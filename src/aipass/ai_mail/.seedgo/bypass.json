@@ -254,8 +254,8 @@
     {
       "file": "apps/ai_mail.py",
       "standard": "logged_fallback",
-      "lines": [209],
-      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
+      "lines": [204],
+      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",
@@ -266,14 +266,14 @@
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "logged_fallback",
-      "lines": [122, 130],
-      "reason": "_pid_alive (ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 130 is the answer, not a fallback. 122, the Windows probe raised, answers alive as a named guess in the fail-closed direction: a second daemon does not start over a process it cannot rule out. Since leg 13 the dispatch lock uses pid_lock's check_pid_alive (a linux zombie is dead) and this one serves only the daemon's own pid file in _write_pid_file, where a zombie daemon still reads alive: named, not merged, as it is not the lock pair."
+      "lines": [118, 126],
+      "reason": "_pid_alive (ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; re-lined 2026-10-11): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 126 is the answer, not a fallback. 118, the Windows probe raised, answers alive as a named guess in the fail-closed direction: a second daemon does not start over a process it cannot rule out. Since leg 13 the dispatch lock uses pid_lock's check_pid_alive (a linux zombie is dead) and this one serves only the daemon's own pid file in _write_pid_file, where a zombie daemon still reads alive: named, not merged, as it is not the lock pair."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "logged_fallback",
-      "lines": [284, 302, 325, 524],
-      "reason": "Each caller's own answer to an unreadable file, all on the side where nothing spawns (ai_mail, fleet green legs 12 and 13). 284: get_registered_branches answers [] for an unreadable registry, so poll_cycle 539 polls no branch. 302: _is_registered_sender answers False, the registry cannot vouch for anyone, so spawn_agent 382 refuses an auto_execute dispatch (leg 12's fail-open find). 325: check_inbox_for_dispatch answers None for an unreadable inbox, so poll_cycle 577 finds no dispatch there. Each logs the JsonUnreadable it caught. 524: spawn_agent answers False for every spawn that did not happen, refused or failed; the except arm also releases the lock it took and logs the failure to the dispatch log, and its one caller, poll_cycle 585, counts spawns only. The unreadable safety config and state file are not here: they raise and run_daemon refuses, as their defaults are the less safe side."
+      "lines": [280, 298, 321, 520],
+      "reason": "Each caller's own answer to an unreadable file, all on the side where nothing spawns (ai_mail, fleet green legs 12 and 13; re-lined 2026-10-11). 280: get_registered_branches answers [] for an unreadable registry, so poll_cycle 535 polls no branch. 298: _is_registered_sender answers False, the registry cannot vouch for anyone, so spawn_agent 378 refuses an auto_execute dispatch (leg 12's fail-open find). 321: check_inbox_for_dispatch answers None for an unreadable inbox, so poll_cycle 573 finds no dispatch there. Each logs the JsonUnreadable it caught. 520: spawn_agent answers False for every spawn that did not happen, refused or failed; the except arm also releases the lock it took and logs the failure to the dispatch log, and its one caller, poll_cycle 581, counts spawns only. The unreadable safety config and state file are not here: they raise and run_daemon refuses, as their defaults are the less safe side."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",

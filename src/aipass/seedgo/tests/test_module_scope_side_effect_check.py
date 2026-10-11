@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_module_scope_side_effect_check.py
 # Description: module_scope_side_effect_check — a side effect a test file runs at collection
-# Version: 1.0.1
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/module_scope_side_effect_check.py."""
@@ -77,6 +77,41 @@ SHAPES = [
     ("module_attr_write", "setattr(prax, 'logger', None)"),
     ("cwd_change", "os.chdir('/')"),
 ]
+
+
+def _verdict_at(tmp_path, body, relative):
+    """(score, the one check's message) for a file planted at a path under tmp_path."""
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    result = checker.check_module(str(path))
+    return result["score"], result["checks"][0]["message"]
+
+
+#: @ai_mail's apps/ai_mail.py at e8d3d8a0, lines 31-33, verbatim. Its tests import it at collection, so
+#: every xdist worker ran with SIGPIPE at SIG_DFL and one EPIPE killed the worker with no traceback.
+SIGPIPE_SPECIMEN = """import signal
+
+# Handle broken pipe gracefully (e.g. output piped to head)
+# SIGPIPE does not exist on Windows
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+"""
+
+#: @ai_mail's apps/handlers/dispatch/daemon.py at e8d3d8a0, lines 64-72, verbatim but for the logger line.
+DAEMON_SPECIMEN = """import signal
+
+SHUTDOWN = False
+
+
+def _handle_signal(signum, _frame):
+    global SHUTDOWN
+    SHUTDOWN = True
+
+
+signal.signal(signal.SIGTERM, _handle_signal)
+signal.signal(signal.SIGINT, _handle_signal)
+"""
 
 
 class TestTheModelFilePasses:
@@ -165,11 +200,82 @@ class TestWhichFilesAreJudged:
     def test_a_conftest_environ_write_is_not_judged(self, tmp_path):
         score, message = _verdict(tmp_path, IMPORTS + "os.environ['AIPASS_TEST_LOG_DIR'] = '/x'\n", "conftest.py")
         assert score == 100
-        assert message == "Not judged: conftest.py module scope is the declared once-per-session harness"
+        assert message == ONLY_SIGNALS
 
     def test_a_helper_module_pytest_does_not_collect_is_not_judged(self, tmp_path):
         score, message = _verdict(tmp_path, IMPORTS + "os.chdir('/')\n", "helpers.py")
-        assert (score, message) == (100, "Not judged: pytest does not collect this file as tests")
+        assert (score, message) == (100, ONLY_SIGNALS)
 
     def test_a_file_named_with_the_test_suffix_is_judged(self, tmp_path):
         assert _verdict(tmp_path, IMPORTS + "os.chdir('/')\n", "routing_test.py")[0] == 0
+
+    def test_a_test_named_product_module_under_apps_is_judged_for_signals_alone(self, tmp_path):
+        """@ai_mail's apps/handlers/dispatch/test_token.py:27 was convicted under 1.1.0 by its name."""
+        body = "import os\n\nos.environ.setdefault('PYTHONUTF8', '1')\n"
+        assert _verdict_at(tmp_path, body, "apps/handlers/test_token.py") == (100, ONLY_SIGNALS)
+
+    def test_the_same_body_in_a_tests_tree_is_convicted(self, tmp_path):
+        body = "import os\n\nos.environ.setdefault('PYTHONUTF8', '1')\n"
+        score, message = _verdict_at(tmp_path, body, "tests/test_token.py")
+        assert score == 0
+        assert "test_token.py:3 environ_write: os.environ.setdefault('PYTHONUTF8', '1')" in message
+
+    def test_a_signal_line_in_a_test_named_product_module_is_still_convicted(self, tmp_path):
+        body = "import signal\n\nsignal.signal(signal.SIGPIPE, signal.SIG_DFL)\n"
+        score, message = _verdict_at(tmp_path, body, "apps/handlers/test_token.py")
+        assert score == 0
+        assert "test_token.py:3 signal_disposition: signal.signal(signal.SIGPIPE, signal.SIG_DFL)" in message
+
+
+ONLY_SIGNALS = "Not a collected test file: only signal_disposition is judged here, and nothing sets one"
+
+
+class TestASignalDispositionIsJudgedEverywhere:
+    def test_ai_mails_sigpipe_line_is_convicted_in_a_production_module(self, tmp_path):
+        score, message = _verdict_at(tmp_path, SIGPIPE_SPECIMEN, "apps/ai_mail.py")
+        assert score == 0
+        assert message == (
+            "ai_mail.py:6 signal_disposition: signal.signal(signal.SIGPIPE, signal.SIG_DFL) - changes how the "
+            "process answers a signal for the rest of its life, and a module a test imports runs it in every "
+            'pytest worker at collection; set it where the process starts, under `if __name__ == "__main__":`'
+        )
+
+    def test_ai_mails_daemon_handlers_are_convicted_line_by_line(self, tmp_path):
+        message = _verdict_at(tmp_path, DAEMON_SPECIMEN, "apps/handlers/dispatch/daemon.py")[1]
+        assert [line.split(" - ")[0] for line in message.splitlines()] == [
+            "daemon.py:11 signal_disposition: signal.signal(signal.SIGTERM, _handle_signal)",
+            "daemon.py:12 signal_disposition: signal.signal(signal.SIGINT, _handle_signal)",
+        ]
+
+    @pytest.mark.parametrize("line", ["signal.alarm(5)", "signal.setitimer(signal.ITIMER_REAL, 1.0)"])
+    def test_a_timer_that_signals_the_process_is_the_same_shape(self, tmp_path, line):
+        score, message = _verdict(tmp_path, f"import signal\n\n{line}\n")
+        assert score == 0
+        assert f"test_specimen.py:3 signal_disposition: {line} - " in message
+
+    def test_a_name_imported_from_signal_is_followed_to_signal(self, tmp_path):
+        body = "from signal import signal as trap, SIGPIPE, SIG_DFL\n\ntrap(SIGPIPE, SIG_DFL)\n"
+        assert "flow.py:3 signal_disposition: trap(SIGPIPE, SIG_DFL)" in _verdict_at(tmp_path, body, "apps/flow.py")[1]
+
+    def test_a_conftest_signal_line_is_convicted_and_its_harness_lines_are_not(self, tmp_path):
+        body = IMPORTS + "import signal\nos.environ['AIPASS_TEST_LOG_DIR'] = '/x'\nsignal.signal(signal.SIGINT, None)\n"
+        score, message = _verdict(tmp_path, body, "conftest.py")
+        assert score == 0
+        assert [line.split(" - ")[0] for line in message.splitlines()] == [
+            "conftest.py:9 signal_disposition: signal.signal(signal.SIGINT, None)"
+        ]
+
+    def test_a_production_module_is_judged_for_signals_alone(self, tmp_path):
+        body = IMPORTS + "HOME = Path.home()\nsys.path.insert(0, 'x')\nos.chdir('/')\n"
+        assert _verdict_at(tmp_path, body, "apps/commons.py") == (100, ONLY_SIGNALS)
+
+
+class TestWhereASignalLineIsNotModuleScope:
+    def test_the_main_guard_and_a_function_body_pass(self, tmp_path):
+        body = "import signal\n\n\ndef main():\n    signal.signal(signal.SIGPIPE, signal.SIG_DFL)\n\n\n"
+        body += "if __name__ == '__main__':\n    signal.signal(signal.SIGPIPE, signal.SIG_DFL)\n"
+        assert _verdict_at(tmp_path, body, "apps/flow.py") == (100, ONLY_SIGNALS)
+
+    def test_reading_a_disposition_changes_nothing_and_passes(self, tmp_path):
+        body = "import signal\n\nPREVIOUS = signal.getsignal(signal.SIGPIPE)\n"
+        assert _verdict(tmp_path, body)[0] == 100

@@ -419,7 +419,7 @@
       "file": "apps/flow.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [117],
+      "lines": [112],
       "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
     }
   ],

@@ -4,7 +4,7 @@
 
 **Purpose:** The social layer of AIPass -- a gathering place where branches post, comment, vote, craft artifacts and talk
 **Module:** `aipass.commons`
-**Version:** 1.2.0
+**Version:** 1.2.1
 **Created:** 2026-03-07
 
 ---

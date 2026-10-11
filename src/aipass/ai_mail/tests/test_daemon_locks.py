@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_daemon_locks.py
 # Description: Tests for the dispatch daemon's dispatch lock, its own pid file and the occupied-branch check
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the dispatch lock, the daemon pid file and is_branch_occupied."""
@@ -27,7 +27,7 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     run_daemon,
 )
 
-pytestmark = pytest.mark.usefixtures("daemon_json_silenced", "daemon_paths_in_tmp")
+pytestmark = pytest.mark.usefixtures("daemon_json_silenced", "daemon_paths_in_tmp", "daemon_signals_restored")
 
 
 # ---- check_lock tests ------------------------------------------

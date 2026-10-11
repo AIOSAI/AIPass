@@ -1,19 +1,17 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.7.2
+# Version: 1.8.0
 # Created: 2026-03-05
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.8.0 (2026-10-11): daemon_signals_restored - run_daemon now installs its stop handlers when started
 #   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
 #   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
 #   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
 #     fixtures, shared by its split siblings; monitor_json_silenced, monitor_logger_silenced,
 #     monitor_wake_stubbed, main_argv - the same for test_dispatch_monitor.py
-#   - v1.6.0 (2026-10-08): daemon_json_silenced, daemon_paths_in_tmp, email_modules_pinned,
-#     email_json_silenced - the autouse pairs of test_daemon.py and test_email_module.py,
-#     shared by their split siblings through pytestmark
 #   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -30,6 +28,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
+import signal
 import sys
 from pathlib import Path
 from typing import Generator
@@ -75,6 +74,19 @@ def daemon_paths_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
     monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
     monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", tmp_path / "AIPASS_REGISTRY.json")
+
+
+@pytest.fixture
+def daemon_signals_restored():
+    """Put SIGTERM and SIGINT back as found after a test that starts run_daemon.
+
+    run_daemon installs its stop handlers for the process it runs in; a test
+    that starts it must not leave them on the xdist worker (2026-10-11).
+    """
+    saved = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
+    yield
+    for signum, handler in saved.items():
+        signal.signal(signum, handler)
 
 
 # ---- The email modules' files (test_email_module*.py) ---------------------------

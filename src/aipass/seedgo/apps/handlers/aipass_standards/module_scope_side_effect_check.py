@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_scope_side_effect_check.py
 # Description: Module Scope Side Effect Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -49,7 +49,8 @@ environ`` and ``from pathlib import Path as P`` are followed. Anything else --
 constants, ``pytestmark``, fixture definitions, imports, typing -- is not a
 side effect this rule judges.
 
-WHERE IT DOES NOT LOOK. ``conftest.py`` is exempt: its module scope is the
+WHERE IT DOES NOT LOOK, for the first eight shapes (the ninth, below, is
+judged everywhere). ``conftest.py`` is exempt: its module scope is the
 declared, once-per-session harness, and test template v1 conftest C0 even
 requires it to set ``AIPASS_TEST_LOG_DIR`` in ``os.environ`` above its
 imports. In a ``test_*.py`` the same code is session state smuggled in by
@@ -62,6 +63,31 @@ convicts a module-level ``sys.modules[...] = stub`` naming an aipass module
 by literal; measured, none of this rule's sys_modules_write hits is convicted
 there (they are ``setdefault`` calls and variable keys), so no line gets two
 verdicts today.
+
+THE NINTH SHAPE IS JUDGED EVERYWHERE (1.1.0, 2026-10-11).
+  signal_disposition ``signal.signal(...)``, ``signal.alarm(...)``,
+                     ``signal.setitimer(...)``
+A test file's module scope is not the only module scope that runs at
+collection: every module a test file imports runs its own, inside the same
+pytest worker. @ai_mail's ``apps/ai_mail.py:33``, @commons' ``commons.py:68``
+and @flow's ``flow.py:46`` each reset SIGPIPE to SIG_DFL at import, and their
+tests import them, so every xdist worker in the fleet ran with SIGPIPE at
+default from collection on. Python ignores SIGPIPE so that a write to a dead
+pipe raises BrokenPipeError; at default the kernel ends the process instead,
+with no traceback and nothing for faulthandler to print. Measured from this
+seat: ``subprocess.run(input=...)`` to a child that exits without reading
+survives as-is and dies with status 141 after importing either entry. CI runs
+38132534544 (ubuntu, gw1, api) and 38128154826 (macOS, gw0, memory) each lost a
+worker as "node down: Not properly terminated"; memory's crashed test does
+exactly that write. @ai_mail's ``dispatch/daemon.py:71-72`` replace SIGTERM and
+SIGINT the same way. So this one shape is judged in EVERY file the checker is
+handed -- production modules and conftest.py too -- while the other eight stay
+test-file-only, where their reasoning lives. A TEST FILE MEANS ONE IN A TESTS
+TREE (``applicability.is_test_path``), not a test-shaped name anywhere: 1.1.0
+decided by name alone and convicted @ai_mail's product module
+``apps/handlers/dispatch/test_token.py:27`` for an environ write its 19
+siblings carry unjudged (1.1.1, @devpulse dispatch 125bec60). Reading a disposition
+(``signal.getsignal``) changes nothing and is not judged.
 
 CHECK FIRST (2026-09-25, before the rule landed). 557 ``test_*.py`` files
 judged across 18 branches: 15 convicted, 32 hits -- commons 3 files / 15,
@@ -82,16 +108,28 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
-APPLIES_TO = "tests"
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 STANDARD = "MODULE_SCOPE_SIDE_EFFECT"
 STANDARD_KEY = "module_scope_side_effect"
 
 CURE = "move it into a fixture (monkeypatch / tmp_path) or into the test that needs it"
+
+#: A cure that is not the test-file one, by shape.
+CURES: Dict[str, str] = {
+    "signal_disposition": 'set it where the process starts, under `if __name__ == "__main__":`',
+}
+
+#: The shapes judged in every file, not only in a collected test file.
+EVERYWHERE_SHAPES: frozenset[str] = frozenset({"signal_disposition"})
+
+#: The pass sentence for a file only EVERYWHERE_SHAPES are judged in.
+ONLY_SIGNALS_PASS = "Not a collected test file: only signal_disposition is judged here, and nothing sets one"
 
 #: Why each shape is a defect at collection time.
 WHY: Dict[str, str] = {
@@ -103,6 +141,10 @@ WHY: Dict[str, str] = {
     "module_attr_write": "monkeypatches an imported object at collection, with nothing to undo it",
     "cwd_change": "moves the working directory for every test collected after it",
     "global_recorder": "module state that functions rebind via `global`, shared by every test in the session",
+    "signal_disposition": (
+        "changes how the process answers a signal for the rest of its life, and a module a test imports "
+        "runs it in every pytest worker at collection"
+    ),
 }
 
 #: Calls that read the host, by canonical dotted name.
@@ -127,6 +169,9 @@ CALLS: Dict[str, str] = {
     "os.putenv": "environ_write",
     "os.unsetenv": "environ_write",
     "os.chdir": "cwd_change",
+    "signal.signal": "signal_disposition",
+    "signal.alarm": "signal_disposition",
+    "signal.setitimer": "signal_disposition",
 }
 
 #: The file names pytest collects as tests.
@@ -366,7 +411,11 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check that a test file does nothing at import that outlives its own tests.
+    """Check that a file does nothing at import that outlives the tests that import it.
+
+    A collected test file in a tests tree is judged for every shape; any other
+    file, conftest.py and a test-named product module included, for
+    EVERYWHERE_SHAPES alone.
 
     Args:
         module_path: Path to the file to check.
@@ -379,11 +428,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
     path = Path(module_path)
-    if path.name == EXEMPT:
-        message = "Not judged: conftest.py module scope is the declared once-per-session harness"
-        return _result(True, _one_check(True, message), 100)
-    if not is_collected_test(path.name):
-        return _result(True, _one_check(True, "Not judged: pytest does not collect this file as tests"), 100)
+    every_shape = path.name != EXEMPT and is_collected_test(path.name) and is_test_path(str(path))
     if not path.exists():
         return _result(False, _one_check(False, f"File not found: {module_path}"), 0)
 
@@ -396,15 +441,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         logger.info("[module_scope_side_effect] Unparseable %s: %s", module_path, exc)
         return _result(True, _one_check(True, "Not judged: the file does not parse (ruff convicts that)"), 100)
 
-    findings = scan(tree)
+    findings = [(line, shape) for line, shape in scan(tree) if every_shape or shape in EVERYWHERE_SHAPES]
     if not findings:
-        return _result(True, _one_check(True, "Nothing at module scope outlives the file's own tests"), 100)
+        message = "Nothing at module scope outlives the file's own tests" if every_shape else ONLY_SIGNALS_PASS
+        return _result(True, _one_check(True, message), 100)
 
     # Every hit on ONE check: checklist._format_failure prints the first failed
     # check and appends "(+N more)", so one check per hit would hide the rest.
     lines = source.splitlines()
     detail = "\n".join(
-        f"{path.name}:{line} {shape}: {_snippet(lines, line)} - {WHY[shape]}; {CURE}" for line, shape in findings
+        f"{path.name}:{line} {shape}: {_snippet(lines, line)} - {WHY[shape]}; {CURES.get(shape, CURE)}"
+        for line, shape in findings
     )
 
     json_handler.log_operation(

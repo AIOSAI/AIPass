@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_misc_handlers.py
 # Description: Tests for miscellaneous small handlers
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/central_writer.py and four other small handlers it sits beside."""
@@ -146,6 +146,7 @@ def test_check_pid_status_unknown_on_error():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.WNOHANG)")
+@pytest.mark.usefixtures("daemon_signals_restored")
 def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
     """run_daemon calls poll_cycle and save_daemon_state in the loop.
 
@@ -187,6 +188,7 @@ def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
     daemon_mod.SHUTDOWN = False
 
 
+@pytest.mark.usefixtures("daemon_signals_restored")
 def test_daemon_exits_if_pid_file_blocked(tmp_path, monkeypatch):
     """run_daemon returns immediately when _write_pid_file returns False."""
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")

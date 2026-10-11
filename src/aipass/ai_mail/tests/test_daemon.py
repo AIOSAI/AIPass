@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_daemon.py
 # Description: Tests for the dispatch daemon's run loop - poll_cycle, spawn_agent, run_daemon
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-08
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the run loop: poll_cycle, the stop signal, spawn_agent, run_daemon."""
@@ -13,6 +13,8 @@
 # seedgo: no-test-needed(shared) — check_lock() and the daemon's pid file: tests/test_daemon_locks.py
 
 import json
+import signal
+import subprocess
 import sys
 import pytest
 from unittest.mock import MagicMock, patch
@@ -24,7 +26,7 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     run_daemon,
 )
 
-pytestmark = pytest.mark.usefixtures("daemon_json_silenced", "daemon_paths_in_tmp")
+pytestmark = pytest.mark.usefixtures("daemon_json_silenced", "daemon_paths_in_tmp", "daemon_signals_restored")
 
 
 # ---- poll_cycle absolute path regression tests ---------------
@@ -140,20 +142,40 @@ def test_poll_cycle_absolute_path_unchanged(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("signame", ["SIGTERM", "SIGINT"])
-def test_the_registered_stop_signal_sets_shutdown(monkeypatch, signame):
-    """The handler the daemon registers for a stop signal sets SHUTDOWN.
+def test_the_registered_stop_signal_sets_shutdown(tmp_path, monkeypatch, signame):
+    """The handler the started daemon registers for a stop signal sets SHUTDOWN.
 
-    Reached through the handler table the import fills, not by name, and
+    Reached through the handler table run_daemon fills, not by name, and
     called directly: no signal is sent to the test process (ai_mail, leg 14).
     """
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", True)
+    run_daemon()
     monkeypatch.setattr(daemon_mod, "SHUTDOWN", False)
     signum = getattr(daemon_mod.signal, signame)
     handler = daemon_mod.signal.getsignal(signum)
+    # Python's own SIGINT handler raises KeyboardInterrupt: never call it here.
+    assert handler not in (signal.SIG_DFL, signal.SIG_IGN, signal.default_int_handler)
     assert callable(handler)
 
     handler(signum, None)
 
     assert daemon_mod.SHUTDOWN is True
+
+
+def test_importing_the_daemon_leaves_the_stop_signals_as_they_were():
+    probe = (
+        "import signal\n"
+        "before = [repr(signal.getsignal(s)) for s in (signal.SIGTERM, signal.SIGINT)]\n"
+        "import aipass.ai_mail.apps.handlers.dispatch.daemon\n"
+        "after = [repr(signal.getsignal(s)) for s in (signal.SIGTERM, signal.SIGINT)]\n"
+        "print(before == after, before, after)\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, encoding="utf-8", timeout=60)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("True "), result.stdout
 
 
 # ---- spawn_agent tests ------------------------------------------

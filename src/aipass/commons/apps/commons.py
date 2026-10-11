@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-05
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -63,10 +63,6 @@ for _script_dir in _script_dirs:
     if _script_dir in sys.path:
         sys.path.remove(_script_dir)
 
-# Handle broken pipe gracefully (e.g. output piped to head)
-if hasattr(signal, "SIGPIPE"):
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-
 # Cross-branch imports
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
@@ -82,7 +78,7 @@ MODULES_DIR = MODULE_ROOT / "modules"
 # The one version constant. --version prints it, the file header above states it,
 # and the README header quotes it - three places that used to be free to disagree
 # (the header said 1.1.0 while --version answered 1.0.0).
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # A help flag anywhere after the verb means explain, never execute. Only these
 # verbs' modules read the flag themselves, so only they are handed it; every
@@ -432,6 +428,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Handle broken pipe gracefully (e.g. output piped to head). Here, never at
+    # import: an import set it in every pytest worker, and the first EPIPE then
+    # killed the worker with no traceback (CI 38132534544).
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         sys.exit(main())
     except BrokenPipeError:
