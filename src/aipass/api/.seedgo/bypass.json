@@ -258,7 +258,7 @@
     {
       "file": "tests/test_host_fleet.py",
       "standard": "through_the_command",
-      "lines": [1187, 1190, 1411, 1414],
+      "lines": [1187, 1190, 1423, 1426],
       "reason": "host_machine._vitals and host_lock._state cleared around the cases that read them, so one case's cached answer is never served to the next. A cache reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12)."
     },
     {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: machine.py
 # Description: Host API Machine Handler — the phone's vitals, proxied from @skills
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -95,6 +95,12 @@ _VITALS_KEY = "vitals"
 # place of NOTHING — a detail the skill did give travels untouched.
 NO_DETAIL = "@skills refused the machine read and gave no detail"
 
+# What the client is told when the door raises. Fixed, never the exception's
+# own words: those can carry host paths and module names, and this sentence
+# travels to a handset (CodeQL py/stack-trace-exposure, PR #774). The words
+# themselves go to the host log, with the traceback.
+DOOR_RAISED = "@skills' machine_vitals() raised; the error is in this host's log"
+
 _vitals = ReadCache("machine_vitals", MACHINE_TTL_SECONDS)
 
 
@@ -151,10 +157,9 @@ def _ask_the_skill() -> Dict[str, Any]:
     except Exception as exc:
         # The skill never raises for a reading, so reaching here is a defect in
         # the door itself: named, logged, and a 503 — never a 500 traceback.
-        message = f"@skills' machine_vitals() raised {type(exc).__name__}: {exc}"
-        logger.error("[host_api] %s", message)
+        logger.error("[host_api] @skills' machine_vitals() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_machine_door_failed", {"error": type(exc).__name__})
-        raise MachineDoorFailed(message) from exc
+        raise MachineDoorFailed(DOOR_RAISED) from exc
 
     ok = vitals.get("ok") if isinstance(vitals, dict) else None
     if not isinstance(ok, bool):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -1250,15 +1250,27 @@ class TestTheMachineRoute:
         assert response.json()["error"] == {"code": "machine_refused", "message": detail, "reason": reason}
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
-        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        """
+        The skill never raises for a reading, so a raise is a defect in the door — named.
+
+        Named by its code and a fixed sentence, never by the exception's own
+        words: those can carry host paths to a handset (CodeQL
+        py/stack-trace-exposure, PR #774). The words and the traceback go to
+        the host log, where the operator reads them.
+        """
         machine_door.side_effect = RuntimeError("boom inside the door")
 
-        response = client.get("/v1/machine", headers=auth)
+        with patch(PATCH_MACHINE_LOGGER) as log:
+            response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "machine_door_failed"
-        assert "RuntimeError: boom inside the door" in error["message"]
+        assert error["message"] == host_machine.DOOR_RAISED
+        assert "boom" not in response.text
+        logged = log.error.call_args
+        assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
+        assert logged.kwargs["exc_info"] is True
 
     @pytest.mark.parametrize("answer", [None, [], {"schema": 1}, {"ok": "yes"}])
     def test_an_answer_outside_the_published_shape_is_a_503(
@@ -1465,15 +1477,26 @@ class TestTheLockRoute:
         assert response.json() == _cannot_tell(reason)
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
-        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        """
+        The skill never raises for a reading, so a raise is a defect in the door — named.
+
+        By code and fixed sentence, as the machine route does: the exception's
+        words go to the host log, never to the handset (CodeQL
+        py/stack-trace-exposure, PR #774).
+        """
         lock_door.side_effect = RuntimeError("boom inside the door")
 
-        response = client.get("/v1/lock", headers=auth)
+        with patch(PATCH_LOCK_LOGGER) as log:
+            response = client.get("/v1/lock", headers=auth)
 
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        assert "RuntimeError: boom inside the door" in error["message"]
+        assert error["message"] == host_lock.DOOR_RAISED
+        assert "boom" not in response.text
+        logged = log.error.call_args
+        assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
+        assert logged.kwargs["exc_info"] is True
 
     @pytest.mark.parametrize(
         "answer",
