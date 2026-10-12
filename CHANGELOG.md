@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-10-12] — after the three-week test review: the plan counter walks past held rows, the execution ratchet opens (DPLAN-0405)
+
+### Fixed
+
+- **flow: `next_free_number` walks past held rows instead of jumping to highest+1** (4c59384e, 2026-10-12; flow building, devpulse landing). A test's FPLAN row 9990 (2026-05-15, "selfheal test no collision") sat far above the real rows; leg 7's cure (2026-10-04, `max(next_number, highest row + 1)`) made the first FPLAN created after 0640 come out as 9994 (seedgo, this morning), six creates short of a five-digit number `PLAN_PATTERN` never matches. `apps/handlers/registry/load_registry.py` 1.4.0: the first number at or above `next_number` that no numeric row holds; the 0358 case still skips its held row. `tests/test_plan_handlers.py` 1.1.0 +1 (next 641 beside rows 0640 and 9990 issues 641, red first); `tests/test_close_ops_self_heal.py` 1.1.0 moves one input to 176, the honest form of the leg-7 case. Rows 9990-9994 stay as issued (9991-9993 are real plans commits cite; FPLAN-9994 is in use); the untracked `fplan_registry.json` counter reset 9995 → 641 by devpulse. Suite 1085, three mutants red, audit 100.
+
+### Added
+
+- **DPLAN-0405, the execution ratchet** (devpulse, 2026-10-12; seedgo building FPLAN-9994). The review of the three-week test campaign (v2.8.11 tree vs today, the same 81 standards on both: 88–93 → 100 on every branch; 10 of 10 random "Mutant:" claims killed on a copy) also ran seedgo's shipped-but-never-scheduled gutting probe for the first time: cli 0 pseudo-tested of 34, backup 12 of 179, daemon 26 of 247. The owner's ruling: the system must evolve to self-healing without hand work on tests. Design (seedgo's reply, ruled 10:12): a `ratchet` verb; seedgo's Sunday 03:00 command job picks the unit (branch, slice) least recently probed from an append-only series `.seedgo/ratchet_series.jsonl`, probes it under a budget the flag now actually controls, archives the artifact, dispatches the owner the open survivors (pseudo_tested minus declared_equivalent), verifies on the owner's reply, and mails one trend line a week; `pytest_quality` stops being the headline (flat across three weeks of real change). Phase 1 targets Sunday 2026-10-19.
+
 ## [2026-10-11] — second train: the silent worker kills (SIGPIPE reset at import), seedgo 1.1.0
 
 ### Fixed
