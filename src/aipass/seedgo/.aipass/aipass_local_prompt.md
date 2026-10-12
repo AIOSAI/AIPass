@@ -22,6 +22,7 @@ seedgo tests retired / restore <name>            # The retire lane — a logged 
 seedgo bypass prune @branch [--dry-run]          # Remove bypass rules that match nothing; live/blank never
 seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes
+seedgo ratchet pick / run / record @branch      # Execution ratchet: one branch a week, --pseudo-tested, series
 seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
 seedgo home-paths scan [<root>]                  # developer_home over the tracked tree — the CI gate, red exits 1
 seedgo readme update @branch                     # README auto-update
@@ -56,6 +57,7 @@ apps/
     ├── config/                  # Package marker only — no handlers today
     ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)
     ├── json/                    # json_handler — the canonical shim, byte-identical fleet-wide
+    ├── ratchet/                 # Execution ratchet: pick, series (.seedgo/ratchet_series.jsonl)
     ├── readme/                  # readme_update handlers
     ├── shadow_cycle/            # Weekly v5 cadence: score, cycle
     ├── test_inventory/          # collection, exclusions

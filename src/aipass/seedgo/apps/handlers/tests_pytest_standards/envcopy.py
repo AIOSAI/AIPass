@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-29
-# Modified: 2026-09-19
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -158,6 +158,12 @@ class EnvSpec:
     #: real target and its repo root.
     diff_scope: Optional[DiffScope] = None
 
+    #: The operator's `--budget`, carried to the mutation campaigns, or None
+    #: for each campaign's own default. Until 2026-10-12 the flag reached only
+    #: the suite run: `--budget 3600 --pseudo-tested` still stopped the
+    #: campaign at 1800 and published a refusal the operator had paid to avoid.
+    campaign_budget_seconds: Optional[int] = None
+
     @property
     def m10_complete(self) -> bool:
         """True when nothing in this env can write through to the real tree.
@@ -189,6 +195,7 @@ class EnvSpec:
             # opt-in unreadable after the fact, and "why is width_coupling
             # not_applicable here and measured there" unanswerable.
             "execution_groups": list(self.execution_groups),
+            "campaign_budget_seconds": self.campaign_budget_seconds,
         }
 
 
@@ -449,6 +456,7 @@ def build_env(
     execution_groups: Optional[Sequence[str]] = None,
     diff_scope_ref: Optional[str] = None,
     scope_to_diff: bool = False,
+    campaign_budget_seconds: Optional[int] = None,
 ) -> EnvSpec:
     """Materialise the scratch env and return how to run pytest inside it.
 
@@ -507,6 +515,7 @@ def build_env(
         vanished_during_copy=built.get("vanished_during_copy", []),
         execution_groups=normalise_execution_groups(execution_groups),
         diff_scope=scope,
+        campaign_budget_seconds=campaign_budget_seconds,
     )
 
     # Recorded because `m10_complete: false` is the one env state a reader

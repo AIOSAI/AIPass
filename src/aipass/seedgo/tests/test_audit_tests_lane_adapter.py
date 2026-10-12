@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -23,7 +23,9 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     corpus,
     envcopy,
     envdiff,
+    gutting,
     nominators,
+    statement_deletion,
     unread_redirect_check as R,
 )
 from aipass.seedgo.tests.support_audit_tests_lane import _records, _spec_for
@@ -243,6 +245,61 @@ class TestOptInExecutionGroups:
         assert "RuntimeError" in document["reason"] and "no interpreter" in document["reason"]
         assert document["score"] is None
         assert document["diverged"] == []
+
+
+class TestCampaignBudget:
+    """`--budget` reaches the mutation campaigns, not only the suite run (DPLAN-0405 M2)."""
+
+    def _recording(self, monkeypatch, engine, discover):
+        """Record the budget a campaign is started with, then stop it."""
+        seen = {}
+
+        def _record(*args, **kwargs):
+            seen["budget_seconds"] = kwargs.get("budget_seconds")
+            raise RuntimeError("recorded")
+
+        monkeypatch.setattr(engine, discover, lambda *args, **kwargs: [])
+        monkeypatch.setattr(engine, "run_campaign", _record)
+        return seen
+
+    def test_the_operators_budget_reaches_the_pseudo_tested_campaign(self, monkeypatch, tmp_path):
+        seen = self._recording(monkeypatch, gutting, "discover_functions")
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [gutting.GROUP]
+        spec.campaign_budget_seconds = 3600
+
+        adapter.nominate(spec)
+
+        assert seen["budget_seconds"] == 3600
+
+    def test_the_operators_budget_reaches_the_statement_deletion_campaign(self, monkeypatch, tmp_path):
+        seen = self._recording(monkeypatch, statement_deletion, "discover_statements")
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [statement_deletion.GROUP]
+        spec.campaign_budget_seconds = 2400
+
+        adapter.nominate(spec)
+
+        assert seen["budget_seconds"] == 2400
+
+    def test_no_budget_leaves_the_campaign_at_its_own_default(self, monkeypatch, tmp_path):
+        seen = self._recording(monkeypatch, gutting, "discover_functions")
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [gutting.GROUP]
+
+        adapter.nominate(spec)
+
+        assert seen["budget_seconds"] == gutting.DEFAULT_BUDGET_SECONDS == 1800
+
+    def test_build_env_carries_the_budget_option_onto_the_spec_it_publishes(self, tmp_path):
+        target = tmp_path / "proj"
+        (target / "tests").mkdir(parents=True)
+        (target / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
+
+        spec = adapter.build_env(target, tmp_path / "env", {"budget_seconds": 3600})
+
+        assert spec.campaign_budget_seconds == 3600
+        assert spec.to_document()["campaign_budget_seconds"] == 3600
 
 
 class TestTeardown:
