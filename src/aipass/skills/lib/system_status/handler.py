@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
-# Description: System Status skill handler - disk, memory, uptime, processes, machine_vitals()
-# Version: 2.4.0
+# Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals()
+# Version: 2.5.0
 # Created: 2026-03-07
-# Modified: 2026-10-10
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -26,6 +26,7 @@ Called by: drone @skills run system_status <action>
 Published: machine_vitals() - from aipass.skills.lib.system_status import handler
 """
 
+import configparser
 import shutil
 import sys
 import threading
@@ -65,7 +66,7 @@ def run(action, args=None, config=None):
     """Execute a system status action.
 
     Args:
-        action: One of: disk, memory, uptime, processes, summary
+        action: One of: disk, memory, uptime, processes, battery, summary
         args: Dict of action arguments (unused for this skill)
         config: Dict of resolved config values (unused for this skill)
 
@@ -80,6 +81,7 @@ def run(action, args=None, config=None):
         "memory": _memory_info,
         "uptime": _system_uptime,
         "processes": _process_count,
+        "battery": _battery_info,
         "summary": _summary,
     }
 
@@ -105,7 +107,7 @@ def run(action, args=None, config=None):
 
 def get_actions():
     """List available actions for this skill."""
-    return ["disk", "memory", "uptime", "processes", "summary"]
+    return ["disk", "memory", "uptime", "processes", "battery", "summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +221,36 @@ def _process_count():
     return {"success": True, "output": output, "error": None}
 
 
+def _battery_info():
+    """The battery as machine_vitals reads it, as text. No battery is an answer."""
+    if psutil is None:
+        return _no_psutil("the battery")
+
+    reading = _read_battery(psutil)
+    if reading["reason"] == "platform":
+        return {"success": True, "output": "Battery: not readable on this platform", "error": None}
+    if reading["reason"] == "no_sensor":
+        return {"success": True, "output": "Battery: none on this host", "error": None}
+
+    percent = reading["percent"]
+    plugged = reading["plugged"]
+    seconds = reading["seconds_left"]
+    if seconds is not None:
+        left = f"{seconds // 3600}h {seconds % 3600 // 60}m"
+    else:
+        left = "none, on mains" if plugged else "unknown"
+    lines = [
+        "Battery",
+        f"  Charge:    {'unknown' if percent is None else f'{percent:.1f}%'}",
+        f"  Power:     {'unknown' if plugged is None else 'on mains' if plugged else 'on battery'}",
+        f"  State:     {reading['state']}",
+        f"  Time left: {left}",
+    ]
+    if reading["low"] is not None:
+        lines.append(f"  Low line:  {reading['low']:g}%, critical {reading['critical']:g}%")
+    return {"success": True, "output": "\n".join(lines), "error": None}
+
+
 def _summary():
     """Combine all status checks into one report.
 
@@ -235,6 +267,7 @@ def _summary():
         ("memory", _memory_info),
         ("uptime", _system_uptime),
         ("processes", _process_count),
+        ("battery", _battery_info),
     ]:
         try:
             result = action_fn()
@@ -269,7 +302,7 @@ def _summary():
 # ---------------------------------------------------------------------------
 
 SKILL_NAME = "system_status"
-VITALS_SCHEMA = 1
+VITALS_SCHEMA = 2
 
 # Every section's values, beside the available/reason/sentence/detail every
 # section carries. A value the host cannot give is None, never a zero.
@@ -282,6 +315,7 @@ _SECTION_VALUES = {
     "fan": ("label", "current", "range", "percent_of_range", "fans", "seen"),
     "network": ("sent_bytes_per_s", "recv_bytes_per_s", "window_s"),
     "processes": ("count",),
+    "battery": ("percent", "plugged", "state", "seconds_left", "low", "critical"),
 }
 
 SECTIONS = tuple(_SECTION_VALUES)
@@ -329,6 +363,17 @@ FAN_ALLOWLIST = ("applesmc",)
 # fan input, never by the hwmonN index - that numbering is boot order.
 HWMON_ROOT = Path("/sys/class/hwmon")
 
+# Where Linux publishes batteries. Only the status file is read, and only to
+# name the state the kernel already knows (Full, Charging, Discharging).
+POWER_SUPPLY_ROOT = Path("/sys/class/power_supply")
+
+# The battery lines the host publishes. A face tones a ring only against a line
+# the host chose; a threshold made up here would be an invented scale.
+UPOWER_CONF = Path("/etc/UPower/UPower.conf")
+# UPower's compiled-in values when its config file leaves a key out.
+UPOWER_DEFAULTS = {"PercentageLow": 20.0, "PercentageCritical": 5.0}
+BATTERY_STATES = ("charging", "discharging", "full")
+
 # Held samples, one per rate. Owned here rather than borrowed from
 # psutil.cpu_percent(interval=None), whose baseline is a psutil module global
 # keyed by thread id: any other caller in the process silently moves its window
@@ -341,7 +386,7 @@ def machine_vitals():
     """Read the machine's vitals as one dict. Never raises for a reading.
 
     Returns:
-        dict: {"ok": True, "schema": 1, "sampled_at": ISO-8601 UTC, and one entry
+        dict: {"ok": True, "schema": 2, "sampled_at": ISO-8601 UTC, and one entry
             per SECTIONS}, each section carrying available, reason, sentence and
             detail beside its values. Or a whole-function refusal
             {"ok": False, "reason": "switched_off" | "psutil_missing", "detail": str}.
@@ -383,6 +428,7 @@ def machine_vitals():
         "fan": _read_fan,
         "network": _read_network,
         "processes": _read_processes,
+        "battery": _read_battery,
     }
 
     vitals = {
@@ -786,6 +832,120 @@ def _locate_fan(chip, label):
             f"so no range can be attributed to that fan."
         )
     return matches[0]
+
+
+def _read_battery(ps):
+    """Charge, mains, state and time left, beside the low lines the host publishes."""
+    # psutil defines sensors_battery on Linux, Windows, macOS and FreeBSD only.
+    if not hasattr(ps, "sensors_battery"):
+        return _section("battery", "platform")
+
+    battery = ps.sensors_battery()
+    if battery is None:
+        return _section(
+            "battery", "no_sensor", detail="psutil.sensors_battery() answered None: this host reports no battery."
+        )
+
+    notes = []
+    seconds_left = battery.secsleft
+    if seconds_left == ps.POWER_TIME_UNLIMITED:
+        seconds_left = None
+        notes.append("seconds_left is None: psutil answered POWER_TIME_UNLIMITED, the host is on mains.")
+    elif seconds_left == ps.POWER_TIME_UNKNOWN:
+        seconds_left = None
+        notes.append("seconds_left is None: psutil answered POWER_TIME_UNKNOWN.")
+    elif seconds_left is not None:
+        seconds_left = int(seconds_left)
+
+    percent = None if battery.percent is None else _clamp_percent(battery.percent)
+    state, state_note = _battery_state(ps, percent, battery.power_plugged, battery.secsleft)
+    low, critical, lines_note = _battery_lines()
+    notes += [note for note in (state_note, lines_note) if note]
+
+    return _section(
+        "battery",
+        detail=" ".join(notes) or None,
+        percent=percent,
+        plugged=battery.power_plugged,
+        state=state,
+        seconds_left=seconds_left,
+        low=low,
+        critical=critical,
+    )
+
+
+def _battery_state(ps, percent, plugged, secsleft):
+    """Name the battery state: the kernel's word when it is one of three, else derived.
+
+    Returns:
+        tuple: (state, note) - state is one of BATTERY_STATES or "unknown", and
+            note says why the kernel's word was not used, or None.
+    """
+    kernel = _battery_sysfs_status()
+    if kernel is not None:
+        if kernel.lower() in BATTERY_STATES:
+            return kernel.lower(), None
+        named = ", ".join(BATTERY_STATES)
+        return "unknown", f"The kernel names the battery state {kernel!r}, which is none of {named}."
+
+    # psutil leaves power_plugged None when it cannot tell; its time sentinel can.
+    if plugged is None and secsleft == ps.POWER_TIME_UNLIMITED:
+        plugged = True
+    elif plugged is None and secsleft is not None and secsleft >= 0:
+        plugged = False
+
+    if plugged is None:
+        return "unknown", None
+    if not plugged:
+        return "discharging", None
+    if percent is None:
+        return "unknown", None
+    return ("full" if percent >= 100.0 else "charging"), None
+
+
+def _battery_sysfs_status():
+    """The kernel's status word for the first BAT* supply, or None off Linux or without one.
+
+    Raises:
+        OSError: A status file exists and cannot be read - the read_failed path.
+    """
+    if _host_platform() != "linux":
+        return None
+    for folder in sorted(POWER_SUPPLY_ROOT.glob("BAT*")):
+        word = _read_sysfs_or(folder / "status", None)
+        if word:
+            return word
+    return None
+
+
+def _battery_lines():
+    """The low and critical percentages UPower publishes, read from its config file.
+
+    Returns:
+        tuple: (low, critical, note) - floats when the host publishes the lines,
+            (None, None, None) off Linux or without the file, and (None, None,
+            why) when the file is there but gives no usable percentage line.
+    """
+    if _host_platform() != "linux":
+        return None, None, None
+    try:
+        text = UPOWER_CONF.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.debug("machine_vitals: no %s, so the host publishes no battery lines", UPOWER_CONF)
+        return None, None, None
+
+    try:
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read_string(text)
+        upower = parser["UPower"] if parser.has_section("UPower") else {}
+        if parser.has_section("UPower") and not parser.getboolean("UPower", "UsePercentageForPolicy", fallback=True):
+            return None, None, f"{UPOWER_CONF.name} sets UsePercentageForPolicy=false, so its lines are times."
+        low = float(upower.get("PercentageLow", UPOWER_DEFAULTS["PercentageLow"]))
+        critical = float(upower.get("PercentageCritical", UPOWER_DEFAULTS["PercentageCritical"]))
+    except (configparser.Error, ValueError) as exc:
+        logger.info("machine_vitals: %s could not be parsed: %s", UPOWER_CONF, exc, exc_info=True)
+        return None, None, f"{UPOWER_CONF.name} could not be parsed ({_describe(exc)}); the error is in the host log."
+    return low, critical, None
 
 
 def _read_sysfs(path):
