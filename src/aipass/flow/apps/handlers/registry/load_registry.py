@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load_registry.py
 # Description: Load Registry Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-10-04
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -105,10 +105,17 @@ def next_free_number(registry: Dict[str, Any]) -> int:
     the stored number without moving it on (DPLAN row 0358 beside
     next_number 358, 2026-10-04), and the next create would have issued
     0358 a second time and written over that row (flow's decision, leg 7).
+    The highest row is not the answer either: one stray row far above the
+    rest (a test's FPLAN 9990, 2026-05-15) dragged every later number after
+    it toward five digits (FPLAN-9994 after 0640, 2026-10-12). So the counter
+    walks past held rows and nothing else.
 
     Returns:
-        max(next_number, highest numeric row + 1), at least 1.
+        The first number at or above next_number (at least 1) that no
+        numeric row holds.
     """
-    numbers = [int(key) for key in registry.get("plans", {}) if str(key).isdigit()]
-    highest_row = max(numbers, default=0)
-    return max(int(registry.get("next_number", 1)), highest_row + 1)
+    held = {int(key) for key in registry.get("plans", {}) if str(key).isdigit()}
+    number = max(int(registry.get("next_number", 1)), 1)
+    while number in held:
+        number += 1
+    return number

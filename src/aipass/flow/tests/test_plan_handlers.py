@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-05
-# Modified: 2026-10-04
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -587,6 +587,23 @@ class TestCreatePlanImpl:
         assert plan_num == 359
         assert registry["plans"]["0358"] is held
         assert registry["next_number"] == 360
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_a_stray_high_row_does_not_drag_the_number_past_it(self, mock_jh, bus):
+        """Live 2026-10-12: a test's FPLAN row 9990 (2026-05-15) made create issue 9994 after 0640."""
+        stray = {"status": "closed", "subject": "selfheal test no collision"}
+        registry = {"next_number": 641, "plans": {"0640": {"status": "closed"}, "9990": stray}}
+        deps = self._make_deps(
+            load_registry=MagicMock(return_value=registry),
+            auto_close_orphaned_plans=MagicMock(return_value=(registry, 0)),
+        )
+
+        success, plan_num, _, _, _, _ = create_plan_impl(subject="next", plan_type_config=None, **deps)
+
+        assert success is True
+        assert plan_num == 641
+        assert registry["plans"]["9990"] is stray
+        assert registry["next_number"] == 642
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_missing_dependency_returns_failure(self, mock_jh):
