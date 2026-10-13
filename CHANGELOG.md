@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased] — after v2.8.14
+## [2026-10-13] — v2.8.15: QR pairing (the pair door, the install ends with the QR), seedgo's rendered_path_oracle, the README uninstall line
 
 ### Added
 
