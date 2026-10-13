@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: phone_ready.py
 # Description: Read what the phone needs after the face lands: the tailnet address, @api's bind, a live server
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
 # Modified: 2026-10-12
 # =============================================
@@ -18,9 +18,10 @@ the token command, the guide. This handler gathers the facts that print states:
     - whether a server answers on that bind: one GET to ``/``, the face entry,
       which @api serves without a token.
 
-It changes nothing. Setting the bind and installing the boot unit are @api's,
-and its module door publishes neither yet (HELD to @api, 2026-10-12): until it
-does, the print carries the exact command the user runs instead.
+    - where a token's receipt lands, from the door's receipt_path.
+
+It changes nothing. Moving the bind and installing the boot unit go through the
+same door from phone_setup.py (FPLAN-0642 slice D).
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -42,6 +44,9 @@ _TAILSCALE_TIMEOUT = 5
 _PROBE_TIMEOUT = 3
 # A wildcard bind listens everywhere, loopback included, so the probe asks loopback.
 _WILDCARDS = ("0.0.0.0", "::", "")
+# The token command names no label; the receipt line shows where that label's receipt lands.
+LABEL_PLACEHOLDER = "<label>"
+RECEIPT_REFUSED = "refused"  # receipt_path raised: no path to state
 
 # tailscale states
 TAILSCALE_ABSENT = "absent"  # no tailscale on PATH
@@ -60,7 +65,8 @@ class PhoneReady:
     """The facts the install's last print states. ``api`` False: @api is not importable here.
 
     ``tailnet`` is this host's tailnet IPv4, or one of the TAILSCALE_* words;
-    ``server`` is one of the SERVER_* words.
+    ``server`` is one of the SERVER_* words; ``receipt`` is where @api's
+    receipt_path puts a token labelled ``<label>``, "" when this @api has no such door.
     """
 
     api: bool
@@ -68,6 +74,24 @@ class PhoneReady:
     port: int
     tailnet: str
     server: str
+    receipt: str = ""
+
+
+def receipt_line(host_config: Any) -> str:
+    """@api's receipt_path for the placeholder label, home shown as ~.
+
+    Returns "" when this @api has no receipt_path, RECEIPT_REFUSED when it raised.
+    """
+    receipt_path = getattr(host_config, "receipt_path", None)
+    if receipt_path is None:
+        return ""
+    try:
+        path = Path(receipt_path(LABEL_PLACEHOLDER))
+    except Exception as exc:  # the door's TokenError, or any error naming the label: a stated state, logged
+        logger.warning("[baud] @api's receipt_path refused the placeholder label: %s", exc)
+        return RECEIPT_REFUSED
+    home = Path.home()
+    return f"~/{path.relative_to(home).as_posix()}" if path.is_relative_to(home) else str(path)
 
 
 def is_tailnet(host: str) -> bool:
@@ -133,9 +157,10 @@ def readiness(host_config: Any, dry_run: bool) -> PhoneReady:
     except (OSError, KeyError, TypeError, ValueError) as exc:
         logger.warning("[baud] @api's host config could not be read: %s", exc)
         return PhoneReady(api=False, host="", port=0, tailnet=TAILSCALE_ABSENT, server=SERVER_UNPROBED)
+    receipt = receipt_line(host_config)
     if dry_run:
-        return PhoneReady(api=True, host=host, port=port, tailnet=TAILSCALE_ABSENT, server=SERVER_UNPROBED)
-    ready = PhoneReady(api=True, host=host, port=port, tailnet=tailnet_ipv4(), server=server_answers(host, port))
+        return PhoneReady(True, host, port, tailnet=TAILSCALE_ABSENT, server=SERVER_UNPROBED, receipt=receipt)
+    ready = PhoneReady(True, host, port, tailnet=tailnet_ipv4(), server=server_answers(host, port), receipt=receipt)
     facts = {"bind": f"{host}:{port}", "tailnet": ready.tailnet, "server": ready.server}
     json_handler.log_operation("baud_phone_ready", facts, module_name="baud")
     return ready

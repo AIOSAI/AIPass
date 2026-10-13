@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-10-12
 # =============================================
@@ -240,17 +240,22 @@ class TestPhoneReadiness:
         assert baud.phone_readiness(host_config=object()).api is False
 
 
+_RECEIPT = "~/.secrets/aipass/host_api/<label>.token"
+
+
 def _ready(host: str = "127.0.0.1", tailnet: str = _TAILNET_IP, server: str = "serving") -> baud.PhoneReady:
-    return baud.PhoneReady(api=True, host=host, port=8787, tailnet=tailnet, server=server)
+    return baud.PhoneReady(api=True, host=host, port=8787, tailnet=tailnet, server=server, receipt=_RECEIPT)
 
 
 class TestPrintPhoneReady:
+    """An @api without the installer doors (slice B's print): the commands that do it by hand."""
+
     def test_the_print_gives_the_url_the_token_command_its_receipt_the_sign_in_and_the_guide(self, capsys):
         baud.print_phone_ready(_ready())
         out, err = capsys.readouterr()
         assert f"Phone URL:  http://{_TAILNET_IP}:8787/" in out
         assert "drone @api host-api issue-token <label> --scope operate" in out
-        assert "~/.secrets/aipass/host_api/<label>.token" in out
+        assert f"its 0600 receipt lands at {_RECEIPT}" in out
         assert "paste the token on the sign-in page" in out
         assert "https://github.com/AIOSAI/baud/blob/main/docs/phone-setup-android.md" in out
         assert "Tailscale is" not in err
@@ -260,11 +265,12 @@ class TestPrintPhoneReady:
         out, _err = capsys.readouterr()
         assert f"drone @api host-api set-config --host {_TAILNET_IP} --port 8787" in out
 
-    def test_a_bind_already_on_the_tailnet_is_kept_and_said_so(self, capsys):
-        baud.print_phone_ready(_ready(host=_TAILNET_IP))
+    def test_no_receipt_door_states_no_path(self, capsys):
+        """Mutant: the receipt line printed whatever ready.receipt holds -> an empty path -> red."""
+        baud.print_phone_ready(baud.PhoneReady(True, "127.0.0.1", 8787, _TAILNET_IP, "serving"))
         out, _err = capsys.readouterr()
-        assert f"kept {_TAILNET_IP}:8787, already a tailnet address" in out
-        assert "set-config" not in out
+        assert "its 0600 receipt path is printed when it is issued" in out
+        assert "receipt lands at" not in out
 
     def test_without_tailscale_the_url_is_loopback_and_the_install_line_is_given(self, capsys):
         baud.print_phone_ready(_ready(tailnet="absent"))
@@ -281,20 +287,182 @@ class TestPrintPhoneReady:
         assert "drone @api host-api autostart" in out
         assert "serving the face" not in out
 
-    def test_a_dry_run_says_what_it_would_do_and_gives_no_url(self, capsys):
+    def test_a_dry_run_without_the_doors_names_the_commands_and_gives_no_url(self, capsys):
         baud.print_phone_ready(_ready(tailnet="absent", server="unprobed"), dry_run=True)
         out, _err = capsys.readouterr()
         assert "would read this host's tailnet address: tailscale ip -4" in out
-        assert "would check @api's bind (now 127.0.0.1:8787)" in out
+        assert "would move @api's bind (now 127.0.0.1:8787) to the tailnet address, when tailscale is up" in out
+        assert "would name the boot unit's commands: drone @api host-api serve --detach" in out
         assert "would ask the server on that bind whether it answers (GET /, no token)" in out
         assert "Phone URL" not in out
 
-    def test_a_dry_run_on_a_tailnet_bind_says_it_is_kept(self, capsys):
-        """Mutant: the dry run always promises a move command -> red."""
-        baud.print_phone_ready(_ready(host=_TAILNET_IP, tailnet="absent", server="unprobed"), dry_run=True)
+
+class _Refused(Exception):
+    pass
+
+
+class _Unsupported(Exception):
+    pass
+
+
+class _Unreachable(Exception):
+    pass
+
+
+def _steps(*names: str, ok: object = True) -> dict:
+    return {"dry_run": ok is None, "ok": ok is not False, "steps": [{"step": n, "ok": ok, "detail": ""} for n in names]}
+
+
+class _ApiDoor(_ApiStore):
+    """@api's host module door with slice C's installer doors; each call is recorded, none touches systemd."""
+
+    BindRefused = _Refused
+    AutostartUnsupported = _Unsupported
+    SupervisorUnreachable = _Unreachable
+    LifetimeError = _Unreachable
+
+    def __init__(self, host: str = "127.0.0.1", **answers: object) -> None:
+        super().__init__(host=host)
+        self.calls: list[tuple] = []
+        self.answers = answers
+
+    def _answer(self, name: str, default: dict) -> dict:
+        answer = self.answers.get(name, default)
+        if isinstance(answer, BaseException):
+            raise answer
+        assert isinstance(answer, dict)
+        return answer
+
+    def set_bind(self, host: str, port: int) -> dict:
+        self.calls.append(("set_bind", host, port))
+        return self._answer("set_bind", {"host": host, "port": port, "changed": True, "previous": {}})
+
+    def autostart(self) -> dict:
+        self.calls.append(("autostart",))
+        return self._answer("autostart", {"unit": "/u/aipass-host.service", "rendered": True, "running": 0})
+
+    def install_unit(self, dry_run: bool = False) -> dict:
+        self.calls.append(("install_unit", dry_run))
+        names = ("mkdir -p ~/.config/systemd/user", "cp unit", "systemctl --user daemon-reload")
+        return self._answer("install_unit", _steps(*names, ok=None if dry_run else True))
+
+    def enable_unit(self, dry_run: bool = False) -> dict:
+        self.calls.append(("enable_unit", dry_run))
+        return self._answer("enable_unit", _steps("systemctl --user enable --now unit", ok=None if dry_run else True))
+
+    def receipt_path(self, label: str) -> Path:
+        return Path.home() / ".secrets" / "aipass" / "host_api" / f"{label}.token"
+
+    def issue_token(self, *_args: object, **_kwargs: object) -> None:
+        raise AssertionError("the install minted a token")
+
+
+@pytest.fixture
+def probes(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """The re-probe after the boot unit, at the network edge: records (host, port), answers serving."""
+    seen: list[tuple] = []
+    monkeypatch.setattr(baud, "server_answers", lambda host, port: seen.append((host, port)) or "serving")
+    return seen
+
+
+class TestFinishPhone:
+    def test_a_loopback_bind_is_moved_to_the_tailnet_and_the_server_asked_there_once(self, capsys, probes):
+        door = _ApiDoor()
+        baud.finish_phone(_ready(server="silent"), host_config=door)
+        out, _err = capsys.readouterr()
+        assert door.calls[0] == ("set_bind", _TAILNET_IP, 8787)
+        assert f"Bind:       moved to {_TAILNET_IP}:8787 (was 127.0.0.1:8787)" in out
+        assert probes == [(_TAILNET_IP, 8787)]
+        assert "Server:     answering, serving the face" in out
+        assert "set-config" not in out
+
+    def test_a_tailnet_bind_is_kept_and_set_bind_never_called(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, _err = capsys.readouterr()
+        assert "set_bind" not in [c[0] for c in door.calls]
+        assert f"kept {_TAILNET_IP}:8787, already a tailnet address" in out
+
+    def test_a_refused_bind_prints_apis_words_and_the_set_config_line(self, capsys, probes):
+        door = _ApiDoor(set_bind=_Refused("100.101.102.103 is not an address on this host"))
+        baud.finish_phone(_ready(), host_config=door)
+        out, _err = capsys.readouterr()
+        assert "@api refused 100.101.102.103: 100.101.102.103 is not an address on this host" in out
+        assert f"drone @api host-api set-config --host {_TAILNET_IP} --port 8787" in out
+        assert probes == [("127.0.0.1", 8787)]
+
+    def test_the_boot_doors_run_in_order_and_each_step_gets_a_line(self, capsys, probes):
+        door = _ApiDoor()
+        baud.finish_phone(_ready(), host_config=door)
+        out, _err = capsys.readouterr()
+        assert [c[0] for c in door.calls] == ["set_bind", "autostart", "install_unit", "enable_unit"]
+        assert ("install_unit", False) in door.calls and ("enable_unit", False) in door.calls
+        assert "Boot unit:  installed and enabled" in out
+        assert "ok      systemctl --user daemon-reload" in out
+        assert "ok      systemctl --user enable --now unit" in out
+
+    def test_a_unit_systemd_already_runs_is_left_alone(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP, autostart={"unit": "/u/x.service", "rendered": False, "running": 4242})
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, _err = capsys.readouterr()
+        assert [c[0] for c in door.calls] == ["autostart"]
+        assert "Boot unit:  left alone, systemd already runs it (pid 4242)" in out
+
+    def test_a_failed_install_step_says_why_and_never_enables(self, capsys, probes):
+        failed = {"dry_run": False, "ok": False, "steps": [{"step": "cp unit", "ok": False, "detail": "denied"}]}
+        door = _ApiDoor(install_unit=failed)
+        baud.finish_phone(_ready(), host_config=door)
+        out, _err = capsys.readouterr()
+        assert "enable_unit" not in [c[0] for c in door.calls]
+        assert "failed  cp unit: denied" in out
+        assert "at every boot: drone @api host-api autostart" in out
+
+    def test_an_enable_refused_over_a_hand_started_server_prints_the_sentence_and_the_stop(self, capsys, probes):
+        refused = "A hand-started server holds the port (pid 5150); stop it first: drone @api host-api stop"
+        door = _ApiDoor(enable_unit={"dry_run": False, "ok": False, "steps": [], "refused": refused})
+        baud.finish_phone(_ready(), host_config=door)
+        out, _err = capsys.readouterr()
+        assert f"Boot unit:  not enabled. {refused}" in out
+        assert "Stop it: drone @api host-api stop" in out
+
+    def test_no_systemd_says_so_once_and_names_serve_detach(self, capsys, probes):
+        door = _ApiDoor(install_unit=_Unsupported("Autostart needs a user-level systemd"))
+        baud.finish_phone(_ready(server="silent"), host_config=door)
+        out, _err = capsys.readouterr()
+        assert "Boot unit:  none here (Autostart needs a user-level systemd)" in out
+        assert "Start it: drone @api host-api serve --detach" in out
+        assert "host-api autostart" not in out
+
+    def test_an_unreachable_supervisor_prints_its_message_and_both_manual_commands(self, capsys, probes):
+        door = _ApiDoor(autostart=_Unreachable("systemctl --user did not answer"))
+        baud.finish_phone(_ready(), host_config=door)
+        out, _err = capsys.readouterr()
+        assert "Boot unit:  not set up: systemctl --user did not answer" in out
+        assert "Start it: drone @api host-api serve --detach" in out
+        assert "at every boot: drone @api host-api autostart" in out
+
+    def test_a_dry_run_plans_the_unit_steps_and_neither_moves_the_bind_nor_renders(self, capsys, probes):
+        door = _ApiDoor()
+        baud.finish_phone(_ready(server="unprobed"), dry_run=True, host_config=door)
+        out, _err = capsys.readouterr()
+        assert door.calls == [("install_unit", True), ("enable_unit", True)]
+        assert probes == []
+        assert "would move @api's bind (now 127.0.0.1:8787) to the tailnet address, when tailscale is up" in out
+        assert "would render the boot unit (autostart), unless systemd already runs it" in out
+        assert "would run: systemctl --user daemon-reload" in out
+        assert "would run: systemctl --user enable --now unit" in out
+
+    def test_a_dry_run_on_a_tailnet_bind_says_it_is_kept(self, capsys, probes):
+        """Mutant: the dry run always promises a move -> red."""
+        baud.finish_phone(_ready(host=_TAILNET_IP, tailnet="absent"), dry_run=True, host_config=_ApiDoor())
         out, _err = capsys.readouterr()
         assert f"would keep @api's bind (now {_TAILNET_IP}:8787), already a tailnet address" in out
-        assert "moves it" not in out
+        assert "would move" not in out
+
+    def test_the_receipt_line_comes_from_apis_receipt_path(self, closed_port):
+        door = _ApiDoor()
+        door.port = closed_port
+        assert baud.phone_readiness(dry_run=True, host_config=door).receipt == _RECEIPT
 
 
 class TestInstallEndsOnThePhone:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-05
 # Modified: 2026-10-12
 # =============================================
@@ -559,13 +559,16 @@ def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) ->
 
 
 def _phone_print(dry_run: bool, face_installed: bool) -> Callable[[], None] | None:
-    """The phone facts read now, printed last (FPLAN-0642 slice B). None: no face, nothing to say."""
+    """The phone facts read now; the bind, the boot unit and the print run last (FPLAN-0642 slices B, D).
+
+    None: no face, nothing to say.
+    """
     if not face_installed:
         return None
-    from aipass.aipass.apps.modules.baud import phone_readiness, print_phone_ready
+    from aipass.aipass.apps.modules.baud import finish_phone, phone_readiness
 
     ready = phone_readiness(dry_run=dry_run)
-    return lambda: print_phone_ready(ready, dry_run=dry_run)
+    return lambda: finish_phone(ready, dry_run=dry_run)
 
 
 def _check_and_fix_owner(home: Path) -> None:
