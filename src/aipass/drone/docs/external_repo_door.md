@@ -5,9 +5,9 @@
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant (DPLAN-0344, the owner's go 2026-09-13). Nine verbs take
-`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, commit, push, tag, fetch, sync
-and merge-upstream.
+door, held by @devpulse's admin grant (DPLAN-0344, the owner's go 2026-09-13). Ten verbs take
+`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, commit, push, tag, fetch, sync,
+merge-upstream, and the read side of gh's `run`.
 
 ---
 
@@ -21,8 +21,9 @@ and merge-upstream.
    the repo you stand in. A project manager standing in its own repo is refused by name.
 2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the
    standing repo.
-3. **Which verb** — anything outside the nine is refused. `issue`, `run` and `workflow` never reach
-   the door: their `--repo OWNER/NAME` is gh's own flag.
+3. **Which verb** — anything outside the ten is refused. `issue` and `workflow` never reach the
+   door: their `--repo OWNER/NAME` is gh's own flag. `run` reaches it only when the value names a
+   directory (see below).
 4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a
    directory, be a git top level, and not be AIPass: refused if `AIPASS_REGISTRY.json` sits at its
    top level, or if it is the caller's own root (a clean clone has no registry).
@@ -65,10 +66,24 @@ conflict is read (`git diff --name-only --diff-filter=U`), then `git merge --abo
 and tree back as they were, and the refusal names the conflicted paths: resolving is the owner's, by
 hand. It never rebases, resets, stashes or pushes; push is its own verb.
 
+**`run` reads only.** `run list`, `run view <id> [--log | --log-failed]` and `run watch <id>` read
+the repo's GitHub Actions runs, so a tag pushed through the door can be watched through it (baud's
+v0.3.0 release build, 2026-10-13). The door reads the repo's `origin` URL, https or ssh, with or
+without `.git`, derives OWNER/NAME, and hands gh `--repo OWNER/NAME`. An origin that does not name a
+github.com repo is refused rather than guessed at, and the URL is never printed, because an https
+remote can carry a token. `rerun`, `cancel`, `delete` and `download` stay home-only, and so does gh's
+`-R`. `projects/baud` reads as a path or as OWNER/NAME, so the disk decides: a value naming a
+directory, absolute or relative to the AIPass root, is the door's. Anything else reaches gh
+untouched, as it always has. A mistyped path therefore comes back as gh's own "could not resolve"
+error, not as a door refusal. `run watch` keeps the passthrough's 60-second timeout, at home and
+through the door alike.
+
 The refusal texts are constants in `repo_door.py`, and `drone @git --help` renders those same
 constants — one wording, two places, no copy. Pinned by `TestRepoDoorRefusals`,
-`TestRepoDoorHappyPath`, `TestRepoDoorFetchAndSync` and `TestRepoDoorMergeUpstream` in `tests/test_git_access_gh_door.py`, against
-real repos with a real bare origin and a second clone standing in for another machine.
+`TestRepoDoorHappyPath`, `TestRepoDoorFetchAndSync`, `TestRepoDoorMergeUpstream` and
+`TestRepoDoorRunReads` in `tests/test_git_access_gh_door.py`, against real repos with a real bare
+origin and a second clone standing in for another machine. gh alone is faked: the tests assert the
+argv the door builds.
 
 ---
 

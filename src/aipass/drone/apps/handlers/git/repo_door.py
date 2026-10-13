@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-13
 # Modified: 2026-10-13
 # =============================================
@@ -38,6 +38,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, NamedTuple
+from urllib.parse import urlsplit
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
@@ -54,7 +55,14 @@ REPO_FLAG = "--repo"
 # ...) — a project's PR flow is the project's later choice, not this door's
 # (DPLAN-0344 design table). The door's sync is not AIPass's sync: it never
 # rebases, never merges, and refuses a diverged branch.
-DOOR_VERBS = ("status", "diff", "log", "commit", "push", "tag", "fetch", "sync", "merge-upstream")
+DOOR_VERBS = ("status", "diff", "log", "commit", "push", "tag", "fetch", "sync", "merge-upstream", "run")
+
+# gh's run, read side only, so a release build pushed through the door can be
+# watched through it (2026-10-13). rerun, cancel, delete and download stay
+# home-only. Only a --repo value naming a directory is the door's: anything
+# else is gh's own OWNER/NAME and passes through untouched.
+RUN_READS = ("list", "view", "watch")
+_GITHUB_HOST = "github.com"
 
 LEDGER_NAME = "git_repo_door.jsonl"
 
@@ -99,6 +107,15 @@ REFUSE_DIVERGED = (
     "sync refused: '{branch}' and {upstream} have diverged in {repo} (ahead {ahead}, behind {behind}). "
     "No rebase, no merge commit: that is the owner's call. Nothing was moved."
 )
+REFUSE_RUN_SUB = (
+    "'run {sub}' does not take --repo. The door reads runs only: list, view <id> [--log | --log-failed], "
+    "watch <id>. rerun, cancel, delete and download stay home-only."
+)
+REFUSE_RUN_SHORT_FLAG = "run --repo <path> names the repo already; -R is gh's flag for the same thing. Give one."
+REFUSE_NO_GITHUB = (
+    "run refused: the origin remote of {repo} does not name a github.com repository, "
+    "so there is no OWNER/NAME to hand gh."
+)
 
 # The remote fetch reads, and push writes to.
 _REMOTE = "origin"
@@ -138,6 +155,9 @@ def help_block() -> str:
         REFUSE_DIRTY,
         REFUSE_DIVERGED,
         REFUSE_CONFLICT,
+        REFUSE_RUN_SUB.replace("{sub}", "<sub>"),
+        REFUSE_RUN_SHORT_FLAG,
+        REFUSE_NO_GITHUB,
     )
     lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
     return (
@@ -160,7 +180,11 @@ def help_block() -> str:
         "  --repo is not theirs. No AIPass PR lock is taken (git's index.lock serialises).\n"
         "  commit never pushes, as at home: push is its own verb. commit --all runs the\n"
         "  same lint and test gate there it runs anywhere; file paths are repo-relative.\n"
-        "  issue, run and workflow are not door verbs: their --repo OWNER/NAME is gh's own.\n"
+        "  gh run list | view <id> [--log | --log-failed] | watch <id>  --repo <path>\n"
+        "  reads the repo's GitHub Actions runs: the door derives OWNER/NAME from the repo's\n"
+        "  origin URL (https or ssh) and hands gh --repo OWNER/NAME. rerun, cancel, delete and\n"
+        "  download stay home-only. Only a --repo value naming a directory is the door's:\n"
+        "  anything else, and every --repo on issue and workflow, is gh's own OWNER/NAME.\n"
         "  Every use, refusals included, is one line in .ai_central/git_repo_door.jsonl:\n"
         "  caller, cwd, verb, args, repo, HEAD before and after, exit code.\n"
         "  Refusals, exactly as printed:\n" + lines
@@ -607,6 +631,70 @@ def merge_upstream(repo_root: Path) -> dict:
         + "\nNothing was pushed: push is its own verb (drone @git push --repo <path>)."
     )
     return {"stdout": text, "stderr": "", "exit_code": 0}
+
+
+def run_aims_at_door(flag: RepoFlag, aipass_root: Path) -> bool:
+    """Whether a ``run`` --repo value is the door's path rather than gh's OWNER/NAME.
+
+    ``projects/baud`` reads as either, so the disk decides: a value naming a
+    directory (absolute, or relative to the AIPass root) is the door's, and
+    anything else reaches gh untouched, as it always has.
+    """
+    if not flag.path:
+        return False
+    candidate = Path(flag.path).expanduser()
+    if not candidate.is_absolute():
+        candidate = aipass_root / candidate
+    return candidate.is_dir()
+
+
+def github_slug(url: str) -> str | None:
+    """OWNER/NAME from a github.com remote URL, https or ssh, with or without ``.git``.
+
+    None for any other host and for a local path: gh's --repo OWNER/NAME means
+    github.com, so naming another host's repo that way would aim at a stranger.
+    The URL is parsed, never printed: an https remote can carry a token.
+    """
+    url = url.strip()
+    if "://" in url:
+        parts = urlsplit(url)
+        host, path = parts.hostname or "", parts.path
+    else:
+        user_host, colon, path = url.partition(":")
+        if not colon:
+            return None
+        host = user_host.rpartition("@")[2]
+    if host.lower() != _GITHUB_HOST:
+        return None
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    segments = path.split("/")
+    if len(segments) != 2 or not all(segments):
+        return None
+    return path
+
+
+def gh_run_args(args: list[str], repo_root: Path) -> tuple[list[str], str]:
+    """The ``gh run`` args aimed at *repo_root*'s GitHub repo, or the refusal.
+
+    Returns:
+        ``(args + ["--repo", "OWNER/NAME"], "")`` for a read subcommand, or
+        ``([], refusal)``. The write subcommands are refused here, after the
+        admin grant and the repo were checked, and before gh is called.
+    """
+    if not args or args[0] not in RUN_READS:
+        return [], REFUSE_RUN_SUB.format(sub=args[0] if args else "")
+    if any(arg == "-R" or arg.startswith("-R=") for arg in args):
+        return [], REFUSE_RUN_SHORT_FLAG
+    try:
+        slug = github_slug(_git_out(repo_root, "remote", "get-url", _REMOTE))
+    except _GitFailed as exc:
+        logger.warning("git repo door: no origin URL to name the GitHub repo in %s: %s", repo_root, exc)
+        slug = None
+    if slug is None:
+        return [], REFUSE_NO_GITHUB.format(repo=repo_root)
+    return [*args, REPO_FLAG, slug], ""
 
 
 def ledger_path() -> Path:
