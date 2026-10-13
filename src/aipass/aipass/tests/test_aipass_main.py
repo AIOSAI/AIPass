@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.4.4
+# Version: 1.4.5
 # Created: 2026-05-12
 # Modified: 2026-10-13
 # =============================================
@@ -644,8 +644,7 @@ class TestMain:
 
         Mutant: _log_crash calls logger.error bare -> PermissionError escapes main() -> red.
         """
-        log_home = tmp_path / "system_logs"
-        denied = PermissionError(13, "Permission denied", str(log_home))
+        denied = PermissionError(13, "Permission denied", str(tmp_path / "system_logs"))
         monkeypatch.setattr(aipass_mod.logger, "error", MagicMock(side_effect=denied))
         mod = MagicMock()
         mod.handle_command.side_effect = RuntimeError("git clone exited 128")
@@ -654,9 +653,12 @@ class TestMain:
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
                 result = main()
         _out, err = capsys.readouterr()
+        # Rich wraps a long line at a space, and the tmp path's length differs by OS (PR #787,
+        # Windows and macOS red): compare with whitespace collapsed, and stop before the path.
+        said = " ".join(err.split())
         assert result == 1
-        assert "'install' crashed: git clone exited 128" in err
-        assert f"(this crash could not be written to the log: [Errno 13] Permission denied: '{log_home}')" in err
+        assert "'install' crashed: git clone exited 128" in said
+        assert "(this crash could not be written to the log: [Errno 13] Permission denied:" in said
 
     def test_import_failure_surfaces_on_command(self, tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: load failure reported on the console, not error() -> red.
