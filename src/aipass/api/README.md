@@ -26,6 +26,21 @@ drone @api host-api status                              # Is the phone's server 
 - **Owns the credentials.** Keys, OAuth tokens and per-provider secrets live under `~/.secrets/aipass/`, owner-only on disk, and are read through this branch. A raw value is never printed to a terminal.
 - **Accounts for usage.** Every generation can be tracked by caller, aggregated, and cleaned up on a retention window.
 - **Serves the phone.** The host API binds one address this machine holds and answers the BAUD face: reads of the fleet, the git surface, files, settings, a photo upload, and a terminal socket into a real tmux room.
+- **Pairs a phone by its camera.** `drone @api host-api pair phone --scope operate` prints a
+  QR. The phone's camera opens it and the face signs itself in: no token is typed, copied,
+  mailed or shown.
+  - **What a code is:** a one-use secret in the URL's fragment, which a browser never sends
+    to a server. The phone posts it to `POST /v1/pair` and gets a bearer token for the code's
+    label and scope. Only the code's sha256 is stored, beside the token store.
+  - **Five minutes, one use:** `--ttl` sets 30 to 900 seconds. An unknown, expired or used
+    code gets one and the same refusal, and each address is limited to ten tries a minute.
+  - **No receipt:** a paired token's only copy is on the phone. `list-tokens` lists it and
+    `revoke-token` revokes it like any other.
+  - **A reachable address:** a loopback or wildcard bind is refused, with the command that
+    fixes it.
+
+  The installer calls the same door, `mint_pairing` and `render_qr`; depth is in
+  [docs/host_api.md](docs/host_api.md).
 - **Refuses in the open.** A refusal exits non-zero and names the reason. A command that printed a red cross and exited 0 was the defect that started that rule.
 
 Not business logic, not workflows, and never a default model or config — consumers bring their own.
@@ -67,9 +82,9 @@ server's own subcommands.
 Three tiers. `apps/api.py` is the entry point: it discovers every module under
 `apps/modules/`, offers each one the command, and turns a refusal into an exit code. The
 modules orchestrate and print — `api_key`, `secrets`, `openrouter_client`, `google_client`,
-`usage_tracker`, `bridge`, `integrations_manager`, `registry`, and `host_api` with its two
-sub-routers `host_serve` (serve, status, stop, autostart) and `host_config_cli` (config,
-set-config). The handlers under `apps/handlers/` hold the implementation, one directory per
+`usage_tracker`, `bridge`, `integrations_manager`, `registry`, and `host_api` with its three
+sub-routers `host_serve` (serve, status, stop, autostart), `host_config_cli` (config,
+set-config) and `host_pair_cli` (pair). The handlers under `apps/handlers/` hold the implementation, one directory per
 concern: `auth/`, `config/`, `google/`, `openrouter/`, `usage/`, `integrations/`, the shared
 `json/` shim bound to prax, and `host/` for the server, its routes and its readers.
 
@@ -114,12 +129,13 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 - `@aipass` — the installer door for the phone face directory and the baud binary
 
 **Credentials** (`~/.secrets/aipass/`): `.env` for API keys, `google_creds.json` and
-`google_client_secret.json` for OAuth, `host_api/` for the token store and its receipts.
+`google_client_secret.json` for OAuth, `host_api/` for the token store, its receipts and
+the pairing store.
 Values are never printed; read them through the Python door.
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-13
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.16.4
+# Version: 1.16.5
 # Created: 2026-08-09
-# Modified: 2026-10-11
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""
@@ -266,6 +266,10 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     `module_scope_side_effect` LEFT this list on 2026-10-11 (1.1.0, @devpulse
     dispatch 39d8d524): its ninth shape, `signal_disposition`, runs in any
     module a test imports, so it is judged in production files too.
+
+    `rendered_path_oracle` joined on 2026-10-13 (+1): a whole path in an
+    f-string asserted against captured console output, @aipass's PR #787
+    specimen. Its unit is an `assert` inside a `def test_*`.
     """
     checkers = discover_checkers()
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
@@ -285,6 +289,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "named_encoding",
         "no_product_call",
         "oversize_test_file",
+        "rendered_path_oracle",
         "retired_token_docstring",
         "router_assert",
         "self_set_assert",

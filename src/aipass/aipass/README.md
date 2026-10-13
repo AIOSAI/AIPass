@@ -23,6 +23,9 @@ Four jobs, in the order a new machine meets them.
 
 **Install.** `aipass install` is the one-command bootstrap: clone, `setup.sh`,
 hooks, the phone face, and a welcome chat with this concierge at the end.
+When the phone server answers on this machine's tailnet address, the install's
+last block is a pairing QR: point the phone's camera at it and the face opens,
+signed in. The code is one use and expires in five minutes.
 
 **Set up.** `aipass init run` walks the ten stages — welcome, system detect,
 profile, style questions, tool choice, first agent, ping sweep, smoke test,
@@ -84,7 +87,7 @@ for the two setup doors, `doctor.py` with `_doctor_fix.py` (the remediation
 report) and `_doctor_wire.py` (the provider rows and the wire prompt),
 `help_chat.py` and `read.py` for the documentation lane, `new_project.py` and
 `adopt.py` for projects, `trust.py` for enrolment, `baud.py` for the phone
-face, `handoff.py` for the CLI launch, `profile.py` for what is remembered
+face with `_phone_print.py` (the install's phone lines and pairing QR), `handoff.py` for the CLI launch, `profile.py` for what is remembered
 about you, and `feedback.py`, which delegates to @hooks outright.
 
 Under them, `apps/handlers/` holds the implementation groups: `system_detect/`,

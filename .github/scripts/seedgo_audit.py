@@ -48,7 +48,11 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 82  # +2 on 2026-10-10: clear_text_secret_logging and exception_text_in_response, seedgo's
+EXPECTED_STANDARDS = 83  # +1 on 2026-10-13: rendered_path_oracle (advisory, tests only), seedgo's checker for the
+#                          species that went red on PR #787 round one (Windows and macOS): an assert whose needle
+#                          interpolates a tmp path into captured console output; Rich wraps the long OS tmp paths
+#                          and str(OSError) renders the filename with %r, so the whole line never matches there.
+#                          +2 on 2026-10-10: clear_text_secret_logging and exception_text_in_response, seedgo's
 #                          checkers for the two CodeQL species that went red on PR #774 round seven (HIGH
 #                          py/clear-text-logging-sensitive-data into prax's warning(); py/stack-trace-exposure
 #                          in api's host routes). exception_text_in_response DECLINES every file without a

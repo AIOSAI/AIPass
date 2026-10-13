@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -26,11 +26,13 @@ Commands (via drone @api):
     host-api issue-token <label> [--scope S] [--out FILE]
     host-api list-tokens                        Show tokens (never the values)
     host-api revoke-token <id>                  Revoke, effective next request
+    host-api pair <label> [--scope S] [--ttl SECONDS]  A one-use QR the phone redeems
     host-api config                             Show the effective config
     host-api set-config [--host H] [--port P] [--face-dir DIR|default] [--baud-bin PATH|default]
 
 config and set-config live in host_config_cli.py, serve/status/stop/autostart in
-host_serve.py; this module offers them every call and owns the tokens.
+host_serve.py, pair in host_pair_cli.py; this module offers them every call and
+owns the tokens.
 """
 
 import os
@@ -54,7 +56,9 @@ from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.modules import host_config_cli
+from aipass.api.apps.modules import host_pair_cli
 from aipass.api.apps.modules import host_serve
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -78,6 +82,7 @@ def print_introspection() -> None:
     console.print("[cyan]Connected Handlers:[/cyan]")
     console.print("  - api.apps.handlers.host.config")
     console.print("  - api.apps.handlers.host.tokens")
+    console.print("  - api.apps.handlers.host.pairings")
     console.print("  - api.apps.handlers.host.server")
     console.print()
 
@@ -89,6 +94,8 @@ def print_introspection() -> None:
     console.print("  - autostart()      - Render the boot unit (a running unit is left alone)")
     console.print("  - install_unit()   - Install the unit under the user's systemd (dry_run names the steps)")
     console.print("  - enable_unit()    - enable --now it, and lingering (dry_run names the steps)")
+    console.print("  - mint_pairing()   - A one-use, five-minute code the phone trades for its bearer")
+    console.print("  - render_qr()      - A text's QR as terminal block characters")
     console.print()
 
     available = host_server.is_available()
@@ -123,6 +130,7 @@ def print_help() -> None:
     console.print("  [cyan]host-api issue-token <label>[/cyan]   [dim]Mint a bearer token for a device[/dim]")
     console.print("  [cyan]host-api list-tokens[/cyan]           [dim]List tokens — values are never shown[/dim]")
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
+    console.print("  [cyan]host-api pair <label>[/cyan]          [dim]A one-use QR the phone's camera redeems[/dim]")
     console.print("  [cyan]host-api config[/cyan]                [dim]Show the effective server config[/dim]")
     console.print(
         "  [cyan]host-api set-config[/cyan]            [dim]Set bind, face dir or baud binary (validated first)[/dim]"
@@ -141,9 +149,13 @@ def print_help() -> None:
     console.print("  [cyan]--scope <s>[/cyan]      [dim]Token scope: read or operate (default: read)[/dim]")
     console.print("  [cyan]--out <file>[/cyan]     [dim]Override where the 0600 receipt lands[/dim]")
     console.print("  [dim]                default: ~/.secrets/aipass/host_api/<label>.token[/dim]")
+    console.print("  [cyan]--ttl <seconds>[/cyan]  [dim]pair: the code's life, 30 to 900 (default: 300)[/dim]")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [dim]# Enroll a phone, then start the server[/dim]")
+    console.print("  [dim]# Pair a phone: point its camera at the QR (the server must be up on a tailnet bind)[/dim]")
+    console.print("  [cyan]drone @api host-api pair phone --scope operate[/cyan]")
+    console.print()
+    console.print("  [dim]# Enroll a device by hand, then start the server[/dim]")
     console.print("  [cyan]drone @api host-api issue-token pixel-8 --scope read[/cyan]")
     console.print("  [cyan]drone @api host-api serve[/cyan]")
     console.print()
@@ -166,6 +178,7 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]SECURITY:[/yellow]")
     console.print("  [dim]Raw token values are never printed — they land in a 0600 receipt file.[/dim]")
+    console.print("  [dim]A paired token has no receipt: the phone holds the only copy. Revoke it like any.[/dim]")
     console.print("  [dim]An existing receipt is never overwritten: its token is still live.[/dim]")
     console.print("  [dim]Bind refuses wildcards, hostnames, and addresses this machine lacks.[/dim]")
     # Read from the flag, never written down: the sentence that said loopback-only
@@ -264,6 +277,21 @@ def receipt_path(label: str) -> Path:
     return host_tokens.receipt_path(label)
 
 
+# The pairing door (DPLAN-0406): a one-use, five-minute code the phone trades for
+# its bearer at POST /v1/pair, shown as a QR so no token value reaches a screen.
+PairingError = host_pairings.PairingError
+
+
+def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = host_pairings.DEFAULT_TTL_SECONDS) -> dict:
+    """Mint a one-use code: {id, label, scope, code, expires_at, url}. Raises PairingError (bad input, no bind)."""
+    return host_pairings.mint_pairing(label, scope, ttl_seconds)
+
+
+def render_qr(text: str) -> str:
+    """The QR of text as terminal block characters, no trailing newline. Raises PairingError for empty text."""
+    return host_pairings.render_qr(text)
+
+
 # =============================================
 # COMMAND HANDLING (drone @api host-api ...)
 # =============================================
@@ -314,6 +342,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if host_serve.handle_command(command, args):
         return True
     if host_config_cli.handle_command(command, args):
+        return True
+    if host_pair_cli.handle_command(command, args):
         return True
 
     if subcommand == "issue-token":

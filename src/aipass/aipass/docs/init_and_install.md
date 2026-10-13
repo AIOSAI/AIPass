@@ -30,6 +30,13 @@ The phone-face step is best-effort: offline, a private repo or a missing token
 prints one line plus the retry command and the install carries on. See
 [`baud_phone_face.md`](baud_phone_face.md).
 
+With the face in, the install ends on the phone: bind, boot unit, server, guide.
+When the server answers on a tailnet address, @api's pairing door mints a
+one-use code (label `phone`, scope `operate`, five minutes) and the last block is
+its QR, its url and the expiry. Otherwise, or when the door refuses, the print
+names `drone @api host-api pair phone --scope operate` instead. The QR prints
+before the welcome chat opens. A dry run mints nothing.
+
 Code: [`apps/modules/install.py`](../apps/modules/install.py).
 
 ## `aipass init` — guided setup

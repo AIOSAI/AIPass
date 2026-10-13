@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-07-05
 # Modified: 2026-10-13
 # =============================================
@@ -22,8 +22,9 @@ this command materializes a working, writable AIPass home and wires it up:
        baud-cli build for this platform lands the face alone. --no-baud skips it.
        --baud-tag TAG pins the release (aipass baud install --tag), checked before
        the clone; a stamped install.sh passes its own. With the face in, the
-       install's last print is the phone: URL, bind, server, token command, guide
-       (FPLAN-0642 slice B).
+       install's last print is the phone: URL, bind, server, guide, then the
+       pairing QR when the server answers on a tailnet bind, else the pair command
+       (FPLAN-0642 slice B, DPLAN-0406 slice C).
     5. End in a conversation: the @aipass concierge opens in this terminal with the
        install report in hand (interactive default; --no-chat to skip). Project
        creation is NOT part of install — the concierge points users at
@@ -784,7 +785,8 @@ def print_help() -> None:
     )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
-    console.print("[dim]With a phone face installed, the last print is the phone: URL, token command, guide.[/dim]")
+    console.print("[dim]With a phone face installed, the last print is the phone: URL, guide, pairing QR.[/dim]")
+    console.print("[dim]No QR (server not on a tailnet bind): drone @api host-api pair phone --scope operate[/dim]")
     # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
     console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
