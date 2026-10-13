@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-10-10
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -20,10 +20,14 @@
 # seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
+import logging
+import os
 import threading
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from aipass.prax.apps.handlers.logging import introspection
 from aipass.prax.apps.handlers.logging import setup as setup_handler
@@ -359,6 +363,36 @@ class TestConcurrentFirstCallsBuildOneLogger:
         assert [m for m in built_reports if m.startswith("Creating logger")] == [
             "Creating logger for module: build_probe"
         ]
+
+
+class TestAnUnwritableLogHome:
+    """A logger call degrades to 'Log handler failed' over a log home it cannot make."""
+
+    # The only route to an unwritable log home is a permission bit: Windows has
+    # none to set, and root writes through it.
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs a POSIX permission bit that binds the writer",
+    )
+    def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path, caplog):
+        """FPLAN-0642: the first log line of a uv tool install raised Errno 13 into `aipass install`."""
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
+        monkeypatch.setattr(setup_handler, "_system_logger", None)
+        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        locked.chmod(0o500)
+        try:
+            with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
+                built = setup_handler.setup_individual_logger("homeless_probe", caller_branch="probe")
+                built.info("a line with nowhere to go")
+        finally:
+            locked.chmod(0o700)
+
+        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+        assert len(failed) == 2  # both tiers, central and local
+        assert list(locked.iterdir()) == []
 
 
 # =============================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-10
-# Modified: 2026-09-27
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -16,7 +16,7 @@ Handles dual logging (system-wide + branch-local) and terminal output.
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 from logging.handlers import RotatingFileHandler
 
 # Import from prax config
@@ -95,6 +95,21 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
     except OSError as e:
         logger.error("Log handler failed for %s: %s", log_file, e)
         return logging.NullHandler()
+
+
+def _tier_handler(resolve_dir: Callable[[], Path], filename: str, max_bytes: int, backup_count: int) -> logging.Handler:
+    """Open one tier's file. A log home that cannot be made is a NullHandler, never a raise.
+
+    The directory resolvers create what they return, so an unwritable log home raises
+    from them, before _safe_rotating_handler is reached: a logger call raised it into
+    its caller (FPLAN-0642 container proof, an `aipass install` crash).
+    """
+    try:
+        log_dir = resolve_dir()
+    except (OSError, RuntimeError) as e:  # RuntimeError: Path.home() with no home to find
+        logger.error("Log handler failed for %s: %s", filename, e)
+        return logging.NullHandler()
+    return _safe_rotating_handler(log_dir / filename, max_bytes, backup_count)
 
 
 def setup_individual_logger(
@@ -217,28 +232,33 @@ def _build_individual_logger(
     else:
         # INTERNAL: route to AIPass system_logs + branch-local logs
         # HANDLER 1: System-wide log (central aggregation)
-        system_log_file = get_system_logs_dir() / f"{branch_name}_{module_name}.log"
+        system_log_file = f"{branch_name}_{module_name}.log"
         system_limits = log_config["system_logs"]
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
-        system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
+        system_handler = _tier_handler(
+            get_system_logs_dir, system_log_file, system_max_bytes, system_limits["backup_count"]
+        )
         system_handler.setFormatter(formatter)
         system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
         # HANDLER 2: Branch-root local log (two-tier: system_logs/ + branch logs/)
-        local_logs_dir = get_module_logs_dir(branch_name)
-        module_log_file = local_logs_dir / f"{module_name}.log"
+        module_log_file = f"{module_name}.log"
         local_limits = log_config["local_logs"]
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
-        local_handler = _safe_rotating_handler(module_log_file, local_max_bytes, local_limits["backup_count"])
+        local_handler = _tier_handler(
+            lambda: get_module_logs_dir(branch_name), module_log_file, local_max_bytes, local_limits["backup_count"]
+        )
         local_handler.setFormatter(formatter)
         local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
         if _system_logger:
             _system_logger.info(
-                f"Logger created for {module_name} → system: {system_log_file} "
-                f"({system_limits['max_lines']} lines), local: {module_log_file} "
+                f"Logger created for {module_name} → system: "
+                f"{getattr(system_handler, 'baseFilename', system_log_file)} "
+                f"({system_limits['max_lines']} lines), local: "
+                f"{getattr(local_handler, 'baseFilename', module_log_file)} "
                 f"({local_limits['max_lines']} lines)"
             )
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -17,8 +17,11 @@
 # seedgo: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from aipass.prax.apps.handlers.config import ignore_patterns as ip_mod
 from aipass.prax.apps.handlers.config import load as load_mod
@@ -130,6 +133,45 @@ class TestGetSystemLogsDir:
         load_mod.get_system_logs_dir()
         load_mod.get_system_logs_dir()
         assert call_count == 1, "Should cache after first call"
+
+    def test_an_installed_package_logs_under_the_user_home_never_the_filesystem_root(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """FPLAN-0642: a uv tool install resolved its log home to /system_logs, Errno 13."""
+        _patch_load_world(monkeypatch, tmp_path)
+        home = tmp_path / "home"
+        # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: Path(tmp_path.anchor))
+
+        result = load_mod.get_system_logs_dir()
+
+        assert result == home / ".aipass" / "system_logs"
+        assert result.is_dir()
+
+    # The only route to an unmakeable log home is a permission bit: Windows has
+    # none to set, and root writes through it.
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs a POSIX permission bit that binds the writer",
+    )
+    def test_a_log_home_that_cannot_be_made_raises_every_time_and_is_never_cached(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """A cache set before the failed mkdir handed every later caller a directory never made."""
+        _patch_load_world(monkeypatch, tmp_path)
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: locked)
+        locked.chmod(0o500)
+        try:
+            with pytest.raises(PermissionError):
+                load_mod.get_system_logs_dir()
+            with pytest.raises(PermissionError):
+                load_mod.get_system_logs_dir()
+        finally:
+            locked.chmod(0o700)
 
 
 # =============================================

@@ -21,8 +21,11 @@ logger.error("Connection failed")
 No configuration, no setup call, no per-branch logger to build. Prax reads the call stack to
 find the caller's branch and module, then writes the line twice: to `system_logs/` at the repo
 root, where every branch's output is aggregated, and to that branch's own `logs/` directory
-for local debugging. Both rotate by size. A missing directory is created rather than raised,
-and if prax itself cannot be imported the caller gets a NullLogger instead of a traceback —
+for local debugging. Both rotate by size. An installed package (`uv tool install`, pip) has
+no repo root to log under, so its `system_logs/` lives in `~/.aipass/system_logs`. A missing
+directory is created rather than raised, a log file that cannot be opened is reported as `Log
+handler failed` and never raised into the caller, and if prax itself cannot be imported the
+caller gets a NullLogger instead of a traceback —
 a logging system that takes the program down with it is worse than no logging system.
 
 ---

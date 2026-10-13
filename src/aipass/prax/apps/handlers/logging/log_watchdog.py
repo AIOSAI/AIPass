@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watchdog.py
 # Description: System Log Size Watchdog
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-02-26
-# Modified: 2026-03-09
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from aipass.prax.apps.handlers.config.load import system_logs_home
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
@@ -61,10 +62,10 @@ _system_logs_dir_cache: Path | None = None
 
 
 def _get_system_logs_dir() -> Path:
-    """Lazily resolve system_logs directory (package-relative)."""
+    """Lazily resolve system_logs directory, the same home the loggers write to."""
     global _system_logs_dir_cache
     if _system_logs_dir_cache is None:
-        _system_logs_dir_cache = _find_repo_root() / "system_logs"
+        _system_logs_dir_cache = system_logs_home(_find_repo_root())
     return _system_logs_dir_cache
 
 

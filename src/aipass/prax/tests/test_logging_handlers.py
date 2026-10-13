@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -28,6 +28,7 @@
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -70,6 +71,31 @@ class TestDirectLog:
         assert len(written) == 2
         for log_file in written:
             assert message in log_file.read_text(encoding="utf-8")
+
+    # The only route to an unwritable log home is a permission bit: Windows has
+    # none to set, and root writes through it.
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs a POSIX permission bit that binds the writer",
+    )
+    def test_an_unwritable_log_home_degrades_to_log_handler_failed_and_never_raises(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        """FPLAN-0642: a direct logger's first line raised PermissionError into `aipass install`."""
+        locked, cache = tmp_path / "locked", {}
+        locked.mkdir()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
+        monkeypatch.setattr(direct, "_direct_loggers", cache)
+        locked.chmod(0o500)
+        try:
+            with caplog.at_level(logging.ERROR, logger=direct.logger.name):
+                direct.direct_log("info", "a line with nowhere to go")
+        finally:
+            locked.chmod(0o700)
+
+        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+        assert len(failed) == 2  # both tiers, central and local
+        assert list(locked.iterdir()) == []
 
 
 # =============================================
