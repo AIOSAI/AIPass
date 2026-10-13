@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: baud.py
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-13
-# Modified: 2026-09-14
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -27,7 +27,9 @@ Usage:
     aipass baud install --dry-run                    # say what would happen, touch nothing
     aipass baud status [--dest <dir>]                # what is installed, where @api points
 
-``aipass install`` runs the same install as its best-effort step 4.
+``aipass install`` runs the same install as its best-effort step 4 (its --baud-tag
+is this command's --tag), then ends on ``print_phone_ready``: the phone URL, the
+token command, the guide (FPLAN-0642 slice B).
 """
 
 from __future__ import annotations
@@ -61,6 +63,13 @@ from aipass.aipass.apps.handlers.baud import (
     read_install,
     validate_tag,
 )
+from aipass.aipass.apps.handlers.baud.phone_ready import (
+    SERVER_ANSWERING,
+    SERVER_SERVING,
+    PhoneReady,
+    is_tailnet,
+    readiness,
+)
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error, success, warning
@@ -68,13 +77,20 @@ from aipass.prax import logger
 
 COMMAND = "baud"
 _MODULE_NAME = "baud"
-_VERSION = "1.1.0"
+_VERSION = "1.2.0"
 DEFAULT_DEST = Path.home() / ".aipass" / "baud" / "phone"
 RETRY_HINT = "Retry anytime: aipass baud install  (or: aipass baud install --from <tarball> --sums <SHA256SUMS.txt>)"
 
 _VALUE_FLAGS = ("--tag", "--from", "--sums", "--dest", "--binary")
 _FROM_ONLY = ("--sums", "--binary")
 _BAUD_ERRORS = (FetchError, VerifyError, UnpackError)
+
+# aipass install's last print (FPLAN-0642 slice B). The token command and its receipt
+# are @api's (drone @api host-api --help); the guide is @baud's.
+PHONE_GUIDE_URL = "https://github.com/AIOSAI/baud/blob/main/docs/phone-setup-android.md"
+TOKEN_COMMAND = "drone @api host-api issue-token <label> --scope operate"
+TOKEN_RECEIPT = "~/.secrets/aipass/host_api/<label>.token"
+TAILSCALE_INSTALL = "curl -fsSL https://tailscale.com/install.sh | sh"
 
 
 class UsageError(Exception):
@@ -232,14 +248,16 @@ def install_phone_face(
     return _point(outcome)
 
 
-def install_best_effort(dry_run: bool = False) -> bool:
+def install_best_effort(dry_run: bool = False, tag: str = LATEST) -> bool:
     """aipass install's step 4 (phone face + baud-cli). Never raises, never fails the install.
+
+    ``tag`` is aipass install's --baud-tag, the release a stamped install.sh pins.
 
     Returns:
         True when the install was pointed (or dry-run walked).
     """
     try:
-        rc = install_phone_face(dry_run=dry_run, best_effort=True)
+        rc = install_phone_face(tag=tag, dry_run=dry_run, best_effort=True)
     except Exception as exc:  # best-effort by contract: the install must continue
         logger.error("[baud] phone face step crashed: %s", exc)
         warning(f"Phone face not installed: {exc}")
@@ -247,6 +265,69 @@ def install_best_effort(dry_run: bool = False) -> bool:
     if rc != 0:
         console.print(f"  [dim]{RETRY_HINT}[/dim]")
     return rc == 0
+
+
+def phone_readiness(dry_run: bool = False, host_config: Any = None) -> PhoneReady:
+    """What the phone needs now the face is in: the tailnet address, @api's bind, a live server.
+
+    ``host_config`` is @api's host module door; None reads the real one. A dry run
+    reads the config only (no tailscale, no probe).
+    """
+    return readiness(host_config if host_config is not None else _api_host_config(), dry_run)
+
+
+def print_phone_ready(ready: PhoneReady, dry_run: bool = False) -> None:
+    """aipass install's last print: the phone URL, the token command, the sign-in note, the guide.
+
+    Never mints a token and never prints one. Sets nothing: where the bind or the
+    boot unit still needs a hand, the line names the command that does it.
+    """
+    console.print()
+    console.print("[bold cyan]Your phone[/bold cyan]")
+    if dry_run:
+        bind = f"now {ready.host}:{ready.port}" if ready.api else "@api's config unreadable here"
+        if is_tailnet(ready.host):
+            bind_line = f"would keep @api's bind ({bind}), already a tailnet address"
+        else:
+            bind_line = f"would check @api's bind ({bind}) and name the command that moves it to the tailnet address"
+        for line in (
+            "would read this host's tailnet address: tailscale ip -4",
+            bind_line,
+            "would ask the server on that bind whether it answers (GET /, no token)",
+            "would print the phone URL, the token command, the sign-in note and the guide",
+        ):
+            console.print(f"[yellow]\\[dry-run][/yellow] {line}")
+        return
+    if not ready.api:
+        warning("@api's host config could not be read, so there is no phone URL to give yet")
+        console.print(f"  Guide:      {PHONE_GUIDE_URL}")
+        return
+
+    tailnet_up = is_tailnet(ready.tailnet)
+    url_host = ready.tailnet if tailnet_up else ready.host
+    console.print(f"  Phone URL:  [cyan]http://{url_host}:{ready.port}/[/cyan]")
+    if is_tailnet(ready.host):
+        console.print(f"  Bind:       kept {ready.host}:{ready.port}, already a tailnet address")
+    elif tailnet_up:
+        move = f"drone @api host-api set-config --host {ready.tailnet} --port {ready.port}"
+        console.print(f"  Bind:       {ready.host}:{ready.port}; the phone needs {ready.tailnet}. Move it:")
+        console.print(f"              [cyan]{move}[/cyan]")
+    else:
+        console.print(f"  Bind:       {ready.host}:{ready.port}")
+    if ready.server == SERVER_SERVING:
+        console.print("  Server:     answering, serving the face")
+    elif ready.server == SERVER_ANSWERING:
+        console.print("  Server:     up, but not serving the face: [cyan]drone @api host-api status[/cyan]")
+    else:
+        console.print("  Server:     not answering. Start it: [cyan]drone @api host-api serve --detach[/cyan]")
+        console.print("              at every boot: [cyan]drone @api host-api autostart[/cyan]")
+    console.print(f"  Token:      [cyan]{TOKEN_COMMAND}[/cyan]")
+    console.print(f"              its 0600 receipt lands at {TOKEN_RECEIPT}")
+    console.print("              paste the token on the sign-in page, the phone URL above")
+    console.print(f"  Guide:      {PHONE_GUIDE_URL}")
+    if not tailnet_up:
+        warning(f"Tailscale is {ready.tailnet} here: the phone URL works on this machine only until it is up")
+        console.print(f"  Install it: [cyan]{TAILSCALE_INSTALL}[/cyan], then: [cyan]sudo tailscale up[/cyan]")
 
 
 def _status_face(target: Path, host_config: Any) -> None:

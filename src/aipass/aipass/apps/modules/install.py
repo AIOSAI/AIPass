@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.5
+# Version: 1.3.0
 # Created: 2026-07-05
-# Modified: 2026-09-29
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -20,6 +20,10 @@ this command materializes a working, writable AIPass home and wires it up:
        BEST-EFFORT: offline, a private repo or no token is one honest line plus the
        retry command, and the install carries on (FPLAN-0587, FPLAN-0589). No
        baud-cli build for this platform lands the face alone. --no-baud skips it.
+       --baud-tag TAG pins the release (aipass baud install --tag), checked before
+       the clone; a stamped install.sh passes its own. With the face in, the
+       install's last print is the phone: URL, bind, server, token command, guide
+       (FPLAN-0642 slice B).
     5. End in a conversation: the @aipass concierge opens in this terminal with the
        install report in hand (interactive default; --no-chat to skip). Project
        creation is NOT part of install — the concierge points users at
@@ -34,6 +38,7 @@ Usage:
     aipass install --non-interactive     # CI/headless (~/AIPass), no chat
     aipass install --no-chat             # install the engine only, skip the chat
     aipass install --no-baud             # skip the phone face + baud-cli step
+    aipass install --baud-tag v0.2.1     # that baud release, not the latest
     aipass install --path ~/tools/aipass # explicit home
     aipass install --here                # install into the current directory
     aipass install --chat-only           # skip the build, just the welcome chat
@@ -55,6 +60,7 @@ from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
+from aipass.aipass.apps.handlers.baud import LATEST, FetchError, validate_tag
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.ui.progress import render_step_header
@@ -488,14 +494,19 @@ def _run_doctor_preflight() -> list[str]:
     return hook_action_items
 
 
-def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
+def _end_in_chat(
+    home: Path, bins: dict, dry_run: bool, no_chat: bool, last_print: Callable[[], None] | None = None
+) -> None:
     """End the install in a conversation with the @aipass concierge (TTY only).
 
     Project creation is NOT part of install — ``aipass init run`` stays a
     separate, later step; the concierge points users there when they're ready.
     ``launch_inline`` replaces this process and never returns when it fires.
+    ``last_print`` is the phone print: the owner ruled nothing follows it on the
+    scripted (--no-chat) path, so every ending calls it last, before a launch.
     """
     _print_next_steps(home)
+    finish = last_print if last_print is not None else (lambda: None)
 
     # The doctor preflight runs INSIDE the chat path below, so every early
     # return here skips it. The owner's ruling (FPLAN-0492 wave 6): a skipped
@@ -503,14 +514,17 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     if no_chat:
         console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")
         warning("Health check skipped with the chat — run 'aipass doctor --fix' to check hook wiring.")
+        finish()
         return
     if dry_run:
         console.print("[yellow]\\[dry-run][/yellow] would launch the AIPass concierge welcome chat.")
         console.print("[yellow]\\[dry-run][/yellow] would run the 'aipass doctor --fix' health check.")
+        finish()
         return
     if not sys.stdin.isatty():
         console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
         warning("Health check skipped (no TTY) — run 'aipass doctor --fix' to check hook wiring.")
+        finish()
         return
 
     hook_action_items = _run_doctor_preflight()
@@ -519,6 +533,7 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     flag_variant = _ask_permission_mode()
     prompt = _build_install_prompt(home, bins, doctor_action_items=hook_action_items)
     aipass_branch = str(Path(__file__).resolve().parents[2])
+    finish()
     console.print()
     console.print("[dim]Launching the AIPass concierge — Ctrl-C to stay in the shell[/dim]")
     console.print()
@@ -527,8 +542,10 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     launch_inline("claude", prompt, aipass_branch, flag_variant)
 
 
-def _install_phone_face(dry_run: bool, no_baud: bool) -> bool:
+def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) -> bool:
     """The Phone face step: best-effort, so its outcome never fails the install.
+
+    ``baud_tag`` is --baud-tag, already validated, handed on as aipass baud install --tag.
 
     Returns:
         True when the face was installed and pointed (or the dry-run walked it).
@@ -538,7 +555,17 @@ def _install_phone_face(dry_run: bool, no_baud: bool) -> bool:
         return False
     from aipass.aipass.apps.modules.baud import install_best_effort
 
-    return install_best_effort(dry_run=dry_run)
+    return install_best_effort(dry_run=dry_run, tag=baud_tag)
+
+
+def _phone_print(dry_run: bool, face_installed: bool) -> Callable[[], None] | None:
+    """The phone facts read now, printed last (FPLAN-0642 slice B). None: no face, nothing to say."""
+    if not face_installed:
+        return None
+    from aipass.aipass.apps.modules.baud import phone_readiness, print_phone_ready
+
+    ready = phone_readiness(dry_run=dry_run)
+    return lambda: print_phone_ready(ready, dry_run=dry_run)
 
 
 def _check_and_fix_owner(home: Path) -> None:
@@ -608,12 +635,23 @@ def run_install(
     no_symlink: bool = False,
     force_symlink: bool = False,
     no_baud: bool = False,
+    baud_tag: str = LATEST,
 ) -> int:
-    """Run the 5-step one-command install. Returns 0 on success, 1 on failure."""
+    """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
+
+    ``baud_tag`` (--baud-tag) is checked before anything is cloned: a bad tag is refused
+    with 2, the bad-usage code, so nothing was attempted.
+    """
     console.print()
     console.print("[bold cyan]AIPass — one-command install[/bold cyan]")
     if dry_run:
         console.print("[yellow]\\[dry-run][/yellow] No clone, no setup, no launch — walking the steps only.")
+    try:
+        validate_tag(baud_tag)
+    except FetchError as exc:
+        logger.warning("[install] --baud-tag refused before the clone: %s", exc)
+        error(f"--baud-tag refused: {exc}")
+        return 2
 
     # Step 1 — resolve + fetch the framework home
     console.print()
@@ -677,7 +715,8 @@ def run_install(
     # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()
     console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
-    face_installed = _install_phone_face(dry_run, no_baud)
+    face_installed = _install_phone_face(dry_run, no_baud, baud_tag)
+    phone_print = _phone_print(dry_run, face_installed)
 
     # Step 5 — end in a welcome chat (no project creation — see module docstring)
     console.print()
@@ -693,10 +732,11 @@ def run_install(
             "dry_run": dry_run,
             "chat": not no_chat,
             "phone_face": face_installed,
+            "baud_tag": baud_tag,
         },
     )
 
-    _end_in_chat(home, bins, dry_run, no_chat)
+    _end_in_chat(home, bins, dry_run, no_chat, last_print=phone_print)
     return 0
 
 
@@ -712,6 +752,7 @@ def print_help() -> None:
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
     console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
     console.print("  [green]aipass install --no-baud[/green]            [dim]# skip phone face + baud-cli[/dim]")
+    console.print("  [green]aipass install --baud-tag TAG[/green]       [dim]# baud release, default latest[/dim]")
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
     console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
@@ -723,6 +764,7 @@ def print_help() -> None:
     )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
+    console.print("[dim]With a phone face installed, the last print is the phone: URL, token command, guide.[/dim]")
     # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
     console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
@@ -770,6 +812,8 @@ def handle_command(command: str, args: list[str]) -> bool:
     force_symlink = "--force-symlink" in run_args
     no_baud = "--no-baud" in run_args
     path = _flag_value("--path")
+    # A --baud-tag with no value reaches validate_tag as "" and is refused there, as any bad tag is.
+    baud_tag = (_flag_value("--baud-tag") or "") if "--baud-tag" in run_args else LATEST
 
     if chat_only:
         result = run_chat_only(
@@ -789,6 +833,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             no_symlink=no_symlink,
             force_symlink=force_symlink,
             no_baud=no_baud,
+            baud_tag=baud_tag,
         )
     json_handler.log_operation(
         "install_run",
