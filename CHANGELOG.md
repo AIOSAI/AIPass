@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-10-12] — after the three-week test review: the plan counter walks past held rows, the execution ratchet opens (DPLAN-0405)
+## [2026-10-13] — v2.8.13: the BAUD front door (`aipass install --baud-tag` ends on the phone through @api's doors, FPLAN-0642), the execution ratchet opens (DPLAN-0405), the plan counter walks past held rows
 
 ### Fixed
 
