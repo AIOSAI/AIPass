@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-10-13
 # =============================================
@@ -14,6 +14,8 @@
 # The phone print (FPLAN-0642 slice B): @api is a fake store with load_config, the
 # module door's shape; tailscale is a fake script alone on PATH; the server is a real
 # http.server on 127.0.0.1. No real install, no real @api config, no token minted.
+# The pairing QR (DPLAN-0406 slice C): mint_pairing and render_qr are the fake door's;
+# every finish_phone gets that door, so @api's real mint_pairing is never called.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
@@ -25,6 +27,7 @@ import stat
 import sys
 import threading
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -241,6 +244,13 @@ class TestPhoneReadiness:
 
 
 _RECEIPT = "~/.secrets/aipass/host_api/<label>.token"
+_PAIR = "drone @api host-api pair phone --scope operate"
+_HEADING = "Pair your phone"
+_CAMERA = "Open your phone's camera and point it at this code."
+_QR = "█▀▀▀█ ▄▀ █▀▀▀█\n█ █ █ ▀▄ █ █ █\n▀▀▀▀▀ ▀▄ ▀▀▀▀▀"
+_PAIR_URL = f"http://{_TAILNET_IP}:8787/#pair=" + "k" * 36
+_EXPIRES_AT = "2026-10-13T19:05:00Z"
+_PAIR_PLAN = "would mint a pairing code for the phone (label phone, scope operate, 5 minutes) and show its QR"
 
 
 def _ready(host: str = "127.0.0.1", tailnet: str = _TAILNET_IP, server: str = "serving") -> baud.PhoneReady:
@@ -250,14 +260,13 @@ def _ready(host: str = "127.0.0.1", tailnet: str = _TAILNET_IP, server: str = "s
 class TestPrintPhoneReady:
     """An @api without the installer doors (slice B's print): the commands that do it by hand."""
 
-    def test_the_print_gives_the_url_the_token_command_its_receipt_the_sign_in_and_the_guide(self, capsys):
+    def test_the_print_gives_the_url_the_pair_command_and_the_guide_and_names_no_token(self, capsys):
         baud.print_phone_ready(_ready())
         out, err = capsys.readouterr()
         assert f"Phone URL:  http://{_TAILNET_IP}:8787/" in out
-        assert "drone @api host-api issue-token <label> --scope operate" in out
-        assert f"its 0600 receipt lands at {_RECEIPT}" in out
-        assert "paste the token on the sign-in page" in out
+        assert f"Then pair your phone: {_PAIR}" in out
         assert "https://github.com/AIOSAI/baud/blob/main/docs/phone-setup-android.md" in out
+        assert "issue-token" not in out and "receipt" not in out and "sign-in" not in out
         assert "Tailscale is" not in err
 
     def test_a_loopback_bind_names_the_command_that_moves_it_to_the_tailnet(self, capsys):
@@ -265,12 +274,12 @@ class TestPrintPhoneReady:
         out, _err = capsys.readouterr()
         assert f"drone @api host-api set-config --host {_TAILNET_IP} --port 8787" in out
 
-    def test_no_receipt_door_states_no_path(self, capsys):
-        """Mutant: the receipt line printed whatever ready.receipt holds -> an empty path -> red."""
-        baud.print_phone_ready(baud.PhoneReady(True, "127.0.0.1", 8787, _TAILNET_IP, "serving"))
-        out, _err = capsys.readouterr()
-        assert "its 0600 receipt path is printed when it is issued" in out
-        assert "receipt lands at" not in out
+    def test_without_a_qr_the_pair_command_sits_above_the_guide_and_the_guide_is_last(self, capsys):
+        baud.print_phone_ready(_ready())
+        lines = capsys.readouterr().out.rstrip().splitlines()
+        assert lines[-2].strip() == f"Then pair your phone: {_PAIR}"
+        assert lines[-1].startswith("  Guide:      ")
+        assert _HEADING not in lines
 
     def test_without_tailscale_the_url_is_loopback_and_the_install_line_is_given(self, capsys):
         baud.print_phone_ready(_ready(tailnet="absent"))
@@ -309,6 +318,10 @@ class _Unreachable(Exception):
     pass
 
 
+class _PairRefused(Exception):
+    pass
+
+
 def _steps(*names: str, ok: object = True) -> dict:
     return {"dry_run": ok is None, "ok": ok is not False, "steps": [{"step": n, "ok": ok, "detail": ""} for n in names]}
 
@@ -320,10 +333,12 @@ class _ApiDoor(_ApiStore):
     AutostartUnsupported = _Unsupported
     SupervisorUnreachable = _Unreachable
     LifetimeError = _Unreachable
+    PairingError = _PairRefused
 
     def __init__(self, host: str = "127.0.0.1", **answers: object) -> None:
         super().__init__(host=host)
         self.calls: list[tuple] = []
+        self.minted: list[tuple] = []  # pairing calls apart, so the installer-door order stays as it was
         self.answers = answers
 
     def _answer(self, name: str, default: dict) -> dict:
@@ -355,6 +370,15 @@ class _ApiDoor(_ApiStore):
 
     def issue_token(self, *_args: object, **_kwargs: object) -> None:
         raise AssertionError("the install minted a token")
+
+    def mint_pairing(self, label: str, scope: str = "read", ttl_seconds: int = 300) -> dict:
+        self.minted.append(("mint_pairing", label, scope, ttl_seconds))
+        code = {"id": "p1", "label": label, "scope": scope, "code": "k" * 36, "expires_at": _EXPIRES_AT}
+        return self._answer("mint_pairing", {**code, "url": _PAIR_URL})
+
+    def render_qr(self, text: str) -> str:
+        self.minted.append(("render_qr", text))
+        return _QR
 
 
 @pytest.fixture
@@ -465,6 +489,67 @@ class TestFinishPhone:
         assert baud.phone_readiness(dry_run=True, host_config=door).receipt == _RECEIPT
 
 
+class TestPairingQR:
+    """DPLAN-0406 slice C: a server serving the face on a tailnet bind ends the install on a pairing QR."""
+
+    def test_a_serving_tailnet_bind_mints_one_code_and_ends_on_the_qr_block_in_order(self, capsys, probes):
+        """Mutant: the url line dropped -> red."""
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        lines = capsys.readouterr().out.rstrip().splitlines()
+        assert door.minted == [("mint_pairing", "phone", "operate", 300), ("render_qr", _PAIR_URL)]
+        hhmm = datetime(2026, 10, 13, 19, 5, tzinfo=timezone.utc).astimezone().strftime("%H:%M")
+        block = ["", _HEADING, _CAMERA, *_QR.splitlines(), "", _PAIR_URL]
+        block.append(f"Expires {hhmm} (5 minutes), one use. Later: {_PAIR}")
+        assert lines[-len(block) :] == block
+        assert lines[-len(block) - 1].startswith("  Guide:      ")
+        assert "Then pair your phone" not in "\n".join(lines)
+
+    def test_a_loopback_bind_prints_the_pair_command_and_mints_nothing(self, capsys, probes):
+        """Mutant: the QR printed on a loopback bind -> red."""
+        door = _ApiDoor()
+        baud.finish_phone(_ready(tailnet="absent"), host_config=door)
+        out, _err = capsys.readouterr()
+        assert probes == [("127.0.0.1", 8787)]
+        assert door.minted == []
+        assert f"Then pair your phone: {_PAIR}" in out
+        assert _HEADING not in out and _PAIR_URL not in out
+
+    def test_a_tailnet_bind_whose_server_does_not_answer_mints_nothing(self, capsys, monkeypatch):
+        monkeypatch.setattr(baud, "server_answers", lambda host, port: "silent")
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, _err = capsys.readouterr()
+        assert door.minted == []
+        assert f"Then pair your phone: {_PAIR}" in out
+        assert _HEADING not in out
+
+    def test_a_pairing_error_is_stated_with_the_pair_command_and_no_qr(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP, mint_pairing=_PairRefused("no bind stored"))
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, err = capsys.readouterr()
+        assert "Pairing code not minted: no bind stored" in out
+        assert f"Then pair your phone: {_PAIR}" in out
+        assert _HEADING not in out and "Traceback" not in out + err
+
+    def test_an_api_without_the_pairing_door_gets_the_pair_command(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP)
+        door.mint_pairing = None  # pyright: ignore[reportAttributeAccessIssue]
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, _err = capsys.readouterr()
+        assert f"Then pair your phone: {_PAIR}" in out
+        assert _HEADING not in out
+
+    def test_the_dry_run_mints_nothing_and_says_what_it_would(self, capsys, probes):
+        """Mutant: the dry run minting -> red."""
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), dry_run=True, host_config=door)
+        out, _err = capsys.readouterr()
+        assert door.minted == [] and probes == []
+        assert _PAIR_PLAN in out
+        assert _HEADING not in out
+
+
 class TestInstallEndsOnThePhone:
     @_POSIX_ONLY
     def test_a_dry_run_install_passes_the_tag_and_ends_on_the_phone_lines(
@@ -485,6 +570,6 @@ class TestInstallEndsOnThePhone:
         assert exc.value.code == 0
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
-        assert out.endswith("would print the phone URL, the token command, the sign-in note and the guide")
+        assert out.endswith(_PAIR_PLAN)
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: phone_setup.py
 # Description: Finish the phone through @api's installer doors: move the bind to the tailnet, install the boot unit
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -26,9 +26,10 @@ a file, so the dry run names it instead.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
-from aipass.aipass.apps.handlers.baud.phone_ready import PhoneReady, is_tailnet
+from aipass.aipass.apps.handlers.baud.phone_ready import SERVER_SERVING, PhoneReady, is_tailnet
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.prax import logger
 
@@ -152,3 +153,54 @@ def set_up_boot(host_config: Any, dry_run: bool) -> BootSetup:
         return BootSetup(BOOT_UNREACHABLE, detail=str(exc))
     json_handler.log_operation("baud_phone_boot", {"state": setup.state, "unit": setup.unit}, module_name="baud")
     return setup
+
+
+# pairing states (DPLAN-0406 slice C)
+PAIR_MINTED = "minted"  # a one-use code minted; qr and url are set
+PAIR_PLANNED = "planned"  # a dry run: nothing minted
+PAIR_SKIPPED = "skipped"  # the server does not answer on a tailnet bind: no code, the pair command instead
+PAIR_REFUSED = "refused"  # the door raised PairingError; detail holds its words
+PAIR_NO_DOOR = "no_door"  # this @api publishes no mint_pairing / render_qr
+PAIR_LABEL = "phone"
+PAIR_SCOPE = "operate"
+
+
+@dataclass
+class Pairing:
+    """The pairing QR's facts. Never carries the code apart from the url it sits in."""
+
+    state: str
+    url: str = ""
+    qr: str = ""
+    expires: str = ""
+    detail: str = ""
+
+
+def _local_hhmm(expires_at: str) -> str:
+    """ISO 8601 UTC from the door, as HH:MM local; the raw value when it does not parse."""
+    try:
+        return datetime.fromisoformat(expires_at.replace("Z", "+00:00")).astimezone().strftime("%H:%M")
+    except ValueError as exc:
+        logger.info("[baud] pairing expiry %r not ISO 8601: %s", expires_at, exc)
+        return f"at {expires_at}"
+
+
+def mint_pair(host_config: Any, ready: PhoneReady, dry_run: bool) -> Pairing:
+    """Mint the phone's pairing code and its QR, only when the server serves the face on a tailnet bind."""
+    if dry_run:
+        return Pairing(PAIR_PLANNED)
+    if ready.server != SERVER_SERVING or not is_tailnet(ready.host):
+        return Pairing(PAIR_SKIPPED)
+    mint = getattr(host_config, "mint_pairing", None)
+    render = getattr(host_config, "render_qr", None)
+    if mint is None or render is None:
+        return Pairing(PAIR_NO_DOOR)
+    try:
+        minted = mint(PAIR_LABEL, PAIR_SCOPE)
+        url = str(minted["url"])
+        qr = render(url)
+    except _door_error(host_config, "PairingError") as exc:
+        logger.warning("[baud] pairing code not minted: %s", exc)
+        return Pairing(PAIR_REFUSED, detail=str(exc))
+    json_handler.log_operation("baud_phone_pairing", {"label": PAIR_LABEL, "scope": PAIR_SCOPE}, module_name="baud")
+    return Pairing(PAIR_MINTED, url=url, qr=qr, expires=_local_hhmm(str(minted.get("expires_at", ""))))

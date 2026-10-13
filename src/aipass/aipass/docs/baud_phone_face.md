@@ -61,9 +61,10 @@ missing token prints one line plus the retry command, and the install carries on
 - `baud status [--dest DIR]` — two rows, face and baud-cli: installed tag and
   sha256, `phone.html` / executable, where @api's face dir and baud binary point.
 
-Code: [`apps/modules/baud.py`](../apps/modules/baud.py) and the handler group
+Code: [`apps/modules/baud.py`](../apps/modules/baud.py), its phone print
+[`apps/modules/_phone_print.py`](../apps/modules/_phone_print.py), and the handler group
 [`apps/handlers/baud/`](../apps/handlers/baud) — `fetch.py`, `verify.py`,
-`unpack.py`, `binary.py`, `installer.py`, `point.py`.
+`unpack.py`, `binary.py`, `installer.py`, `point.py`, `phone_ready.py`, `phone_setup.py`.
 
 ---
 

@@ -81,6 +81,16 @@
       "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
     },
     {
+      "file": "apps/modules/_phone_print.py",
+      "standard": "naming",
+      "reason": "Leading underscore is intentional — hides from module discovery; baud.py's phone print, split out 2026-10-13 (DPLAN-0406 slice C) when baud.py passed 600 lines. Same shape as _doctor_wire.py."
+    },
+    {
+      "file": "apps/modules/_phone_print.py",
+      "standard": "introspection",
+      "reason": "Private helper module for baud.py — not directly invokable, no introspection needed. Same shape as _doctor_wire.py."
+    },
+    {
       "file": "apps/modules/handoff.py",
       "standard": "introspection",
       "reason": "aipass is binary-invoked: aipass handoff shows usage; introspection via --info"
@@ -153,8 +163,8 @@
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [164, 260, 683],
-      "reason": "164: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:196). 260: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 683: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-12 after FPLAN-0642 slice B moved them."
+      "lines": [165, 261, 684],
+      "reason": "165: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:197). 261: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 684: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0406 slice C moved them."
     },
     {
       "file": "apps/modules/doctor.py",
