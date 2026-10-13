@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: series.py
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -17,15 +17,23 @@ no later run can overwrite it.
 A LINE IS KEYED BY `relpath::qualname`, never by line number: the verify
 point a week later must find the same function after the owner's edit moved it.
 
+NO ABSOLUTE PATH LEAVES THIS FILE. The artifact names the target, the
+interpreter and every file the gate saw by absolute path, so the first four
+archives carried `/home/<owner>/...` 68 times and turned CI's home-paths gate
+red (PR #786). Everything written here goes through `portable()` first: the
+AIPass root becomes repo-relative, any other home path becomes `~`. A probe on
+the owner's machine and one in CI then record the same paths.
+
 A REFUSED PROBE IS STILL A LINE. A red baseline, a missing coverage map or an
 exhausted budget is a visit with its reason, so the pick moves on and the
 refusal itself is what gets handed over.
 """
 
 import json
+import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -35,6 +43,12 @@ MODULE_NAME = "ratchet.series"
 
 SEEDGO_ROOT = module_file(__file__).parents[3]
 ARTIFACT_DIR = SEEDGO_ROOT / ".seedgo"
+
+#: The AIPass root the probe runs in: `src/aipass/seedgo` is three levels down.
+REPO_ROOT = SEEDGO_ROOT.parents[2]
+
+#: The home a path outside the root is written relative to, as `~`.
+HOME_DIR = Path.home()
 SERIES_NAME = "ratchet_series.jsonl"
 ARCHIVE_DIRNAME = "ratchet"
 
@@ -100,11 +114,50 @@ def holds_run(run_id: str, lines: List[dict]) -> bool:
     return any(line.get("run_id") == run_id for line in lines)
 
 
+def portable(value: Any, root: Optional[Path] = None, home: Optional[Path] = None) -> Any:
+    """`value` with every path under the AIPass root made repo-relative and any other home path `~`.
+
+    Walks dicts (keys too), lists and strings; anything else is returned as is.
+    The root alone becomes `.`; `<root>/src/x` becomes `src/x`, inside prose too.
+    """
+    rewrite = _rewriter(Path(root) if root else REPO_ROOT, Path(home) if home else HOME_DIR)
+    return _walk(value, rewrite)
+
+
+def _rewriter(root: Path, home: Path):
+    """One string -> string function for this root and home."""
+    passes = []
+    for prefix, replacement in ((str(root), "."), (str(home), "~")):
+        escaped = re.escape(prefix)
+        if replacement == ".":
+            passes.append((re.compile(escaped + r"[\\/]"), ""))
+        passes.append((re.compile(escaped + r"(?![\w.-])"), replacement))
+
+    def rewrite(text: str) -> str:
+        """The text with the root and the home rewritten."""
+        for pattern, replacement in passes:
+            text = pattern.sub(lambda _: replacement, text)
+        return text
+
+    return rewrite
+
+
+def _walk(value: Any, rewrite) -> Any:
+    """Apply `rewrite` to every string in a JSON-shaped value."""
+    if isinstance(value, str):
+        return rewrite(value)
+    if isinstance(value, dict):
+        return {_walk(key, rewrite): _walk(item, rewrite) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_walk(item, rewrite) for item in value]
+    return value
+
+
 def archive(document: dict, branch: str, run_id: str, directory: Optional[Path] = None) -> Path:
-    """Copy the probe's artifact where no later run can overwrite it."""
+    """Copy the probe's artifact, paths made portable, where no later run can overwrite it."""
     target = (Path(directory) if directory else ARTIFACT_DIR) / ARCHIVE_DIRNAME / f"{branch}_{run_id}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(document, indent=2, sort_keys=True), encoding="utf-8")
+    target.write_text(json.dumps(portable(document), indent=2, sort_keys=True), encoding="utf-8")
     logger.info(f"[RATCHET] archived the {branch} artifact to {target}")
     return target
 
@@ -162,10 +215,11 @@ def build_line(
         # Phase 2 reads `no-test-needed(equivalent)` markers. Until then the
         # field says it was not read, never that nothing was declared.
         "declared_equivalent": None,
-        "archive": str(archived) if archived else None,
+        # Posix separators so the line reads the same from every host.
+        "archive": Path(portable(str(archived))).as_posix() if archived else None,
     }
     line["open_survivors"] = len(pseudo_tested) if status == "measured" else None
-    return line
+    return portable(line)
 
 
 def _status(document: dict, group: dict) -> str:

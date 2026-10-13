@@ -927,7 +927,7 @@
         ],
         "layout": "aipass",
         "m10_complete": true,
-        "python": "/home/patrick/Projects/AIPass/.venv/bin/python",
+        "python": ".venv/bin/python",
         "sibling_basis": "own_root",
         "symlinked_siblings": [],
         "target_copy": "/tmp/audit_tests_0quaz3bh/env/src/aipass/daemon",
@@ -6699,7 +6699,7 @@
       },
       {
         "check": 17,
-        "detail": "466 file(s) re-hashed after teardown; 12 change(s) nothing else was observed writing, 0 attributed to the target's own concurrent writers (probe ran: True, window 0.0613s - a window shorter than the run UNDER-detects, so an unattributed change may still be a live service); diff: {'added': [], 'removed': [], 'modified': ['/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_data.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_log.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_runstate.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_data.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_log.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_data.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_log.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/schedule.lock', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_data.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_log.json', '/home/patrick/Projects/AIPass/src/aipass/daemon/logs/daemon.log', '/home/patrick/Projects/AIPass/src/aipass/daemon/logs/discovery.log']}",
+        "detail": "466 file(s) re-hashed after teardown; 12 change(s) nothing else was observed writing, 0 attributed to the target's own concurrent writers (probe ran: True, window 0.0613s - a window shorter than the run UNDER-detects, so an unattributed change may still be a live service); diff: {'added': [], 'removed': [], 'modified': ['src/aipass/daemon/daemon_json/daemon_data.json', 'src/aipass/daemon/daemon_json/daemon_log.json', 'src/aipass/daemon/daemon_json/daemon_runstate.json', 'src/aipass/daemon/daemon_json/discovery_data.json', 'src/aipass/daemon/daemon_json/discovery_log.json', 'src/aipass/daemon/daemon_json/run_data.json', 'src/aipass/daemon/daemon_json/run_log.json', 'src/aipass/daemon/daemon_json/schedule.lock', 'src/aipass/daemon/daemon_json/tick_lock_data.json', 'src/aipass/daemon/daemon_json/tick_lock_log.json', 'src/aipass/daemon/logs/daemon.log', 'src/aipass/daemon/logs/discovery.log']}",
         "name": "every real-tree change was ATTRIBUTED",
         "prevents": "UNATTRIBUTED-CHANGE",
         "status": "fail"
@@ -6742,36 +6742,36 @@
     "diff": {
       "added": [],
       "modified": [
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_runstate.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/schedule.lock",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/daemon.log",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/discovery.log"
+        "src/aipass/daemon/daemon_json/daemon_data.json",
+        "src/aipass/daemon/daemon_json/daemon_log.json",
+        "src/aipass/daemon/daemon_json/daemon_runstate.json",
+        "src/aipass/daemon/daemon_json/discovery_data.json",
+        "src/aipass/daemon/daemon_json/discovery_log.json",
+        "src/aipass/daemon/daemon_json/run_data.json",
+        "src/aipass/daemon/daemon_json/run_log.json",
+        "src/aipass/daemon/daemon_json/schedule.lock",
+        "src/aipass/daemon/daemon_json/tick_lock_data.json",
+        "src/aipass/daemon/daemon_json/tick_lock_log.json",
+        "src/aipass/daemon/logs/daemon.log",
+        "src/aipass/daemon/logs/discovery.log"
       ],
       "removed": []
     },
     "diff_before_carrier_subtraction": {
       "added": [],
       "modified": [
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_runstate.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/schedule.lock",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_data.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_log.json",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/daemon.log",
-        "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/discovery.log"
+        "src/aipass/daemon/daemon_json/daemon_data.json",
+        "src/aipass/daemon/daemon_json/daemon_log.json",
+        "src/aipass/daemon/daemon_json/daemon_runstate.json",
+        "src/aipass/daemon/daemon_json/discovery_data.json",
+        "src/aipass/daemon/daemon_json/discovery_log.json",
+        "src/aipass/daemon/daemon_json/run_data.json",
+        "src/aipass/daemon/daemon_json/run_log.json",
+        "src/aipass/daemon/daemon_json/schedule.lock",
+        "src/aipass/daemon/daemon_json/tick_lock_data.json",
+        "src/aipass/daemon/daemon_json/tick_lock_log.json",
+        "src/aipass/daemon/logs/daemon.log",
+        "src/aipass/daemon/logs/discovery.log"
       ],
       "removed": []
     },
@@ -6784,18 +6784,18 @@
     "probed": true,
     "real_tree_unchanged": false,
     "unattributed_changes": [
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_data.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_log.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/daemon_runstate.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_data.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/discovery_log.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_data.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/run_log.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/schedule.lock",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_data.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/daemon_json/tick_lock_log.json",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/daemon.log",
-      "/home/patrick/Projects/AIPass/src/aipass/daemon/logs/discovery.log"
+      "src/aipass/daemon/daemon_json/daemon_data.json",
+      "src/aipass/daemon/daemon_json/daemon_log.json",
+      "src/aipass/daemon/daemon_json/daemon_runstate.json",
+      "src/aipass/daemon/daemon_json/discovery_data.json",
+      "src/aipass/daemon/daemon_json/discovery_log.json",
+      "src/aipass/daemon/daemon_json/run_data.json",
+      "src/aipass/daemon/daemon_json/run_log.json",
+      "src/aipass/daemon/daemon_json/schedule.lock",
+      "src/aipass/daemon/daemon_json/tick_lock_data.json",
+      "src/aipass/daemon/daemon_json/tick_lock_log.json",
+      "src/aipass/daemon/logs/daemon.log",
+      "src/aipass/daemon/logs/discovery.log"
     ]
   },
   "provenance": {
@@ -6823,7 +6823,7 @@
     "layout": "pytest.ini at root",
     "name": "DAEMON",
     "notes": [],
-    "path": "/home/patrick/Projects/AIPass/src/aipass/daemon",
+    "path": "src/aipass/daemon",
     "resolved_from": "registry entry for 'DAEMON'",
     "unit_count": 27
   },

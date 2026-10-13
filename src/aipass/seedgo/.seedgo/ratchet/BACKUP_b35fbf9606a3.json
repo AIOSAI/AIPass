@@ -562,7 +562,7 @@
         ],
         "layout": "aipass",
         "m10_complete": true,
-        "python": "/home/patrick/Projects/AIPass/.venv/bin/python",
+        "python": ".venv/bin/python",
         "sibling_basis": "own_root",
         "symlinked_siblings": [],
         "target_copy": "/tmp/audit_tests_hci9nsgf/env/src/aipass/backup",
@@ -4498,7 +4498,7 @@
     "layout": "pytest.ini at root",
     "name": "BACKUP",
     "notes": [],
-    "path": "/home/patrick/Projects/AIPass/src/aipass/backup",
+    "path": "src/aipass/backup",
     "resolved_from": "registry entry for 'BACKUP'",
     "unit_count": 16
   },

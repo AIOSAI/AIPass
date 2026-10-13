@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -15,10 +15,12 @@
 # seedgo: no-test-needed(cli) — Rich's rendering of the standings
 
 import json
+from pathlib import Path
 
 import pytest
 
 from aipass.seedgo.apps.handlers import registry_scan
+from aipass.seedgo.apps.handlers.aipass_standards import developer_home_check
 from aipass.seedgo.apps.handlers.audit_tests import artifact, refusal, runner
 from aipass.seedgo.apps.handlers.ratchet import series
 from aipass.seedgo.apps.modules import CommandRefused, ratchet
@@ -235,3 +237,47 @@ class TestRecord:
         assert _series(fleet) == []
         _, err = capsys.readouterr()
         assert "not requested" in err
+
+
+class TestPortablePaths:
+    """No absolute path leaves the ratchet: PR #786 went red on 68 developer-home hits in four archives."""
+
+    def test_an_archive_from_a_run_under_a_home_holds_no_absolute_path(self, fleet, probe, monkeypatch, tmp_path):
+        home = tmp_path / "home" / "devlin"
+        root = home / "Projects" / "AIPass"
+        monkeypatch.setattr(series, "REPO_ROOT", root)
+        monkeypatch.setattr(series, "HOME_DIR", home)
+        branch = root / "src" / "aipass" / "alpha"
+        document = _artifact()
+        document["target"] = {"path": str(branch), "repo": str(root)}
+        document["harness"] = {"python": str(home / ".pyenv" / "bin" / "python")}
+        document["m10_proof"] = {
+            "detail": f"1 change at {branch / 'alpha_json' / 'data.json'} after teardown",
+            "changed": {str(branch / "x.json"): "modified"},
+        }
+        document["groups"]["pytest.pseudo_tested"]["reason"] = f"probed {branch}"
+        probe["document"] = document
+
+        ratchet.handle_command("ratchet", ["run"])
+
+        written = (fleet / "ratchet" / "alpha_r1.json").read_text(encoding="utf-8")
+        archived = json.loads(written)
+        relative = Path("src") / "aipass" / "alpha"
+        assert str(home) not in written
+        assert developer_home_check.scan_text(written) == []
+        assert archived["target"] == {"path": str(relative), "repo": "."}
+        assert archived["harness"]["python"] == str(Path("~") / ".pyenv" / "bin" / "python")
+        assert archived["m10_proof"]["detail"] == f"1 change at {relative / 'alpha_json' / 'data.json'} after teardown"
+        assert archived["m10_proof"]["changed"] == {str(relative / "x.json"): "modified"}
+        series_text = (fleet / series.SERIES_NAME).read_text(encoding="utf-8")
+        assert str(home) not in series_text
+        assert developer_home_check.scan_text(series_text) == []
+        assert json.loads(series_text)["reason"] == f"probed {relative}"
+
+    def test_the_series_line_names_its_archive_relative_to_the_root(self, fleet, probe, monkeypatch):
+        monkeypatch.setattr(series, "REPO_ROOT", fleet.parent)
+
+        ratchet.handle_command("ratchet", ["run"])
+
+        (line,) = _series(fleet)
+        assert line["archive"] == ".seedgo/ratchet/alpha_r1.json"

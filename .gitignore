@@ -200,6 +200,14 @@ sandbox_test/
 # mutmut working copy (advisory mutation runs, DPLAN-0323, 2026-09-07)
 mutants/
 
+# seedgo ratchet artifacts (DPLAN-0405): one probe's full record, 100-480 KB each,
+# written weekly by seedgo's Sunday job and read from disk by the owner it names.
+# The append-only series beside them (.seedgo/ratchet_series.jsonl) is the tracked
+# record. The four from the first run (3ccc004f, 2026-10-12) stay tracked until
+# seedgo releases them; CI's own home-paths check caught absolute paths in them
+# the night of 2026-10-13, which is also why they never belonged in the repo.
+src/aipass/*/.seedgo/ratchet/
+
 # The last wake prompt a citizen received, filed into ITS .daemon/ by the daemon
 # (DPLAN-0332 catch-up lane) and by ai_mail's interactive lane. A runtime record
 # per machine, never a tracked file — it names live PIDs and fire instants.
