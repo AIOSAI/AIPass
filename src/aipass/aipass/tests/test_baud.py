@@ -3,7 +3,7 @@
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
