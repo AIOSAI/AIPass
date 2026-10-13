@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased] — after v2.8.14
+
+### Added
+
+- **seedgo: `rendered_path_oracle` 1.0.0, the species behind PR #787's Windows and macOS red** (2026-10-13; seedgo building through a sub-agent, devpulse landing). Round one of the train went red on both OS runs for one test: an assert whose needle was an f-string interpolating `tmp_path` into captured console output. conftest pins `err_console` at 200 columns; the Windows and macOS pytest tmp paths push the line past it, Rich wraps at the last space before the path, and `str(OSError)` renders the filename with `%r`, so on Windows the backslashes are doubled and the line never matches even unwrapped. No row covered it: `literal_path` judges paths handed to a call, `weak_oracle` judges asserts that cannot fail, `conftest_fixtures` only checks the width is pinned. The new standard (tests only, every test file, **advisory**) convicts an `in` / `not in` / `==` / `!=` whose needle interpolates a PATH (`tmp_path`, `tmp_path_factory.mktemp`, an expression rooted at either, a `Path`/`PurePath` call, `str(path)`, `path.parent`) and whose haystack is captured output (`capsys`/`capfd` `readouterr()`, `CliRunner().invoke` or `subprocess.run` output); `.name`, `.stem`, `.suffix` acquit, as does a path compared against `str(exc)` or a returned value. The cure text names WRAP and REPR: assert the words without the path, and the path's `.name`. Red-first on the exact pre-cure specimen; 50 tests; two mutants red from seedgo's seat. Fleet: 9 rows, all real (backup 8 across `test_caller_path.py`, `test_share.py`, `test_versioned_engine.py`; devpulse `test_feedback_compose.py:346`), which is why it lands advisory; it ratchets to gating once those are cured. `.github/scripts/seedgo_audit.py` `EXPECTED_STANDARDS` 82 → 83. HELD in its `.md`: a needle first bound to a name, a transformed haystack, `check_output`, `tmpdir`, a path arriving through a helper.
+
 ## [2026-10-13] — v2.8.14: the container proof's cures (an installed package logs under `~/.aipass`, the install's crash path, `--non-interactive` reaches setup.sh), the external-repo door reads gh runs
 
 ### Fixed
