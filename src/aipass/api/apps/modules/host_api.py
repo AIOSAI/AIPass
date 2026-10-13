@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-11
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -50,7 +50,9 @@ from typing import List, Optional
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger
+from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.modules import host_config_cli
 from aipass.api.apps.modules import host_serve
@@ -83,6 +85,10 @@ def print_introspection() -> None:
     console.print("  - serve()          - Validate the bind, then run the server")
     console.print("  - issue_token()    - Mint a bearer token for a device")
     console.print("  - revoke_token()   - Revoke server-side, next request")
+    console.print("  - set_bind()       - Validate and store the bind address")
+    console.print("  - autostart()      - Render the boot unit (a running unit is left alone)")
+    console.print("  - install_unit()   - Install the unit under the user's systemd (dry_run names the steps)")
+    console.print("  - enable_unit()    - enable --now it, and lingering (dry_run names the steps)")
     console.print()
 
     available = host_server.is_available()
@@ -221,6 +227,41 @@ def baud_bin() -> Optional[Path]:
 def set_baud_bin(path: Optional[Path]) -> Optional[Path]:
     """Validate and store the baud binary, or clear it with None. Raises BaudBinRefused."""
     return host_config.set_baud_bin(path)
+
+
+# The install doors (FPLAN-0642 slice C): what `aipass install` needs to finish
+# the phone with nobody at the keyboard. The CLI's autostart verb still only
+# prints its steps; these run them, and only when called by name.
+BindRefused = host_config.BindRefused
+AutostartUnsupported = host_autostart.AutostartUnsupported
+SupervisorUnreachable = host_autostart.SupervisorUnreachable
+LifetimeError = host_lifetime.LifetimeError
+TokenError = host_tokens.TokenError
+
+
+def set_bind(host: str, port: int) -> dict:
+    """Validate and store the bind, as set-config --host --port does. Unchanged = not written. Raises BindRefused."""
+    return host_config.set_bind(host, port)
+
+
+def autostart(host: Optional[str] = None, port: Optional[int] = None) -> dict:
+    """Render the boot unit and report what installing it needs; a unit already running is left alone."""
+    return host_lifetime.ensure_autostart(host, port)
+
+
+def install_unit(dry_run: bool = False) -> dict:
+    """Copy the rendered unit into the user unit dir and reload systemd; dry_run names the steps only."""
+    return host_autostart.install_unit(host_lifetime.unit_path(), dry_run)
+
+
+def enable_unit(dry_run: bool = False) -> dict:
+    """enable --now the installed unit, and lingering if off; refused while a hand-started server holds the port."""
+    return host_lifetime.enable_autostart(dry_run)
+
+
+def receipt_path(label: str) -> Path:
+    """Where issue-token writes a token's raw value by default. Raises TokenError for a label that is no filename."""
+    return host_tokens.receipt_path(label)
 
 
 # =============================================

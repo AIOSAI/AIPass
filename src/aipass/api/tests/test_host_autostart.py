@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-10-03
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -46,6 +46,7 @@ import pytest
 from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
+from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules import host_serve as host_serve_module
 from aipass.api.apps.modules.host_api import handle_command
 
@@ -515,3 +516,110 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
 
         assert exit_info.value.code == 1
         quiet_serve["error"].assert_called_once()
+
+
+class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
+    """
+    FPLAN-0642: host_api.install_unit and enable_unit RUN the steps the verb prints.
+
+    The CLI still only prints them; these doors are for a caller that asked by
+    name. Every run here is scripted: subprocess.run is a recorder and the home
+    is tmp_path, so no real systemctl, loginctl or user unit dir is touched.
+    """
+
+    @pytest.fixture
+    def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr(host_autostart.Path, "home", lambda: tmp_path / "home")
+        return tmp_path / "home"
+
+    def _unit(self, tmp_path: Path) -> Path:
+        unit = tmp_path / "rendered.service"
+        unit.write_text("[Unit]\nDescription=stand-in\n", encoding="utf-8")
+        return unit
+
+    def test_a_dry_run_names_every_step_and_runs_none(self, has_systemd: None, home: Path, tmp_path: Path) -> None:
+        with patch.object(host_autostart.subprocess, "run") as run:
+            report = host_autostart.install_unit(self._unit(tmp_path), dry_run=True)
+
+        run.assert_not_called()
+        assert not home.exists()
+        assert report["dry_run"] is True and report["ok"] is True
+        assert [step["ok"] for step in report["steps"]] == [None, None, None]
+        assert "daemon-reload" in report["steps"][2]["step"]
+
+    def test_install_copies_the_unit_home_and_reloads(self, has_systemd: None, home: Path, tmp_path: Path) -> None:
+        with patch.object(host_autostart.subprocess, "run", return_value=_completed()) as run:
+            report = host_autostart.install_unit(self._unit(tmp_path))
+
+        installed = home / ".config" / "systemd" / "user" / host_autostart.UNIT_NAME
+        assert installed.read_text(encoding="utf-8") == "[Unit]\nDescription=stand-in\n"
+        assert run.call_args.args[0] == ["systemctl", "--user", "daemon-reload"]
+        assert report["ok"] is True
+        assert [step["ok"] for step in report["steps"]] == [True, True, True]
+
+    def test_a_failed_step_stops_the_run_and_says_why(self, has_systemd: None, home: Path, tmp_path: Path) -> None:
+        refused = _completed(returncode=1)
+        refused.stderr = "Failed to enable unit"
+
+        with patch.object(host_autostart, "linger_enabled", return_value=False):
+            with patch.object(host_autostart.subprocess, "run", return_value=refused) as run:
+                report = host_autostart.enable_unit()
+
+        assert run.call_count == 1, "the linger step ran after the enable had already failed"
+        assert report["ok"] is False
+        assert [(step["ok"], step["detail"]) for step in report["steps"]] == [(False, "Failed to enable unit")]
+        assert "enable --now" in report["steps"][0]["step"]
+
+    def test_enable_turns_lingering_on_only_when_it_is_off(self, has_systemd: None) -> None:
+        for linger, expected in ((False, 2), (True, 1)):
+            with patch.object(host_autostart, "linger_enabled", return_value=linger):
+                with patch.object(host_autostart.subprocess, "run", return_value=_completed()) as run:
+                    report = host_autostart.enable_unit()
+
+            assert run.call_count == expected
+            assert run.call_args_list[0].args[0] == ["systemctl", "--user", "enable", "--now", host_autostart.UNIT_NAME]
+            assert report["ok"] is True
+        assert len(report["steps"]) == 1
+
+    def test_the_module_door_refuses_to_enable_over_a_hand_started_server(self, quiet: None) -> None:
+        """enable --now against a detached server's port would crash-loop the unit."""
+        detached = {"owner": host_lifetime.OWNER_DETACHED, "pid": 5150}
+
+        with patch.object(host_lifetime, "running", return_value=detached):
+            with patch.object(host_autostart, "enable_unit") as enable:
+                report = host_api_module.enable_unit()
+
+        enable.assert_not_called()
+        assert report["ok"] is False and report["steps"] == []
+        assert "5150" in report["refused"]
+
+    def test_the_module_door_leaves_a_live_unit_alone(self, quiet: None, tmp_path: Path) -> None:
+        """Idempotent: a second install does not re-render the unit systemd is running."""
+        with (
+            patch.object(host_autostart, "supervised_pid", return_value=4242),
+            patch.object(host_lifetime, "unit_path", return_value=tmp_path / "u.service"),
+        ):
+            with patch.object(host_autostart, "linger_enabled", return_value=True):
+                with patch.object(host_lifetime, "write_unit") as write:
+                    report = host_api_module.autostart("127.0.0.1", 9100)
+
+        write.assert_not_called()
+        assert report["rendered"] is False
+        assert report["running"] == 4242
+
+    def test_the_module_door_renders_when_no_unit_runs(self, quiet: None, tmp_path: Path) -> None:
+        rendered = {"unit": tmp_path / "u.service", "steps": [], "linger": True, "conflict": None}
+
+        with patch.object(host_autostart, "supervised_pid", return_value=0):
+            with patch.object(host_lifetime, "autostart_report", return_value=rendered) as reporter:
+                report = host_api_module.autostart("127.0.0.1", 9100)
+
+        reporter.assert_called_once_with("127.0.0.1", 9100)
+        assert report["rendered"] is True and report["running"] == 0
+
+    def test_both_doors_refuse_without_systemd(self, quiet: None, tmp_path: Path) -> None:
+        with patch.object(host_autostart, "is_supported", return_value=False):
+            with pytest.raises(host_api_module.AutostartUnsupported):
+                host_autostart.install_unit(tmp_path / "u.service")
+            with pytest.raises(host_api_module.AutostartUnsupported):
+                host_autostart.enable_unit()

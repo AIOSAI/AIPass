@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-19
-# Modified: 2026-10-03
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -69,6 +69,8 @@ Functions:
     serve_argv()      - The one spelling of how this server is started
     write_unit()      - Render the supervisor unit into this branch
     autostart_report() - Render the unit and gather everything an install needs
+    ensure_autostart() - The same, leaving a unit the supervisor runs alone
+    enable_autostart() - Enable the installed unit, refused while a hand-started server holds the port
     server_state()    - The status lane's answer, including "cannot tell"
     serve_detached()  - Start the server in its own session, return its facts
     running()         - The live server's record, or None
@@ -662,6 +664,69 @@ def autostart_report(host: Optional[str] = None, port: Optional[int] = None) -> 
 
     report["conflict"] = current if (current or {}).get("owner") == OWNER_DETACHED else None
     return report
+
+
+def ensure_autostart(host: Optional[str] = None, port: Optional[int] = None) -> Dict[str, Any]:
+    """
+    autostart_report, safe to call twice: a unit the supervisor runs is not re-rendered.
+
+    For an installer that may run again on a host it already set up (FPLAN-0642).
+
+    Args:
+        host: Bind address override for a fresh render. Defaults to the stored config.
+        port: Bind port override for a fresh render. Defaults to the stored config.
+
+    Returns:
+        autostart_report's dict plus `rendered` (False when the live unit was
+        left alone) and `running` (the unit's main pid, 0 when it is not running).
+        A live unit keeps the bind it was started with; host and port are not
+        applied to it.
+
+    Raises:
+        BindRefused: The address was refused. NOTHING is written.
+        AutostartUnsupported: There is no user-level systemd here.
+        SupervisorUnreachable: Whether the unit is live could not be asked, so
+            nothing is rendered over it blind.
+    """
+    pid = autostart.supervised_pid()
+    if pid:
+        report = autostart.installation_report(unit_path())
+        report.update(conflict=None, rendered=False, running=pid)
+        return report
+
+    report = autostart_report(host, port)
+    report.update(rendered=True, running=0)
+    return report
+
+
+def enable_autostart(dry_run: bool = False) -> Dict[str, Any]:
+    """
+    Enable and start the installed unit, unless a hand-started server holds the port.
+
+    That server is the trap autostart_report's conflict names: enable --now
+    starts a unit that cannot bind, retries its whole window and ends in failed.
+    Here it is a refusal, not a warning, because no person is reading.
+
+    Args:
+        dry_run: Name the steps and run none. A conflict is refused either way.
+
+    Returns:
+        autostart.enable_unit's steps report, or {"dry_run", "ok": False,
+        "steps": [], "refused"} naming the server in the way.
+
+    Raises:
+        AutostartUnsupported: There is no user-level systemd here.
+        SupervisorUnreachable: Whether a server is running could not be asked.
+        LifetimeError: The serve record could not be read.
+    """
+    current = running() or {}
+    if current.get("owner") == OWNER_DETACHED:
+        pid = current.get("pid")
+        refused = f"A hand-started server holds the port (pid {pid}); stop it first: drone @api host-api stop"
+        logger.warning("[host_api] autostart enable refused: %s", refused)
+        return {"dry_run": dry_run, "ok": False, "steps": [], "refused": refused}
+
+    return autostart.enable_unit(dry_run)
 
 
 def server_state() -> Dict[str, Any]:

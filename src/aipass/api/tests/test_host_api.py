@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-11
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -67,6 +67,8 @@
 # - issue-token: writes the raw value to a 0600 file
 # - issue-token: missing label refused
 # - serve: BindRefused is reported, server never starts
+# - set_bind door: stores, refuses a wildcard storing nothing, keeps an unchanged bind unwritten
+# - receipt_path door: the token store's receipt, its refusal exported as TokenError
 #
 # WHERE EACH LIVES since the oversize split (api, 2026-10-08): the config,
 # face dir, baud binary and token tests listed above are in
@@ -1277,3 +1279,45 @@ class TestCrossBranchApi:
         stored = host_config.load_config()
         assert host_config.BAUD_BIN_KEY not in stored
         assert host_config.FACE_DIR_KEY not in stored
+
+    def test_set_bind_stores_the_bind_and_reports_what_it_replaced(self, store: Path) -> None:
+        """FPLAN-0642: the installer writes the bind in-process, same store as set-config."""
+        with patch(PATCH_CONFIG_LOGGER):
+            result = host_api_module.set_bind("127.0.0.1", 9100)
+            config = host_config.load_config()
+
+        assert result == {
+            "host": "127.0.0.1",
+            "port": 9100,
+            "changed": True,
+            "previous": {"host": host_config.DEFAULT_HOST, "port": host_config.DEFAULT_PORT},
+        }
+        assert (config["host"], config["port"]) == ("127.0.0.1", 9100)
+
+    def test_set_bind_refuses_a_wildcard_and_stores_nothing(self, store: Path) -> None:
+        with patch(PATCH_CONFIG_LOGGER):
+            with pytest.raises(host_api_module.BindRefused):
+                host_api_module.set_bind("0.0.0.0", 9100)
+            config = host_config.load_config()
+
+        assert host_api_module.BindRefused is host_config.BindRefused
+        assert (config["host"], config["port"]) == (host_config.DEFAULT_HOST, host_config.DEFAULT_PORT)
+
+    def test_set_bind_keeps_a_bind_already_stored_without_writing_it_again(self, store: Path) -> None:
+        """Idempotent: a second install on the same bind is a no-op, not a rewrite."""
+        with patch(PATCH_CONFIG_LOGGER):
+            host_api_module.set_bind("127.0.0.1", 9100)
+            with patch.object(host_config, "save_config") as save:
+                result = host_api_module.set_bind("127.0.0.1", 9100)
+
+        save.assert_not_called()
+        assert result["changed"] is False
+        assert result["previous"] == {"host": "127.0.0.1", "port": 9100}
+
+    def test_receipt_path_is_the_token_store_receipt(self, store: Path) -> None:
+        """The installer asks for the path rather than restating it."""
+        assert host_api_module.receipt_path("pixel-8") == host_tokens.receipt_path("pixel-8")
+        assert host_api_module.receipt_path("pixel-8").name == "pixel-8.token"
+
+        with pytest.raises(host_api_module.TokenError):
+            host_api_module.receipt_path("..")
