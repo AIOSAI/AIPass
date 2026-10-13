@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.8
+# Version: 1.2.9
 # Created: 2026-03-30
-# Modified: 2026-10-04
+# Modified: 2026-10-13
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -170,6 +170,7 @@ _REROUTED_VERBS: dict[str, str] = {
     "add": "Staging is part of commit — use 'commit --all' or 'commit \"<msg>\" <files>'.",
     "push": "Use 'dev-pr' to push dev and open a PR. An external repo: 'push --repo <path>' (admin seat only).",
     "pull": "Use 'sync'.",
+    "fetch": "Fetching is part of 'sync'. An external repo: 'fetch --repo <path>' (admin seat only).",
 }
 
 

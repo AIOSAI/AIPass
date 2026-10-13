@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.5.1
+# Version: 1.6.1
 # Created: 2026-03-17
-# Modified: 2026-10-10
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -375,6 +375,14 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return _handle_commit(args, repo_root=repo_root)
     if command == "tag":
         return _handle_tag(args, repo_root=repo_root)
+    if command in ("fetch", "sync", "merge-upstream") and args:
+        return {"stdout": "", "stderr": repo_door.REFUSE_NO_ARGS.format(verb=command), "exit_code": 1}
+    if command == "fetch":
+        return repo_door.fetch_report(repo_root)
+    if command == "sync":
+        return repo_door.sync_fast_forward(repo_root)
+    if command == "merge-upstream":
+        return repo_door.merge_upstream(repo_root)
     if args:
         return {"stdout": "", "stderr": repo_door.REFUSE_PUSH_ARGS, "exit_code": 1}
     return repo_door.push_current_branch(repo_root)

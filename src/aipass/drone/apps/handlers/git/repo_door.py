@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.0.3
+# Version: 1.2.0
 # Created: 2026-09-13
-# Modified: 2026-10-08
+# Modified: 2026-10-13
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -48,10 +48,13 @@ from aipass.drone.apps.handlers.router_handler import caller_cwd, resolve_caller
 REPO_FLAG = "--repo"
 
 # The verbs the door serves. Reads so the writer can see the tree it is about to
-# commit; commit, push and tag to land it. Nothing that encodes AIPass's own
-# dev->PR->main train (merge, pr, sync, ...) — a project's PR flow is the
-# project's later choice, not this door's (DPLAN-0344 design table).
-DOOR_VERBS = ("status", "diff", "log", "commit", "push", "tag")
+# commit; commit, push and tag to land it; fetch and a fast-forward-only sync so
+# a push the remote rejects can be caught up first (2026-10-13, FPLAN-0642).
+# Nothing that encodes AIPass's own dev->PR->main train (merge, pr, smart-sync,
+# ...) — a project's PR flow is the project's later choice, not this door's
+# (DPLAN-0344 design table). The door's sync is not AIPass's sync: it never
+# rebases, never merges, and refuses a diverged branch.
+DOOR_VERBS = ("status", "diff", "log", "commit", "push", "tag", "fetch", "sync", "merge-upstream")
 
 LEDGER_NAME = "git_repo_door.jsonl"
 
@@ -81,6 +84,24 @@ REFUSE_AIPASS = (
 )
 REFUSE_PUSH_ARGS = "push takes no arguments: drone @git push --repo <path>"
 REFUSE_DETACHED = "push refused: HEAD is detached in {repo}. Check out the branch to push first."
+REFUSE_NO_ARGS = "{verb} takes no arguments: drone @git {verb} --repo <path>"
+REFUSE_HEAD_DETACHED = "{verb} refused: HEAD is detached in {repo}. Check out a branch first."
+REFUSE_NO_UPSTREAM = "{verb} refused: '{branch}' in {repo} has no upstream to compare against. Fetched: {fetched}."
+REFUSE_DIRTY = (
+    "{verb} refused: {repo} has tracked changes. Commit them or set them aside first; "
+    "untracked files do not block. Nothing was fetched or moved."
+)
+REFUSE_CONFLICT = (
+    "merge-upstream refused: merging {upstream} into '{branch}' in {repo} conflicts. "
+    "The merge was aborted and the tree is as it was; resolving is the owner's, by hand. Conflicted:"
+)
+REFUSE_DIVERGED = (
+    "sync refused: '{branch}' and {upstream} have diverged in {repo} (ahead {ahead}, behind {behind}). "
+    "No rebase, no merge commit: that is the owner's call. Nothing was moved."
+)
+
+# The remote fetch reads, and push writes to.
+_REMOTE = "origin"
 
 # What drone's router stamps onto every routed command, and what the rail reads.
 _STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
@@ -92,7 +113,17 @@ def help_block() -> str:
     Lives beside the constants it renders; it moved here from git_module when
     that file reached its 1,500-line cap (2026-10-01).
     """
-    placeholders = {"caller": "<caller>", "path": "<path>", "verb": "<verb>", "toplevel": "<toplevel>"}
+    placeholders = {
+        "caller": "<caller>",
+        "path": "<path>",
+        "verb": "<verb>",
+        "toplevel": "<toplevel>",
+        "repo": "<repo>",
+        "branch": "<branch>",
+        "upstream": "<upstream>",
+        "ahead": "<n>",
+        "behind": "<m>",
+    }
     refusals = (
         REFUSE_NOT_ADMIN,
         REFUSE_LANE_DARK.replace("{reason}", "<reason>"),
@@ -104,12 +135,24 @@ def help_block() -> str:
         REFUSE_NOT_REPO,
         REFUSE_NOT_TOP,
         REFUSE_AIPASS,
+        REFUSE_DIRTY,
+        REFUSE_DIVERGED,
+        REFUSE_CONFLICT,
     )
     lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
     return (
         "External-repo door — admin seat only (DPLAN-0344):\n"
         "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  fetch | sync | merge-upstream  --repo <path>\n"
         "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
+        "  fetch fetches origin and prints ahead/behind against the branch's upstream, with\n"
+        "  the commits on each side; nothing local moves. sync does the same fetch, then\n"
+        "  fast-forwards the branch onto its upstream (git merge --ff-only). It refuses a\n"
+        "  tracked change in the tree and a diverged branch (both lists printed): it never\n"
+        "  rebases, merges, stashes or resets. AIPass's own sync and smart-sync are not these.\n"
+        "  merge-upstream is the cure for diverged: the same checks, then one merge commit\n"
+        "  (git merge --no-edit) bringing the upstream in. A conflict is aborted, the tree left\n"
+        "  as it was, and the conflicted paths named. It never pushes: push is its own verb.\n"
         "  <path> is absolute, or relative to the AIPass root (not your cwd), and must be\n"
         "  that repo's top level. --repo=<path> works too, in any slot.\n"
         "  Checked on EVERY use against @ai_mail's verified-caller rail — the 5-leg admin\n"
@@ -369,6 +412,201 @@ def push_current_branch(repo_root: Path) -> dict:
     report = result.stderr.strip()
     message = f"Pushed '{name}' to origin in {repo_root}."
     return {"stdout": f"{message}\n{report}" if report else message, "stderr": "", "exit_code": 0}
+
+
+class _GitFailed(Exception):
+    """git could not run in the door's repo, or answered a call the door needed with an error."""
+
+
+class _DoorRefusal(Exception):
+    """The repo is in a state the verb refuses to act on; the message is the refusal, printed exactly."""
+
+
+class Standing(NamedTuple):
+    """Where the checked-out branch stands against its upstream, after a fetch."""
+
+    branch: str
+    upstream: str
+    ahead: list[str]
+    behind: list[str]
+
+
+def _run_git(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
+    """Run git in *repo_root*; raise _GitFailed only when git itself cannot run."""
+    try:
+        return subprocess.run(["git", *argv], capture_output=True, text=True, cwd=str(repo_root))
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _GitFailed(f"git {argv[0]} could not run: {exc}") from exc
+
+
+def _git_out(repo_root: Path, *argv: str) -> str:
+    """git's stripped stdout for a call that must succeed; raise _GitFailed with git's own words if it does not."""
+    result = _run_git(repo_root, *argv)
+    if result.returncode != 0:
+        raise _GitFailed(f"git {argv[0]} failed: {(result.stderr or result.stdout).strip()}")
+    return result.stdout.strip()
+
+
+def _commit_lines(repo_root: Path, rev_range: str) -> list[str]:
+    """``<short sha> <subject>`` for each commit in *rev_range*, newest first."""
+    listing = _git_out(repo_root, "log", "--format=%h %s", rev_range)
+    return listing.splitlines() if listing else []
+
+
+def _fetch_standing(repo_root: Path, verb: str) -> Standing:
+    """Fetch origin, then read where the checked-out branch stands against its upstream.
+
+    Moves only the remote-tracking refs. Raises _DoorRefusal for a detached HEAD
+    or a branch with no upstream, _GitFailed when git cannot do what was asked.
+    """
+    branch = _run_git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    name = branch.stdout.strip() if branch.returncode == 0 else ""
+    if not name:
+        raise _DoorRefusal(REFUSE_HEAD_DETACHED.format(verb=verb, repo=repo_root))
+    _git_out(repo_root, "fetch", _REMOTE)
+    upstream = _run_git(repo_root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    upstream_name = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    if not upstream_name:
+        raise _DoorRefusal(REFUSE_NO_UPSTREAM.format(verb=verb, branch=name, repo=repo_root, fetched=_REMOTE))
+    return Standing(
+        name,
+        upstream_name,
+        _commit_lines(repo_root, f"{upstream_name}..HEAD"),
+        _commit_lines(repo_root, f"HEAD..{upstream_name}"),
+    )
+
+
+def _commit_block(title: str, commits: list[str]) -> str:
+    """A titled list of commits, one per line, indented; empty when there are none."""
+    if not commits:
+        return ""
+    return f"\n{title} (newest first):\n" + "\n".join(f"  {line}" for line in commits)
+
+
+def _standing_text(standing: Standing) -> str:
+    """The ahead/behind line and both commit lists, for the reader to decide on."""
+    return (
+        f"'{standing.branch}' against {standing.upstream}: "
+        f"ahead {len(standing.ahead)}, behind {len(standing.behind)}."
+        + _commit_block(f"Behind: on {standing.upstream}, not here", standing.behind)
+        + _commit_block(f"Ahead: here, not on {standing.upstream}", standing.ahead)
+    )
+
+
+def _door_failure(verb: str, repo_root: Path, exc: Exception) -> dict:
+    """The answer for a fetch or sync git could not complete, logged once."""
+    logger.warning("git repo door: %s in %s did not complete: %s", verb, repo_root, exc)
+    return {"stdout": "", "stderr": f"{verb} failed in {repo_root}: {exc}", "exit_code": 1}
+
+
+def fetch_report(repo_root: Path) -> dict:
+    """``fetch --repo``: fetch origin, then show ahead/behind and the commits on each side.
+
+    Changes no working tree and no local branch; only the remote-tracking refs move.
+    """
+    try:
+        standing = _fetch_standing(repo_root, "fetch")
+    except _DoorRefusal as refusal:
+        return {"stdout": "", "stderr": str(refusal), "exit_code": 1}
+    except _GitFailed as exc:
+        return _door_failure("fetch", repo_root, exc)
+    return {"stdout": f"Fetched {_REMOTE} in {repo_root}.\n{_standing_text(standing)}", "stderr": "", "exit_code": 0}
+
+
+def sync_fast_forward(repo_root: Path) -> dict:
+    """``sync --repo``: fetch, then fast-forward the checked-out branch onto its upstream.
+
+    Refuses a tracked change in the working tree (before fetching), and refuses a
+    branch that has diverged, printing both lists. Never rebases, never makes a
+    merge commit, never stashes or resets: ``git merge --ff-only`` or nothing.
+    """
+    try:
+        if _git_out(repo_root, "status", "--porcelain", "--untracked-files=no"):
+            raise _DoorRefusal(REFUSE_DIRTY.format(verb="sync", repo=repo_root))
+        standing = _fetch_standing(repo_root, "sync")
+        if standing.ahead and standing.behind:
+            raise _DoorRefusal(
+                REFUSE_DIVERGED.format(
+                    branch=standing.branch,
+                    upstream=standing.upstream,
+                    repo=repo_root,
+                    ahead=len(standing.ahead),
+                    behind=len(standing.behind),
+                )
+                + _commit_block(f"Behind: on {standing.upstream}, not here", standing.behind)
+                + _commit_block(f"Ahead: here, not on {standing.upstream}", standing.ahead)
+            )
+        if not standing.behind:
+            text = f"Nothing to fast-forward in {repo_root}. {_standing_text(standing)}"
+            return {"stdout": text, "stderr": "", "exit_code": 0}
+        _git_out(repo_root, "merge", "--ff-only", standing.upstream)
+    except _DoorRefusal as refusal:
+        return {"stdout": "", "stderr": str(refusal), "exit_code": 1}
+    except _GitFailed as exc:
+        return _door_failure("sync", repo_root, exc)
+    text = (
+        f"Fast-forwarded '{standing.branch}' onto {standing.upstream} in {repo_root}: "
+        f"{len(standing.behind)} commit(s)." + _commit_block("Now here", standing.behind)
+    )
+    return {"stdout": text, "stderr": "", "exit_code": 0}
+
+
+def _merge_or_abort(repo_root: Path, standing: Standing) -> str:
+    """Merge the upstream with a merge commit and return its short sha; on a conflict, abort and refuse.
+
+    The conflicted paths are read BEFORE the abort, which is what puts HEAD,
+    index and tree back exactly as they were.
+    """
+    merge = _run_git(repo_root, "merge", "--no-edit", standing.upstream)
+    if merge.returncode == 0:
+        return _git_out(repo_root, "rev-parse", "--short", "HEAD")
+    conflicted = _run_git(repo_root, "diff", "--name-only", "--diff-filter=U").stdout.split()
+    abort = _run_git(repo_root, "merge", "--abort")
+    if not conflicted:
+        raise _GitFailed(f"git merge failed: {(merge.stderr or merge.stdout).strip()}")
+    if abort.returncode != 0:
+        raise _GitFailed(f"git merge --abort failed after a conflict: {abort.stderr.strip()}")
+    raise _DoorRefusal(
+        REFUSE_CONFLICT.format(branch=standing.branch, upstream=standing.upstream, repo=repo_root)
+        + "".join(f"\n  {path}" for path in conflicted)
+    )
+
+
+def merge_upstream(repo_root: Path) -> dict:
+    """``merge-upstream --repo``: bring the upstream into a diverged branch with one merge commit.
+
+    The ordinary cure when the owner merged on GitHub while this seat committed
+    locally. Refuses a tracked change first (sync's check), fast-forwards when
+    only behind, does nothing when nothing is behind, and on a conflict aborts and
+    names the paths. Never rebases, resets, stashes or pushes.
+    """
+    try:
+        if _git_out(repo_root, "status", "--porcelain", "--untracked-files=no"):
+            raise _DoorRefusal(REFUSE_DIRTY.format(verb="merge-upstream", repo=repo_root))
+        standing = _fetch_standing(repo_root, "merge-upstream")
+        if not standing.behind:
+            text = f"Nothing to merge in {repo_root}. {_standing_text(standing)}"
+            return {"stdout": text, "stderr": "", "exit_code": 0}
+        if not standing.ahead:
+            _git_out(repo_root, "merge", "--ff-only", standing.upstream)
+            text = (
+                f"Fast-forwarded '{standing.branch}' onto {standing.upstream} in {repo_root}: "
+                f"{len(standing.behind)} commit(s); no merge commit was needed."
+                + _commit_block("Now here", standing.behind)
+            )
+            return {"stdout": text, "stderr": "", "exit_code": 0}
+        merge_sha = _merge_or_abort(repo_root, standing)
+    except _DoorRefusal as refusal:
+        return {"stdout": "", "stderr": str(refusal), "exit_code": 1}
+    except _GitFailed as exc:
+        return _door_failure("merge-upstream", repo_root, exc)
+    text = (
+        f"Merged {standing.upstream} into '{standing.branch}' in {repo_root}: merge commit {merge_sha}, "
+        f"{len(standing.behind)} commit(s) brought in."
+        + _commit_block("Brought in", standing.behind)
+        + "\nNothing was pushed: push is its own verb (drone @git push --repo <path>)."
+    )
+    return {"stdout": text, "stderr": "", "exit_code": 0}
 
 
 def ledger_path() -> Path:
