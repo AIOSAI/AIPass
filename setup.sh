@@ -78,7 +78,11 @@ is_valid_git_email() {
 
 # Own function (not an inline `[ -t 0 ]`) so tests can override it after
 # sourcing and drive the interactive prompts below without a real tty.
+# AIPASS_NON_INTERACTIVE=1 wins over the tty test: `aipass install --non-interactive`
+# exports it, because install.sh hands that process the user's tty and a run told
+# it was non-interactive still asked for a git identity (container proof, 2026-10-13).
 is_interactive() {
+    [ -n "${AIPASS_NON_INTERACTIVE:-}" ] && return 1
     [ -t 0 ]
 }
 

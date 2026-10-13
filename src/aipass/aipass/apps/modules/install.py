@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-07-05
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -74,6 +74,8 @@ DEFAULT_HOME = Path.home() / "AIPass"
 # Clone can be slow on a cold network; setup.sh compiles a venv + installs deps.
 _CLONE_TIMEOUT = 600
 _SETUP_TIMEOUT = 1800
+# Exported to setup.sh under --non-interactive, for it to read before its own [ -t 0 ].
+NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
 
 
 def _prompt(msg: str, default: str = "") -> str:
@@ -329,15 +331,26 @@ def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | 
         if proc.returncode == 0:
             _announce_cloned_branch(home)
             return True
+        # The user's line before the log line: a log home that cannot be written
+        # must not be the last word on a failed clone (container proof, 2026-10-13).
+        warning(f"git clone failed (exit {proc.returncode}) — git's own message is above. Check the network and retry.")
         logger.warning("[install] git clone exited %s", proc.returncode)
     except subprocess.TimeoutExpired as exc:
-        logger.warning("[install] git clone timed out: %s", exc)
         warning("git clone timed out.")
+        logger.warning("[install] git clone timed out: %s", exc)
     return False
 
 
-def _run_setup(home: Path, dry_run: bool, no_symlink: bool = False, force_symlink: bool = False) -> bool:
-    """Run the repo's setup.sh (venv + editable install + hook wiring + binaries)."""
+def _run_setup(
+    home: Path, dry_run: bool, no_symlink: bool = False, force_symlink: bool = False, non_interactive: bool = False
+) -> bool:
+    """Run the repo's setup.sh (venv + editable install + hook wiring + binaries).
+
+    ``non_interactive`` (--non-interactive) closes setup.sh's stdin and exports
+    AIPASS_NON_INTERACTIVE=1: setup.sh asks with ``[ -t 0 ]`` (is_interactive), and
+    install.sh hands this process the user's tty, so without it a run told it was
+    non-interactive still asked for a git identity (container proof, 2026-10-13).
+    """
     setup = home / "setup.sh"
     # --no-chat: install owns the welcome-chat ending (_end_in_chat) — without it,
     # setup.sh's own chat ending would launch (and exit-replace this process) twice.
@@ -347,22 +360,24 @@ def _run_setup(home: Path, dry_run: bool, no_symlink: bool = False, force_symlin
         setup_args.append("--no-symlink")
     if force_symlink:
         setup_args.append("--force-symlink")
+    closed = " (stdin closed, AIPASS_NON_INTERACTIVE=1)" if non_interactive else ""
     if dry_run:
-        console.print(f"[yellow]\\[dry-run][/yellow] would run: {' '.join(setup_args)}")
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: {' '.join(setup_args)}{closed}")
         return True
     if not setup.is_file():
         warning(f"setup.sh not found at {setup} — cannot build the environment.")
         return False
     console.print("[cyan]Building environment[/cyan] [dim](venv, dependencies, hook wiring)…[/dim]")
+    quiet = {"stdin": subprocess.DEVNULL, "env": {**os.environ, NON_INTERACTIVE_ENV: "1"}} if non_interactive else {}
     try:
-        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT)
+        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT, **quiet)
         if proc.returncode == 0:
             return True
-        logger.warning("[install] setup.sh exited %s", proc.returncode)
         warning("setup.sh reported errors — see output above.")
+        logger.warning("[install] setup.sh exited %s", proc.returncode)
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        logger.warning("[install] setup.sh failed: %s", exc)
         warning(f"setup failed: {exc}")
+        logger.warning("[install] setup.sh failed: %s", exc)
     return False
 
 
@@ -699,7 +714,9 @@ def run_install(
         # Step 2 — build the environment via setup.sh
         console.print()
         console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
-        if not _run_setup(home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink):
+        if not _run_setup(
+            home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink, non_interactive=non_interactive
+        ):
             warning("Environment build failed — aborting install.")
             return 1
         success("Environment ready")
