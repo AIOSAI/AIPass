@@ -20,7 +20,10 @@ deleted, moved or renamed — and it does nothing:
 - Every test under `lib/telegram/tests/` is **skipped, never fixed**:
   `pytest_collection_modifyitems` in that directory's existing `conftest.py`
   marks each case skipped with the ruling as the reason. A skip marker rather
-  than `collect_ignore`, so all 1114 cases still show up as skipped. That
+  than `collect_ignore`, so every case still shows up as skipped. This hook
+  is the only skip condition in the branch: under `pytest . -rs` every
+  skipped case carries the ruling as its reason, and nothing outside
+  `lib/telegram/tests/` skips. That
   covers seedgo's runtime-probe finding (`test_log_streamer.py` wrote
   `~/.aipass/telegram_bots/last_inbound.json`), which is not cured.
 - Lifting it is `drone @skills on telegram` plus deleting that hook.

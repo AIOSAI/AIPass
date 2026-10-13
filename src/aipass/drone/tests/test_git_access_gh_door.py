@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-10-13
 # =============================================
@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -638,7 +639,8 @@ class TestRepoDoorMergeUpstream:
         merge = _git(ext, "rev-parse", "HEAD")
         assert result == {
             "stdout": (
-                f"Merged origin/main into 'main' in {ext.resolve()}: merge commit {merge[:7]}, 1 commit(s) brought in.\n"
+                f"Merged origin/main into 'main' in {ext.resolve()}: "
+                f"merge commit {merge[:7]}, 1 commit(s) brought in.\n"
                 "Brought in (newest first):\n"
                 f"  {remote[:7]} remote upstream.txt\n"
                 "Nothing was pushed: push is its own verb (drone @git push --repo <path>)."
@@ -721,3 +723,146 @@ class TestRepoDoorMergeUpstream:
 
         assert aipass["stderr"] == repo_door.REFUSE_AIPASS.format(path=str(target))
         assert extra["stderr"] == repo_door.REFUSE_NO_ARGS.format(verb="merge-upstream")
+
+
+# ===========================================================================
+# run list | view | watch --repo <path> — gh's read side through the door
+# ===========================================================================
+
+_REAL_RUN = subprocess.run
+
+
+def _gh_recorder(calls: list[list[str]], stdout: str = "ok\n"):
+    """A subprocess.run that records each gh argv and answers it, and runs git for real.
+
+    Patching ``git_module.subprocess.run`` replaces the one subprocess module every
+    door handler shares, so the door's own git reads must still reach git.
+    """
+
+    def run(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if argv[0] != "gh":
+            return _REAL_RUN(argv, *args, **kwargs)
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    return run
+
+
+@pytest.fixture()
+def github_world(door_world: dict[str, Path]) -> dict[str, Path]:
+    """door_world with the external repo's origin URL pointing at github.com over ssh."""
+    _git(door_world["ext"], "remote", "set-url", "origin", "git@github.com:AIOSAI/ext.git")
+    return door_world
+
+
+class TestRepoDoorRunReads:
+    """The door hands gh --repo OWNER/NAME from the repo's origin, for reads only."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://github.com/AIOSAI/baud",
+            "https://github.com/AIOSAI/baud.git",
+            "https://x-access-token:abc@github.com/AIOSAI/baud.git",
+            "git@github.com:AIOSAI/baud.git",
+            "git@github.com:AIOSAI/baud",
+            "ssh://git@github.com/AIOSAI/baud.git",
+        ],
+    )
+    def test_owner_name_comes_from_https_and_ssh_urls_with_or_without_git(self, url: str) -> None:
+        assert repo_door.github_slug(url) == "AIOSAI/baud"
+
+    @pytest.mark.parametrize(
+        "url",
+        ["/srv/origin.git", "https://gitlab.com/AIOSAI/baud.git", "git@github.com:AIOSAI", "https://github.com/a/b/c"],
+    )
+    def test_a_url_that_names_no_github_repo_gives_none(self, url: str) -> None:
+        assert repo_door.github_slug(url) is None
+
+    @pytest.mark.parametrize(
+        ("args", "argv"),
+        [
+            (["list"], ["gh", "run", "list", "--repo", "AIOSAI/ext"]),
+            (["view", "123", "--log-failed"], ["gh", "run", "view", "123", "--log-failed", "--repo", "AIOSAI/ext"]),
+            (["watch", "123"], ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext"]),
+        ],
+    )
+    def test_the_door_hands_gh_the_origins_owner_name(
+        self, github_world: dict[str, Path], tmp_path: Path, args: list[str], argv: list[str]
+    ) -> None:
+        """Mutant: the slug left off gh_run_args' return — gh is asked about the standing repo."""
+        calls: list[list[str]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            result = handle_command("run", [*args, "--repo", "projects/ext"])
+
+        assert result == {"stdout": "ok\n", "stderr": "", "exit_code": 0}
+        assert calls == [argv]
+        [record] = _ledger(tmp_path)
+        assert (record["outcome"], record["verb"], record["args"]) == ("ran", "run", args)
+
+    @pytest.mark.parametrize("sub", ["rerun", "cancel", "delete", "download"])
+    def test_the_write_subcommands_are_refused_and_gh_is_never_called(
+        self, github_world: dict[str, Path], sub: str
+    ) -> None:
+        """Mutant: rerun added to RUN_READS — gh is called to rerun another repo's run."""
+        calls: list[list[str]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            result = handle_command("run", [sub, "123", "--repo", "projects/ext"])
+
+        assert result == {"stdout": "", "stderr": repo_door.REFUSE_RUN_SUB.format(sub=sub), "exit_code": 1}
+        assert calls == []
+
+    def test_the_aipass_repo_is_refused_and_gh_is_never_called(self, door_world: dict[str, Path]) -> None:
+        target = door_world["root"]
+        _git(target, "init", "-q", "-b", "main")
+        calls: list[list[str]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            result = handle_command("run", ["list", "--repo", str(target)])
+
+        assert result == {"stdout": "", "stderr": repo_door.REFUSE_AIPASS.format(path=str(target)), "exit_code": 1}
+        assert calls == []
+
+    def test_an_origin_that_is_not_github_and_a_second_repo_flag_are_refused(self, door_world: dict[str, Path]) -> None:
+        """door_world's origin is a local bare repo: there is no OWNER/NAME to hand gh."""
+        calls: list[list[str]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            local = handle_command("run", ["list", "--repo", "projects/ext"])
+            short = handle_command("run", ["list", "-R", "AIOSAI/other", "--repo", "projects/ext"])
+
+        assert local["stderr"] == repo_door.REFUSE_NO_GITHUB.format(repo=door_world["ext"].resolve())
+        assert short["stderr"] == repo_door.REFUSE_RUN_SHORT_FLAG
+        assert calls == []
+
+    def test_an_owner_name_that_is_not_a_directory_still_reaches_gh_untouched(
+        self, door_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: run_aims_at_door answers True — gh's own --repo is swallowed by the door."""
+        calls: list[list[str]] = []
+        with (
+            patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="devpulse"),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            result = handle_command("run", ["list", "--repo", "AIOSAI/ext"])
+
+        assert result["exit_code"] == 0
+        assert calls == [["gh", "run", "list", "--repo", "AIOSAI/ext"]]
+        assert _ledger(tmp_path) == []
+
+    def test_help_names_the_run_reads_and_their_refusals(self) -> None:
+        text = get_help()
+        assert "  gh run list | view <id> [--log | --log-failed] | watch <id>  --repo <path>\n" in text
+        assert "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n" in get_help("run")
+        assert repo_door.REFUSE_RUN_SUB.format(sub="<sub>") in text
+        assert repo_door.REFUSE_NO_GITHUB.format(repo="<repo>") in text

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.5.1
+# Version: 0.5.2
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -35,7 +35,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.cli.apps.modules import console, error, resolve_exit
+from aipass.cli.apps.modules import console, error, resolve_exit, warning
 from aipass.prax import logger
 
 try:
@@ -260,22 +260,34 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """Route command to appropriate module.
 
     Returns True on success. Raises on handler crash so callers can
-    distinguish 'not found' (False) from 'found but broken'.
+    distinguish 'not found' (False) from 'found but broken'. The crash is not
+    logged here: both callers in main() log it, traceback and all, through
+    _log_crash. A log call here ran first and, with an unwritable log home,
+    raised over the module's own error (container proof, 2026-10-13).
     """
     for module in modules:
-        try:
-            if module.handle_command(command, args):
-                return True
-        except Exception as e:
-            mod_name = module.__name__.split(".")[-1]
-            logger.error(f"[AIPASS] Module {mod_name} crashed: {e}")
-            raise
+        if module.handle_command(command, args):
+            return True
     return False
 
 
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
+
+
+def _log_crash(message: str) -> None:
+    """Log the crash being handled, with its traceback; never raise from the log itself.
+
+    A crash handler that raises from its own logging replaces the user's error
+    with a logging crash: from a uv tool install prax's log home resolved to
+    /system_logs, and the handler's logger.error raised [Errno 13] over the
+    clone error it was reporting (container proof, 2026-10-13).
+    """
+    try:
+        logger.error(message, exc_info=True)
+    except OSError as exc:
+        warning(f"(this crash could not be written to the log: {exc})")
 
 
 def main():
@@ -324,7 +336,7 @@ def main():
             return resolve_exit(True)
     except Exception as e:
         error(f"'{command}' crashed: {e}")
-        logger.error(f"[AIPASS] '{command}' traceback", exc_info=True)
+        _log_crash(f"[AIPASS] '{command}' traceback")
         return 1
 
     if command.startswith("@"):
@@ -352,7 +364,7 @@ def main():
                 return resolve_exit(True)
         except Exception as e:
             error(f"help crashed: {e}")
-            logger.error("[AIPASS] catch-all help traceback", exc_info=True)
+            _log_crash("[AIPASS] catch-all help traceback")
             return 1
 
     console.print(f"Unknown command: {command}")

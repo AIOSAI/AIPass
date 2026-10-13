@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.4.3
+# Version: 1.4.5
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -636,6 +636,29 @@ class TestMain:
         assert result == 1
         assert "'doctor' crashed: db connection failed" in err
         assert "Unknown command" not in out
+
+    def test_a_crash_whose_log_cannot_be_written_still_ends_on_the_crash_not_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """From a uv tool install the log home was an unwritable /system_logs (container proof, 2026-10-13).
+
+        Mutant: _log_crash calls logger.error bare -> PermissionError escapes main() -> red.
+        """
+        denied = PermissionError(13, "Permission denied", str(tmp_path / "system_logs"))
+        monkeypatch.setattr(aipass_mod.logger, "error", MagicMock(side_effect=denied))
+        mod = MagicMock()
+        mod.handle_command.side_effect = RuntimeError("git clone exited 128")
+        mod.__name__ = "aipass.aipass.apps.modules.install"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "install"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        _out, err = capsys.readouterr()
+        # Rich wraps a long line at a space, and the tmp path's length differs by OS (PR #787,
+        # Windows and macOS red): compare with whitespace collapsed, and stop before the path.
+        said = " ".join(err.split())
+        assert result == 1
+        assert "'install' crashed: git clone exited 128" in said
+        assert "(this crash could not be written to the log: [Errno 13] Permission denied:" in said
 
     def test_import_failure_surfaces_on_command(self, tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: load failure reported on the console, not error() -> red.

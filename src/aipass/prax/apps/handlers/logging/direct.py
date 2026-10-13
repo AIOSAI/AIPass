@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-27
-# Modified: 2026-10-08
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -33,7 +33,7 @@ import inspect
 import logging
 from logging.handlers import RotatingFileHandler as _BaseRotatingFileHandler
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from aipass.prax.apps.handlers.config.load import (
     get_system_logs_dir,
@@ -103,6 +103,24 @@ def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
         del frame
 
 
+def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[str, Any]) -> logging.Handler:
+    """Open one tier's file. An unwritable log home is a NullHandler, never a raise.
+
+    The first line of a new direct logger opens these files, so a raise here lands in
+    whatever the caller was doing (FPLAN-0642 container proof, an `aipass install` crash).
+    """
+    try:
+        return RotatingFileHandler(
+            resolve_dir() / filename,
+            maxBytes=lines_to_bytes(limits["max_lines"]),
+            backupCount=limits["backup_count"],
+            encoding="utf-8",
+        )
+    except (OSError, RuntimeError) as e:  # RuntimeError: Path.home() with no home to find
+        logger.error("Log handler failed for %s: %s", filename, e)
+        return logging.NullHandler()
+
+
 def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optional[str]) -> logging.Logger:
     """Create a standalone logger with dual RotatingFileHandlers.
 
@@ -137,27 +155,13 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
     target = branch_name if branch_path else "prax"
 
     # Handler 1: System-wide log (central aggregation)
-    sys_log_file = get_system_logs_dir() / f"{target}_{module_name}.log"
-    sys_limits = config["system_logs"]
-    sys_handler = RotatingFileHandler(
-        sys_log_file,
-        maxBytes=lines_to_bytes(sys_limits["max_lines"]),
-        backupCount=sys_limits["backup_count"],
-        encoding="utf-8",
-    )
+    sys_handler = _tier_handler(get_system_logs_dir, f"{target}_{module_name}.log", config["system_logs"])
     sys_handler.setFormatter(formatter)
     sys_handler.setLevel(system_level)
     logger.addHandler(sys_handler)
 
     # Handler 2: Module-local log (local debugging)
-    local_log_file = get_module_logs_dir(target) / f"{module_name}.log"
-    local_limits = config["local_logs"]
-    local_handler = RotatingFileHandler(
-        local_log_file,
-        maxBytes=lines_to_bytes(local_limits["max_lines"]),
-        backupCount=local_limits["backup_count"],
-        encoding="utf-8",
-    )
+    local_handler = _tier_handler(lambda: get_module_logs_dir(target), f"{module_name}.log", config["local_logs"])
     local_handler.setFormatter(formatter)
     local_handler.setLevel(local_level)
     logger.addHandler(local_handler)

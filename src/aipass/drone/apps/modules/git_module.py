@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-03-17
 # Modified: 2026-10-13
 # =============================================
@@ -199,12 +199,15 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     # The external-repo door is decided BEFORE the tier gate. Its question is not
     # "does this caller own the repo it stands in" but "does this caller hold the
     # admin grant", and a flag aimed at another repo must never fall through and
-    # run the verb in the standing one. The gh passthroughs are not door verbs:
-    # their --repo OWNER/NAME is gh's own flag and reaches gh untouched, as ever.
-    if command not in _GH_PASSTHROUGH_COMMANDS:
-        repo_flag = repo_door.extract_repo_flag(args)
-        if repo_flag.present:
-            return _handle_repo_door(command, repo_flag)
+    # run the verb in the standing one. On the gh passthroughs --repo OWNER/NAME
+    # is gh's own flag and reaches gh untouched, as ever; only `run` with a value
+    # naming a directory is the door's (its read side, 2026-10-13).
+    repo_flag = repo_door.extract_repo_flag(args)
+    if repo_flag.present and (
+        command not in _GH_PASSTHROUGH_COMMANDS
+        or (command == "run" and repo_door.run_aims_at_door(repo_flag, lock_handler.find_repo_root()))
+    ):
+        return _handle_repo_door(command, repo_flag)
 
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
@@ -383,6 +386,11 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return repo_door.sync_fast_forward(repo_root)
     if command == "merge-upstream":
         return repo_door.merge_upstream(repo_root)
+    if command == "run":
+        gh_args, refusal = repo_door.gh_run_args(args, repo_root)
+        if refusal:
+            return {"stdout": "", "stderr": refusal, "exit_code": 1}
+        return _handle_gh_passthrough("run", gh_args)
     if args:
         return {"stdout": "", "stderr": repo_door.REFUSE_PUSH_ARGS, "exit_code": 1}
     return repo_door.push_current_branch(repo_root)
@@ -1315,7 +1323,12 @@ def _gh_verb_help(command: str) -> str:
     writes = textwrap.fill(
         ", ".join(table["write"]), width=78, initial_indent="  Owner only: ", subsequent_indent=" " * 14
     )
-    log_line = "  view <id> --log | --log-failed reads a run's log (job API fallback)\n" if command == "run" else ""
+    log_line = (
+        "  view <id> --log | --log-failed reads a run's log (job API fallback)\n"
+        "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n"
+        if command == "run"
+        else ""
+    )
     return (
         f"git {command} <subcommand> [args] — gh {command}, gated per subcommand\n"
         f"  Reads [global]: {', '.join(table['read'])}\n"

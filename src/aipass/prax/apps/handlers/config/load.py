@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-07
-# Modified: 2026-08-11
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -75,9 +75,26 @@ def _is_pytest_session() -> bool:
 # Callers should use get_system_logs_dir() for guaranteed initialization.
 _system_logs_dir_cache: Path | None = None
 
+# The log home of an installed package, under the user's home directory, beside
+# the ~/.aipass home that `aipass install` keeps.
+USER_SYSTEM_LOGS = Path(".aipass") / "system_logs"
+
+
+def system_logs_home(repo_root: Path) -> Path:
+    """The system_logs/ directory for a resolved repo root — never the filesystem root.
+
+    A checkout logs under its own root. An installed package (``uv tool install``,
+    pip into site-packages) has no registry and no ``src`` above it, so the repo
+    walk ends at ``/`` or a drive root: unwritable for a user and nobody's home.
+    Its logs go to ``~/.aipass/system_logs`` instead (FPLAN-0642 container proof).
+    """
+    if repo_root == Path(repo_root.anchor):
+        return Path.home() / USER_SYSTEM_LOGS
+    return repo_root / "system_logs"
+
 
 def get_system_logs_dir() -> Path:
-    """Lazily resolve and create system_logs directory (package-relative).
+    """Lazily resolve and create system_logs directory (see system_logs_home()).
 
     Central aggregation: all branches log here for system-wide monitoring.
     Per-module logs use get_module_logs_dir() for local debugging.
@@ -93,9 +110,11 @@ def get_system_logs_dir() -> Path:
         return p
     global _system_logs_dir_cache
     if _system_logs_dir_cache is None:
-        repo_root = _find_repo_root()
-        _system_logs_dir_cache = repo_root / "system_logs"
-        _system_logs_dir_cache.mkdir(parents=True, exist_ok=True)
+        logs_dir = system_logs_home(_find_repo_root())
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        # Cached only once it exists: a cache set before a failed mkdir handed every
+        # later caller a directory that was never made.
+        _system_logs_dir_cache = logs_dir
     return _system_logs_dir_cache
 
 

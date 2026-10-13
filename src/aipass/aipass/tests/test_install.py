@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-05
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -306,6 +306,21 @@ class TestCloneRepo:
         with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=1)):
             assert _clone_repo(tmp_path / "home", dry_run=False) is False
 
+    def test_a_failed_clone_says_so_before_the_log_line_that_could_raise(self, tmp_path, tools_on_path, capsys):
+        """An unwritable log home must not be the last word on a failed clone (container proof, 2026-10-13).
+
+        Mutant: the warning moved below logger.warning -> the PermissionError fires first, no line -> red.
+        """
+        tools_on_path("git")
+        denied = PermissionError(13, "Permission denied", str(tmp_path / "system_logs"))
+        with (
+            patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=128)),
+            patch(f"{_MOD}.logger.warning", side_effect=denied),
+        ):
+            with pytest.raises(PermissionError):
+                _clone_repo(tmp_path / "home", dry_run=False)
+        assert "git clone failed (exit 128) — git's own message is above" in capsys.readouterr().err
+
 
 class TestRunSetup:
     """Running the repo setup.sh."""
@@ -353,6 +368,31 @@ class TestRunSetup:
         argv = run.call_args[0][0]
         assert "--no-symlink" not in argv
         assert "--force-symlink" not in argv
+        assert "stdin" not in run.call_args.kwargs
+
+    def test_non_interactive_closes_setups_stdin_and_says_so_in_its_env(self, tmp_path: Path) -> None:
+        """setup.sh asks on [ -t 0 ]: under --non-interactive it gets no tty (container proof, 2026-10-13).
+
+        Mutant: non_interactive not read -> the user's tty reaches setup.sh -> red.
+        """
+        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
+            assert _run_setup(tmp_path, dry_run=False, non_interactive=True) is True
+        assert run.call_args.kwargs["stdin"] is _sp.DEVNULL
+        assert run.call_args.kwargs["env"]["AIPASS_NON_INTERACTIVE"] == "1"
+
+    def test_the_install_flag_reaches_setup(self, tmp_path: Path) -> None:
+        """aipass install --non-interactive threads into the setup step. Mutant: the call drops the flag -> red."""
+        home = tmp_path / "AIPass"
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=home),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._clone_repo", return_value=True),
+            patch(f"{_MOD}._run_setup", return_value=False) as setup,
+            patch(_BUS),
+        ):
+            run_install(non_interactive=True, dry_run=False)
+        assert setup.call_args.kwargs["non_interactive"] is True
 
 
 class TestRunInstall:
