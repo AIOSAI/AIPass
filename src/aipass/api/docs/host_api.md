@@ -68,6 +68,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 |---|---|---|
 | `GET /v1/ping` | none | 204, no body — separates "tunnel down" from "token bad" |
 | `GET /v1/whoami` | read | Enrollment check; returns only what the caller already holds |
+| `POST /v1/pair` | none | `{"code"}` → **200** `{token, id, label, scope}` for a live one-use pairing code. **401** `pairing_refused` for unknown, expired and used alike; **429** after 10 attempts a minute per address; **400** without a string code. See [Pairing](#pairing) |
 | `GET /v1/feed?since=&limit=` | read | Cursor is a **timestamp**, clamped both ends, `gap` flagged |
 | `GET /v1/roots` | read | Every place the file lane may stand: `home`, every project in @baud's census, this server's own repo. Rows of `{kind, name, label}`. No census, no roster — 503, never a short list |
 | `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
@@ -206,6 +207,38 @@ before the tests that now catch them.
 A genuinely unreachable project still refuses honestly: a non-git one answers
 `503` with git's own sentence, *not a git repository*. An empty change list
 would paint it clean when nothing was measured.
+
+---
+
+## Pairing
+
+**The token's hop to the phone was the weak link** (owner, 2026-10-13, after
+signing his phone in by hand): a receipt file the user has to carry is a
+credential typed by eye or mailed. DPLAN-0406 replaced the hop with a QR.
+
+`host-api pair <label> [--scope read|operate] [--ttl SECONDS]` mints a one-use
+code (`pairings.py`), stores only its sha256 in `host_api/pairings.json` beside
+the token store, under the token store's own lock and atomic owner-only write,
+and prints the QR of `http://<bind>/#pair=<code>`, the URL, and the expiry. The
+fragment never leaves the browser. The face strips it from the address bar and
+posts it to `POST /v1/pair`, the one route with no bearer: the code is the
+credential, once, for five minutes.
+
+- **Used before minted.** A redeem marks the row used, releases the lock, then
+  calls `issue_token()`. A failure between the two burns the code rather than
+  leaving it live for a second phone.
+- **One answer.** Unknown, expired and used share the 401 sentence; which it
+  was goes to the log with the caller's address.
+- **Swept.** Every mint and redeem drops rows that are used or past their
+  expiry; the row spent just now stays until the next one, so a second try is
+  logged as `used`, not `unknown`.
+- **No receipt.** The paired token is listed and revoked like any other.
+- **An address a phone can open.** `mint_pairing` refuses an unset or wildcard
+  bind; the verb also refuses loopback, before anything is minted.
+
+The module door: `mint_pairing(label, scope="read", ttl_seconds=300) -> dict`,
+`render_qr(text) -> str` and `PairingError` (a `TokenError`), on
+`aipass.api.apps.modules.host_api`.
 
 ---
 

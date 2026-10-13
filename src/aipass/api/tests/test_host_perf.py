@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-10-02
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -94,7 +94,10 @@ LOOP_SAFE_GETS = {"/v1/ping", "/v1/whoami"}
 # has nothing to serialize — every upload writes a NEW file under a name it
 # makes itself (a timestamp plus token_hex), so two concurrent uploads cannot
 # be racing over one document the way every other write route can.
-LOOP_FREE_POSTS = {"/v1/files/upload"}
+# /v1/pair (DPLAN-0406) is the second, and for the reason the pin below asks
+# for: it writes through the token store's file lock, and its attempt window
+# holds a threading lock, so the threadpool cannot lose one of its writes.
+LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair"}
 
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),

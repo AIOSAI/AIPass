@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-11
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -72,6 +72,8 @@ Functions:
     list_tokens()  - Records for display, hashes stripped
     load_tokens()  - Raw store read
     lock_path()    - Where the store's write lock lives
+    store_lock()   - The write lock, shared with the pairing store
+    write_private_json() - The atomic owner-only write, shared with it too
     receipt_path() - Where a label's raw receipt belongs, fenced
 """
 
@@ -288,16 +290,31 @@ def save_tokens(records: List[Dict[str, Any]]) -> str:
         Path to the written file, as a string.
     """
     envelope: Dict[str, Any] = {"version": STORE_VERSION, "tokens": records}
-    target = store_path()
+    return write_private_json(store_path(), envelope)
 
+
+def write_private_json(target: Path, document: Dict[str, Any]) -> str:
+    """
+    Write a JSON document owner-only and atomically: save_tokens' write, shared.
+
+    The pairing store (pairings.py) keeps the same promises as the token store,
+    so it writes through the same function rather than a copy of it.
+
+    Args:
+        target: The file to replace.
+        document: What to write.
+
+    Returns:
+        Path to the written file, as a string.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(target.parent, 0o700)
 
     # Same directory, so the rename cannot cross a filesystem boundary — and
     # 0o600 is set at creation rather than chmod'd after, so the content is
     # never briefly world-readable.
-    temporary = target.parent / f".{TOKEN_SLUG}.{os.getpid()}.tmp"
-    content = json.dumps(envelope, indent=2).encode("utf-8")
+    temporary = target.parent / f".{target.stem}.{os.getpid()}.tmp"
+    content = json.dumps(document, indent=2).encode("utf-8")
 
     # The low-level descriptor call rather than the builtin, because the mode
     # argument is the point: creating with 0o600 means the bytes are never
@@ -323,11 +340,30 @@ def save_tokens(records: List[Dict[str, Any]]) -> str:
         except OSError as cleanup_error:
             # Named in words, never by its path: a path inside the secrets base
             # reads as a secret's location (seedgo clear_text_secret_logging).
-            # This module keeps one store, so the words are enough to find it.
-            logger.warning("[host_api] could not remove the token store's temp file: %s", cleanup_error)
+            # Two stores write through here now (tokens, pairings); both live
+            # in the one provider directory, so the words still find it.
+            logger.warning("[host_api] could not remove a host_api store's temp file: %s", cleanup_error)
         raise
 
     return str(target)
+
+
+@contextmanager
+def store_lock() -> Iterator[None]:
+    """
+    The token store's write lock, for the pairing store that shares it.
+
+    One lock for both files: pairings.py marks a code used under it, releases
+    it, and only then mints through issue_token(), which takes it again.
+
+    Yields:
+        None, with the lock held.
+
+    Raises:
+        OSError: The lock could not be taken within LOCK_WAIT_SECONDS.
+    """
+    with _store_lock():
+        yield
 
 
 @contextmanager

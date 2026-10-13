@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-13
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -30,6 +30,7 @@ Endpoints in Phase 1:
     GET /v1/whoami  - read scope. The auth layer proving itself end to end, and
                       the phone's enrollment check. Returns only what the caller
                       already holds.
+    POST /v1/pair   - no bearer: a one-use pairing code buys one (pair_route.py).
 
 Endpoints added in Phase 2 (read lane):
     GET /v1/feed    - read scope. Cursor-first, clamped both ends, gap flagged.
@@ -123,6 +124,7 @@ from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
+from aipass.api.apps.handlers.host import pair_route as host_pair_route
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import statics as host_statics
@@ -696,6 +698,8 @@ def create_app() -> Any:
     async def ping() -> Response:
         """Liveness with no auth and no body — reachability, nothing more."""
         return Response(status_code=204)
+
+    host_pair_route.register(app, _deny, _peer)
 
     @app.get("/v1/whoami")
     async def whoami(record: dict = Depends(require_scope("read"))) -> dict:

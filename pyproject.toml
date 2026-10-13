@@ -32,6 +32,7 @@ dependencies = [
     "psutil>=5.9",
     "questionary>=2.0",
     "pathspec>=0.12",
+    "segno>=1.6",
 ]
 
 [project.urls]
