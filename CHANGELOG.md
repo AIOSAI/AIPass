@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased] — after v2.8.13: the container proof's findings (the install's crash path from a uv tool install), the external-repo door reads gh runs
+## [2026-10-13] — v2.8.14: the container proof's cures (an installed package logs under `~/.aipass`, the install's crash path, `--non-interactive` reaches setup.sh), the external-repo door reads gh runs
 
 ### Fixed
 
