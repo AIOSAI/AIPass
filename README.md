@@ -259,7 +259,7 @@ The installer also writes a layer outside the project. Remove all of it to erase
 - `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`); each time doctor re-wires the hooks it leaves a dated `settings.json.bak.*` copy beside it. Also `~/.claude/commands/memo.md`.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
 - Your shell rc (`.bashrc`/`.zshrc`/`.bash_profile`): a PATH line, `AIPASS_HOME` and `PYTHONUTF8` exports, and the `claude()` boot-shim function between the `AIPass boot shim` markers. On Windows, a `drone` wrapper in your PowerShell profile.
-- `~/.aipass/` — cross-project state: the fleet registry, trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
+- `~/.aipass/` — cross-project state: the fleet registry, trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
 - `~/.secrets/aipass/` if seeded.
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: `~/.codex/config.toml` is rewritten.
