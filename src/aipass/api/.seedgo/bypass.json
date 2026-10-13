@@ -77,7 +77,7 @@
     {
       "file": "apps/handlers/host/lifetime.py",
       "standard": "logged_fallback",
-      "lines": [341, 347],
+      "lines": [343, 349],
       "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9)."
     },
     {
@@ -141,8 +141,8 @@
     {
       "file": "apps/handlers/host/autostart.py",
       "standard": "logged_fallback",
-      "lines": [374, 438],
-      "reason": "Both are status probes whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess); linger_enabled, None is the could-not-ask answer its docstring names, beside True/False (api, fleet green leg 9)."
+      "lines": [380, 444],
+      "reason": "Both are status probes whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess); linger_enabled, None is the could-not-ask answer its docstring names, beside True/False (api, fleet green leg 9). Lines moved 374/438 -> 380/444 with FPLAN-0642's constant and Functions entries above them."
     },
     {
       "file": "apps/handlers/openrouter/caller.py",

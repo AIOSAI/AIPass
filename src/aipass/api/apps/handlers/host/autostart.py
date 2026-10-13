@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: autostart.py
 # Description: Host API Autostart Handler — the supervisor seam, so the server survives a reboot
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-09-28
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -54,13 +54,15 @@ Functions:
     linger_enabled()    - Whether this account's units survive logout
     install_commands()  - The exact host-side steps, in order
     installation_report() - Everything the autostart command has to show
+    install_unit()      - Copy the unit into the user unit dir and reload (or name the steps)
+    enable_unit()       - enable --now, and lingering if off (or name the steps)
 """
 
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
@@ -70,9 +72,13 @@ from aipass.api.apps.handlers.json import json_handler
 # it?" have to mean the same unit, so it is spelled once.
 UNIT_NAME = "aipass-host-api.service"
 
-# Where a user unit lives. Rendered into install instructions only — nothing
-# here ever writes outside this tree.
+# Where a user unit lives. The autostart COMMAND only prints it; install_unit()
+# writes there, and only when a caller asks it to by name (FPLAN-0642: a stranger
+# running `aipass install` is the operator saying yes).
 USER_UNIT_DIR = "~/.config/systemd/user"
+
+# enable --now starts the server, so it waits for a start, not a probe.
+ENABLE_TIMEOUT_SECONDS = 30.0
 
 # How long any systemctl question may take. A supervisor probe that hangs turns
 # `status` — the command an operator runs precisely when things are strange —
@@ -493,3 +499,151 @@ def installation_report(unit_file: Path) -> dict:
         "steps": install_commands(unit_file),
         "linger": linger_enabled(),
     }
+
+
+class _StepFailed(Exception):
+    """One install step did not complete; its text is the reason."""
+
+
+def _run_steps(steps: List[Tuple[str, Callable[[], str]]], dry_run: bool) -> Dict[str, Any]:
+    """
+    Run named steps in order, stopping at the first that fails.
+
+    Args:
+        steps: (the step as an operator would type it, the callable that does it).
+        dry_run: Name every step and run none.
+
+    Returns:
+        {"dry_run", "ok", "steps": [{"step", "ok", "detail"}]}. In a dry run each
+        step's ok is None: planned, not attempted. A failed step is the last entry.
+    """
+    if dry_run:
+        return {"dry_run": True, "ok": True, "steps": [{"step": name, "ok": None, "detail": ""} for name, _ in steps]}
+
+    done: List[Dict[str, Any]] = []
+    for name, action in steps:
+        try:
+            detail = action()
+        except _StepFailed as e:
+            logger.warning("[host_api] autostart step failed: %s: %s", name, e)
+            done.append({"step": name, "ok": False, "detail": str(e)})
+            return {"dry_run": False, "ok": False, "steps": done}
+        done.append({"step": name, "ok": True, "detail": detail})
+
+    json_handler.log_operation("host_api_autostart_steps_ran", {"steps": [entry["step"] for entry in done]})
+    return {"dry_run": False, "ok": True, "steps": done}
+
+
+def _systemctl_step(arguments: List[str], timeout: float) -> str:
+    """One systemctl --user call as a step: its stdout, or _StepFailed with why."""
+    try:
+        result = _systemctl(arguments, timeout)
+    except SupervisorUnreachable as e:
+        raise _StepFailed(str(e)) from e
+
+    if result is None:
+        raise _StepFailed("systemctl could not be run on this platform")
+    if result.returncode != 0:
+        raise _StepFailed((result.stderr or result.stdout or f"exit {result.returncode}").strip())
+    return (result.stdout or "").strip()
+
+
+def _user_unit_dir() -> Path:
+    """The user unit directory, under this account's home."""
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def install_unit(unit_file: Path, dry_run: bool = False) -> Dict[str, Any]:
+    """
+    Copy the rendered unit into the user unit directory and reload systemd.
+
+    The install_commands() steps up to, not including, the enable: run here
+    rather than printed, for a caller that asked by name (FPLAN-0642).
+
+    Args:
+        unit_file: The rendered unit inside this branch.
+        dry_run: Name the steps and run none.
+
+    Returns:
+        The steps report: {"dry_run", "ok", "steps"}.
+
+    Raises:
+        AutostartUnsupported: There is no user-level systemd here.
+    """
+    if not is_supported():
+        raise AutostartUnsupported("Autostart needs a user-level systemd, which this platform does not have")
+
+    target_dir = _user_unit_dir()
+    target = target_dir / UNIT_NAME
+
+    def make_dir() -> str:
+        """Create the user unit directory."""
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise _StepFailed(str(e)) from e
+        return ""
+
+    def copy_unit() -> str:
+        """Copy the rendered unit over any installed one."""
+        try:
+            shutil.copyfile(unit_file, target)
+        except OSError as e:
+            raise _StepFailed(str(e)) from e
+        return ""
+
+    mkdir_step, copy_step, reload_step = install_commands(unit_file)[:3]
+    return _run_steps(
+        [
+            (mkdir_step, make_dir),
+            (copy_step, copy_unit),
+            (reload_step, lambda: _systemctl_step(["daemon-reload"], PROBE_TIMEOUT_SECONDS)),
+        ],
+        dry_run,
+    )
+
+
+def enable_unit(dry_run: bool = False) -> Dict[str, Any]:
+    """
+    Enable and start the installed unit, and turn lingering on if it is off.
+
+    Lingering is skipped, not re-asked, when it is already on; when it cannot be
+    read it is asked, because the step is idempotent (install_commands' note).
+
+    Args:
+        dry_run: Name the steps and run none.
+
+    Returns:
+        The steps report: {"dry_run", "ok", "steps"}.
+
+    Raises:
+        AutostartUnsupported: There is no user-level systemd here.
+    """
+    if not is_supported():
+        raise AutostartUnsupported("Autostart needs a user-level systemd, which this platform does not have")
+
+    enable_step, linger_step = install_commands(Path(UNIT_NAME))[3:]
+    steps: List[Tuple[str, Callable[[], str]]] = [
+        (enable_step, lambda: _systemctl_step(["enable", "--now", UNIT_NAME], ENABLE_TIMEOUT_SECONDS)),
+    ]
+    if linger_enabled() is not True:
+        steps.append((linger_step, _enable_linger))
+    return _run_steps(steps, dry_run)
+
+
+def _enable_linger() -> str:
+    """loginctl enable-linger for this account, as a step. No user named: loginctl means the caller."""
+    try:
+        result = subprocess.run(
+            ["loginctl", "enable-linger"],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise _StepFailed(str(e)) from e
+
+    if result.returncode != 0:
+        raise _StepFailed((result.stderr or f"exit {result.returncode}").strip())
+    return ""

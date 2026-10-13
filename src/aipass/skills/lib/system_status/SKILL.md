@@ -1,7 +1,7 @@
 ---
 name: system_status
-description: Check system health -- disk usage, memory, running processes, uptime
-version: 2.2.0
+description: Check system health -- disk usage, memory, running processes, uptime, battery
+version: 2.3.0
 tags: [system, monitoring, health]
 requires:
   pip: [psutil]
@@ -22,6 +22,7 @@ Check system health metrics without leaving your workflow. Returns structured da
 | `memory`    | Memory and swap usage (psutil, portable)       |
 | `uptime`    | System uptime from psutil's boot time          |
 | `processes` | Count of currently running processes            |
+| `battery`   | Charge, mains, state, time left (none is an answer) |
 | `summary`   | All of the above combined into one report       |
 
 ## Published Function: `machine_vitals()`
@@ -34,8 +35,9 @@ from aipass.skills.lib.system_status import handler
 vitals = handler.machine_vitals()
 ```
 
-- `{"ok": True, "schema": 1, "sampled_at": ...}` plus eight sections: `cpu`,
-  `load`, `memory`, `swap`, `temp`, `fan`, `network`, `processes`. Each carries
+- `{"ok": True, "schema": 2, "sampled_at": ...}` plus nine sections: `cpu`,
+  `load`, `memory`, `swap`, `temp`, `fan`, `network`, `processes`, `battery`
+  (schema 1 had the first eight). Each carries
   `available`, `reason`, `sentence`, `detail` beside its values. Never raises
   for a reading; a value the host cannot give is `None`, never a zero.
 - Whole-function refusal: `{"ok": False, "reason", "detail"}` with
@@ -55,6 +57,18 @@ vitals = handler.machine_vitals()
 - CPU temperature and fans come from allowlists keyed by chip and label
   (`coretemp` / `Package id 0`; `applesmc` fans). The fan range is a read-only
   Linux sysfs read of `fanN_min` / `fanN_max`.
+- `battery` carries `percent`, `plugged`, `state` (`charging`, `discharging`,
+  `full` or `unknown`), `seconds_left`, `low` and `critical`. A host whose
+  `psutil.sensors_battery()` answers `None` is `no_sensor`; a psutil without
+  the function is `platform`. `seconds_left` is `None` on psutil's
+  `POWER_TIME_UNLIMITED` / `POWER_TIME_UNKNOWN`, and `detail` names which.
+  `state` is the kernel's `/sys/class/power_supply/BAT*/status` word on Linux
+  when it is one of the three (any other word is `unknown`), else derived
+  from `plugged` and `percent`. `low` / `critical` are UPower's
+  `PercentageLow` / `PercentageCritical` from `/etc/UPower/UPower.conf` on
+  Linux (UPower's 20 / 5 when the file leaves a key out); no file, or a
+  time-based policy, is `None` - a face tones only against a line the host
+  published.
 
 The contract in full is in the branch README; it is pinned by
 `tests/test_machine_vitals.py`.
@@ -66,6 +80,7 @@ drone @skills run system_status disk
 drone @skills run system_status memory
 drone @skills run system_status uptime
 drone @skills run system_status processes
+drone @skills run system_status battery
 drone @skills run system_status summary
 ```
 

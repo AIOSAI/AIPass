@@ -36,7 +36,9 @@ absolute paths and this machine's bind address, and a file like that committed t
 a public repo is either a hardcoded path or somebody else's broken install. The
 command then prints the five host-side steps. Installing means writing under a
 home directory and enabling something that outlives every session; that is
-outside this tree and stays the operator's to run.
+outside this tree and stays the operator's to run — from the CLI. An installer
+that calls the module's doors by name runs them instead (see the installer's
+doors below).
 
 **Two things make this safe rather than merely automatic, and both used to fail
 silently.**
@@ -128,6 +130,30 @@ policy may undo it, and `serve` will not start a second listener on a port it
 cannot see. Only `supervised_bind` swallows it, and only because the pid probe
 has already established the verdict — losing the bind costs a status line its
 address, not its truth.
+
+---
+
+## The installer's doors (2026-10-12, FPLAN-0642)
+
+**The CLI still prints the steps; the module now runs them for a caller that
+asks by name.** A stranger running `aipass install` has consented to the
+install, so asking them to paste two commands afterwards is a hand the phone
+does not need. `apps/modules/host_api.py` publishes:
+
+| Door | Does |
+|---|---|
+| `set_bind(host, port) -> dict` | `set-config --host --port` in-process: `validate_bind`, then the store. `{host, port, changed, previous}`; an unchanged bind is kept and **not rewritten**. Raises `BindRefused`, storing nothing |
+| `autostart(host=None, port=None) -> dict` | `autostart_report` plus `rendered` and `running`. A unit the supervisor already runs is **not re-rendered** and keeps the bind it started with |
+| `install_unit(dry_run=False) -> dict` | the first three steps: mkdir, copy into the user unit dir, `daemon-reload` |
+| `enable_unit(dry_run=False) -> dict` | `enable --now`, then `loginctl enable-linger` only when lingering is not already on. Refused while a hand-started server holds the port |
+| `receipt_path(label) -> Path` | where a token's receipt belongs, so the installer stops restating it |
+
+Each run returns `{dry_run, ok, steps: [{step, ok, detail}]}` and stops at the
+first failed step, which is the last entry. A dry run names every step with `ok`
+None and runs none. The enable refusal is `ok` False, empty `steps`, and a
+`refused` sentence naming the pid and the stop command. `AutostartUnsupported`,
+`SupervisorUnreachable`, `LifetimeError` and `TokenError` are exported beside
+`BindRefused`, so a caller catches the module's names.
 
 ---
 

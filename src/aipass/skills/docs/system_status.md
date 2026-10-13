@@ -59,9 +59,9 @@ from aipass.skills.lib.system_status import handler
 vitals = handler.machine_vitals()
 ```
 
-- **Shape.** `{"ok": True, "schema": 1, "sampled_at": <ISO-8601 UTC>}` plus
-  eight sections: `cpu`, `load`, `memory`, `swap`, `temp`, `fan`, `network`,
-  `processes`. Every section carries `available`, `reason`, `sentence` and
+- **Shape.** `{"ok": True, "schema": 2, "sampled_at": <ISO-8601 UTC>}` plus
+  nine sections: `cpu`, `load`, `memory`, `swap`, `temp`, `fan`, `network`,
+  `processes`, `battery` (schema 1 had the first eight). Every section carries `available`, `reason`, `sentence` and
   `detail` beside its own values, and every value key is always present — `None`
   when the host cannot give it, never a zero. It never raises for a reading: a
   call that raises costs its own section (`read_failed`), never its siblings.
@@ -74,7 +74,7 @@ vitals = handler.machine_vitals()
 
 | Code | When |
 |------|------|
-| `platform` | The OS has no such reading. psutil defines `sensors_temperatures` and `sensors_fans` only on Linux (temperatures also on FreeBSD); load on Windows is emulated and reads 0 until warm, so it is not drawn |
+| `platform` | The OS has no such reading. psutil defines `sensors_temperatures` and `sensors_fans` only on Linux (temperatures also on FreeBSD); load on Windows is emulated and reads 0 until warm, so it is not drawn; `sensors_battery` exists on Linux, Windows, macOS and FreeBSD only |
 | `no_sensor` | The function exists but reported nothing to read from |
 | `no_allowlisted_sensor` | Chips were reported, none on the allowlist; `seen` names them |
 | `read_failed` | The call raised; `detail` carries the error |

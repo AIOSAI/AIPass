@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -1186,6 +1186,7 @@ def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
         "fan": _absent("platform", label=None, current=None, range=None, percent_of_range=None, fans=None, seen=None),
         "network": _present(sent_bytes_per_s=1200.0, recv_bytes_per_s=5400.0, window_s=1.018),
         "processes": _present(count=245),
+        "battery": _present(percent=87.0, plugged=False, state="discharging", seconds_left=14400, low=20, critical=5),
     }
 
 

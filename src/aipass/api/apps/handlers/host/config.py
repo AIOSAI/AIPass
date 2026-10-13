@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Host API Config Handler — server config, bind-address and face-dir validation
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-11
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -41,6 +41,7 @@ binary. Those files make that call; this one only stores the choice.
 Functions:
     load_config()       - Effective config, defaults merged under any stored values
     save_config()       - Persist config to the store
+    set_bind()          - Validate and store the bind address; raises BindRefused
     face_dir()          - The configured phone-face directory, or None
     validate_face_dir() - Check a face dir without storing it; raises FaceDirRefused
     set_face_dir()      - Validate and store it, or clear it
@@ -151,6 +152,41 @@ def save_config(config: Dict[str, Any]) -> str:
     # CodeQL follows into the log as clear-text secret data (PR #774 r10).
     logger.info("[host_api] config saved to the host_api config in the secrets store")
     return str(path)
+
+
+def set_bind(host: str, port: int) -> Dict[str, Any]:
+    """
+    Validate and store the bind address: set-config --host --port as a function.
+
+    For an installer that has to finish without a person at the keyboard
+    (FPLAN-0642). Same rule as the command: validated before it is stored,
+    refused otherwise, nothing half-written.
+
+    Args:
+        host: Literal IP address this machine holds.
+        port: TCP port, 1-65535.
+
+    Returns:
+        {"host", "port", "changed", "previous"}. changed is False, and nothing
+        is written, when the store already holds this bind: a second install
+        keeps the bind the first one set. previous is the bind before the call.
+
+    Raises:
+        BindRefused: The address was refused. Nothing is stored.
+    """
+    validate_bind(host, port)
+
+    config = load_config()
+    previous = {"host": config["host"], "port": config["port"]}
+    bind = {"host": str(host).strip(), "port": port}
+
+    if previous == bind:
+        return {**bind, "changed": False, "previous": previous}
+
+    config.update(bind)
+    save_config(config)
+    json_handler.log_operation("host_api_config_saved", bind)
+    return {**bind, "changed": True, "previous": previous}
 
 
 # ==============================================

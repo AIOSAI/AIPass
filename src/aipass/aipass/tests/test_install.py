@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.2.8
+# Version: 1.3.0
 # Created: 2026-07-05
-# Modified: 2026-10-05
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -61,9 +61,14 @@ def phone_face_step_stays_offline():
     for every test (the step's own tests patch it again), and a network call fails at
     teardown: the step is best-effort and swallows exceptions, so a raise inside it
     would pass silently.
+
+    The phone print's reader (_phone_print, FPLAN-0642 slice B) is stubbed too: once a
+    test answers True for the face, the real reader would run this host's tailscale and
+    probe its live @api server. tests/test_baud_phone.py pins the reader itself.
     """
     with (
         patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=False) as step,
+        patch(f"{_MOD}._phone_print", return_value=None),
         patch("urllib.request.urlopen") as network,
     ):
         yield step
@@ -422,8 +427,42 @@ class TestRunInstall:
         bus.fire.assert_called_once_with(
             "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
-        face.assert_called_once_with(False, False)
+        face.assert_called_once_with(False, False, "latest")
         nxt.assert_called_once()
+
+    def test_a_bad_baud_tag_is_refused_before_anything_is_cloned(self, tmp_path: Path) -> None:
+        """--baud-tag is checked first: a bad tag exits 2 with no home, no lock, no clone (FPLAN-0642 slice B).
+
+        Mutant: the validate_tag call dropped from run_install -> the clone runs, rc 0 -> red.
+        """
+        with (
+            patch(f"{_MOD}._resolve_home") as resolve,
+            patch(f"{_MOD}._clone_repo") as clone,
+            patch(f"{_MOD}._install_phone_face") as face,
+        ):
+            rc = run_install(non_interactive=True, dry_run=False, baud_tag="../escape")
+        assert rc == 2
+        resolve.assert_not_called()
+        clone.assert_not_called()
+        face.assert_not_called()
+
+    def test_a_good_baud_tag_reaches_the_phone_face_step(self, tmp_path: Path) -> None:
+        """The tag a user typed is the tag step 4 installs. Mutant: step 4 handed LATEST -> red."""
+        home = tmp_path / "AIPass"
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=home),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._clone_repo", return_value=True),
+            patch(f"{_MOD}._run_setup", return_value=True),
+            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
+            patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._install_phone_face", return_value=False) as face,
+            patch(f"{_MOD}._end_in_chat"),
+            patch(_BUS),
+        ):
+            rc = run_install(non_interactive=True, dry_run=False, baud_tag="v0.2.1")
+        assert rc == 0
+        face.assert_called_once_with(False, False, "v0.2.1")
 
     def test_phone_face_sits_between_verify_and_welcome_and_never_fails_the_install(self, tmp_path: Path) -> None:
         """Step 4 of 5 runs after the verified binaries and before the chat; a False result is not fatal.
@@ -511,6 +550,30 @@ class TestHandleCommand:
                 handle_command("install", ["--no-baud"])
         assert run.call_args.kwargs["no_baud"] is True
 
+    def test_passes_baud_tag_flag(self) -> None:
+        """--baud-tag TAG is threaded into run_install; absent, it is latest.
+
+        Mutant: handle_command reads the flag as LATEST always -> red.
+        """
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--baud-tag", "v0.2.1", "--no-chat"])
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-chat"])
+        assert [c.kwargs["baud_tag"] for c in run.call_args_list] == ["v0.2.1", "latest"]
+
+    def test_a_valueless_baud_tag_is_refused_not_swallowed(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """`--baud-tag --no-chat` does not install the tag "--no-chat", nor fall back to latest: exit 2.
+
+        Mutant: a valueless --baud-tag read as LATEST -> the install runs -> red.
+        """
+        with patch(f"{_MOD}._resolve_home") as resolve:
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", ["--baud-tag", "--no-chat"])
+        assert exc.value.code == 2
+        resolve.assert_not_called()
+        assert "--baud-tag refused: '--no-chat'" in capsys.readouterr().err
+
     def test_symlink_flags_reach_setup_sh(self, tmp_path: Path) -> None:
         """--no-symlink and --force-symlink typed at the command land on setup.sh's argv (#660).
 
@@ -565,7 +628,13 @@ class TestInstallPhoneFaceStep:
         """Without --no-baud the step is baud's best-effort install, dry-run threaded."""
         with patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=True) as best:
             assert _install_phone_face(dry_run=True, no_baud=False) is True
-        best.assert_called_once_with(dry_run=True)
+        best.assert_called_once_with(dry_run=True, tag="latest")
+
+    def test_the_tag_reaches_the_best_effort_install(self) -> None:
+        """--baud-tag is passed straight through as baud's --tag. Mutant: tag dropped -> red."""
+        with patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=True) as best:
+            _install_phone_face(dry_run=False, no_baud=False, baud_tag="v0.2.1")
+        best.assert_called_once_with(dry_run=False, tag="v0.2.1")
 
 
 class TestBuildInstallPrompt:
@@ -754,6 +823,32 @@ class TestEndInChat:
             mock_stdin.isatty.return_value = True
             _end_in_chat(home, self._BINS, dry_run=True, no_chat=False)
         mock_launch.assert_not_called()
+
+    def test_the_phone_print_is_the_last_thing_on_no_chat(self, tmp_path, capsys) -> None:
+        """On --no-chat nothing follows the phone print (FPLAN-0642 slice B, owner's ruling).
+
+        Mutant: finish() moved above _print_next_steps -> the next steps print after it -> red.
+        """
+        home = tmp_path / "AIPass"
+        _end_in_chat(home, self._BINS, dry_run=False, no_chat=True, last_print=lambda: print("PHONE-LAST"))
+        out = capsys.readouterr().out.rstrip()
+        assert out.endswith("PHONE-LAST")
+        assert out.count("PHONE-LAST") == 1
+
+    def test_the_phone_print_comes_before_the_chat_takes_the_terminal(self, tmp_path) -> None:
+        """With a chat, the phone print lands before the launch, not after it. Mutant: finish() dropped -> red."""
+        home = tmp_path / "AIPass"
+        order = MagicMock()
+        with (
+            patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch(f"{_MOD}._ask_permission_mode", return_value="default"),
+            patch(f"{_MOD}._run_doctor_preflight", return_value=[]),
+            patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
+        ):
+            mock_stdin.isatty.return_value = True
+            order.attach_mock(mock_launch, "launch")
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=False, last_print=order.phone)
+        assert [c[0] for c in order.mock_calls] == ["phone", "launch"]
 
 
 class TestRunDoctorPreflightWrapper:

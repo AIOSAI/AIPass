@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops_self_heal.py
 # Description: Tests for close's self-heal of an unregistered plan, split from test_close_ops.py (oversize, leg 12)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-06
-# Modified: 2026-10-06
+# Modified: 2026-10-12
 # =============================================
 
 """Tests for close_plan_impl's self-heal in apps/handlers/plan/close_ops.py and close_helpers.py."""
@@ -178,7 +178,7 @@ class TestSelfHealNoCollision:
         plan_file = tmp_path / "DPLAN-0176_design_topic_2026-05-10.md"
         plan_file.write_text("# DPLAN-0176: design topic", encoding="utf-8")
 
-        result, saved, _loads = self._close_unregistered("DPLAN-0176", plan_file, next_number=175)
+        result, saved, _loads = self._close_unregistered("DPLAN-0176", plan_file, next_number=176)
 
         assert result["success"] is True
         registry_file, registered = saved[0]  # the self-heal's save, before the close's
@@ -186,9 +186,10 @@ class TestSelfHealNoCollision:
         assert registered["plans"]["0176"]["self_healed"] is True
         assert registered["plans"]["0176"]["status"] == "open"
         assert registered["plans"]["0176"]["file_path"] == str(plan_file)
-        # 177, not the 175 this pinned until leg 7: a row at 0176 beside
-        # next_number 175 hands 0176 out again two creates later (live:
-        # DPLAN row 0358 beside next_number 358, 2026-10-04).
+        # 177: the counter moves past the row it was standing on (live: DPLAN
+        # row 0358 beside next_number 358, 2026-10-04, leg 7). Input 176 since
+        # 2026-10-12: next_free_number walks past held rows, so 175 beside a
+        # row at 0176 is an honest counter and no longer the case to pin.
         assert registered["next_number"] == 177
 
     def test_extracts_subject_from_filename(self, tmp_path):

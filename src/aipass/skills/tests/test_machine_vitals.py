@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-12
-# Modified: 2026-10-10
+# Modified: 2026-10-12
 # Category: skills/tests
 # =============================================
 
@@ -39,6 +39,11 @@ _Virtual = namedtuple("svmem", ["total", "available", "percent", "used", "free"]
 _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 _Temp = namedtuple("shwtemp", ["label", "current", "high", "critical"])
 _Fan = namedtuple("sfan", ["label", "current"])
+_Battery = namedtuple("sbattery", ["percent", "secsleft", "power_plugged"])
+
+# psutil's two time sentinels, by their real values.
+POWER_TIME_UNKNOWN = -1
+POWER_TIME_UNLIMITED = -2
 
 # The host API relays this dict verbatim and BAUD's phone draws it, so what is
 # pinned here is the shape a consumer reads.
@@ -54,6 +59,7 @@ SECTION_KEYS = {
     "fan": ["label", "current", "range", "percent_of_range", "fans", "seen"],
     "network": ["sent_bytes_per_s", "recv_bytes_per_s", "window_s"],
     "processes": ["count"],
+    "battery": ["percent", "plugged", "state", "seconds_left", "low", "critical"],
 }
 REASON_CODES = {
     "platform",
@@ -87,6 +93,10 @@ MACBOOK_TEMPERATURES = {
     ],
 }
 MACBOOK_FANS = {"applesmc": [_Fan("Right Side", 1290)]}
+# The owner's laptop on 2026-10-12, as psutil reported it: on mains, full.
+LAPTOP_BATTERY = _Battery(percent=100.0, secsleft=POWER_TIME_UNLIMITED, power_plugged=True)
+ON_MAINS = "seconds_left is None: psutil answered POWER_TIME_UNLIMITED, the host is on mains."
+NO_BATTERY = "psutil.sensors_battery() answered None: this host reports no battery."
 
 # applesmc's device directory. hwmonN/name does not exist for this chip; its
 # name lives one level down, beside the fan files. The two control files are
@@ -155,7 +165,7 @@ class _Clock:
 
 
 class _Machine:
-    """psutil as a Mac has it: every portable call, and no sensors_* at all.
+    """psutil as a Mac has it: every portable call, and of sensors_* only the battery.
 
     Four logical CPUs, each busy until its CORE_BUSY_UNTIL second and idle after,
     so a window over [0, 2] reads 75, 100, 0 and 25 per core and 50% in total, and
@@ -164,6 +174,9 @@ class _Machine:
     not 50. CPU 2 spends half its idle time in iowait, so a reader that counts
     iowait as busy reads that core at 50, not 0.
     """
+
+    POWER_TIME_UNKNOWN = POWER_TIME_UNKNOWN
+    POWER_TIME_UNLIMITED = POWER_TIME_UNLIMITED
 
     def __init__(self, clock):
         self._clock = clock
@@ -174,6 +187,7 @@ class _Machine:
         self.logical = 4
         self.physical = 2
         self.freq = LAPTOP_FREQ
+        self.battery = LAPTOP_BATTERY
         # psutil seeds its shared cpu_percent baseline at import.
         self._percent_last = self._aggregate()
 
@@ -248,6 +262,21 @@ class _Machine:
     def pids(self):
         return [1, 42, 4242]
 
+    def sensors_battery(self):
+        return self.battery
+
+    def boot_time(self):
+        return 0.0
+
+
+class _OpenBSDMachine(_Machine):
+    """psutil as OpenBSD has it: no sensors_battery at all."""
+
+    def __getattribute__(self, name):
+        if name == "sensors_battery":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
 
 class _LinuxMachine(_Machine):
     """psutil as Linux has it: the portable calls plus both sensor functions."""
@@ -319,8 +348,27 @@ def sysfs(tmp_path, monkeypatch):
     """A Linux host whose hwmon tree is the MacBook's, built in tmp_path."""
     root = _build_hwmon(tmp_path / "hwmon")
     monkeypatch.setattr(status, "HWMON_ROOT", root)
+    _no_battery_files(monkeypatch, tmp_path)
     monkeypatch.setattr(status, "_host_platform", lambda: "linux")
     return root
+
+
+def _no_battery_files(monkeypatch, tmp_path):
+    """Point the battery's sysfs root and UPower file at paths that do not exist yet."""
+    monkeypatch.setattr(status, "POWER_SUPPLY_ROOT", tmp_path / "power_supply")
+    monkeypatch.setattr(status, "UPOWER_CONF", tmp_path / "UPower.conf")
+
+
+def _lay_battery_status(tmp_path, word, name="BAT0"):
+    """Write a kernel status word for one battery under the redirected sysfs root."""
+    folder = tmp_path / "power_supply" / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "status").write_text(f"{word}\n", encoding="utf-8")
+
+
+def _lay_upower(tmp_path, text):
+    """Write a UPower.conf at the redirected path."""
+    (tmp_path / "UPower.conf").write_text(text, encoding="utf-8")
 
 
 @pytest.fixture()
@@ -365,6 +413,7 @@ def _manufacture(monkeypatch, clock, tmp_path, platform):
     """A host with no sensor functions at all, naming itself as platform."""
     monkeypatch.setattr(status, "_host_platform", lambda: platform)
     monkeypatch.setattr(status, "HWMON_ROOT", tmp_path / "no_sysfs_here")
+    _no_battery_files(monkeypatch, tmp_path)
     stand_in = _Machine(clock)
     monkeypatch.setattr(status, "psutil", stand_in)
     return stand_in
@@ -373,14 +422,25 @@ def _manufacture(monkeypatch, clock, tmp_path, platform):
 class TestTheContract:
     """Pin 1: the section set and the closed reason-code set, a sentence per code."""
 
-    def test_the_section_set_is_the_eight_the_route_relays(self):
-        assert status.SECTIONS == ("cpu", "load", "memory", "swap", "temp", "fan", "network", "processes")
+    def test_the_section_set_is_the_nine_the_route_relays_battery_last(self):
+        assert status.SECTIONS == (
+            "cpu",
+            "load",
+            "memory",
+            "swap",
+            "temp",
+            "fan",
+            "network",
+            "processes",
+            "battery",
+        )
 
     def test_a_whole_answer_carries_every_section_with_its_full_key_set(self, machine):
         result = status.machine_vitals()
         assert set(result) == {"ok", "schema", "sampled_at", *SECTION_KEYS}
         assert result["ok"] is True
-        assert result["schema"] == 1
+        # The battery section is a schema change: 1 had eight sections, 2 has nine.
+        assert result["schema"] == 2
         for name, keys in SECTION_KEYS.items():
             assert list(result[name]) == BASE_KEYS + keys
             assert isinstance(result[name]["available"], bool)
@@ -429,6 +489,7 @@ class TestAbsenceIsPerSection:
             ("sensors_fans", "fan"),
             ("virtual_memory", "memory"),
             ("pids", "processes"),
+            ("sensors_battery", "battery"),
         ],
     )
     def test_one_failed_reading_costs_only_its_own_section(self, machine, monkeypatch, call, section):
@@ -864,3 +925,149 @@ class TestTheCores:
         result = _two_reads(clock)
         assert result["cpu"] == _expected("cpu", percent=37.5, window_s=2.0, cores=[50.0, 25.0], **CPU_FACTS)
         assert result["load"] == _expected("load", "platform")
+
+
+class TestTheBattery:
+    """Pin 10: charge, mains, state and time left as psutil gives them; absence named; lines only when published."""
+
+    def test_the_laptop_on_mains_and_full_reads_clean(self, machine):
+        assert status.machine_vitals()["battery"] == _expected(
+            "battery", detail=ON_MAINS, percent=100.0, plugged=True, state="full"
+        )
+
+    def test_discharging_carries_its_seconds(self, machine):
+        machine.battery = _Battery(percent=57.25, secsleft=5400, power_plugged=False)
+        assert status.machine_vitals()["battery"] == _expected(
+            "battery", percent=57.2, plugged=False, state="discharging", seconds_left=5400
+        )
+
+    def test_a_host_with_no_battery_is_no_sensor_naming_psutils_answer(self, machine):
+        machine.battery = None
+        assert status.machine_vitals()["battery"] == _expected("battery", "no_sensor", detail=NO_BATTERY)
+
+    def test_a_psutil_with_no_battery_function_is_platform(self, monkeypatch, clock, tmp_path):
+        _manufacture(monkeypatch, clock, tmp_path, "openbsd7")
+        monkeypatch.setattr(status, "psutil", _OpenBSDMachine(clock))
+        assert status.machine_vitals()["battery"] == _expected("battery", "platform")
+
+    @pytest.mark.parametrize(
+        ("secsleft", "plugged", "named"),
+        [(POWER_TIME_UNLIMITED, True, "POWER_TIME_UNLIMITED"), (POWER_TIME_UNKNOWN, False, "POWER_TIME_UNKNOWN")],
+    )
+    def test_both_time_sentinels_publish_none_and_detail_names_which(self, machine, secsleft, plugged, named):
+        machine.battery = _Battery(percent=80.0, secsleft=secsleft, power_plugged=plugged)
+        battery = status.machine_vitals()["battery"]
+        assert battery["seconds_left"] is None
+        assert battery["available"] is True
+        assert named in battery["detail"]
+
+    def test_a_charge_above_100_is_clamped(self, machine):
+        machine.battery = _Battery(percent=104.6, secsleft=POWER_TIME_UNLIMITED, power_plugged=True)
+        assert status.machine_vitals()["battery"]["percent"] == 100.0
+
+    @pytest.mark.parametrize(
+        ("percent", "secsleft", "plugged", "state"),
+        [
+            (80.0, 3600, False, "discharging"),
+            (100.0, 3600, False, "discharging"),
+            (100.0, POWER_TIME_UNLIMITED, True, "full"),
+            (99.9, POWER_TIME_UNLIMITED, True, "charging"),
+            (80.0, POWER_TIME_UNKNOWN, True, "charging"),
+            (80.0, 3600, None, "discharging"),
+            (100.0, POWER_TIME_UNLIMITED, None, "full"),
+            (80.0, POWER_TIME_UNKNOWN, None, "unknown"),
+            (None, POWER_TIME_UNLIMITED, True, "unknown"),
+        ],
+    )
+    def test_with_no_kernel_word_the_state_is_derived(self, machine, percent, secsleft, plugged, state):
+        machine.battery = _Battery(percent=percent, secsleft=secsleft, power_plugged=plugged)
+        assert status.machine_vitals()["battery"]["state"] == state
+
+    @pytest.mark.parametrize(("word", "state"), [("Charging", "charging"), ("Discharging", "discharging")])
+    def test_the_kernels_word_wins_over_the_derivation(self, machine, tmp_path, word, state):
+        _lay_battery_status(tmp_path, word)
+        battery = status.machine_vitals()["battery"]
+        assert battery["state"] == state
+        assert battery["detail"] == ON_MAINS
+
+    def test_a_kernel_word_outside_the_three_is_unknown_and_named(self, machine, tmp_path):
+        _lay_battery_status(tmp_path, "Not charging")
+        battery = status.machine_vitals()["battery"]
+        assert battery["state"] == "unknown"
+        assert "'Not charging'" in battery["detail"]
+
+    def test_off_linux_the_kernel_word_is_never_read(self, monkeypatch, clock, tmp_path):
+        stand_in = _manufacture(monkeypatch, clock, tmp_path, "darwin")
+        stand_in.battery = _Battery(percent=80.0, secsleft=POWER_TIME_UNLIMITED, power_plugged=True)
+        _lay_battery_status(tmp_path, "Discharging")
+        assert status.machine_vitals()["battery"]["state"] == "charging"
+
+    def test_the_published_upower_lines_are_read(self, machine, tmp_path):
+        _lay_upower(tmp_path, "[UPower]\n# the owner's lines\nPercentageLow=15\nPercentageCritical=3.5\n")
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (15.0, 3.5)
+
+    def test_a_upower_file_without_the_keys_publishes_upowers_defaults(self, machine, tmp_path):
+        _lay_upower(tmp_path, "[UPower]\nUsePercentageForPolicy=true\n")
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (20.0, 5.0)
+
+    def test_no_upower_file_publishes_no_lines(self, machine):
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (None, None)
+
+    def test_a_time_policy_publishes_no_percent_lines(self, machine, tmp_path):
+        _lay_upower(tmp_path, "[UPower]\nUsePercentageForPolicy=false\nPercentageLow=15\n")
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (None, None)
+        assert "UsePercentageForPolicy=false" in battery["detail"]
+
+    def test_an_unparsable_line_publishes_none_and_names_the_class(self, machine, tmp_path):
+        _lay_upower(tmp_path, "[UPower]\nPercentageLow=twenty\n")
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (None, None)
+        assert "could not be parsed (ValueError)" in battery["detail"]
+        assert "twenty" not in battery["detail"]
+
+    def test_off_linux_upower_is_never_read(self, monkeypatch, clock, tmp_path):
+        _manufacture(monkeypatch, clock, tmp_path, "darwin")
+        _lay_upower(tmp_path, "[UPower]\nPercentageLow=15\n")
+        battery = status.machine_vitals()["battery"]
+        assert (battery["low"], battery["critical"]) == (None, None)
+
+
+class TestTheBatteryAction:
+    """Pin 11: the text action and the summary carry the battery; no battery is an answer, not a failure."""
+
+    def test_the_action_prints_the_reading(self, machine, tmp_path):
+        _lay_upower(tmp_path, "[UPower]\n")
+        result = status.run("battery")
+        assert result == {
+            "success": True,
+            "output": (
+                "Battery\n  Charge:    100.0%\n  Power:     on mains\n  State:     full\n"
+                "  Time left: none, on mains\n  Low line:  20%, critical 5%"
+            ),
+            "error": None,
+        }
+
+    def test_seconds_print_as_hours_and_minutes(self, machine):
+        machine.battery = _Battery(percent=57.0, secsleft=5460, power_plugged=False)
+        assert "  Time left: 1h 31m" in status.run("battery")["output"]
+
+    @pytest.mark.parametrize(
+        ("stand_in", "line"),
+        [(None, "Battery: none on this host"), ("openbsd", "Battery: not readable on this platform")],
+    )
+    def test_a_host_without_a_reading_still_answers(self, machine, clock, monkeypatch, stand_in, line):
+        if stand_in is None:
+            machine.battery = None
+        else:
+            monkeypatch.setattr(status, "psutil", _OpenBSDMachine(clock))
+        assert status.run("battery") == {"success": True, "output": line, "error": None}
+
+    def test_the_summary_carries_the_battery_last(self, machine):
+        result = status.run("summary")
+        assert result["success"] is True
+        assert result["output"].split("\n---\n")[-1].startswith("Battery\n")
+        assert "battery" in status.get_actions()

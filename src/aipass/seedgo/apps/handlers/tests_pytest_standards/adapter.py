@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapter.py
 # Description: the pytest execution adapter - the 8-function contract
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-29
-# Modified: 2026-09-19
+# Modified: 2026-10-12
 # =============================================
 
 """
@@ -265,6 +265,7 @@ def build_env(target: Path, workdir: Path, options: dict) -> envcopy.EnvSpec:
         execution_groups=options.get(OPTION_EXECUTION_GROUPS),
         scope_to_diff=bool(options.get("scope_to_diff")),
         diff_scope_ref=options.get("diff_scope_ref"),
+        campaign_budget_seconds=options.get("budget_seconds"),
     )
 
 
@@ -597,6 +598,11 @@ def _axis_target(spec: envcopy.EnvSpec) -> envdiff.Target:
     )
 
 
+def _campaign_budget(spec: envcopy.EnvSpec) -> int:
+    """The wall-clock ceiling a mutation campaign runs under: the operator's `--budget`, else 1800 s."""
+    return int(spec.campaign_budget_seconds or gutting.DEFAULT_BUDGET_SECONDS)
+
+
 def _pseudo_tested_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, object]:
     """The per-function extreme-mutation campaign, when it was asked for.
 
@@ -623,6 +629,7 @@ def _pseudo_tested_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, ob
             _suite_target(spec),
             sites,
             selection=gutting.SELECTION_COVERAGE,
+            budget_seconds=_campaign_budget(spec),
         )
     except Exception as exc:
         logger.warning(f"[AUDIT-TESTS] the gutting campaign could not run: {type(exc).__name__}: {exc}")
@@ -712,7 +719,7 @@ def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[st
     try:
         discovered = statement_deletion.discover_statements(spec.target_copy)
         sites = discovered if spec.diff_scope is None else diff_scope.apply(discovered, spec.diff_scope)
-        campaign = statement_deletion.run_campaign(_suite_target(spec), sites)
+        campaign = statement_deletion.run_campaign(_suite_target(spec), sites, budget_seconds=_campaign_budget(spec))
     except Exception as e:  # the lane reports a failure to run, it never hides one
         logger.info("statement_deletion campaign raised: %s", e)
         return _execution_not_applicable(

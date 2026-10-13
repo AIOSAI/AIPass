@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
@@ -433,3 +433,291 @@ class TestRepoDoorHappyPath:
         assert (records[2]["head_before"], records[2]["head_after"]) == (head, head)
         assert {r["repo"] for r in records} == {str(ext.resolve())}
         assert records[1]["args"] == ["add release workflow", "release.yml"]
+
+
+def _remote_commit(world: dict[str, Path], name: str) -> str:
+    """Land one commit on origin's main from a second clone, as another machine would; return its sha."""
+    other = world["origin"].parent / "other"
+    if not other.exists():
+        _git(other.parent, "clone", "-q", "-b", "main", str(world["origin"]), str(other))
+    (other / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(other, "add", name)
+    _git(other, "commit", "-q", "-m", f"remote {name}")
+    _git(other, "push", "-q", "origin", "main")
+    return _git(other, "rev-parse", "HEAD")
+
+
+def _local_commit(ext: Path, name: str) -> str:
+    """One commit in the door's repo that origin does not have; return its sha."""
+    (ext / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(ext, "add", name)
+    _git(ext, "commit", "-q", "-m", f"local {name}")
+    return _git(ext, "rev-parse", "HEAD")
+
+
+@pytest.fixture()
+def tracked_world(door_world: dict[str, Path]) -> dict[str, Path]:
+    """door_world with ext's main tracking origin/main, as a clone made by `git clone` would."""
+    _git(door_world["ext"], "branch", "-q", "--set-upstream-to=origin/main", "main")
+    return door_world
+
+
+class TestRepoDoorFetchAndSync:
+    """fetch shows what the remote has; sync fast-forwards onto it or refuses, never rebasing or merging."""
+
+    def test_fetch_prints_ahead_behind_and_the_behind_commits_and_moves_nothing_local(
+        self, tracked_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: _commit_lines' range reversed for behind — the remote's commit is not listed."""
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        remote = _remote_commit(tracked_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("fetch", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert result["stdout"] == (
+            f"Fetched origin in {ext.resolve()}.\n"
+            "'main' against origin/main: ahead 0, behind 1.\n"
+            "Behind: on origin/main, not here (newest first):\n"
+            f"  {remote[:7]} remote upstream.txt"
+        )
+        assert _git(ext, "rev-parse", "HEAD") == head
+        assert _git(ext, "rev-parse", "origin/main") == remote
+        assert not (ext / "upstream.txt").exists()
+        [record] = _ledger(tmp_path)
+        assert (record["verb"], record["outcome"], record["head_before"], record["head_after"]) == (
+            "fetch",
+            "ran",
+            head,
+            head,
+        )
+
+    def test_sync_fast_forwards_when_only_behind(self, tracked_world: dict[str, Path], tmp_path: Path) -> None:
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        remote = _remote_commit(tracked_world, "upstream.txt")
+        (ext / "scratch.aipass-new").write_text("untracked\n", encoding="utf-8")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo=projects/ext"])
+
+        assert result == {
+            "stdout": (
+                f"Fast-forwarded 'main' onto origin/main in {ext.resolve()}: 1 commit(s).\n"
+                "Now here (newest first):\n"
+                f"  {remote[:7]} remote upstream.txt"
+            ),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert _git(ext, "rev-parse", "HEAD") == remote
+        assert _git(ext, "log", "-1", "--format=%P") == head, "a fast-forward makes no merge commit"
+        assert (ext / "scratch.aipass-new").exists(), "an untracked file neither blocks nor is touched"
+        [record] = _ledger(tmp_path)
+        assert (record["verb"], record["head_before"], record["head_after"]) == ("sync", head, remote)
+
+    def test_sync_refuses_a_diverged_branch_printing_both_lists(self, tracked_world: dict[str, Path]) -> None:
+        """Mutant: the divergence check removed — git's own ff-only error comes back instead of the refusal."""
+        ext = tracked_world["ext"]
+        remote = _remote_commit(tracked_world, "upstream.txt")
+        local = _local_commit(ext, "here.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo", "projects/ext"])
+
+        refusal = repo_door.REFUSE_DIVERGED.format(
+            branch="main", upstream="origin/main", repo=ext.resolve(), ahead=1, behind=1
+        )
+        assert result == {
+            "stdout": "",
+            "stderr": (
+                f"{refusal}\n"
+                "Behind: on origin/main, not here (newest first):\n"
+                f"  {remote[:7]} remote upstream.txt\n"
+                "Ahead: here, not on origin/main (newest first):\n"
+                f"  {local[:7]} local here.txt"
+            ),
+            "exit_code": 1,
+        }
+        assert _git(ext, "rev-parse", "HEAD") == local
+        assert _git(ext, "rev-parse", "origin/main") == remote
+
+    def test_sync_refuses_a_tracked_change_before_fetching(self, tracked_world: dict[str, Path]) -> None:
+        """Mutant: the dirty check removed — the fetch runs and the branch fast-forwards over the edit."""
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        _remote_commit(tracked_world, "upstream.txt")
+        (ext / "README.md").write_text("edited\n", encoding="utf-8")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo", "projects/ext"])
+
+        refusal = repo_door.REFUSE_DIRTY.format(verb="sync", repo=ext.resolve())
+        expected = {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert result == expected
+        assert _git(ext, "rev-parse", "HEAD") == head
+        assert _git(ext, "rev-parse", "origin/main") == head, "nothing was fetched"
+        assert (ext / "README.md").read_text(encoding="utf-8") == "edited\n"
+
+    def test_a_branch_with_no_upstream_is_refused_by_name(self, door_world: dict[str, Path]) -> None:
+        ext = door_world["ext"]
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("fetch", ["--repo", "projects/ext"])
+
+        expected = repo_door.REFUSE_NO_UPSTREAM.format(
+            verb="fetch", branch="main", repo=ext.resolve(), fetched="origin"
+        )
+        assert result == {"stdout": "", "stderr": expected, "exit_code": 1}
+
+    @pytest.mark.parametrize("verb", ["fetch", "sync"])
+    def test_both_refuse_without_a_repo_path_and_with_arguments(self, door_world: dict[str, Path], verb: str) -> None:
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            bare = handle_command(verb, ["--repo"])
+            extra = handle_command(verb, ["origin", "--repo", "projects/ext"])
+
+        assert bare == {"stdout": "", "stderr": repo_door.REFUSE_NO_VALUE, "exit_code": 1}
+        assert extra == {"stdout": "", "stderr": repo_door.REFUSE_NO_ARGS.format(verb=verb), "exit_code": 1}
+
+    def test_sync_on_the_aipass_repo_is_refused_as_every_door_verb_is(self, door_world: dict[str, Path]) -> None:
+        target = door_world["root"]
+        _git(target, "init", "-q", "-b", "main")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo", str(target)])
+
+        assert result == {"stdout": "", "stderr": repo_door.REFUSE_AIPASS.format(path=str(target)), "exit_code": 1}
+
+    def test_fetch_without_the_door_points_at_it(self, door_world: dict[str, Path]) -> None:
+        """At home there is no fetch verb: the refusal names the door rather than dead-ending."""
+        result = handle_command("fetch", [])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith("Unknown git command: 'fetch'.")
+        assert "'fetch --repo <path>' (admin seat only)" in result["stderr"]
+
+    def test_help_names_fetch_and_sync_on_the_door(self) -> None:
+        text = get_help()
+        assert "  fetch | sync | merge-upstream  --repo <path>\n" in text
+        assert (
+            repo_door.REFUSE_DIVERGED.format(
+                branch="<branch>", upstream="<upstream>", repo="<repo>", ahead="<n>", behind="<m>"
+            )
+            in text
+        )
+        assert repo_door.REFUSE_CONFLICT.format(branch="<branch>", upstream="<upstream>", repo="<repo>") in text
+
+
+def _same_line_on_both_sides(world: dict[str, Path]) -> None:
+    """Change README.md's one line on origin (from 'other') and locally, so the merge must conflict."""
+    other = world["origin"].parent / "other"
+    _git(other.parent, "clone", "-q", "-b", "main", str(world["origin"]), str(other))
+    (other / "README.md").write_text("theirs\n", encoding="utf-8")
+    _git(other, "commit", "-q", "-am", "remote readme")
+    _git(other, "push", "-q", "origin", "main")
+    (world["ext"] / "README.md").write_text("ours\n", encoding="utf-8")
+    _git(world["ext"], "commit", "-q", "-am", "local readme")
+
+
+class TestRepoDoorMergeUpstream:
+    """merge-upstream: one merge commit for a diverged branch, an abort for a conflict, nothing ever pushed."""
+
+    def test_a_clean_diverged_merge_makes_one_merge_commit_with_both_sides(
+        self, tracked_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: the diverged arm runs --ff-only instead of --no-edit — git refuses and nothing merges."""
+        ext, origin = tracked_world["ext"], tracked_world["origin"]
+        remote = _remote_commit(tracked_world, "upstream.txt")
+        local = _local_commit(ext, "here.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        merge = _git(ext, "rev-parse", "HEAD")
+        assert result == {
+            "stdout": (
+                f"Merged origin/main into 'main' in {ext.resolve()}: merge commit {merge[:7]}, 1 commit(s) brought in.\n"
+                "Brought in (newest first):\n"
+                f"  {remote[:7]} remote upstream.txt\n"
+                "Nothing was pushed: push is its own verb (drone @git push --repo <path>)."
+            ),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert _git(ext, "log", "-1", "--format=%P") == f"{local} {remote}"
+        assert (ext / "upstream.txt").exists() and (ext / "here.txt").exists()
+        assert _git(origin, "rev-parse", "main") == remote, "merge-upstream never pushes"
+        [record] = _ledger(tmp_path)
+        assert (record["verb"], record["head_before"], record["head_after"]) == ("merge-upstream", local, merge)
+
+    def test_a_conflict_aborts_names_the_path_and_leaves_head_index_and_tree_as_they_were(
+        self, tracked_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the abort dropped — MERGE_HEAD and the conflict markers stay behind."""
+        ext = tracked_world["ext"]
+        _same_line_on_both_sides(tracked_world)
+        head = _git(ext, "rev-parse", "HEAD")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        refusal = repo_door.REFUSE_CONFLICT.format(branch="main", upstream="origin/main", repo=ext.resolve())
+        assert result == {"stdout": "", "stderr": f"{refusal}\n  README.md", "exit_code": 1}
+        assert _git(ext, "rev-parse", "HEAD") == head
+        assert _git(ext, "status", "--porcelain") == ""
+        assert not (ext / ".git" / "MERGE_HEAD").exists()
+        assert (ext / "README.md").read_text(encoding="utf-8") == "ours\n"
+
+    def test_behind_only_fast_forwards_without_a_merge_commit(self, tracked_world: dict[str, Path]) -> None:
+        """Mutant: the behind-only arm removed — a merge --no-edit of a pure fast-forward reports a merge commit."""
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        remote = _remote_commit(tracked_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert result["stdout"].startswith(
+            f"Fast-forwarded 'main' onto origin/main in {ext.resolve()}: 1 commit(s); no merge commit was needed."
+        )
+        assert _git(ext, "rev-parse", "HEAD") == remote
+        assert _git(ext, "log", "-1", "--format=%P") == head
+
+    def test_nothing_behind_is_nothing_to_merge(self, tracked_world: dict[str, Path]) -> None:
+        ext = tracked_world["ext"]
+        local = _local_commit(ext, "here.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert result["stdout"].startswith(f"Nothing to merge in {ext.resolve()}. 'main' against origin/main: ahead 1")
+        assert _git(ext, "rev-parse", "HEAD") == local
+
+    def test_a_tracked_change_is_refused_before_fetching(self, tracked_world: dict[str, Path]) -> None:
+        """Mutant: the dirty check removed — the fetch runs and origin/main moves."""
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        _remote_commit(tracked_world, "upstream.txt")
+        (ext / "README.md").write_text("edited\n", encoding="utf-8")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        refusal = repo_door.REFUSE_DIRTY.format(verb="merge-upstream", repo=ext.resolve())
+        assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert _git(ext, "rev-parse", "origin/main") == head, "nothing was fetched"
+
+    def test_the_aipass_repo_and_extra_arguments_are_refused(self, door_world: dict[str, Path]) -> None:
+        target = door_world["root"]
+        _git(target, "init", "-q", "-b", "main")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            aipass = handle_command("merge-upstream", ["--repo", str(target)])
+            extra = handle_command("merge-upstream", ["origin/main", "--repo", "projects/ext"])
+
+        assert aipass["stderr"] == repo_door.REFUSE_AIPASS.format(path=str(target))
+        assert extra["stderr"] == repo_door.REFUSE_NO_ARGS.format(verb="merge-upstream")
