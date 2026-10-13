@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -15,6 +15,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 from aipass.seedgo.apps.handlers.audit_tests import adapters, m10
@@ -291,7 +292,9 @@ class TestCampaignBudget:
 
         assert seen["budget_seconds"] == gutting.DEFAULT_BUDGET_SECONDS == 1800
 
-    def test_build_env_carries_the_budget_option_onto_the_spec_it_publishes(self, tmp_path):
+    def test_build_env_carries_the_budget_option_onto_the_spec_it_publishes(self, tmp_path, monkeypatch):
+        # rsync is the edge: Windows runners have none (PR #786, run 38365012946); the spec is the claim.
+        monkeypatch.setattr(envcopy, "rsync", lambda source, destination: shutil.copytree(source, destination) and None)
         target = tmp_path / "proj"
         (target / "tests").mkdir(parents=True)
         (target / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
