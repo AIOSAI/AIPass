@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-19
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -66,6 +66,7 @@ the unit itself runs, so the supervised path goes through the same code every
 other caller does.
 
 Functions:
+    server_home()     - The interpreter and api branch the server runs from
     serve_argv()      - The one spelling of how this server is started
     write_unit()      - Render the supervisor unit into this branch
     autostart_report() - Render the unit and gather everything an install needs
@@ -87,8 +88,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set, Tuple
 
+from aipass.drone.apps.modules.config import resolve_aipass_home
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import autostart
@@ -121,6 +123,10 @@ STOP_POLL_SECONDS = 0.2
 # to have happened and reached the log. A launcher that reports success for a
 # process that died on startup is worse than no launcher.
 SETTLE_SECONDS = 0.6
+
+# Homes whose server this process has already said it runs from another
+# install: said once per process, not on every spawn.
+_ANNOUNCED_HOMES: Set[Path] = set()
 
 
 class LifetimeError(Exception):
@@ -211,6 +217,58 @@ def unit_path() -> Path:
     return _runtime_dir() / UNIT_FILE_NAME
 
 
+def server_home() -> Tuple[str, Path]:
+    """
+    Which interpreter runs the server, and from which api branch.
+
+    A stranger's machine holds aipass twice: the uv tool venv, whose `aipass`
+    calls these doors in-process with no [host] extra, and the AIPass home
+    setup.sh made, whose .venv has it. Spelled as this process, the server ran
+    on the tool venv's python and died on "No module named fastapi" after the
+    settle (the owner's sandbox, DPLAN-0408, 2026-10-13). The rule mirrors
+    drone's branch_interpreter, with no fall back:
+
+    * No home resolved, or this copy lives inside it: this process's own
+      interpreter and branch, as always.
+    * Otherwise the home's .venv python and the home's api branch, logged once
+      per process. The venv path is used as found: a venv's python is a
+      symlink, and following it loses the venv.
+
+    Returns:
+        (interpreter, api branch directory).
+
+    Raises:
+        LifetimeError: The home lacks its venv python or its api.py. Such a
+            home is half-installed, and a server started from this copy
+            instead would start and die, which is worse than refusing.
+    """
+    root = _branch_root()
+    home = resolve_aipass_home().path
+    if home is None or root.is_relative_to(home.resolve()):
+        return sys.executable, root
+
+    branch = home / "src" / "aipass" / "api"
+    windows = sys.platform == "win32"
+    python = home / ".venv" / ("Scripts" if windows else "bin") / ("python.exe" if windows else "python")
+    for needed in (python, branch / "apps" / "api.py"):
+        if not needed.is_file():
+            raise LifetimeError(
+                f"The AIPass home {home} has no {needed}, so its server cannot be started "
+                f"(setup.sh makes it; this home is half-installed)"
+            )
+
+    if home not in _ANNOUNCED_HOMES:
+        _ANNOUNCED_HOMES.add(home)
+        logger.info(
+            "[host_api] the server runs from the AIPass home %s on %s; this process's copy at %s "
+            "belongs to another install",
+            home,
+            python,
+            root,
+        )
+    return str(python), branch
+
+
 def serve_argv(host: str, port: int) -> list:
     """
     The one spelling of how this server is started.
@@ -220,7 +278,12 @@ def serve_argv(host: str, port: int) -> list:
         port: The bind port.
 
     Returns:
-        The argv, absolute in both the interpreter and the entry point.
+        The argv, absolute in both the interpreter and the entry point: the
+        home's server where this process belongs to another install
+        (server_home).
+
+    Raises:
+        LifetimeError: The home is half-installed (server_home).
 
     Note:
         SHARED BY THE DETACHED PATH AND THE UNIT ON PURPOSE. Two ways to start
@@ -228,8 +291,9 @@ def serve_argv(host: str, port: int) -> list:
         bug — and the unit's copy is the one nobody re-reads, because it lives
         in a file under somebody's home directory that this tree cannot see.
     """
-    entry = _branch_root() / "apps" / "api.py"
-    return [sys.executable, str(entry), "host-api", "serve", "--host", str(host), "--port", str(port)]
+    python, branch = server_home()
+    entry = branch / "apps" / "api.py"
+    return [python, str(entry), "host-api", "serve", "--host", str(host), "--port", str(port)]
 
 
 def write_unit(host: Optional[str] = None, port: Optional[int] = None) -> Path:
@@ -270,7 +334,7 @@ def write_unit(host: Optional[str] = None, port: Optional[int] = None) -> Path:
 
     target = unit_path()
     target.write_text(
-        autostart.unit_text(serve_argv(bind_host, bind_port), _branch_root(), log_path()),
+        autostart.unit_text(serve_argv(bind_host, bind_port), server_home()[1], log_path()),
         encoding="utf-8",
     )
 
@@ -484,7 +548,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
             stdout=stream,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            cwd=str(_branch_root()),
+            cwd=str(server_home()[1]),
             # The whole mechanism: the child leaves the process group drone is
             # timing and loses the terminal, so neither a timeout nor a closed
             # pane reaches it. Spelled differently per platform — see above.

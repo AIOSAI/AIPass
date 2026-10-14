@@ -92,6 +92,18 @@ Two ways to start one server is how a fix lands in one of them and the other
 keeps the bug — and the unit's copy is the one nobody re-reads, because it lives
 in a file under somebody's home directory that this tree cannot see.
 
+**It names the home's server, not this process's** (DPLAN-0408, 2026-10-13). A
+stranger's machine holds aipass twice: the uv tool venv `aipass install` runs in,
+with no `[host]` extra, and the AIPass home with its own `.venv`. Spelled as
+itself, the install started a server on the tool venv's python that died on
+*No module named fastapi*. `server_home()` resolves the home as drone's
+`branch_interpreter` does (`resolve_aipass_home`). If this copy lives inside it,
+or no home resolves, the server is this interpreter and this branch. Otherwise it
+is `<home>/.venv`'s python and `<home>/src/aipass/api/apps/api.py`, and the
+spawn's `cwd` and the unit's `WorkingDirectory` are the home's api branch. A
+home missing either file refuses with `LifetimeError` naming it; there is no
+fall back, because a server that starts and dies is worse than a refusal.
+
 Lingering is reported, not assumed: without it a user unit waits for a login,
 which on a headless reboot never comes — the exact failure this build exists to
 end. It is set outside this tree and can be turned off by someone who never reads
