@@ -514,6 +514,7 @@ class TestPairingQR:
         assert door.minted == []
         assert f"Then pair your phone: {_PAIR}" in out
         assert _HEADING not in out and _PAIR_URL not in out
+        assert "No QR yet" not in out  # the server answers; the Tailscale line below says why
 
     def test_a_tailnet_bind_whose_server_does_not_answer_mints_nothing(self, capsys, monkeypatch):
         monkeypatch.setattr(baud, "server_answers", lambda host, port: "silent")
@@ -523,6 +524,11 @@ class TestPairingQR:
         assert door.minted == []
         assert f"Then pair your phone: {_PAIR}" in out
         assert _HEADING not in out
+        # The owner's test 13: the screen says why there is no code to hold the phone up to.
+        lines = out.splitlines()
+        why = "No QR yet: a pairing code needs the server running first."
+        no_qr = next(i for i, line in enumerate(lines) if why in line)
+        assert "Then pair your phone" in lines[no_qr + 1]
 
     def test_a_pairing_error_is_stated_with_the_pair_command_and_no_qr(self, capsys, probes):
         door = _ApiDoor(host=_TAILNET_IP, mint_pairing=_PairRefused("no bind stored"))

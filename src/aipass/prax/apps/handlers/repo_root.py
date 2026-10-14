@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: Repo-Root Resolution That Never Reads The Process CWD
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -179,7 +179,15 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
 
 
 def _announce_fallback(anchor: Path, fallback: Path) -> None:
-    """Say once, out loud, that the marker was never found.
+    """Say once that the marker was never found: a warning for a checkout, a note for an installed package.
+
+    An installed package (``uv tool install``, pip into site-packages) has no
+    registry and no ``src`` above it, so the walk ends at the filesystem root. That
+    is the designed answer there, not a drift: ``system_logs_home`` reads the
+    anchor root and logs under the user's home (FPLAN-0642). It goes out at INFO,
+    because stdlib's last-resort handler prints WARNING and above to the terminal,
+    and the BAUD installer's step 3 showed the checkout warning to a stranger
+    whose install has no checkout to speak of (the owner's test 13, 2026-10-13).
 
     Uses stdlib logging on purpose — this runs inside the construction of prax's
     own logger, and a warning that needs the logger it is being emitted from is
@@ -198,6 +206,13 @@ def _announce_fallback(anchor: Path, fallback: Path) -> None:
     if _ANNOUNCED:
         return
     _ANNOUNCED.add(REGISTRY_MARKER)
+    if fallback == Path(fallback.anchor):
+        logger.info(
+            "[repo_root] %s not found above %s and no src/ either: an installed package, logs go under the user's home",
+            REGISTRY_MARKER,
+            anchor,
+        )
+        return
     logger.warning(
         "[repo_root] %s not found above %s — falling back to the source root %s. "
         "Paths derived from the repo root are resolved against the checkout, "

@@ -9,6 +9,13 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **prax: an installed package's repo-root fallback is a note, not the checkout warning** (2026-10-13; devpulse, the admin seat, from the owner's test 13 of the public install; FPLAN-0643). From a `uv tool install` the walk above site-packages finds no registry and no `src`, so `find_repo_root` ends at the filesystem root; `system_logs_home` already reads that root as "an installed package" and logs under `~/.aipass` (v2.8.14). The announcement still went out at WARNING, and stdlib's last-resort handler printed `[repo_root] AIPASS_REGISTRY.json not found above …/site-packages/… — falling back to the source root /` into the BAUD installer's step 3, between `Owner/identity OK.` and the step 4 header: a line about a checkout to a stranger with none. `handlers/repo_root.py` 1.0.1: when the fallback is the anchor root the note goes out at INFO (`an installed package, logs go under the user's home`); a registry-less checkout keeps its warning. One test added in `test_repo_root.py`.
+- **aipass: the install's step 4 no longer prints a stale phone URL, and the phone block says why there is no QR** (2026-10-13; devpulse, the admin seat, from the owner's test 13; FPLAN-0643). Step 4 pointed @api at the face and then printed `Restart the host api to serve it …` and `Then open: http://127.0.0.1:8787/phone.html`, read from a config whose bind the phone step moves to the tailnet a moment later and whose server is not running yet, so both lines were wrong by the time the install ended. `modules/baud.py` 1.4.1: `_point(outcome, hints=)`, and `install_phone_face(best_effort=True)`, the install's path, passes `hints=False`; `aipass baud install` by hand keeps both lines, where the config is already the live one. `modules/_phone_print.py` 1.0.1: when the code was skipped because the server does not answer, one line, `No QR yet: a pairing code needs the server running first.`, sits above `Then pair your phone: …`. The owner's Docker run ended on exactly that screen, the guide said "hold your phone up", and nothing said up to what. Two asserts in `test_baud.py`.
+
 ## [2026-10-13] — v2.8.15: QR pairing (the pair door, the install ends with the QR), seedgo's rendered_path_oracle, the README uninstall line
 
 ### Added

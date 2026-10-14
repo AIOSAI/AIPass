@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: _phone_print.py
 # Description: aipass install's last print: the phone's bind, boot unit, server, guide and pairing QR
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-13
 # Modified: 2026-10-13
 # =============================================
@@ -197,6 +197,10 @@ def print_phone_ready(
     pairing = pairing if pairing is not None else Pairing(PAIR_SKIPPED)
     if pairing.state == PAIR_REFUSED:
         console.print(f"  Pairing code not minted: {pairing.detail}", markup=False)
+    if pairing.state == PAIR_SKIPPED and ready.server != SERVER_SERVING:
+        # The owner's test 13 (2026-10-13): the guide said "hold your phone up" and
+        # nothing on the screen said why there was no code to hold it up to.
+        console.print("  No QR yet: a pairing code needs the server running first.")
     if pairing.state != PAIR_MINTED:
         console.print(f"  Then pair your phone: [cyan]{PAIR_COMMAND}[/cyan]")
     console.print(f"  Guide:      {PHONE_GUIDE_URL}")

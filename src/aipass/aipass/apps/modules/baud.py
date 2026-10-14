@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: baud.py
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-13
 # Modified: 2026-10-13
 # =============================================
@@ -185,8 +185,14 @@ def _say(result: PointResult) -> None:
         warning(result.message)
 
 
-def _point(outcome: InstallOutcome) -> int:
-    """Hand the face and the binary to @api, then say how to see it. 0 when @api took everything installed."""
+def _point(outcome: InstallOutcome, hints: bool = True) -> int:
+    """Hand the face and the binary to @api, then say how to see it. 0 when @api took everything installed.
+
+    ``hints`` False skips the restart hint and the open-this URL. aipass install's
+    step 4 runs before the bind moves to the tailnet and before the server is
+    started, so both lines were stale by the time its last block printed the real
+    phone URL (the owner's test 13, 2026-10-13); that block says it instead.
+    """
     host_config = _api_host_config()
     face = point_api_at(outcome.dest, host_config)
     cli = point_api_at_binary(outcome.binary.path, host_config) if outcome.binary else None
@@ -196,7 +202,7 @@ def _point(outcome: InstallOutcome) -> int:
         module_name=_MODULE_NAME,
     )
     _say(face)
-    if face.ok:
+    if face.ok and hints:
         console.print(f"  [dim]{RESTART_HINT}[/dim]")
         console.print(f"  [dim]Then open:[/dim] [cyan]{phone_url(host_config)}[/cyan]")
     if cli is not None:
@@ -217,7 +223,8 @@ def install_phone_face(
 
     No baud-cli for this platform, in this release, or on the --from command line
     is one line and still 0: the face alone is a complete install. best_effort
-    reports refusals as warnings (aipass install's step); dry_run changes nothing.
+    reports refusals as warnings and leaves the open-this lines to the install's
+    own phone block (aipass install's step); dry_run changes nothing.
     """
     target = _resolve_dest(dest)
     try:
@@ -239,7 +246,7 @@ def install_phone_face(
         success(f"baud-cli {outcome.tag} installed at {outcome.binary.path} ({outcome.binary.sha256[:12]}…)")
     else:
         console.print(f"  {outcome.binary_note}")
-    return _point(outcome)
+    return _point(outcome, hints=not best_effort)
 
 
 def install_best_effort(dry_run: bool = False, tag: str = LATEST) -> bool:

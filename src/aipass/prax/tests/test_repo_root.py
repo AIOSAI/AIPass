@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-10
+# Modified: 2026-10-13
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -402,6 +402,20 @@ class TestFindRepoRoot:
             for _ in range(5):
                 repo_root_mod.find_repo_root(start)
         assert caplog.text.count("[repo_root]") == 1
+
+    def test_an_installed_package_falls_back_to_the_anchor_root_without_a_warning(self, tmp_path, caplog, monkeypatch):
+        """site-packages has no registry and no src/: the anchor root is the designed
+        answer there (system_logs_home reads it), so the announcement is a note, not
+        the checkout warning the BAUD installer's step 3 showed a stranger (2026-10-13)."""
+        monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
+        start = tmp_path / "site-packages" / "aipass" / "prax" / "a.py"
+        start.parent.mkdir(parents=True)
+        with caplog.at_level("INFO", logger=repo_root_mod.__name__):
+            resolved = repo_root_mod.find_repo_root(start)
+        assert resolved == Path(start.anchor)
+        levels = [record.levelname for record in caplog.records if "[repo_root]" in record.getMessage()]
+        assert levels == ["INFO"], levels
+        assert "installed package" in caplog.text
 
     def test_this_module_imports_nothing_from_prax(self):
         """@memory's caveat, pinned structurally instead of with a try/except.
