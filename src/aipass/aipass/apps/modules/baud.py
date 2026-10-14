@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: baud.py
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-09-13
 # Modified: 2026-10-13
 # =============================================
@@ -30,15 +30,19 @@ Usage:
 ``aipass install`` runs the same install as its best-effort step 4 (its --baud-tag
 is this command's --tag), then ends on ``finish_phone``: through @api's module
 door it moves the bind to the tailnet address and installs the boot unit, then
-prints the phone URL and the guide (FPLAN-0642 slices B, D). When the server
-serves the face on a tailnet bind, @api's pairing door mints a one-use code and the
-install ends on its QR; otherwise it names the pair command (DPLAN-0406 slice C).
+prints the phone URL and the guide (FPLAN-0642 slices B, D). Where no boot unit
+will bring the server up, it starts it detached (DPLAN-0407). On a terminal, with
+the face served on a tailnet bind, it waits for Enter, then @api's pairing door
+mints a one-use code and the install ends on its QR; otherwise, and always under
+--non-interactive, it names the pair command (DPLAN-0406 slice C).
 The print itself lives in ``_phone_print.py``.
 """
 
 from __future__ import annotations
 
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, List
@@ -69,16 +73,38 @@ from aipass.aipass.apps.handlers.baud import (
     validate_tag,
 )
 from aipass.aipass.apps.handlers.baud.phone_ready import PhoneReady, readiness, server_answers
-from aipass.aipass.apps.handlers.baud.phone_setup import mint_pair, move_bind, set_up_boot
+from aipass.aipass.apps.handlers.baud.phone_setup import (
+    BOOT_DONE,
+    BOOT_LIVE,
+    PAIR_DECLINED,
+    PAIR_PLANNED,
+    PAIR_SKIPPED,
+    SERVE_STARTED,
+    BindMove,
+    BootSetup,
+    Pairing,
+    ServerStart,
+    can_pair,
+    mint_pair,
+    move_bind,
+    probe_until_serving,
+    set_up_boot,
+    start_server,
+)
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.modules._phone_print import print_phone_ready
+from aipass.aipass.apps.modules._phone_print import (
+    print_pair_pause,
+    print_phone_head,
+    print_phone_ready,
+    print_phone_tail,
+)
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.prax import logger
 
 COMMAND = "baud"
 _MODULE_NAME = "baud"
-_VERSION = "1.4.0"
+_VERSION = "1.5.0"
 DEFAULT_DEST = Path.home() / ".aipass" / "baud" / "phone"
 RETRY_HINT = "Retry anytime: aipass baud install  (or: aipass baud install --from <tarball> --sums <SHA256SUMS.txt>)"
 
@@ -277,15 +303,52 @@ def phone_readiness(dry_run: bool = False, host_config: Any = None) -> PhoneRead
     return readiness(host_config if host_config is not None else _api_host_config(), dry_run)
 
 
-def finish_phone(ready: PhoneReady, dry_run: bool = False, host_config: Any = None) -> None:
-    """aipass install's last step and its closing lines, FPLAN-0642 slice D.
+def _enter_pressed() -> bool:
+    """One line from stdin: True on Enter, False on EOF or Ctrl-C (a stated skip, never a traceback)."""
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        console.print()
+        logger.info("[baud] the pairing pause ended without Enter")
+        return False
+    return True
+
+
+def _bring_server_up(
+    door: Any, ready: PhoneReady, bind: BindMove, boot: BootSetup, dry_run: bool, sleep: Callable[[float], None]
+) -> tuple[PhoneReady, ServerStart]:
+    """Ask the server on the bind it now has (a starting unit gets its retries), start it when nothing will."""
+    if not dry_run:
+        if boot.state in (BOOT_DONE, BOOT_LIVE):  # the unit is starting: give it its few seconds
+            answer = probe_until_serving(server_answers, bind.host, bind.port, sleep)
+        else:
+            answer = server_answers(bind.host, bind.port)
+        ready = replace(ready, host=bind.host, port=bind.port, server=answer)
+    start = start_server(door, ready, boot, dry_run)
+    if start.state == SERVE_STARTED:
+        ready = replace(ready, server=probe_until_serving(server_answers, ready.host, ready.port, sleep))
+    return ready, start
+
+
+def finish_phone(
+    ready: PhoneReady,
+    dry_run: bool = False,
+    host_config: Any = None,
+    non_interactive: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """aipass install's last step and its closing lines, FPLAN-0642 slice D, DPLAN-0407.
 
     Through @api's module door: move the bind to the tailnet address, render,
-    install and enable the boot unit, then ask the server once more and print.
+    install and enable the boot unit, ask the server (a starting unit gets
+    PROBE_TRIES asks), and start it detached when no unit will (start_server).
     A dry run calls install_unit and enable_unit with dry_run=True and neither
-    set_bind nor autostart (autostart renders a file and has no dry run).
-    Last, when that probe finds the face served on a tailnet bind, it mints the
-    phone's one-use pairing code and its QR (DPLAN-0406 slice C); a dry run mints nothing.
+    set_bind, autostart nor serve_detached.
+
+    The pairing code waits for the person: only on a terminal, without
+    --non-interactive, with the face served on a tailnet bind, the print pauses
+    for Enter and mints after it. Anything else mints nothing and names the pair
+    command. ``sleep`` paces the re-probes; tests hand in one that does not sleep.
     """
     if not ready.api:
         print_phone_ready(ready, dry_run=dry_run)
@@ -293,10 +356,15 @@ def finish_phone(ready: PhoneReady, dry_run: bool = False, host_config: Any = No
     door = host_config if host_config is not None else _api_host_config()
     bind = move_bind(door, ready, dry_run)
     boot = set_up_boot(door, dry_run)
-    if not dry_run:
-        ready = replace(ready, host=bind.host, port=bind.port, server=server_answers(bind.host, bind.port))
-    pairing = mint_pair(door, ready, dry_run)
-    print_phone_ready(ready, dry_run=dry_run, bind=bind, boot=boot, pairing=pairing)
+    ready, start = _bring_server_up(door, ready, bind, boot, dry_run, sleep)
+    if dry_run or non_interactive or not can_pair(ready) or not sys.stdin.isatty():
+        pairing = Pairing(PAIR_PLANNED if dry_run and not non_interactive else PAIR_SKIPPED)
+        print_phone_ready(ready, dry_run=dry_run, bind=bind, boot=boot, pairing=pairing, start=start)
+        return
+    print_phone_head(ready, bind, boot, start)
+    print_pair_pause()
+    pairing = mint_pair(door, ready, dry_run=False) if _enter_pressed() else Pairing(PAIR_DECLINED)
+    print_phone_tail(ready, pairing)
 
 
 def _status_face(target: Path, host_config: Any) -> None:

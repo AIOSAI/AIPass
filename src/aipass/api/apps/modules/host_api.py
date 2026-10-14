@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-14
 # Modified: 2026-10-13
 # =============================================
@@ -270,6 +270,18 @@ def install_unit(dry_run: bool = False) -> dict:
 def enable_unit(dry_run: bool = False) -> dict:
     """enable --now the installed unit, and lingering if off; refused while a hand-started server holds the port."""
     return host_lifetime.enable_autostart(dry_run)
+
+
+def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> dict:
+    """Start the server in its own session, as serve --detach does: {pid, host, port, log, started}.
+
+    The install's door for a machine with no user systemd (DPLAN-0407): the boot
+    unit cannot be installed there, and "Start it: ..." printed to a stranger is a
+    stop. The bind is validated here before anything is spawned. Raises
+    BindRefused, LifetimeError (a server already runs, or the child died on start)
+    and SupervisorUnreachable, all exported above.
+    """
+    return host_lifetime.serve_detached(host=host, port=port)
 
 
 def receipt_path(label: str) -> Path:

@@ -31,11 +31,16 @@ prints one line plus the retry command and the install carries on. See
 [`baud_phone_face.md`](baud_phone_face.md).
 
 With the face in, the install ends on the phone: bind, boot unit, server, guide.
-When the server answers on a tailnet address, @api's pairing door mints a
-one-use code (label `phone`, scope `operate`, five minutes) and the last block is
-its QR, its url and the expiry. Otherwise, or when the door refuses, the print
-names `drone @api host-api pair phone --scope operate` instead. The QR prints
-before the welcome chat opens. A dry run mints nothing.
+Where no boot unit will bring the server up (no user systemd, a unit that failed
+or could not be reached), the install starts it detached and says so on the
+Server line. On a terminal, when the server answers on a tailnet address, the
+print pauses: press Enter when the phone's camera is ready, and only then does
+@api's pairing door mint a one-use code (label `phone`, scope `operate`, five
+minutes); the last block is its QR, its url and the expiry. EOF or Ctrl-C at the
+pause is a stated skip. Otherwise, or when the door refuses, and always under
+`--non-interactive` (what `install.sh` runs; it does its own pause and pair), the
+print names `drone @api host-api pair phone --scope operate` instead. The QR
+prints before the welcome chat opens. A dry run mints and starts nothing.
 
 Code: [`apps/modules/install.py`](../apps/modules/install.py).
 

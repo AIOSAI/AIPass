@@ -301,7 +301,6 @@ else
         echo "  bwrap     ... MISSING"
         echo "    sudo apt install bubblewrap"
         SB_MISSING+=("bwrap")
-        ACTION_NEEDED+=("bwrap missing — run: sudo apt install bubblewrap")
     fi
 
     # node
@@ -311,7 +310,6 @@ else
         echo "  node      ... MISSING"
         echo "    Install Node.js: https://nodejs.org/"
         SB_MISSING+=("node")
-        ACTION_NEEDED+=("node missing — install from https://nodejs.org/")
     fi
 
     # npm (needed for srt install)
@@ -320,7 +318,6 @@ else
     else
         echo "  npm       ... MISSING"
         SB_MISSING+=("npm")
-        ACTION_NEEDED+=("npm missing — install Node.js (includes npm) from https://nodejs.org/")
     fi
 
     # @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
@@ -341,7 +338,6 @@ else
                     echo "    Install failed (may need sudo). Run manually:"
                     echo "      sudo npm install -g @anthropic-ai/sandbox-runtime"
                     SB_MISSING+=("srt")
-                    ACTION_NEEDED+=("srt missing — run: sudo npm install -g @anthropic-ai/sandbox-runtime")
                 fi
             else
                 echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
@@ -352,11 +348,9 @@ else
     elif ! command -v node &>/dev/null; then
         echo "  srt       ... skipped (no node)"
         SB_MISSING+=("srt")
-        ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
     else
         echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
         SB_MISSING+=("srt")
-        ACTION_NEEDED+=("srt check skipped — resolver script missing, reinstall/repair the repo")
     fi
 
     # rg (ripgrep)
@@ -368,13 +362,15 @@ else
         echo "  rg        ... MISSING"
         echo "    sudo apt install ripgrep"
         SB_MISSING+=("rg")
-        ACTION_NEEDED+=("rg missing — run: sudo apt install ripgrep")
     fi
 
     if [ ${#SB_MISSING[@]} -eq 0 ]; then
         echo "  sandbox prereqs: READY"
     else
-        echo "  sandbox prereqs: INCOMPLETE (${SB_MISSING[*]} missing) — aipass doctor for details"
+        # Optional (DPLAN-0407): AIPass runs without the kernel sandbox, so a missing
+        # tool is a line here, never an ACTION NEEDED item after "ready" (the owner's
+        # test 13: the install ended on a homework list of five optional tools).
+        echo "  sandbox: optional, not set up here (${SB_MISSING[*]} missing); AIPass runs without it — aipass doctor says how"
     fi
 fi
 
@@ -457,11 +453,11 @@ resolve_git_identity() {
                 ACTION_NEEDED+=("Git identity not set — run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\"")
             fi
         else
-            # Non-interactive — never guess an identity. Skip and warn.
-            echo "  Non-interactive mode — skipping. Run 'git config --global user.email \"you@example.com\"'"
-            echo "  and 'git config --global user.name \"Your Name\"' yourself before committing."
+            # Non-interactive — never guess an identity, and never make it homework
+            # (DPLAN-0407): a stranger's first five minutes do not commit. One line;
+            # git itself asks for a name the first time a commit needs one.
+            echo "  Not set (non-interactive); git will ask for one at your first commit."
             GIT_IDENTITY_SKIPPED="yes"
-            ACTION_NEEDED+=("Git identity not set (non-interactive) — run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\"")
         fi
     else
         echo "Git identity: $GIT_NAME <$GIT_EMAIL>"

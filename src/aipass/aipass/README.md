@@ -23,9 +23,10 @@ Four jobs, in the order a new machine meets them.
 
 **Install.** `aipass install` is the one-command bootstrap: clone, `setup.sh`,
 hooks, the phone face, and a welcome chat with this concierge at the end.
-When the phone server answers on this machine's tailnet address, the install's
-last block is a pairing QR: point the phone's camera at it and the face opens,
-signed in. The code is one use and expires in five minutes.
+The install starts the phone server itself when nothing else will. When it
+answers on this machine's tailnet address, the install waits for you to press
+Enter, then shows a pairing QR: point the phone's camera at it and the face
+opens, signed in. The code is one use and expires in five minutes.
 
 **Set up.** `aipass init run` walks the ten stages — welcome, system detect,
 profile, style questions, tool choice, first agent, ping sweep, smoke test,

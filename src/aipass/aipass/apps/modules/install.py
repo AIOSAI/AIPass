@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.3.3
+# Version: 1.4.0
 # Created: 2026-07-05
 # Modified: 2026-10-13
 # =============================================
@@ -22,9 +22,10 @@ this command materializes a working, writable AIPass home and wires it up:
        baud-cli build for this platform lands the face alone. --no-baud skips it.
        --baud-tag TAG pins the release (aipass baud install --tag), checked before
        the clone; a stamped install.sh passes its own. With the face in, the
-       install's last print is the phone: URL, bind, server, guide, then the
-       pairing QR when the server answers on a tailnet bind, else the pair command
-       (FPLAN-0642 slice B, DPLAN-0406 slice C).
+       install's last print is the phone: URL, bind, server (started detached
+       when no boot unit runs it), guide, then on a terminal a pause for Enter and
+       the pairing QR when the server answers on a tailnet bind, else the pair
+       command; --non-interactive never mints (FPLAN-0642, DPLAN-0406, DPLAN-0407).
     5. End in a conversation: the @aipass concierge opens in this terminal with the
        install report in hand (interactive default; --no-chat to skip). Project
        creation is NOT part of install — the concierge points users at
@@ -36,7 +37,7 @@ fight, per ui/progress.activity_spinner).
 
 Usage:
     aipass install                       # interactive, ends in a welcome chat
-    aipass install --non-interactive     # CI/headless (~/AIPass), no chat
+    aipass install --non-interactive     # CI/headless (~/AIPass), no chat, no pairing QR
     aipass install --no-chat             # install the engine only, skip the chat
     aipass install --no-baud             # skip the phone face + baud-cli step
     aipass install --baud-tag v0.2.1     # that baud release, not the latest
@@ -574,17 +575,18 @@ def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) ->
     return install_best_effort(dry_run=dry_run, tag=baud_tag)
 
 
-def _phone_print(dry_run: bool, face_installed: bool) -> Callable[[], None] | None:
-    """The phone facts read now; the bind, the boot unit and the print run last (FPLAN-0642 slices B, D).
+def _phone_print(dry_run: bool, face_installed: bool, non_interactive: bool = False) -> Callable[[], None] | None:
+    """The phone facts read now; the bind, the boot unit, the server and the print run last (FPLAN-0642, DPLAN-0407).
 
-    None: no face, nothing to say.
+    None: no face, nothing to say. ``non_interactive`` (what install.sh runs) never
+    mints a pairing code: install.sh owns the terminal, the pause and the pair.
     """
     if not face_installed:
         return None
     from aipass.aipass.apps.modules.baud import finish_phone, phone_readiness
 
     ready = phone_readiness(dry_run=dry_run)
-    return lambda: finish_phone(ready, dry_run=dry_run)
+    return lambda: finish_phone(ready, dry_run=dry_run, non_interactive=non_interactive)
 
 
 def _check_and_fix_owner(home: Path) -> None:
@@ -737,7 +739,7 @@ def run_install(
     console.print()
     console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
     face_installed = _install_phone_face(dry_run, no_baud, baud_tag)
-    phone_print = _phone_print(dry_run, face_installed)
+    phone_print = _phone_print(dry_run, face_installed, non_interactive)
 
     # Step 5 — end in a welcome chat (no project creation — see module docstring)
     console.print()
@@ -768,7 +770,9 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass install[/green]                      [dim]# interactive, ends in a chat[/dim]")
-    console.print("  [green]aipass install --non-interactive[/green]    [dim]# CI/headless (~/AIPass), no chat[/dim]")
+    console.print(
+        "  [green]aipass install --non-interactive[/green]    [dim]# CI/headless (~/AIPass), no chat, no pairing QR[/dim]"
+    )
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
     console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
@@ -785,8 +789,9 @@ def print_help() -> None:
     )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
-    console.print("[dim]With a phone face installed, the last print is the phone: URL, guide, pairing QR.[/dim]")
-    console.print("[dim]No QR (server not on a tailnet bind): drone @api host-api pair phone --scope operate[/dim]")
+    console.print("[dim]With a phone face installed, the install starts the server when no boot unit runs it,[/dim]")
+    console.print("[dim]then waits for Enter and shows the pairing QR. No QR (--non-interactive, or no server[/dim]")
+    console.print("[dim]on a tailnet bind): drone @api host-api pair phone --scope operate[/dim]")
     # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
     console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
