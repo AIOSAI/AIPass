@@ -27,6 +27,8 @@ The install starts the phone server itself when nothing else will. When it
 answers on this machine's tailnet address, the install waits for you to press
 Enter, then shows a pairing QR: point the phone's camera at it and the face
 opens, signed in. The code is one use and expires in five minutes.
+`--source PATH|URL` clones AIPass from a local checkout's committed HEAD or
+another URL instead of the public repo (the install sandbox).
 
 **Set up.** `aipass init run` walks the ten stages — welcome, system detect,
 profile, style questions, tool choice, first agent, ping sweep, smoke test,

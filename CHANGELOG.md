@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **`aipass install --source PATH|URL`** (@aipass, `install.py` 1.5.0; DPLAN-0408, the install sandbox). Clones AIPass from that path or URL instead of the public repo. A local path is cloned as its `file://` URI with `--depth 1`, so only its committed HEAD crosses, never the working tree; a missing path, a file or a directory without `.git` is refused with the path named (exit 2), never a silent fall back to GitHub. The default is unchanged. BAUD's `docker/sandbox.sh` uses it to install the local checkout in a fresh container in minutes instead of a merge train per change.
+
 ### Fixed
 
 - **`drone` finds its AIPass home without `AIPASS_HOME`** (@drone, `registry_handler` 1.3.0, `drone.py` 1.3.0; the owner's test 14, DPLAN-0407). A stranger's install ended on `Branch '@api' not found in registry`: the terminal that ran the one line started before setup.sh wrote `AIPASS_HOME` into the shell rc, and the branch lookup's fallback read only that variable. `resolve_aipass_home()` now answers in order: `AIPASS_HOME` as given; the interpreter's own install (`<home>/.venv/bin/python3` → `<home>`, when it holds `AIPASS_REGISTRY.json`), which is every installed `drone`; the newest enrolled home in `~/.aipass/trusted_projects.json`. Every reader in the router goes through it, so `drone @api …` works in any terminal after an install. The "Tip:" prints only when all three failed and then names what was tried.

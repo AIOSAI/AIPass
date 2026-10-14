@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-05
 # Modified: 2026-10-13
 # =============================================
@@ -42,6 +42,7 @@ Usage:
     aipass install --no-baud             # skip the phone face + baud-cli step
     aipass install --baud-tag v0.2.1     # that baud release, not the latest
     aipass install --path ~/tools/aipass # explicit home
+    aipass install --source ~/src/AIPass # this checkout's committed HEAD (or a URL)
     aipass install --here                # install into the current directory
     aipass install --chat-only           # skip the build, just the welcome chat
                                           # (used by setup.sh's own tail)
@@ -71,6 +72,8 @@ from aipass.aipass.shared.registry_discovery import registries_in
 COMMAND = "install"
 TOTAL_STEPS = 5
 REPO_URL = "https://github.com/AIOSAI/AIPass.git"
+# --source values taken as given (DPLAN-0408); anything else is a local checkout path.
+_URL_PREFIXES = ("https://", "http://", "ssh://", "git://", "file://", "git@")
 DEFAULT_HOME = Path.home() / "AIPass"
 
 # Clone can be slow on a cold network; setup.sh compiles a venv + installs deps.
@@ -308,8 +311,39 @@ def _announce_cloned_branch(home: Path) -> None:
     console.print(f"  [dim]branch:[/dim] [cyan]{branch}[/cyan] [dim](the repo default)[/dim]")
 
 
-def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | None = None) -> bool:
-    """git clone the public AIPass repo into `home`. Returns True on success.
+class SourceRefused(ValueError):
+    """--source named no checkout. The message names the path and is safe to print."""
+
+
+def _resolve_source(source: str | None) -> str:
+    """What to fetch: REPO_URL by default, a URL as given, a local checkout as its file:// URI.
+
+    A local path goes through file:// so ``--depth 1`` holds: only the committed
+    HEAD of that checkout crosses, never its working tree (DPLAN-0408, the install
+    sandbox). A relative path is taken from the current directory. Raises
+    SourceRefused for an empty value, a missing path, a file, or a directory with no
+    ``.git``, never a silent fall back to the public repo.
+    """
+    if source is None:
+        return REPO_URL
+    if not source:
+        raise SourceRefused("it needs a path or a URL")
+    if source.startswith(_URL_PREFIXES):
+        return source
+    path = Path(source).expanduser().resolve()
+    if not path.exists():
+        raise SourceRefused(f"{path} does not exist")
+    if not path.is_dir():
+        raise SourceRefused(f"{path} is not a directory")
+    if not (path / ".git").exists():
+        raise SourceRefused(f"{path} is not a repository (no .git)")
+    return path.as_uri()
+
+
+def _clone_repo(
+    home: Path, dry_run: bool, which: Callable[[str], str | None] | None = None, source: str = REPO_URL
+) -> bool:
+    """git clone ``source`` (the public AIPass repo by default, _resolve_source) into `home`. True on success.
 
     *which* is ``shutil.which`` when None, resolved at call time. A seam, and the reason
     is the test: test_install's clone tests answer "git is on PATH" here instead of
@@ -318,7 +352,7 @@ def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | 
     if which is None:
         which = shutil.which
     if dry_run:
-        console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {REPO_URL} {home}")
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {source} {home}")
         return True
     if home.exists() and any(home.iterdir()):
         warning(f"{home} exists and is not empty — pass an empty --path, or remove it first.")
@@ -329,7 +363,7 @@ def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | 
     home.parent.mkdir(parents=True, exist_ok=True)
     console.print("[cyan]Downloading AIPass[/cyan] [dim](git clone — this can take a minute)…[/dim]")
     try:
-        proc = subprocess.run(["git", "clone", "--depth", "1", REPO_URL, str(home)], timeout=_CLONE_TIMEOUT)
+        proc = subprocess.run(["git", "clone", "--depth", "1", source, str(home)], timeout=_CLONE_TIMEOUT)
         if proc.returncode == 0:
             _announce_cloned_branch(home)
             return True
@@ -657,11 +691,13 @@ def run_install(
     force_symlink: bool = False,
     no_baud: bool = False,
     baud_tag: str = LATEST,
+    source: str | None = None,
 ) -> int:
     """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
 
-    ``baud_tag`` (--baud-tag) is checked before anything is cloned: a bad tag is refused
-    with 2, the bad-usage code, so nothing was attempted.
+    ``baud_tag`` (--baud-tag) and ``source`` (--source) are checked before anything is
+    cloned: a bad tag or a path that is no checkout is refused with 2, the
+    bad-usage code, so nothing was attempted.
     """
     console.print()
     console.print("[bold cyan]AIPass — one-command install[/bold cyan]")
@@ -672,6 +708,12 @@ def run_install(
     except FetchError as exc:
         logger.warning("[install] --baud-tag refused before the clone: %s", exc)
         error(f"--baud-tag refused: {exc}")
+        return 2
+    try:
+        clone_from = _resolve_source(source)
+    except SourceRefused as exc:
+        logger.warning("[install] --source refused before the clone: %s", exc)
+        error(f"--source refused: {exc}")
         return 2
 
     # Step 1 — resolve + fetch the framework home
@@ -685,6 +727,8 @@ def run_install(
         warning("Cancelled.")
         return 1
     console.print(f"  Home: [cyan]{home}[/cyan]")
+    if source is not None:
+        console.print(f"  Source: [cyan]{clone_from}[/cyan]")
 
     if is_throwaway_path(home):
         warning(
@@ -708,7 +752,7 @@ def run_install(
     try:
         if _looks_like_aipass_tree(home):
             success(f"AIPass already present at {home} — skipping download")
-        elif not _clone_repo(home, dry_run):
+        elif not _clone_repo(home, dry_run, source=clone_from):
             warning("Could not fetch AIPass — aborting install.")
             return 1
         else:
@@ -771,13 +815,18 @@ def print_help() -> None:
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass install[/green]                      [dim]# interactive, ends in a chat[/dim]")
     console.print(
-        "  [green]aipass install --non-interactive[/green]    [dim]# CI/headless (~/AIPass), no chat, no pairing QR[/dim]"
+        "  [green]aipass install --non-interactive[/green]    "
+        "[dim]# CI/headless (~/AIPass), no chat, no pairing QR[/dim]"
     )
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
     console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
     console.print("  [green]aipass install --no-baud[/green]            [dim]# skip phone face + baud-cli[/dim]")
     console.print("  [green]aipass install --baud-tag TAG[/green]       [dim]# baud release, default latest[/dim]")
+    console.print(
+        "  [green]aipass install --source PATH|URL[/green]   [dim]# clone AIPass from this path or URL instead of the"
+        " public repo (a local path clones its committed HEAD; for the install sandbox)[/dim]"
+    )
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
     console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
@@ -841,6 +890,8 @@ def handle_command(command: str, args: list[str]) -> bool:
     path = _flag_value("--path")
     # A --baud-tag with no value reaches validate_tag as "" and is refused there, as any bad tag is.
     baud_tag = (_flag_value("--baud-tag") or "") if "--baud-tag" in run_args else LATEST
+    # The same for --source: a valueless one is refused, never read as the public repo.
+    source = (_flag_value("--source") or "") if "--source" in run_args else None
 
     if chat_only:
         result = run_chat_only(
@@ -861,9 +912,16 @@ def handle_command(command: str, args: list[str]) -> bool:
             force_symlink=force_symlink,
             no_baud=no_baud,
             baud_tag=baud_tag,
+            source=source,
         )
     json_handler.log_operation(
         "install_run",
-        {"non_interactive": non_interactive, "dry_run": dry_run, "chat_only": chat_only, "exit": result},
+        {
+            "non_interactive": non_interactive,
+            "dry_run": dry_run,
+            "chat_only": chat_only,
+            "source": source or "default",
+            "exit": result,
+        },
     )
     sys.exit(result)

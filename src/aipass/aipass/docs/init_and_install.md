@@ -19,6 +19,7 @@ steps, each reported as it runs.
 |---|---|
 | `install` | The whole bootstrap into the default home |
 | `install --path DIR` / `--here` | Choose the install home |
+| `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
 | `install --non-interactive` | Headless — no prompts, no chat |
 | `install --no-chat` / `--chat-only` | Install without the chat, or the chat alone |
 | `install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
