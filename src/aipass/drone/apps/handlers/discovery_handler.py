@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery_handler.py
 # Description: Handler for module and command discovery
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -14,7 +14,6 @@ introspection lives here. Returns data structures, not formatted strings.
 """
 
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -22,6 +21,7 @@ from typing import Dict, List, Optional
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.registry_handler import branch_interpreter
 
 logger = system_logger
 
@@ -92,7 +92,7 @@ def discover_modules(branch_path: str, branch_name: str) -> List[str]:
     if entry_point is not None:
         try:
             result = subprocess.run(
-                [sys.executable, str(entry_point.relative_to(branch_path)), "--help"],
+                [branch_interpreter(branch_path), str(entry_point.relative_to(branch_path)), "--help"],
                 cwd=branch_path,
                 capture_output=True,
                 timeout=10,
@@ -142,7 +142,7 @@ def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) 
 
     try:
         result = subprocess.run(
-            [sys.executable] + cmd_args,
+            [branch_interpreter(branch_path)] + cmd_args,
             cwd=branch_path,
             capture_output=True,
             timeout=10,

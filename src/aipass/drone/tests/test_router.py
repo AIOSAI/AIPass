@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -22,7 +22,7 @@ from aipass.drone.apps.handlers.exceptions import (
     BranchNotFoundError,
     CommandExecutionError,
 )
-from aipass.drone.apps.handlers import router_handler
+from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.router_handler import (
     detect_caller_signal,
@@ -213,6 +213,25 @@ class TestExecuteBranchCommand:
 
         call_kwargs = mock_exec.call_args.kwargs
         assert call_kwargs.get("executable") == sys.executable
+
+    @patch("aipass.drone.apps.handlers.router_handler.execute_command")
+    def test_a_branch_in_another_installs_home_runs_on_that_homes_venv(
+        self, mock_exec, branch_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The stranger's sandbox: the uv tool's drone launching the home's api.py.
+
+        Mutant: executable=sys.executable at the launch site."""
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
+        (branch_dir / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
+        venv_python = branch_dir.resolve() / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(branch_dir))
+
+        execute_branch_command(branch_path=str(branch_dir), branch_name="fakebranch", command="test")
+
+        assert mock_exec.call_args.kwargs["executable"] == str(venv_python)
 
     def test_raises_when_entry_point_missing(self, temp_test_dir: Path):
         """execute_branch_command raises CommandExecutionError if entry point missing."""

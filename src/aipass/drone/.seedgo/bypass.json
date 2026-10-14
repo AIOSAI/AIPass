@@ -220,9 +220,9 @@
       "file": "apps/handlers/router_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        162
+        161
       ],
-      "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 272) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
+      "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 271) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
       "anchor": "return None"
     },
     {
@@ -231,17 +231,17 @@
       "lines": [
         61
       ],
-      "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:511 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
+      "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:581 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
     },
     {
       "file": "apps/handlers/registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        268,
-        303
+        338,
+        373
       ],
-      "reason": "_registry_matches_credential, option C (accept loudly). True here means 'do not skip this registry', never 'the ids matched'. 268, the registry could not be read: load_registry() reads the same file and raises RegistryCorruptError or RegistryPermissionError naming it; skipping would resolve another registry further up in silence. 303, the passport could not be read: False would send find_registry() to another project's registry in silence, and a raise would stop every drone command under that passport, the mail to ask for help included. The fault is recorded for passport_fault() and drone.py main() prints it once on stderr after routing. Caller: find_registry() only. Fleet green leg 7, drone's decision.",
+      "reason": "_registry_matches_credential, option C (accept loudly). True here means 'do not skip this registry', never 'the ids matched'. 338, the registry could not be read: load_registry() reads the same file and raises RegistryCorruptError or RegistryPermissionError naming it; skipping would resolve another registry further up in silence. 373, the passport could not be read: False would send find_registry() to another project's registry in silence, and a raise would stop every drone command under that passport, the mail to ask for help included. The fault is recorded for passport_fault() and drone.py main() prints it once on stderr after routing. Caller: find_registry() only. Fleet green leg 7, drone's decision.",
       "anchor": "return True"
     },
     {

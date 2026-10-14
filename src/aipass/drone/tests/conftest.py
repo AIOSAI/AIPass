@@ -312,6 +312,8 @@ def _seal_home_fallbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(
         registry_handler, "_enrolment_file", lambda: tmp_path / "_no_user_home" / ".aipass" / "trusted_projects.json"
     )
+    # Once-per-process announcements: each test starts as a fresh process does.
+    monkeypatch.setattr(registry_handler, "_ANNOUNCED_HOMES", set())
 
 
 @pytest.fixture(autouse=True)

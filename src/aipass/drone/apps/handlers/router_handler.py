@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.2.3
+# Version: 1.3.0
 # Created: 2026-03-09
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -15,7 +15,6 @@ and subprocess execution for branch command routing.
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
@@ -445,8 +444,11 @@ def execute_branch_command(
         caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
         caller_env["AIPASS_CALLER_IDENTITY_SOURCE"] = identity_source or "unknown"
 
+    # Lazy: registry_handler imports this module for caller_cwd and registries_in.
+    from aipass.drone.apps.handlers.registry_handler import branch_interpreter
+
     result = execute_command(
-        executable=sys.executable,
+        executable=branch_interpreter(branch_path),
         args=cmd_args,
         cwd=branch_path,
         timeout=timeout,

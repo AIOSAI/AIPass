@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-09
 # Modified: 2026-10-13
 # =============================================
@@ -213,6 +213,76 @@ def missing_home_tip() -> str:
         + "; ".join(home.tried)
         + ".\n  Set AIPASS_HOME=/path/to/AIPass to reach the core branches."
     )
+
+
+# The homes whose interpreter choice this process has already logged: once per
+# home, not once per routed command.
+_ANNOUNCED_HOMES: set = set()
+
+
+# Where a venv keeps its python, by platform: (directory, file name).
+VENV_LAYOUTS = {"windows": ("Scripts", "python.exe"), "posix": ("bin", "python")}
+
+
+def _venv_layout() -> tuple:
+    """This platform's venv layout, one of VENV_LAYOUTS."""
+    return VENV_LAYOUTS["windows"] if os.name == "nt" else VENV_LAYOUTS["posix"]
+
+
+def _venv_python(home: Path) -> Path:
+    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python`` or ``Scripts/python.exe``."""
+    directory, name = _venv_layout()
+    return home / ".venv" / directory / name
+
+
+def branch_interpreter(branch_path: str | Path) -> str:
+    """Which python runs a branch's app: the interpreter of the AIPass home the branch lives in.
+
+    A stranger's machine holds aipass twice: the uv tool venv whose ``drone``
+    comes first on PATH, and the home's own ``.venv`` with the home's code
+    installed editable. A home app run on the tool venv's python imports its
+    handlers from the tool's site-packages, and the handlers fence refuses a
+    caller outside its tree (the owner's sandbox, DPLAN-0408, 2026-10-13).
+
+    * The branch is outside the resolved home (a project's own branch, a
+      declared root), or no home resolved: ``sys.executable``, as always.
+    * The home is ``Path(sys.prefix).parent``, so this drone IS the home's:
+      ``sys.executable``.
+    * Otherwise the home's own venv python when it exists, logged INFO once.
+    * No venv there: ``sys.executable``, with a WARNING naming the home, once.
+      setup.sh makes the venv; a home without one is half-installed.
+
+    The venv path is returned as found, never resolved: a venv's python is a
+    symlink to the base interpreter, and following it would lose the venv.
+    """
+    home = resolve_aipass_home().path
+    if home is None:
+        return sys.executable
+    home = home.resolve()
+    if not Path(branch_path).resolve().is_relative_to(home) or home == _interpreter_home().resolve():
+        return sys.executable
+    venv_python = _venv_python(home)
+    announce = home not in _ANNOUNCED_HOMES
+    _ANNOUNCED_HOMES.add(home)
+    if venv_python.is_file():
+        if announce:
+            logger.info(
+                "Branch apps in the AIPass home %s run on its own interpreter %s; this drone's %s belongs to "
+                "another install",
+                home,
+                venv_python,
+                sys.executable,
+            )
+        return str(venv_python)
+    if announce:
+        logger.warning(
+            "The AIPass home %s has no %s (setup.sh makes it; this home is half-installed). "
+            "Its branch apps run on this drone's own %s, whose handlers may refuse them.",
+            home,
+            venv_python,
+            sys.executable,
+        )
+    return sys.executable
 
 
 def _first_registry_in(directory: Path) -> Optional[Path]:

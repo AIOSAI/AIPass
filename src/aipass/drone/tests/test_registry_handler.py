@@ -14,6 +14,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Generator
@@ -571,6 +572,82 @@ class TestAipassHomeResolution:
         TestCredentialCheckWithNoCurrentDirectory._no_cwd(monkeypatch)
 
         assert find_registry() == home / "AIPASS_REGISTRY.json"
+
+
+def _with_venv(home: Path, layout: str = "posix") -> Path:
+    """Give *home* its own venv python in *layout*, the way setup.sh does; returns that python."""
+    directory, name = registry_handler.VENV_LAYOUTS[layout]
+    python = home / ".venv" / directory / name
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    return python
+
+
+class TestBranchInterpreter:
+    """A branch app runs on the interpreter of the AIPass home it lives in, not on whichever drone came first."""
+
+    @pytest.fixture(autouse=True)
+    def _posix_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
+
+    def test_an_enrolled_homes_branch_runs_on_the_homes_venv_announced_once(self, stranger: dict[str, Path]) -> None:
+        """The sandbox: the uv tool's drone, an enrolled home with its own .venv (mutant: always sys.executable)."""
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        python = _with_venv(home)
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        with patch.object(registry_handler, "logger") as log:
+            first = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+            second = registry_handler.branch_interpreter(home / "src" / "aipass" / "flow")
+
+        assert first == second == str(python.resolve())
+        assert log.info.call_count == 1
+        assert python.resolve() in log.info.call_args.args
+        log.warning.assert_not_called()
+
+    @pytest.mark.parametrize("layout", ["posix", "windows"])
+    def test_aipass_home_set_to_another_install_takes_its_venv_in_either_layout(
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch, layout: str
+    ) -> None:
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        python = _with_venv(home, layout)
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS[layout])
+
+        assert registry_handler.branch_interpreter(home / "src" / "aipass" / "api") == str(python.resolve())
+
+    def test_a_home_without_a_venv_keeps_sys_executable_and_warns_naming_it(self, stranger: dict[str, Path]) -> None:
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        with patch.object(registry_handler, "logger") as log:
+            chosen = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+
+        assert chosen == sys.executable
+        assert log.warning.call_count == 1
+        assert home.resolve() in log.warning.call_args.args
+
+    def test_the_drones_own_home_keeps_sys_executable_even_with_a_venv(self, stranger: dict[str, Path]) -> None:
+        """The exact rule: on a dev checkout the .venv IS this interpreter (mutant: the own-home check removed)."""
+        home = _an_aipass_home(stranger["interpreter"])
+        _with_venv(home)
+
+        with patch.object(registry_handler, "logger") as log:
+            chosen = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+
+        assert chosen == sys.executable
+        log.warning.assert_not_called()
+        log.info.assert_not_called()
+
+    def test_a_branch_outside_the_home_and_no_home_at_all_keep_sys_executable(self, stranger: dict[str, Path]) -> None:
+        """A declared root's branch is not the home's (mutant: the inside-the-home check removed)."""
+        assert registry_handler.branch_interpreter(stranger["tmp"] / "wren" / "src") == sys.executable
+
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        _with_venv(home)
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        assert registry_handler.branch_interpreter(stranger["tmp"] / "wren" / "src") == sys.executable
 
 
 # ===================================================================

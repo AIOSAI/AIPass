@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_scan.py
 # Description: Tests for branch command scanning
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/scan.py and the scanning handlers it drives."""
@@ -58,6 +58,24 @@ class TestScanHelpOutput:
         assert "audit" in names
         assert "list" in names
         assert all(c["source"] == "help" for c in result)
+
+    def test_the_scan_runs_on_the_interpreter_the_selector_names_for_the_branch(self, temp_test_dir: Path) -> None:
+        """Mutant: sys.executable at the scanner's launch site — a home's app scanned on another install's python."""
+        apps_dir = temp_test_dir / "apps"
+        apps_dir.mkdir(parents=True)
+        (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
+        done = MagicMock(stdout=b"Usage: mybranch\n", stderr=b"", returncode=0)
+
+        with (
+            patch(
+                "aipass.drone.apps.handlers.scanning.scanner.branch_interpreter",
+                side_effect=lambda path: f"python-for:{path}",
+            ),
+            patch("aipass.drone.apps.handlers.scanning.scanner.subprocess.run", return_value=done) as mock_run,
+        ):
+            scan_help_output(str(temp_test_dir), "mybranch")
+
+        assert mock_run.call_args.args[0][0] == f"python-for:{temp_test_dir}"
 
     def test_extracts_descriptions(self, temp_test_dir: Path) -> None:
         """Should extract descriptions alongside command names."""

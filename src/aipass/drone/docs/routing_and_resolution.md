@@ -185,6 +185,20 @@ per-project registration.
   terminal used to end every printed `drone @api …` hint on "Branch '@api' not found in registry"
   (BAUD's public install, 2026-10-13). Pinned by `TestAipassHomeResolution` in
   `tests/test_registry_handler.py`.
+- **The home's own interpreter.** `branch_interpreter(branch_path)` answers which python runs a
+  branch app. Every launch site asks it: `router_handler.execute_branch_command`, and the `--help`
+  runs in `discovery_handler` (`discover_modules`, `get_help`) and `scanning/scanner`.
+  - A branch outside the resolved home, or no home at all: `sys.executable`.
+  - The home is `Path(sys.prefix).parent`, so this drone is the home's: `sys.executable`.
+  - Otherwise, the home's `.venv/bin/python` (`.venv/Scripts/python.exe` on Windows), logged
+    INFO once per home.
+  - No venv there: `sys.executable`, with one WARNING naming the half-installed home.
+
+  A stranger's machine holds aipass twice. The uv tool venv's `drone` comes first on PATH, and the
+  home's apps, run on that venv's python, import their handlers from the tool's site-packages. The
+  handlers fence then refuses them (the owner's sandbox, DPLAN-0408). Pinned by
+  `TestBranchInterpreter`, and at the launch sites in `test_router.py`, `test_discovery.py` and
+  `test_scan.py`.
 - **Module routing, not a fallback.** An external seat reaches those modules because `is_module()`
   is checked *before* any branch call — the module lane is chosen, not discovered by failing the
   branch lane. Rich output from AIPass, functional output from external projects.
