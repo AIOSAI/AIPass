@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-20
 # Modified: 2026-10-13
 # =============================================
@@ -691,6 +691,34 @@ class TestTheServerRunsOnItsHomesInterpreter:
 
         popen.assert_not_called()
         assert str(other_home["python"]) in str(raised.value)
+
+    def test_the_record_log_and_unit_live_in_the_homes_logs(
+        self, tmp_path: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The home's drone reads this record: status, stop and a repair serve --detach must find it."""
+        home = tmp_path / "home"
+        python = home / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
+        python = python / ("python.exe" if sys.platform == "win32" else "python")
+        entry = home / "src" / "aipass" / "api" / "apps" / "api.py"
+        for made in (python, entry):
+            made.parent.mkdir(parents=True, exist_ok=True)
+            made.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.setattr(host_lifetime, "json_handler", operations := MagicMock())
+        monkeypatch.setattr(host_lifetime, "logger", log := MagicMock())
+        monkeypatch.setattr(host_lifetime, "SETTLE_SECONDS", 0.0)
+        monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
+        home_logs = entry.parents[1] / "logs"
+
+        with patch.object(subprocess, "Popen", return_value=_spawned()):
+            record = host_lifetime.serve_detached()
+
+        operations.log_operation.assert_called_once_with("host_api_serve_detached", record)
+        assert record["log"] == str(home_logs / host_lifetime.LOG_NAME)
+        assert str(home) in str(log.info.call_args_list[0])
+        assert {host_lifetime.record_path().parent, host_lifetime.log_path().parent} == {home_logs}
+        assert host_lifetime.unit_path().parent == home_logs
+        assert json.loads((home_logs / host_lifetime.RECORD_NAME).read_text(encoding="utf-8"))["pid"] == record["pid"]
 
     def test_a_copy_inside_its_home_runs_on_this_interpreter(self, runtime: Path, bind_ok: None) -> None:
         with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:

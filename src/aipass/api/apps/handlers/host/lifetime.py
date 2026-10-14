@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-19
 # Modified: 2026-10-13
 # =============================================
@@ -179,8 +179,14 @@ def _runtime_dir() -> Path:
 
     Returns:
         The runtime directory, created if absent.
+
+    Raises:
+        LifetimeError: The home is half-installed (server_home).
     """
-    directory = _branch_root() / RUNTIME_DIRNAME
+    # The branch the server runs from (server_home), not this copy: a server the
+    # tool venv's install started is the home's, and every later drone command
+    # reads the home's record. Unchanged when this copy is the home's.
+    directory = server_home()[1] / RUNTIME_DIRNAME
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
