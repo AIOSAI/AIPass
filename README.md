@@ -227,7 +227,7 @@ devpulse (orchestrator)
 - [Claude Code](https://code.claude.com/docs)
 - Linux, macOS, or Windows via Git Bash (tested in CI; WSL should work but is untested)
 - `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
-- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` sandbox; without them that step is listed under "action needed" with the command to run later)
+- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 ---

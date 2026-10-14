@@ -256,8 +256,8 @@
     {
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
-      "lines": [320, 842],
-      "reason": "prax, leg 14. 320: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 842: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+      "lines": [320, 856],
+      "reason": "prax, leg 14. 320: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 856 (842 until the installed-package test landed above it, 2026-10-13): load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/monitoring/instance_lock.py",

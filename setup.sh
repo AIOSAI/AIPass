@@ -342,7 +342,6 @@ else
             else
                 echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
                 SB_MISSING+=("srt")
-                ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
             fi
         fi
     elif ! command -v node &>/dev/null; then
