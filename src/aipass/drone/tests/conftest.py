@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-13
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -26,7 +26,7 @@ from typing import Generator
 import pytest
 
 from aipass.cli.apps.modules import display
-from aipass.drone.apps.handlers import router_handler
+from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.json import json_handler
 
 # Directories no source walk of this suite enters, written here rather than imported
@@ -295,6 +295,23 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if DELETABLE_CWD_MARKER in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _seal_home_fallbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Close the two AIPass-home fallbacks behind AIPASS_HOME for every test.
+
+    This suite runs on the AIPass venv, so ``Path(sys.prefix).parent`` IS the
+    live AIPass home and ``~/.aipass/trusted_projects.json`` enrolls it: a test
+    that unsets AIPASS_HOME to stand in a stranger's project would quietly see
+    every real citizen again. The interpreter points into an empty tmp tree and
+    the enrolment file at one that does not exist. A test of the fallbacks
+    builds its own and patches over these.
+    """
+    monkeypatch.setattr(registry_handler, "_interpreter_home", lambda: tmp_path / "_no_aipass_home")
+    monkeypatch.setattr(
+        registry_handler, "_enrolment_file", lambda: tmp_path / "_no_user_home" / ".aipass" / "trusted_projects.json"
+    )
 
 
 @pytest.fixture(autouse=True)

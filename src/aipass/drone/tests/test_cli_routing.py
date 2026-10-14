@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.6
+# Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-05
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -26,7 +26,8 @@ from aipass.drone.apps.drone import (
     print_introspection,
 )
 from aipass.drone.apps.handlers.executor import CommandResult
-from aipass.drone.apps.modules import RegistryError
+from aipass.drone.apps.handlers import registry_handler
+from aipass.drone.apps.modules import BranchNotFoundError, RegistryError
 from aipass.drone.cli import main as cli_main
 
 
@@ -701,6 +702,47 @@ class TestHandleTarget:
         assert rc == 0
         mock_hm.assert_called_once_with("seedgo", ["audit"])
         mock_route.assert_not_called()
+
+    @staticmethod
+    def _not_found(argv: list[str]) -> int:
+        """main() for a target the registry does not hold: route_command raises BranchNotFoundError."""
+        missing = BranchNotFoundError("Branch '@api' not found in registry")
+        with (
+            patch("sys.argv", ["drone", *argv]),
+            patch(f"{_DRONE}.is_module", return_value=False),
+            patch(f"{_DRONE}.branch_exists", return_value=False),
+            patch(f"{_DRONE}.route_command", side_effect=missing),
+        ):
+            return main()
+
+    @pytest.mark.parametrize("argv", [["@api"], ["@api", "--help"], ["@api", "host-api", "status"]])
+    def test_branch_not_found_with_no_home_prints_the_tip_naming_what_was_tried(
+        self, argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """conftest seals both fallbacks, so nothing resolves (mutant: the tip print removed)."""
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+
+        assert self._not_found(argv) == 1
+
+        err = capsys.readouterr().err
+        assert "drone: Branch '@api' not found in registry" in err
+        assert registry_handler.missing_home_tip() in err
+        assert "Tried: AIPASS_HOME is unset; " in err
+
+    def test_branch_not_found_says_no_tip_once_the_interpreter_names_a_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A home resolved: pointing at AIPASS_HOME would be wrong advice (mutant: the tip printed regardless)."""
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        (tmp_path / "install").mkdir()
+        (tmp_path / "install" / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        monkeypatch.setattr(registry_handler, "_interpreter_home", lambda: tmp_path / "install")
+
+        assert self._not_found(["@api", "host-api", "status"]) == 1
+
+        err = capsys.readouterr().err
+        assert "drone: Branch '@api' not found in registry" in err
+        assert "Tip" not in err
 
 
 # ===========================================================================

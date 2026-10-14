@@ -139,8 +139,8 @@ reset_registry_path()
 
 Order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path()` →
 **`AIPASS_REGISTRY`** env var → walk up from cwd, skipping any registry whose `metadata.id`
-conflicts with the nearest passport's `citizenship.registry_id` → `AIPASS_HOME` → walk up from the
-drone package → package-relative default. The env var is `AIPASS_REGISTRY`, not
+conflicts with the nearest passport's `citizenship.registry_id` → the AIPass home (below) → walk up
+from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`, not
 `AIPASS_REGISTRY_PATH` — the latter name appeared in the README until 2026-08-25 and was never read
 by any code.
 
@@ -169,13 +169,29 @@ The hierarchy lives in `apps/handlers/exceptions.py`.
 Infrastructure modules (`seedgo`, `cli`, `git`, `spawn`) work from external AIPass projects without
 per-project registration.
 
-- **Dual registry lookup.** `registry_handler.py` merges the local project registry with the
-  `AIPASS_HOME` registry. Local entries win on a name collision.
+- **Dual registry lookup.** `registry_handler.py` merges the local project registry with the AIPass
+  home's registry. Local entries win on a name collision.
+- **The AIPass home, without `AIPASS_HOME`.** `resolve_aipass_home()` is the one answer every
+  reader asks, first answer wins:
+  1. `AIPASS_HOME` set: used as given, because an explicit setting beats a guess.
+  2. The interpreter's own install: `Path(sys.prefix).parent`, when it holds an
+     `AIPASS_REGISTRY.json`. The installed `drone` runs on `<home>/.venv/bin/python3`, so this
+     answers for every setup.sh or `aipass install` install. A system Python or a tool venv fails
+     the check and falls through.
+  3. The homes enrolled in `~/.aipass/trusted_projects.json`: only projects holding an
+     `AIPASS_REGISTRY.json` count, and the newest `enrolled` wins.
+
+  This cures the terminal opened before setup.sh wrote `AIPASS_HOME` into the shell rc. That
+  terminal used to end every printed `drone @api …` hint on "Branch '@api' not found in registry"
+  (BAUD's public install, 2026-10-13). Pinned by `TestAipassHomeResolution` in
+  `tests/test_registry_handler.py`.
 - **Module routing, not a fallback.** An external seat reaches those modules because `is_module()`
   is checked *before* any branch call — the module lane is chosen, not discovered by failing the
   branch lane. Rich output from AIPass, functional output from external projects.
-- **`AIPASS_HOME` hints.** When it is not set and the local registry lacks core branches, drone
-  prints a one-line tip naming the variable.
+- **The home tip.** It fires under "Branch not found" only when all three sources failed, and it
+  names what was tried, so a person can act on it: the unset variable, the interpreter's directory
+  with no registry, and the enrolment file (missing, unreadable, or enrolling no home). `drone
+  systems` keeps its `export AIPASS_HOME` hint on the same condition.
 
 ---
 

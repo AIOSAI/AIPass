@@ -76,7 +76,7 @@ Auth is checked once, at the top of `git_module.handle_command()`, via `verify_g
  - A new flag can eat a passthrough's own flag: `--repo` had to be excluded from `issue`, `run` and `workflow`, where it is gh's own.
  - Commit subjects are capped at prax's `SUBJECT_CAP`, imported from `aipass.prax.apps.modules.dashboard`. Read the cap, never copy the number.
  - Interned small ints make an identity pin scenery: prove a constant is imported by reading the import line, not by comparing values.
- - Dual registry: local project plus `AIPASS_HOME`. Local entries win on a name collision.
+ - Dual registry: local project plus the AIPass home — `AIPASS_HOME`, else the interpreter's install, else an enrolled home (`resolve_aipass_home()`). Local entries win on a name collision.
 
 # Rules of this seat
 

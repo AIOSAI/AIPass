@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`drone` finds its AIPass home without `AIPASS_HOME`** (@drone, `registry_handler` 1.3.0, `drone.py` 1.3.0; the owner's test 14, DPLAN-0407). A stranger's install ended on `Branch '@api' not found in registry`: the terminal that ran the one line started before setup.sh wrote `AIPASS_HOME` into the shell rc, and the branch lookup's fallback read only that variable. `resolve_aipass_home()` now answers in order: `AIPASS_HOME` as given; the interpreter's own install (`<home>/.venv/bin/python3` → `<home>`, when it holds `AIPASS_REGISTRY.json`), which is every installed `drone`; the newest enrolled home in `~/.aipass/trusted_projects.json`. Every reader in the router goes through it, so `drone @api …` works in any terminal after an install. The "Tip:" prints only when all three failed and then names what was tried.
+
 ## [2026-10-13] — v2.8.16: the zero-question install (the server started without systemd, the pairing QR on Enter, setup.sh without homework), the three test-13 fixes
 
 ### Fixed

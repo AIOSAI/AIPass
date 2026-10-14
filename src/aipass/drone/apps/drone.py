@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.6
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-04
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -43,7 +43,7 @@ from aipass.drone.apps.modules.module_registry import (
     route_module_command,
     get_module_help,
 )
-from aipass.drone.apps.modules.config import passport_fault
+from aipass.drone.apps.modules.config import missing_home_tip, passport_fault, resolve_aipass_home
 
 VERSION = "1.1.0"
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -204,11 +204,20 @@ def print_introspection() -> None:
 # =============================================================================
 
 
+def _print_home_tip(exc: Exception) -> None:
+    """Under "Branch not found", say what was tried — only when no AIPass home resolved."""
+    if not isinstance(exc, BranchNotFoundError):
+        return
+    tip = missing_home_tip()
+    if tip:
+        err_console.print(tip, markup=False, highlight=False, soft_wrap=True)
+
+
 def _cwd_has_registry(max_depth: int = 10) -> bool:
     """Check if CWD is within a project that has a *_REGISTRY.json.
 
     A caller whose directory was deleted has no CWD to be "within", so the walk
-    is skipped and AIPASS_HOME — which never needed a location — still answers.
+    is skipped and the AIPass home — which never needed a location — still answers.
     """
     # No location is not a failure to read one. ``caller_cwd`` is the single
     # reader (router_handler); a private try/except here would be the tenth copy
@@ -220,13 +229,10 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
                 break
             if registries_in(parent):
                 return True
-    # AIPASS_HOME fallback — for external projects / global drone usage
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if aipass_home:
-        home = Path(aipass_home)
-        if home.is_dir() and registries_in(home):
-            return True
-    return False
+    # The AIPass home — AIPASS_HOME, else the interpreter's install, else an
+    # enrolled home — for external projects / global drone usage
+    home = resolve_aipass_home().path
+    return home is not None and home.is_dir() and bool(registries_in(home))
 
 
 def _handle_systems() -> int:
@@ -273,9 +279,9 @@ def _handle_systems() -> int:
             console.print(f"  @{branch.get('name', '').lower()}")
 
     # Hint for external projects missing AIPass core branches.
-    # If AIPASS_HOME is not set AND 'drone' isn't among the local branches,
+    # If no AIPass home resolves AND 'drone' isn't among the local branches,
     # we're in an external project that can't see the core branch set.
-    if not os.environ.get("AIPASS_HOME"):
+    if resolve_aipass_home().path is None:
         branch_names = {b.get("name", "").lower() for b in all_branches}
         if "drone" not in branch_names:
             console.print()
@@ -456,8 +462,7 @@ def _handle_custom_command(args: list[str]) -> int:
             return _handle_module(module_name, [command] + cmd_args)
         logger.warning("Custom command failed for target %s: %s", target, exc)
         err_console.print(f"drone: {exc}")
-        if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
-            err_console.print("  Tip: set AIPASS_HOME=/path/to/AIPass to access core branches.")
+        _print_home_tip(exc)
         return 1
 
     if result.stdout:
@@ -579,8 +584,7 @@ def _handle_target(args: List[str]) -> int:
         except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
             logger.warning("Introspection failed for %s: %s", target, exc)
             err_console.print(f"drone: {exc}")
-            if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
-                err_console.print("  Tip: set AIPASS_HOME=/path/to/AIPass to access core branches.")
+            _print_home_tip(exc)
             return 1
         return result.exit_code
 
@@ -591,8 +595,7 @@ def _handle_target(args: List[str]) -> int:
         except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
             logger.warning("Help lookup failed for %s: %s", target, exc)
             err_console.print(f"drone: {exc}")
-            if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
-                err_console.print("  Tip: set AIPASS_HOME=/path/to/AIPass to access core branches.")
+            _print_home_tip(exc)
             return 1
         return result.exit_code
 
@@ -620,8 +623,7 @@ def _handle_target(args: List[str]) -> int:
     except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
         logger.warning("Command routing failed for %s %s: %s", target, command, exc)
         err_console.print(f"drone: {exc}")
-        if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
-            err_console.print("  Tip: set AIPASS_HOME=/path/to/AIPass to access core branches.")
+        _print_home_tip(exc)
         return 1
 
     if result.stdout:
