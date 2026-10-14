@@ -122,7 +122,7 @@ assert "non-interactive: GIT_EMAIL stays empty" "" "$GIT_EMAIL"
 assert "non-interactive: GIT_NAME stays empty" "" "$GIT_NAME"
 assert "non-interactive: marked skipped" "yes" "$GIT_IDENTITY_SKIPPED"
 assert "non-interactive: no config --global writes" "" "$(grep -E '^git config --global user\.(email|name) ' "$GIT_LOG" || true)"
-assert "non-interactive: ACTION_NEEDED item added" "1" "${#ACTION_NEEDED[@]}"
+assert "non-interactive: no ACTION_NEEDED item (DPLAN-0407: never homework for a stranger)" "0" "${#ACTION_NEEDED[@]}"
 
 # ============================================================
 # resolve_git_identity — interactive, unconfigured: garbage rejected,

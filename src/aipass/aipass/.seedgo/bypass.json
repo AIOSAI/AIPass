@@ -163,8 +163,8 @@
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [165, 261, 684],
-      "reason": "165: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:197). 261: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 684: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0406 slice C moved them."
+      "lines": [166, 262, 686],
+      "reason": "166: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:198). 262: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 686: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0407 moved them."
     },
     {
       "file": "apps/modules/doctor.py",

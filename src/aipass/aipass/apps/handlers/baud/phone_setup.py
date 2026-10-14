@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: phone_setup.py
 # Description: Finish the phone through @api's installer doors: move the bind to the tailnet, install the boot unit
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-12
 # Modified: 2026-10-13
 # =============================================
@@ -21,15 +21,21 @@ Nothing here shells out and nothing mints a token. A door this @api does not
 publish is a state (``*_NO_DOOR``), so an older @api still gets the manual commands.
 A dry run never calls set_bind or autostart: autostart has no dry run and renders
 a file, so the dry run names it instead.
+
+Where no boot unit will bring the server up (no user systemd, a failed or
+unreachable unit), ``serve_detached()`` starts it in its own session (DPLAN-0407),
+and ``probe_until_serving`` gives a starting server its few seconds.
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from aipass.aipass.apps.handlers.baud.phone_ready import SERVER_SERVING, PhoneReady, is_tailnet
+from aipass.aipass.apps.handlers.baud.phone_ready import SERVER_ANSWERING, SERVER_SERVING, PhoneReady, is_tailnet
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.prax import logger
 
@@ -52,6 +58,19 @@ BOOT_UNREACHABLE = "unreachable"  # the supervisor or the serve record could not
 BOOT_NO_DOOR = "no_door"  # this @api publishes no installer doors
 
 _BOOT_DOORS = ("autostart", "install_unit", "enable_unit")
+
+# server start states (DPLAN-0407)
+SERVE_STARTED = "started"  # serve_detached() spawned it; pid is set
+SERVE_REFUSED = "refused"  # serve_detached() raised; detail holds the door's words
+SERVE_NO_DOOR = "no_door"  # this @api publishes no serve_detached
+SERVE_SKIPPED = "skipped"  # served already, or a boot unit (or a hand-started server) holds it
+SERVE_PLANNED = "planned"  # a dry run: nothing called
+
+# A unit or a detached server needs a moment to bind: up to 6 asks, 0.5 s apart.
+PROBE_TRIES = 6
+PROBE_GAP_SECONDS = 0.5
+# The boot states under which something other than the install brings the server up.
+_UNIT_RUNS_IT = (BOOT_DONE, BOOT_LIVE, BOOT_REFUSED)
 
 
 class _NeverRaised(Exception):
@@ -161,6 +180,7 @@ PAIR_PLANNED = "planned"  # a dry run: nothing minted
 PAIR_SKIPPED = "skipped"  # the server does not answer on a tailnet bind: no code, the pair command instead
 PAIR_REFUSED = "refused"  # the door raised PairingError; detail holds its words
 PAIR_NO_DOOR = "no_door"  # this @api publishes no mint_pairing / render_qr
+PAIR_DECLINED = "declined"  # EOF or Ctrl-C at the pause: a stated skip (DPLAN-0407)
 PAIR_LABEL = "phone"
 PAIR_SCOPE = "operate"
 
@@ -185,11 +205,16 @@ def _local_hhmm(expires_at: str) -> str:
         return f"at {expires_at}"
 
 
+def can_pair(ready: PhoneReady) -> bool:
+    """A pairing code is worth minting only when the server serves the face on a tailnet bind."""
+    return ready.server == SERVER_SERVING and is_tailnet(ready.host)
+
+
 def mint_pair(host_config: Any, ready: PhoneReady, dry_run: bool) -> Pairing:
     """Mint the phone's pairing code and its QR, only when the server serves the face on a tailnet bind."""
     if dry_run:
         return Pairing(PAIR_PLANNED)
-    if ready.server != SERVER_SERVING or not is_tailnet(ready.host):
+    if not can_pair(ready):
         return Pairing(PAIR_SKIPPED)
     mint = getattr(host_config, "mint_pairing", None)
     render = getattr(host_config, "render_qr", None)
@@ -204,3 +229,50 @@ def mint_pair(host_config: Any, ready: PhoneReady, dry_run: bool) -> Pairing:
         return Pairing(PAIR_REFUSED, detail=str(exc))
     json_handler.log_operation("baud_phone_pairing", {"label": PAIR_LABEL, "scope": PAIR_SCOPE}, module_name="baud")
     return Pairing(PAIR_MINTED, url=url, qr=qr, expires=_local_hhmm(str(minted.get("expires_at", ""))))
+
+
+@dataclass
+class ServerStart:
+    """What the install did about a silent server. ``detail`` is serve_detached's refusal, in its words."""
+
+    state: str
+    pid: int = 0
+    detail: str = ""
+
+
+def probe_until_serving(
+    probe: Callable[[str, int], str], host: str, port: int, sleep: Callable[[float], None] = time.sleep
+) -> str:
+    """Ask the server up to PROBE_TRIES times, PROBE_GAP_SECONDS apart; the last answer, serving or not."""
+    answer = probe(host, port)
+    for _ in range(PROBE_TRIES - 1):
+        if answer == SERVER_SERVING:
+            break
+        sleep(PROBE_GAP_SECONDS)
+        answer = probe(host, port)
+    return answer
+
+
+def start_server(host_config: Any, ready: PhoneReady, boot: BootSetup, dry_run: bool) -> ServerStart:
+    """Start the server detached when it does not answer and no boot unit will bring it up.
+
+    An answering port (serving or not) and a unit that is done, live, or refused
+    over a hand-started server are skipped: a second server there could only fail.
+    """
+    if dry_run:
+        return ServerStart(SERVE_PLANNED)
+    if ready.server in (SERVER_SERVING, SERVER_ANSWERING) or boot.state in _UNIT_RUNS_IT:
+        return ServerStart(SERVE_SKIPPED)
+    serve = getattr(host_config, "serve_detached", None)
+    if serve is None:
+        return ServerStart(SERVE_NO_DOOR)
+    refusals = tuple(_door_error(host_config, n) for n in ("BindRefused", "LifetimeError", "SupervisorUnreachable"))
+    try:
+        record = serve()
+    except refusals as exc:
+        logger.warning("[baud] the server could not be started detached: %s", exc)
+        start = ServerStart(SERVE_REFUSED, detail=str(exc))
+    else:
+        start = ServerStart(SERVE_STARTED, pid=int(record.get("pid", 0)))
+    json_handler.log_operation("baud_phone_serve", {"state": start.state, "pid": start.pid}, module_name="baud")
+    return start

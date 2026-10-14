@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-08
 # Modified: 2026-10-13
 # =============================================
@@ -16,11 +16,14 @@
 # http.server on 127.0.0.1. No real install, no real @api config, no token minted.
 # The pairing QR (DPLAN-0406 slice C): mint_pairing and render_qr are the fake door's;
 # every finish_phone gets that door, so @api's real mint_pairing is never called.
+# The server start and the pause (DPLAN-0407): serve_detached is the fake door's too;
+# the terminal is a StringIO that says it is a tty; the re-probe's sleep is a list.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import http.server
+import io
 import os
 import socket
 import stat
@@ -250,7 +253,14 @@ _CAMERA = "Open your phone's camera and point it at this code."
 _QR = "█▀▀▀█ ▄▀ █▀▀▀█\n█ █ █ ▀▄ █ █ █\n▀▀▀▀▀ ▀▄ ▀▀▀▀▀"
 _PAIR_URL = f"http://{_TAILNET_IP}:8787/#pair=" + "k" * 36
 _EXPIRES_AT = "2026-10-13T19:05:00Z"
-_PAIR_PLAN = "would mint a pairing code for the phone (label phone, scope operate, 5 minutes) and show its QR"
+_PAIR_PLAN = (
+    "would wait for Enter, then mint a pairing code for the phone (label phone, scope operate, 5 minutes)"
+    " and show its QR"
+)
+_PAIR_PLAN_NONE = f"would mint no pairing code (--non-interactive); would name: {_PAIR}"
+_PAUSE = "Pair your phone: press Enter when your phone's camera is ready to scan (the code lasts five minutes, one use)"
+_SERVE_PLAN = "would start the server detached when no boot unit runs it"
+_AUTOSTART = "drone @api host-api autostart"
 
 
 def _ready(host: str = "127.0.0.1", tailnet: str = _TAILNET_IP, server: str = "serving") -> baud.PhoneReady:
@@ -339,6 +349,7 @@ class _ApiDoor(_ApiStore):
         super().__init__(host=host)
         self.calls: list[tuple] = []
         self.minted: list[tuple] = []  # pairing calls apart, so the installer-door order stays as it was
+        self.served: list[tuple] = []  # serve_detached calls, apart for the same reason
         self.answers = answers
 
     def _answer(self, name: str, default: dict) -> dict:
@@ -380,6 +391,10 @@ class _ApiDoor(_ApiStore):
         self.minted.append(("render_qr", text))
         return _QR
 
+    def serve_detached(self, host: str | None = None, port: int | None = None) -> dict:
+        self.served.append((host, port))
+        return self._answer("serve_detached", {"pid": 4321, "host": self.host, "port": 8787, "log": "/l", "started": 1})
+
 
 @pytest.fixture
 def probes(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
@@ -387,6 +402,46 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
     seen: list[tuple] = []
     monkeypatch.setattr(baud, "server_answers", lambda host, port: seen.append((host, port)) or "serving")
     return seen
+
+
+class _Tty(io.StringIO):
+    """A terminal for the pause: says it is a tty; its text is what the person types."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+class _CtrlC(_Tty):
+    def readline(self, *_args: object) -> str:
+        raise KeyboardInterrupt
+
+
+@pytest.fixture
+def tty(monkeypatch: pytest.MonkeyPatch):
+    """Put a terminal on stdin that answers with ``typed`` ("" is EOF)."""
+
+    def attach(typed: str = "\n", stdin: type[_Tty] = _Tty) -> None:
+        monkeypatch.setattr(sys, "stdin", stdin(typed))
+
+    return attach
+
+
+@pytest.fixture
+def scripted(monkeypatch: pytest.MonkeyPatch):
+    """server_answers from a script: each ask takes the next answer, the last one repeats; records (host, port)."""
+
+    def install(*answers: str) -> list[tuple]:
+        seen: list[tuple] = []
+        queue = list(answers)
+
+        def probe(host: str, port: int) -> str:
+            seen.append((host, port))
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+
+        monkeypatch.setattr(baud, "server_answers", probe)
+        return seen
+
+    return install
 
 
 class TestFinishPhone:
@@ -492,12 +547,15 @@ class TestFinishPhone:
 class TestPairingQR:
     """DPLAN-0406 slice C: a server serving the face on a tailnet bind ends the install on a pairing QR."""
 
-    def test_a_serving_tailnet_bind_mints_one_code_and_ends_on_the_qr_block_in_order(self, capsys, probes):
+    def test_a_serving_tailnet_bind_waits_for_enter_then_ends_on_the_qr_block_in_order(self, capsys, probes, tty):
         """Mutant: the url line dropped -> red."""
+        tty("\n")
         door = _ApiDoor(host=_TAILNET_IP)
         baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
         lines = capsys.readouterr().out.rstrip().splitlines()
         assert door.minted == [("mint_pairing", "phone", "operate", 300), ("render_qr", _PAIR_URL)]
+        pause = lines.index(_PAUSE)
+        assert lines[pause - 1] == "" and lines[pause - 2] == "  Server:     answering, serving the face"
         hhmm = datetime(2026, 10, 13, 19, 5, tzinfo=timezone.utc).astimezone().strftime("%H:%M")
         block = ["", _HEADING, _CAMERA, *_QR.splitlines(), "", _PAIR_URL]
         block.append(f"Expires {hhmm} (5 minutes), one use. Later: {_PAIR}")
@@ -514,40 +572,158 @@ class TestPairingQR:
         assert door.minted == []
         assert f"Then pair your phone: {_PAIR}" in out
         assert _HEADING not in out and _PAIR_URL not in out
+        assert "No QR yet" not in out  # the server answers; the Tailscale line below says why
 
-    def test_a_tailnet_bind_whose_server_does_not_answer_mints_nothing(self, capsys, monkeypatch):
-        monkeypatch.setattr(baud, "server_answers", lambda host, port: "silent")
+    def test_a_tailnet_bind_whose_server_does_not_answer_mints_nothing(self, capsys, scripted, tty):
+        scripted("silent")
+        tty("\n")
         door = _ApiDoor(host=_TAILNET_IP)
-        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=[].append)
         out, _err = capsys.readouterr()
         assert door.minted == []
         assert f"Then pair your phone: {_PAIR}" in out
         assert _HEADING not in out
+        # The owner's test 13: the screen says why there is no code to hold the phone up to.
+        lines = out.splitlines()
+        why = "No QR yet: a pairing code needs the server running first."
+        no_qr = next(i for i, line in enumerate(lines) if why in line)
+        assert "Then pair your phone" in lines[no_qr + 1]
 
-    def test_a_pairing_error_is_stated_with_the_pair_command_and_no_qr(self, capsys, probes):
+    def test_a_pairing_error_is_stated_with_the_pair_command_and_no_qr(self, capsys, probes, tty):
+        tty("\n")
         door = _ApiDoor(host=_TAILNET_IP, mint_pairing=_PairRefused("no bind stored"))
         baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
         out, err = capsys.readouterr()
         assert "Pairing code not minted: no bind stored" in out
         assert f"Then pair your phone: {_PAIR}" in out
-        assert _HEADING not in out and "Traceback" not in out + err
+        assert _CAMERA not in out and "Traceback" not in out + err
 
-    def test_an_api_without_the_pairing_door_gets_the_pair_command(self, capsys, probes):
+    def test_an_api_without_the_pairing_door_gets_the_pair_command(self, capsys, probes, tty):
+        tty("\n")
         door = _ApiDoor(host=_TAILNET_IP)
         door.mint_pairing = None  # pyright: ignore[reportAttributeAccessIssue]
         baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
         out, _err = capsys.readouterr()
         assert f"Then pair your phone: {_PAIR}" in out
-        assert _HEADING not in out
+        assert _CAMERA not in out
 
     def test_the_dry_run_mints_nothing_and_says_what_it_would(self, capsys, probes):
         """Mutant: the dry run minting -> red."""
         door = _ApiDoor(host=_TAILNET_IP)
         baud.finish_phone(_ready(host=_TAILNET_IP), dry_run=True, host_config=door)
         out, _err = capsys.readouterr()
-        assert door.minted == [] and probes == []
-        assert _PAIR_PLAN in out
+        assert door.minted == [] and door.served == [] and probes == []
+        assert _SERVE_PLAN in out
+        assert out.rstrip().endswith(_PAIR_PLAN)
         assert _HEADING not in out
+
+
+class TestServerStart:
+    """DPLAN-0407: where no boot unit will bring the server up, the install starts it detached."""
+
+    def test_no_systemd_starts_it_and_the_retry_waits_through_two_silent_answers(self, capsys, scripted):
+        seen = scripted("silent", "silent", "silent", "serving")
+        naps: list[float] = []
+        door = _ApiDoor(host=_TAILNET_IP, install_unit=_Unsupported("Autostart needs a user-level systemd"))
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=naps.append)
+        out, _err = capsys.readouterr()
+        assert door.served == [(None, None)]
+        assert len(seen) == 4 and naps == [0.5, 0.5]  # one ask before the start, three after it
+        assert f"Server:     started now (pid 4321), serving the face; not at boot: {_AUTOSTART}" in out
+        assert "Start it:" not in out
+
+    def test_an_unreachable_unit_starts_it_and_names_the_boot_command_on_the_server_line(self, capsys, scripted):
+        scripted("silent", "serving")
+        door = _ApiDoor(host=_TAILNET_IP, autostart=_Unreachable("systemctl --user did not answer"))
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=[].append)
+        out, _err = capsys.readouterr()
+        assert "Boot unit:  not set up: systemctl --user did not answer" in out
+        assert f"Server:     started now (pid 4321), serving the face; at boot: {_AUTOSTART}" in out
+        assert "Start it:" not in out and "at every boot" not in out
+
+    def test_a_refused_start_states_the_doors_words_and_the_serve_command(self, capsys, scripted):
+        scripted("silent")
+        refusal = _Refused("100.101.102.103 is not an address on this host")
+        door = _ApiDoor(host=_TAILNET_IP, install_unit=_Unsupported("no systemd"), serve_detached=refusal)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=[].append)
+        out, _err = capsys.readouterr()
+        assert door.served == [(None, None)]
+        assert f"Server:     not answering; could not start it: {refusal}" in out
+        assert "Start it: drone @api host-api serve --detach" in out
+        assert door.minted == []
+
+    def test_an_api_without_serve_detached_keeps_the_manual_lines(self, capsys, scripted):
+        scripted("silent")
+        door = _ApiDoor(host=_TAILNET_IP, install_unit=_Unsupported("no systemd"))
+        door.serve_detached = None  # pyright: ignore[reportAttributeAccessIssue]
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=[].append)
+        out, _err = capsys.readouterr()
+        assert "Start it: drone @api host-api serve --detach" in out
+        assert "Server:     not answering" in out and "started" not in out
+
+    @pytest.mark.parametrize("unit", ["done", "live", "refused"])
+    def test_a_unit_that_holds_the_server_is_never_doubled(self, capsys, scripted, unit):
+        """Mutant: the start ignores the boot unit -> red."""
+        seen = scripted("silent")
+        naps: list[float] = []
+        answers = {
+            "done": {},
+            "live": {"autostart": {"unit": "/u/x.service", "rendered": False, "running": 7}},
+            "refused": {
+                "enable_unit": {"dry_run": False, "ok": False, "steps": [], "refused": "a hand-start holds it"}
+            },
+        }[unit]
+        door = _ApiDoor(host=_TAILNET_IP, **answers)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, sleep=naps.append)
+        assert door.served == []
+        if unit != "refused":  # a starting unit gets its six asks
+            assert len(seen) == 6 and naps == [0.5] * 5
+
+    def test_a_starting_unit_that_answers_on_the_third_ask_is_serving(self, capsys, scripted):
+        seen = scripted("silent", "silent", "serving")
+        naps: list[float] = []
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=_ApiDoor(host=_TAILNET_IP), sleep=naps.append)
+        out, _err = capsys.readouterr()
+        assert len(seen) == 3 and naps == [0.5, 0.5]
+        assert "Server:     answering, serving the face" in out
+
+
+class TestThePauseBeforeTheCode:
+    """DPLAN-0407: the code is minted after the person presses Enter, never on our clock."""
+
+    def test_non_interactive_never_pauses_or_mints_and_ends_on_the_pair_command(self, capsys, probes, tty):
+        tty("\n")
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door, non_interactive=True)
+        lines = capsys.readouterr().out.rstrip().splitlines()
+        assert door.minted == []
+        assert _PAUSE not in lines
+        assert lines[-2] == f"  Then pair your phone: {_PAIR}" and lines[-1].startswith("  Guide:      ")
+
+    def test_no_terminal_never_pauses_or_mints(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, _err = capsys.readouterr()
+        assert door.minted == [] and _PAUSE not in out
+        assert f"Then pair your phone: {_PAIR}" in out
+
+    @pytest.mark.parametrize("stdin", [_Tty, _CtrlC], ids=["eof", "ctrl-c"])
+    def test_no_enter_at_the_pause_is_a_stated_skip_then_the_guide(self, capsys, probes, tty, stdin):
+        """Mutant: the code minted without waiting for Enter -> red."""
+        tty("", stdin)
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), host_config=door)
+        out, err = capsys.readouterr()
+        lines = out.rstrip().splitlines()
+        assert door.minted == []
+        assert lines[-2] == f"  Skipped. Later: {_PAIR}" and lines[-1].startswith("  Guide:      ")
+        assert "Then pair your phone" not in out and "Traceback" not in out + err
+
+    def test_a_non_interactive_dry_run_says_it_mints_nothing(self, capsys, probes):
+        door = _ApiDoor(host=_TAILNET_IP)
+        baud.finish_phone(_ready(host=_TAILNET_IP), dry_run=True, host_config=door, non_interactive=True)
+        out, _err = capsys.readouterr()
+        assert out.rstrip().endswith(_PAIR_PLAN_NONE)
 
 
 class TestInstallEndsOnThePhone:
@@ -570,6 +746,6 @@ class TestInstallEndsOnThePhone:
         assert exc.value.code == 0
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
-        assert out.endswith(_PAIR_PLAN)
+        assert out.endswith(_PAIR_PLAN_NONE)
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-27
-# Modified: 2026-10-12
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -616,6 +616,19 @@ class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
 
         reporter.assert_called_once_with("127.0.0.1", 9100)
         assert report["rendered"] is True and report["running"] == 0
+
+    def test_the_serve_detached_door_is_the_handler_with_the_same_refusals(self, quiet: None) -> None:
+        """DPLAN-0407: where no user systemd exists the install starts the server
+        through this door instead of printing the command; the record and the
+        refusals are the handler's own. Mutant: the door swallowing BindRefused -> red."""
+        record = {"pid": 7, "host": "100.64.0.9", "port": 9100, "log": "/l", "started": "t"}
+        with patch.object(host_lifetime, "serve_detached", return_value=record) as start:
+            assert host_api_module.serve_detached("100.64.0.9", 9100) == record
+        start.assert_called_once_with(host="100.64.0.9", port=9100)
+
+        with patch.object(host_lifetime, "serve_detached", side_effect=host_config.BindRefused("loopback")):
+            with pytest.raises(host_api_module.BindRefused):
+                host_api_module.serve_detached()
 
     def test_both_doors_refuse_without_systemd(self, quiet: None, tmp_path: Path) -> None:
         with patch.object(host_autostart, "is_supported", return_value=False):
