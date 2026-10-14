@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-13] — v2.8.16: the zero-question install (the server started without systemd, the pairing QR on Enter, setup.sh without homework), the three test-13 fixes
 
 ### Fixed
 
