@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-05
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -857,6 +857,21 @@ def print_introspection() -> None:
     console.print()
 
 
+def _flag_value(args: list[str], flag: str) -> str | None:
+    """A value flag in either spelling: ``--flag value`` or ``--flag=value`` (DPLAN-0409 C3).
+
+    None: the flag is absent. "": present with no value (``--flag`` last, or
+    ``--flag=``), which the caller refuses rather than reading as the default.
+    """
+    prefix = f"{flag}="
+    for idx, arg in enumerate(args):
+        if arg == flag:
+            return args[idx + 1] if idx + 1 < len(args) else ""
+        if arg.startswith(prefix):
+            return arg[len(prefix) :]
+    return None
+
+
 def handle_command(command: str, args: list[str]) -> bool:
     """Route install subcommands. Returns True if handled, False otherwise."""
     if command != COMMAND:
@@ -872,13 +887,6 @@ def handle_command(command: str, args: list[str]) -> bool:
     # `aipass install` runs directly; `run` is accepted as an optional verb.
     run_args = args[1:] if args and args[0] == "run" else args
 
-    def _flag_value(flag: str) -> str | None:
-        """Extract the value after a named flag, or None if absent."""
-        if flag not in run_args:
-            return None
-        idx = run_args.index(flag)
-        return run_args[idx + 1] if idx + 1 < len(run_args) else None
-
     non_interactive = "--non-interactive" in run_args
     dry_run = "--dry-run" in run_args
     here = "--here" in run_args
@@ -887,11 +895,12 @@ def handle_command(command: str, args: list[str]) -> bool:
     no_symlink = "--no-symlink" in run_args
     force_symlink = "--force-symlink" in run_args
     no_baud = "--no-baud" in run_args
-    path = _flag_value("--path")
+    path = _flag_value(run_args, "--path") or None
     # A --baud-tag with no value reaches validate_tag as "" and is refused there, as any bad tag is.
-    baud_tag = (_flag_value("--baud-tag") or "") if "--baud-tag" in run_args else LATEST
+    baud_tag = _flag_value(run_args, "--baud-tag")
+    baud_tag = LATEST if baud_tag is None else baud_tag
     # The same for --source: a valueless one is refused, never read as the public repo.
-    source = (_flag_value("--source") or "") if "--source" in run_args else None
+    source = _flag_value(run_args, "--source")
 
     if chat_only:
         result = run_chat_only(

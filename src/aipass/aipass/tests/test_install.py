@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-07-05
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -429,6 +429,49 @@ class TestSource:
         printed = " ".join(capsys.readouterr().out.split())
         assert "aipass install --source PATH|URL" in printed
         assert "a local path clones its committed HEAD; for the install sandbox" in printed
+
+
+class TestFlagSpellings:
+    """DPLAN-0409 C3: every value flag reads `--flag value` and `--flag=value` alike, in one place."""
+
+    @pytest.mark.parametrize(
+        ("flag", "kwarg", "value"),
+        [
+            ("--path", "path", "/opt/aipass-home"),
+            ("--baud-tag", "baud_tag", "v0.2.1"),
+            ("--source", "source", "/src/a"),
+        ],
+    )
+    def test_both_spellings_reach_run_install_with_the_same_value(self, flag: str, kwarg: str, value: str) -> None:
+        """Mutant: the equals branch removed -> `--source=/x` clones the public repo -> red."""
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", [flag, value, "--no-chat"])
+            with pytest.raises(SystemExit):
+                handle_command("install", [f"{flag}={value}", "--no-chat"])
+        assert [c.kwargs[kwarg] for c in run.call_args_list] == [value, value]
+
+    @pytest.mark.parametrize(
+        ("given", "words"), [("--source=", "--source refused"), ("--baud-tag=", "--baud-tag refused")]
+    )
+    def test_an_empty_equals_value_is_refused_with_2_and_nothing_made(self, given, words, capsys) -> None:
+        with (
+            patch(f"{_MOD}._resolve_home") as resolve,
+            patch(f"{_MOD}._clone_repo") as clone,
+        ):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", [given, "--no-chat"])
+        assert exc.value.code == 2
+        resolve.assert_not_called()
+        clone.assert_not_called()
+        assert words in capsys.readouterr().err
+
+    def test_absent_flags_keep_their_defaults(self) -> None:
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-chat"])
+        kwargs = run.call_args.kwargs
+        assert (kwargs["path"], kwargs["baud_tag"], kwargs["source"]) == (None, "latest", None)
 
 
 class TestRunSetup:
