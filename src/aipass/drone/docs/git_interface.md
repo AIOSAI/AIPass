@@ -106,6 +106,27 @@ in `tests/test_git_module.py`.
 
 ---
 
+## `untrack` — out of the index, never off the disk
+
+A `.gitignore` line never untracks a file the index already holds. Four seedgo ratchet artifacts
+were committed with the owner's home path in them, their directory was then ignored, and they still
+rode every clone; with raw git blocked for every seat there was no door to `git rm --cached`
+(DPLAN-0409 C1, 2026-10-15). `drone @git untrack <path ...>` is that door, owner tier, beside
+`commit`. Each path is classified exactly as `tracked` classifies it. Only a tracked file leaves the
+index; an untracked, ignored, missing or outside path is refused by name with its class and nothing
+is done for it, and a directory is refused unless `--recursive` is given, because one directory can
+untrack a whole tree. Refusals do not stop the accepted paths, and any refusal makes the exit 1.
+
+The verb never touches the working tree and never commits. Its last line names the next step:
+`drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on them, which
+stages a still-present file straight back into the index, or fails outright on one that is now
+ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
+every verb's does, and there is no separate owner-verb ledger to write. `--repo` is not served: the
+door would need its own repo-rooted lane, and the verb is refused there like any verb outside the
+door's table. Pinned by `TestUntrack` in `tests/test_git_module.py`, against a real repo.
+
+---
+
 ## The `--all` pre-commit lane
 
 `commit --all` stages the whole repo, which is the correct default since dispatched agents work

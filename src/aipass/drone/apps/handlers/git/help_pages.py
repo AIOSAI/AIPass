@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-15
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -16,7 +16,7 @@ every call and keeps the gh passthroughs' pages, which read the gate's table.
 from __future__ import annotations
 
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.git import commit_handler, merge_main_handler, repo_door
+from aipass.drone.apps.handlers.git import commit_handler, merge_main_handler, repo_door, untrack_handler
 
 
 def page(command: str | None = None) -> str:
@@ -70,6 +70,18 @@ def page(command: str | None = None) -> str:
             "  missing (not on disk, not tracked) or outside (not in this repo).\n"
             "  A path is read against your directory first, then the repo root.\n"
             "  Example: drone @git tracked docs/plan.md logs/run.log\n"
+        )
+    if command == "untrack":
+        return (
+            "git untrack [--recursive] <path ...> — Take tracked files out of the index, files stay on disk [owner]\n"
+            "  The twin of git rm --cached. Each path is read as tracked reads it; only a\n"
+            "  tracked one leaves the index. Never touches the working tree, never commits.\n"
+            "  Refused by name, nothing done for that path (exit 1, the others still run):\n"
+            f"    {untrack_handler.REFUSE_NOT_TRACKED.format(path='<path>', state='<state>')}\n"
+            f"    {untrack_handler.REFUSE_DIRECTORY.format(path='<path>')}\n"
+            "  --recursive   A directory leaves the index whole (git rm --cached -r).\n"
+            '  Then commit the removal with no paths: drone @git commit "<message>"\n'
+            "  (paths would stage the files again). --repo is not served.\n"
         )
     if command == "export":
         return (
@@ -198,6 +210,7 @@ def page(command: str | None = None) -> str:
         "  workflow list|view     gh workflow reads\n"
         "Owner (devpulse only):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
+        "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
         "  checkout <main|dev>    Switch branches\n"
         "  pr <desc>              Push current branch and create PR to main\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"

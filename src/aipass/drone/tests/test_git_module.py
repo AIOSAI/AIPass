@@ -1,19 +1,21 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
-# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate and gh verbs
-# Version: 1.2.0
+# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs and untrack
+# Version: 1.3.0
 # Created: 2026-04-21
-# Modified: 2026-10-08
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
+# seedgo: no-test-needed(stdlib) — subprocess.run, a recorded stub everywhere but untrack, whose git runs in a tmp_path repo
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -21,6 +23,8 @@ import pytest
 
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers import module_registry_handler
+from aipass.drone.apps.handlers.git import untrack_handler
+from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.handlers.git.pr_handler import create_pr
 from aipass.drone.apps.modules.git_module import (
@@ -962,3 +966,156 @@ class TestVerbFlags:
 
         mock_sync.assert_called_once_with(autostash=False)
         assert result == {"stdout": "", "stderr": "dirty tree", "exit_code": 1}
+
+
+# ===========================================================================
+# untrack <path ...>: out of the index, never off the disk, never committed
+# ===========================================================================
+
+
+def _git(cwd: Path, *argv: str) -> str:
+    """Run git in *cwd* for fixture setup and read-back; raises on failure."""
+    return subprocess.run(
+        ["git", *argv], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", check=True
+    ).stdout.strip()
+
+
+@pytest.fixture()
+def untrack_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A real repo holding tracked a.txt, sub/one.txt, sub/two.txt and a force-added, ignored kept.log.
+
+    Git runs with no host config, a fixed identity and a ceiling at tmp_path. The
+    caller stands at the repo root with no AIPASS_CALLER_CWD stamp.
+    """
+    empty_config = tmp_path / "gitconfig"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep.join(sorted({str(tmp_path), str(tmp_path.resolve())})))
+    for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(name, "Untrack Test")
+    for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(name, "untrack@test.invalid")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+    work = tmp_path / "work"
+    (work / "sub").mkdir(parents=True)
+    _git(work, "init", "-q", "-b", "dev")
+    (work / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    for name in ("a.txt", "sub/one.txt", "sub/two.txt", "kept.log"):
+        (work / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(work, "add", ".gitignore", "a.txt", "sub")
+    _git(work, "add", "-f", "kept.log")
+    _git(work, "commit", "-q", "-m", "seed")
+    monkeypatch.chdir(work)
+    return work
+
+
+def _untrack(work: Path, args: list[str]) -> dict:
+    with patch(_AUTH, return_value="devpulse"), patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=work):
+        return handle_command("untrack", args)
+
+
+class TestUntrack:
+    """untrack: a tracked file leaves the index and stays on disk; anything else is refused by name."""
+
+    def test_a_tracked_file_leaves_the_index_stays_on_disk_and_nothing_is_committed(self, untrack_repo: Path) -> None:
+        """Mutant: --cached dropped — git rm deletes the working-tree file too."""
+        work = untrack_repo
+        head = _git(work, "rev-parse", "HEAD")
+
+        result = _untrack(work, ["a.txt"])
+
+        assert result == {
+            "stdout": "left the index  a.txt\n" + untrack_handler.NEXT_STEP.format(count=1),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert "a.txt" not in _git(work, "ls-files").splitlines()
+        assert (work / "a.txt").read_text(encoding="utf-8") == "a.txt\n"
+        assert _git(work, "rev-parse", "HEAD") == head, "untrack never commits"
+
+    def test_untracked_ignored_and_missing_paths_are_refused_by_name_and_the_tracked_one_still_leaves(
+        self, untrack_repo: Path
+    ) -> None:
+        """Mutant: the not-tracked refusal removed — git rm is asked for a path the index never held."""
+        work = untrack_repo
+        (work / "new.txt").write_text("new\n", encoding="utf-8")
+        (work / "x.log").write_text("log\n", encoding="utf-8")
+
+        result = _untrack(work, ["new.txt", "x.log", "gone.txt", "a.txt"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].splitlines() == [
+            untrack_handler.REFUSE_NOT_TRACKED.format(path="new.txt", state="untracked"),
+            untrack_handler.REFUSE_NOT_TRACKED.format(path="x.log", state="ignored"),
+            untrack_handler.REFUSE_NOT_TRACKED.format(path="gone.txt", state="missing"),
+        ]
+        assert result["stdout"].splitlines()[0] == "left the index  a.txt"
+        assert "a.txt" not in _git(work, "ls-files").splitlines()
+        assert (work / "new.txt").exists() and (work / "x.log").exists()
+
+    def test_a_directory_is_refused_without_recursive_and_leaves_whole_with_it(self, untrack_repo: Path) -> None:
+        work = untrack_repo
+
+        refused = _untrack(work, ["sub"])
+        listed_after_refusal = _git(work, "ls-files", "sub").splitlines()
+        recursive = _untrack(work, ["--recursive", "sub"])
+
+        assert refused == {"stdout": "", "stderr": untrack_handler.REFUSE_DIRECTORY.format(path="sub"), "exit_code": 1}
+        assert listed_after_refusal == ["sub/one.txt", "sub/two.txt"]
+        assert recursive["exit_code"] == 0
+        assert recursive["stdout"].splitlines()[0] == "left the index  sub"
+        assert _git(work, "ls-files", "sub") == ""
+        assert (work / "sub" / "one.txt").exists() and (work / "sub" / "two.txt").exists()
+
+    def test_the_printed_next_step_commits_an_ignored_file_out_and_keeps_it_on_disk(self, untrack_repo: Path) -> None:
+        """The ratchet case: tracked before its .gitignore line; commit with paths would stage it back."""
+        work = untrack_repo
+
+        untracked = _untrack(work, ["kept.log"])
+        with (
+            patch(_AUTH, return_value="devpulse"),
+            patch("aipass.drone.apps.handlers.git.commit_handler.find_repo_root", return_value=work),
+        ):
+            commit = handle_command("commit", ["chore: untrack kept.log"])
+
+        assert untracked["exit_code"] == 0
+        assert 'drone @git commit "<message>"  (no paths' in untracked["stdout"]
+        assert commit["exit_code"] == 0
+        assert "kept.log" not in _git(work, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+        assert (work / "kept.log").exists()
+        assert _git(work, "status", "--porcelain") == ""
+
+    def test_no_path_and_an_unknown_flag_are_refused_before_git_runs(self, untrack_repo: Path) -> None:
+        assert _untrack(untrack_repo, ["--recursive"]) == {
+            "stdout": "",
+            "stderr": "Usage: drone @git untrack [--recursive] <path ...>",
+            "exit_code": 1,
+        }
+        assert _untrack(untrack_repo, ["-f", "a.txt"]) == {
+            "stdout": "",
+            "stderr": "Unknown argument for 'untrack': -f",
+            "exit_code": 1,
+        }
+        assert "a.txt" in _git(untrack_repo, "ls-files").splitlines()
+
+    def test_untrack_is_owner_tier_and_the_real_gate_stops_a_builder(self, untrack_repo: Path) -> None:
+        make_owner_project(untrack_repo, citizen_class="builder")
+
+        result = handle_command("untrack", ["a.txt"])
+
+        assert "untrack" in GIT_ACCESS_TIERS["owner"]["commands"]
+        assert "untrack" not in GIT_ACCESS_TIERS["global"]["commands"]
+        assert result["exit_code"] == 1
+        assert "not authorized" in result["stderr"].lower()
+        assert "a.txt" in _git(untrack_repo, "ls-files").splitlines()
+
+    def test_help_names_the_verb_under_owner_and_its_page_renders_the_refusals(self) -> None:
+        owner_part = get_help().split("Owner (devpulse only):\n", 1)[1].split("\n\n", 1)[0]
+        page = get_help("untrack")
+
+        assert "  untrack <path ...> " in owner_part
+        assert page.startswith("git untrack [--recursive] <path ...> — ")
+        assert untrack_handler.REFUSE_DIRECTORY.format(path="<path>") in page
+        assert untrack_handler.REFUSE_NOT_TRACKED.format(path="<path>", state="<state>") in page
