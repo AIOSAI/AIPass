@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-10
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -103,6 +103,10 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, max_bytes: int
     The directory resolvers create what they return, so an unwritable log home raises
     from them, before _safe_rotating_handler is reached: a logger call raised it into
     its caller (FPLAN-0642 container proof, an `aipass install` crash).
+
+    From outside, a muted tier is one "Log handler failed" line on stderr when the
+    logger is built, then silence from that tier until the process restarts. The
+    built logger is cached with its NullHandler, so nothing retries, by design.
     """
     try:
         log_dir = resolve_dir()
@@ -110,6 +114,12 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, max_bytes: int
         logger.error("Log handler failed for %s: %s", filename, e)
         return logging.NullHandler()
     return _safe_rotating_handler(log_dir / filename, max_bytes, backup_count)
+
+
+def _made(log_dir: Path) -> Path:
+    """Create ``log_dir`` and return it: a resolver for _tier_handler, which guards the mkdir."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
 
 
 def setup_individual_logger(
@@ -201,25 +211,28 @@ def _build_individual_logger(
     if external_project:
         # EXTERNAL PROJECT: route both handlers to the caller's project directory
         project_name, project_root = external_project
-        ext_system_logs = project_root / "system_logs"
-        ext_system_logs.mkdir(parents=True, exist_ok=True)
-        ext_local_logs = project_root / "logs"
-        ext_local_logs.mkdir(parents=True, exist_ok=True)
 
         # HANDLER 1: Project system log
-        system_log_file = ext_system_logs / f"{project_name}_{module_name}.log"
+        system_log_file = f"{project_name}_{module_name}.log"
         system_limits = log_config["system_logs"]
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
-        system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
+        system_handler = _tier_handler(
+            lambda: _made(project_root / "system_logs"),
+            system_log_file,
+            system_max_bytes,
+            system_limits["backup_count"],
+        )
         system_handler.setFormatter(formatter)
         system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
         # HANDLER 2: Project local log
-        module_log_file = ext_local_logs / f"{module_name}.log"
+        module_log_file = f"{module_name}.log"
         local_limits = log_config["local_logs"]
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
-        local_handler = _safe_rotating_handler(module_log_file, local_max_bytes, local_limits["backup_count"])
+        local_handler = _tier_handler(
+            lambda: _made(project_root / "logs"), module_log_file, local_max_bytes, local_limits["backup_count"]
+        )
         local_handler.setFormatter(formatter)
         local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
@@ -227,7 +240,8 @@ def _build_individual_logger(
         if _system_logger:
             _system_logger.info(
                 f"Logger created for {module_name} → external project '{project_name}': "
-                f"{system_log_file}, {module_log_file}"
+                f"{getattr(system_handler, 'baseFilename', system_log_file)}, "
+                f"{getattr(local_handler, 'baseFilename', module_log_file)}"
             )
     else:
         # INTERNAL: route to AIPass system_logs + branch-local logs
@@ -305,30 +319,34 @@ def setup_system_logger() -> logging.Logger:
     log_config_fmt = logging.Formatter(log_config["log_format"], log_config["date_format"])
 
     # HANDLER 1: System-wide log (central aggregation)
-    system_log_file = get_system_logs_dir() / "prax_logger.log"
     system_limits = log_config["system_logs"]
     system_max_bytes = lines_to_bytes(system_limits["max_lines"])
-    system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
+    system_handler = _tier_handler(
+        get_system_logs_dir, "prax_logger.log", system_max_bytes, system_limits["backup_count"]
+    )
     system_handler.setFormatter(log_config_fmt)
     system_handler.setLevel(system_level)
     _system_logger.addHandler(system_handler)
 
     # HANDLER 2: Module-local log (local debugging)
-    local_log_file = get_module_logs_dir("prax") / "prax_logger.log"
     local_limits = log_config["local_logs"]
     local_max_bytes = lines_to_bytes(local_limits["max_lines"])
-    local_handler = _safe_rotating_handler(local_log_file, local_max_bytes, local_limits["backup_count"])
+    local_handler = _tier_handler(
+        lambda: get_module_logs_dir("prax"), "prax_logger.log", local_max_bytes, local_limits["backup_count"]
+    )
     local_handler.setFormatter(log_config_fmt)
     local_handler.setLevel(local_level)
     _system_logger.addHandler(local_handler)
+
+    # A muted tier has no file: None in the record, never a path that was not opened.
+    system_log_file = getattr(system_handler, "baseFilename", None)
+    local_log_file = getattr(local_handler, "baseFilename", None)
 
     # Log system logger creation
     _system_logger.info("Prax system logger initialized successfully")
     _system_logger.info(f"System logger writing to: {system_log_file} + {local_log_file}")
 
-    json_handler.log_operation(
-        "logger_setup_complete", {"system_log": str(system_log_file), "local_log": str(local_log_file)}
-    )
+    json_handler.log_operation("logger_setup_complete", {"system_log": system_log_file, "local_log": local_log_file})
 
     return _system_logger
 

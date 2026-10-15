@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -24,6 +24,7 @@ import logging
 import os
 import threading
 import types
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -291,6 +292,37 @@ class TestSetupExternalRouting:
                         setup_handler.setup_individual_logger("navigator", caller_path=fake_module)
 
         assert len(get_calls) == 0
+
+    def test_a_project_system_logs_that_cannot_be_made_mutes_that_tier_and_never_raises(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
+    ):
+        """DPLAN-0409 C4: the external branch mkdir'd <project>/system_logs bare, so it raised."""
+        project_dir = tmp_path / "Compass"
+        project_dir.mkdir()
+        # A file where the directory belongs: mkdir fails on every OS, no permission bit needed.
+        (project_dir / "system_logs").write_text("not a directory", encoding="utf-8")
+        monkeypatch.setattr(setup_handler, "detect_external_project", lambda path: ("compass", project_dir))
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "")
+
+        with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
+            built = setup_handler.setup_individual_logger("navigator", caller_path=str(project_dir / "nav.py"))
+        try:
+            failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+            handler_types = [type(h) is logging.NullHandler for h in built.handlers]
+            local_is_a_file = isinstance(built.handlers[1], RotatingFileHandler)
+            local_file = Path(built.handlers[1].baseFilename)
+        finally:
+            for handler in list(built.handlers):
+                handler.close()
+                built.removeHandler(handler)
+
+        assert len(failed) == 1
+        assert failed[0].startswith("Log handler failed for compass_navigator.log: ")
+        assert handler_types == [True, False]
+        assert local_is_a_file
+        assert local_file == project_dir / "logs" / "navigator.log"
 
 
 class TestConcurrentFirstCallsBuildOneLogger:
