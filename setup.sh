@@ -348,8 +348,12 @@ else
         echo "  srt       ... skipped (no node)"
         SB_MISSING+=("srt")
     else
+        # Not an optional tool: the resolver is a tracked file of this checkout.
+        # Its absence means the clone is incomplete, which is the one sandbox
+        # row that belongs in ACTION NEEDED (DPLAN-0409, the 2026-10-15 review).
         echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
         SB_MISSING+=("srt")
+        ACTION_NEEDED+=("Checkout incomplete — $SRT_RESOLVER is a tracked file and is missing. Run: drone @git status, then drone @git fix, or re-run the install line to clone again")
     fi
 
     # rg (ripgrep)
