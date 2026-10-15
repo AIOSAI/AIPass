@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-14
 # =============================================
 
 """
@@ -62,10 +62,12 @@ DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "citizen"
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 
 
-def _load_meta_tabs():
+def _load_meta_tabs(branch_dir: str | None = None):
     """Load memory meta-tab values from @memory's renderer.
 
-    Returns empty dict when @memory is unavailable (standalone project).
+    branch_dir is the newborn's folder name, so its todos tab names its own
+    backlog instead of ``<branch>``. Returns empty dict when @memory is
+    unavailable (standalone project).
     """
     try:
         from aipass.memory.apps.modules.door_tab_renderer import render_all_meta_tabs
@@ -74,7 +76,7 @@ def _load_meta_tabs():
         logger.info("[spawn] @memory not available — meta-tab placeholders will be empty (%s)", e)
         return {}
 
-    tabs = render_all_meta_tabs()
+    tabs = render_all_meta_tabs(branch_dir)
     missing = _META_TAB_KEYS - set(tabs or {})
     if missing:
         raise RuntimeError(f"render_all_meta_tabs() missing keys: {sorted(missing)}")

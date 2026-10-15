@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-14
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -180,6 +180,12 @@ class TestSpawnAgent:
         # Verify registry
         reg = load_registry(tmp_registry)
         assert len(reg["branches"]) == 1
+
+    def test_newborn_todos_meta_names_its_own_backlog_not_a_placeholder(self, tmp_agent, tmp_registry):
+        spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+        local = json.loads((tmp_agent / ".trinity" / "local.json").read_text(encoding="utf-8"))
+        assert ".backup/todo/test_agent/backlog.json" in local["todos_meta"]
+        assert "<branch>" not in local["todos_meta"]
 
     def test_target_already_exists(self, tmp_path, tmp_registry):
         existing = tmp_path / "existing"

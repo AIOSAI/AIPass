@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-28
-# Modified: 2026-10-03
+# Modified: 2026-10-14
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen.
@@ -54,7 +54,7 @@ _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
 def spawn_at(
     target_path,
-    load_meta_tabs: Callable[[], dict],
+    load_meta_tabs: Callable[[str], dict],
     role="",
     traits: str | list[str] | tuple[str, ...] = "",
     purpose="",
@@ -182,7 +182,7 @@ def _find_project_registry(target: Path) -> Path:
 def mint_citizen(
     target: Path,
     template: Path,
-    load_meta_tabs: Callable[[], dict],
+    load_meta_tabs: Callable[[str], dict],
     role="",
     traits: str | list[str] | tuple[str, ...] = "",
     purpose="",
@@ -195,8 +195,9 @@ def mint_citizen(
     Args:
         target: Resolved path of the new branch (must not exist)
         template: The template directory to copy
-        load_meta_tabs: Answers @memory's meta-tab values; called at the
-            same step as before the move, after the registry is resolved
+        load_meta_tabs: Answers @memory's meta-tab values for the newborn's
+            folder name; called at the same step as before the move, after the
+            registry is resolved
         role, traits, purpose, profile, registry_path, citizen_class: as
             spawn_agent in apps/modules/core.py documents them
 
@@ -256,7 +257,7 @@ def mint_citizen(
     resolved_class = citizen_class or class_for_citizen_number(citizen_number)
 
     # Build placeholder replacements
-    meta_tabs = load_meta_tabs()
+    meta_tabs = load_meta_tabs(folder_name)
     replacements = build_replacements_dict(
         target,
         folder_name,
