@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-02-13
-# Modified: 2026-09-27
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -301,6 +301,8 @@ def _cmd_detail(console, args: list) -> bool:
         error(f"Error not found: {args[0]}", suggestion="Try a fingerprint prefix, full fingerprint, or short ID")
         return True
 
+    from rich.markup import escape
+
     st = entry.get("status", "?")
     sev = entry.get("severity", "?")
     sc = _STATUS_COLORS.get(st, "white")
@@ -316,21 +318,21 @@ def _cmd_detail(console, args: list) -> bool:
         f"  [bold]Count:[/bold]           {entry.get('count', 0)}",
         f"  [bold]First Seen:[/bold]      {entry.get('first_seen', '?')}",
         f"  [bold]Last Seen:[/bold]       {entry.get('last_seen', '?')}",
-        f"  [bold]Log Path:[/bold]        {entry.get('log_path', 'N/A') or 'N/A'}",
+        f"  [bold]Log Path:[/bold]        {escape(str(entry.get('log_path', 'N/A') or 'N/A'))}",
         f"  [bold]Fix Status:[/bold]      "
         f"[{_FIX_STATUS_COLORS.get(entry.get('source_fix_status', 'none'), 'white')}]"
         f"{entry.get('source_fix_status', 'none')}"
         f"[/{_FIX_STATUS_COLORS.get(entry.get('source_fix_status', 'none'), 'white')}]",
     ]
     if entry.get("suppress_reason"):
-        lines.append(f"  [bold]Suppress Reason:[/bold] {entry['suppress_reason']}")
+        lines.append(f"  [bold]Suppress Reason:[/bold] {escape(str(entry['suppress_reason']))}")
     lines += [
         "",
         "  [bold]Message:[/bold]",
-        f"    {entry.get('message', '?')}",
+        f"    {escape(str(entry.get('message', '?')))}",
         "",
         "  [bold]Normalized:[/bold]",
-        f"    {entry.get('normalized_message', '?')}",
+        f"    {escape(str(entry.get('normalized_message', '?')))}",
     ]
 
     console.print(Panel("\n".join(lines), title=f"Error Detail - {entry.get('id', '?')}", style="bold"))
