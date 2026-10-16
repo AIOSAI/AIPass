@@ -263,7 +263,7 @@ saying which half is which is part of the finding.
   `timer_install`, @hooks' `trust_registry` among them — so a marked ancestor under
   the profile is not a hypothetical.
 
-**Not proven, and it needed a probe from the Windows job to settle (the lane is retired since 2026-10-15, so it stays open):** *which marker
+**Not proven, and no Windows runner exists to settle it:** *which marker
 file existed on that runner at that moment, and which step created it.*
 
 ### The class

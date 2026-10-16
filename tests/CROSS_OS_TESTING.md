@@ -14,7 +14,7 @@ audible hooks). Copy a **Run Record** (bottom of this file) per machine and fill
 | Layer | What | Where it runs | Catches |
 |-------|------|---------------|---------|
 | 1 — **Static** | `drone @seedgo` Windows-compat scan | any OS, no execution | POSIX-only patterns (`os.kill`, `start_new_session`, `/tmp`, `fcntl`…) before you run |
-| 2 — **Automated** | `pytest tests/e2e` (the `e2e-wheel.yml` 4-tier gate) | CI on ubuntu+macos, and locally (the Windows lane was retired 2026-10-15; layer 1 is now the only Windows guard) | the wiring contract: clean-wheel install → `aipass init` scaffold → hook fires → `drone` routes |
+| 2 — **Automated** | `pytest tests/e2e` (the `e2e-wheel.yml` 4-tier gate) | CI on ubuntu+macos, and locally; layer 1 is the only Windows guard | the wiring contract: clean-wheel install → `aipass init` scaffold → hook fires → `drone` routes |
 | 3 — **Manual** | **this checklist** | a real box / VM, by hand | full install, interactive `init run`, daemons, sound, per-branch smoke |
 
 Layers 1–2 are free and run on every push. **This file is layer 3** — the human acceptance pass

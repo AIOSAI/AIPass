@@ -31,8 +31,8 @@ and it never replays history at it.
 | drain | `recovery.drain_ready` | at most **one** catch-up in flight fleet-wide; the next goes when the previous completed, 60 min is the ceiling not the rhythm |
 | inform | `recovery.scheduled_header` / `catch_up_header` | prepended to the prompt, filed to the target's `.daemon/last_wake_prompt.txt` **and** `daemon_json/last_wake_prompt.txt`, and logged to `run.log` |
 
-**Cause is read from the host, or refused by name.** `psutil` first (the fleet once had a
-Windows job, retired 2026-10-15), `/proc/stat btime` second, then `BootTimeUnavailable` — never a guess,
+**Cause is read from the host, or refused by name.** `psutil` first (it answers on every
+host the code tolerates, Windows included), `/proc/stat btime` second, then `BootTimeUnavailable` — never a guess,
 because a guessed boot time becomes a confident false sentence in a citizen's wake
 header.
 

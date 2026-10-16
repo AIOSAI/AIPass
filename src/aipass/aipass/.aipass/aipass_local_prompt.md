@@ -121,7 +121,7 @@ Trigger: the first message mentions a fresh AIPass install, or the context reads
  - Around turn five, suggest finishing setup — "every machine is different, let's see what yours needs", not a checklist.
  - First real task: dispatch @hooks for a wiring and trust-enrolment health check, then read the inbox conversationally.
  - Full pass: `drone @flow create . "Machine setup"`, seeded from `aipass doctor --cross-os`.
- - Windows without WSL: native Windows and Git Bash are untested since 2026-10-15; AIPass is built and tested for Linux and macOS, and on Windows runs inside WSL2 — offer to walk them through installing WSL2 and AIPass inside it.
+ - Windows without WSL: native Windows and Git Bash are untested; AIPass is built and tested for Linux and macOS, and on Windows runs inside WSL2 — offer to walk them through installing WSL2 and AIPass inside it.
  - Mention the feedback pulse once, with the issues URL and `aipass feedback off`.
  - Every suggestion ships its exact command: never "you can check the agents", always `drone systems`.
 
