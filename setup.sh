@@ -723,7 +723,10 @@ if [ -f "$MEMORY_CONFIG_EXAMPLE" ] && [ ! -f "$MEMORY_CONFIG_FILE" ]; then
 fi
 
 # --- Install Claude Code hooks ---
-CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+# One door writes ~/.claude/settings.json at install: refresh_provider_hooks below
+# (hooks, env, permissions, scalars), which backs the file up and leaves a receipt
+# first (FPLAN-0645). The stdlib heredoc that used to rewrite env and deny rules
+# after it, with no backup, is gone.
 
 if [ -f "$SCRIPT_DIR/src/aipass/hooks/apps/handlers/bridges/claude.py" ]; then
     echo "Installing Claude Code hooks ..."
@@ -739,94 +742,6 @@ manifest_path = Path(sys.argv[1])
 actions = refresh_provider_hooks(manifest_path)
 for action in actions:
     print(f"  {action}")
-PYEOF
-
-    "$PYTHON" - "$SCRIPT_DIR" "$CLAUDE_SETTINGS" << 'PYEOF'
-import json
-import os
-import sys
-from pathlib import Path
-
-repo_root = sys.argv[1]
-settings_path = Path(sys.argv[2])
-
-# Load existing settings or start fresh
-if settings_path.exists():
-    settings = json.loads(settings_path.read_text(encoding="utf-8"))
-else:
-    settings = {}
-
-# Inject AIPASS_HOME into env block so dispatched agents find AIPass
-env_block = settings.get("env", {})
-env_block["AIPASS_HOME"] = repo_root
-env_block["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
-# Windows: force UTF-8 for Rich output in hook processes
-msys = os.environ.get("MSYSTEM", "") + os.environ.get("OSTYPE", "")
-if "MSYS" in msys or "msys" in msys or "MINGW" in msys:
-    env_block["PYTHONUTF8"] = "1"
-settings["env"] = env_block
-
-# Deny rules — hard-block tool access to secrets
-permissions = settings.get("permissions", {})
-deny = permissions.get("deny", [])
-secrets_deny = [
-    "Read(~/.secrets/**)",
-    f"Read({os.path.expanduser('~')}/.secrets/**)",
-    "Bash(cat ~/.secrets/*)",
-    f"Bash(cat {os.path.expanduser('~')}/.secrets/*)",
-    "Bash(head ~/.secrets/*)",
-    f"Bash(head {os.path.expanduser('~')}/.secrets/*)",
-    "Bash(tail ~/.secrets/*)",
-    f"Bash(tail {os.path.expanduser('~')}/.secrets/*)",
-    "Bash(less ~/.secrets/*)",
-    f"Bash(less {os.path.expanduser('~')}/.secrets/*)",
-]
-git_deny = [
-    "Bash(git reset --hard*)",
-    "Bash(git push --force*)",
-    "Bash(git push -f *)",
-    "Bash(git rebase*)",
-    "Bash(git clean*)",
-    "Bash(git reset*)",
-    "Bash(git merge*)",
-    "Bash(git config*)",
-    "Bash(git checkout -- *)",
-    "Bash(git checkout .*)",
-    "Bash(git restore --staged*)",
-    "Bash(git restore .*)",
-    "Bash(git branch -D*)",
-    "Bash(git stash drop*)",
-    "Bash(git stash clear*)",
-    "Bash(git checkout -b*)",
-    "Bash(git switch -c*)",
-    "Bash(git switch --create*)",
-    "Bash(git commit*)",
-    "Bash(git push*)",
-]
-for rule in secrets_deny + git_deny:
-    if rule not in deny:
-        deny.append(rule)
-permissions["deny"] = deny
-
-ask = permissions.get("ask", [])
-home = os.path.expanduser("~")
-# Edit(path) rules cover ALL file-editing tools (Edit, Write, NotebookEdit).
-# Write(path) rules are never matched by file permission checks — Claude Code
-# warns about them at launch. Ship Edit() only.
-ask_rules = [
-    f"Edit({home}/.claude/**)",
-    "Edit(~/.claude/**)",
-]
-for rule in ask_rules:
-    if rule not in ask:
-        ask.append(rule)
-permissions["ask"] = ask
-
-settings["permissions"] = permissions
-
-settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-print(f"  hooks -> {settings_path}")
-print(f"  AIPASS_HOME -> {repo_root} (in settings.json env)")
 PYEOF
 else
     echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"

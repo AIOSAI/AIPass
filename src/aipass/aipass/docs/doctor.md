@@ -60,15 +60,18 @@ of the personal `~/.claude/settings.json`. It reads what AIPass wants from
 `.claude/provider_manifest.json` — hooks, env vars, permission rules, and the
 `settings` scalar slot — and merges additively: a key that is absent is set, a
 key that already carries your value is reported and **never** overwritten. The
-same merge runs from the installer's `refresh_provider_hooks`, so both doors
-agree. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+same merge, all four parts, runs from the installer's `refresh_provider_hooks`,
+so both doors agree; under Git Bash on Windows both also set `PYTHONUTF8=1`.
+The one difference: install re-points `AIPASS_HOME` to the tree being installed,
+and says so; `doctor --fix` never does, so a fix from a second checkout cannot
+take the home from the first (the home-agreement row flags that split). Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
 ## Every write to your provider settings backs up first
 
 Before any of these doors writes the personal settings file (`doctor --fix`,
-the install tail's doctor run, setup.sh's hook refresh, the stale-deny cleanup),
+the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
 `settings.json.<date>T<time>.<door>`. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,

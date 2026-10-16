@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-08-01
 # Modified: 2026-10-15
 # =============================================
@@ -560,10 +560,11 @@ class TestSettingsBackup:
         manifest, settings_path = _backup_world(tmp_path, {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(keep*)"]}})
         original = settings_path.read_bytes()
 
+        detail = ""
         if door == "setup-sh":
             refresh_provider_hooks(manifest, settings_path=settings_path)
         else:
-            (row,) = reconcile_stale_deny(fix=True)
+            ((_label, _glyph, detail, _remedy),) = reconcile_stale_deny(fix=True)
 
         name = f"settings.json.{_STAMP}.{door}"
         assert _backups(settings_path) == [name]
@@ -574,8 +575,8 @@ class TestSettingsBackup:
         assert receipt["after_sha256"] == _sha(settings_path.read_bytes()) != _sha(original)
         if door == "reconcile-stale-deny":
             assert receipt["summary"] == ["Removed stale deny rules: Bash(rm -rf*)"]
-            assert str(_folder(settings_path) / name) in row[2]
-            assert str(_folder(settings_path) / "receipts.jsonl") in row[2]
+            assert str(_folder(settings_path) / name) in detail
+            assert str(_folder(settings_path) / "receipts.jsonl") in detail
 
     def test_the_receipt_names_the_branch_the_cwd_sits_in_else_the_cwd_path(self, tmp_path, monkeypatch) -> None:
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
@@ -597,3 +598,113 @@ class TestSettingsBackup:
         auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         assert [r["actor"] for r in _receipts(settings_path)] == ["scout", str(outside)]
+
+
+# =============================================================================
+# TestInstallDoorEnvAndPermissions — setup.sh's second heredoc folded in (FPLAN-0645)
+# =============================================================================
+
+
+class TestInstallDoorEnvAndPermissions:
+    """refresh_provider_hooks merges manifest env and permissions too, through auto_wire's helpers."""
+
+    @pytest.fixture(autouse=True)
+    def _not_msys(self, monkeypatch) -> None:
+        monkeypatch.delenv("MSYSTEM", raising=False)
+        monkeypatch.delenv("OSTYPE", raising=False)
+
+    _EXTRA = {
+        "env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+        "permissions": {"deny": ["Bash(git push*)", "Read(~/.secrets/**)"], "ask": ["Edit(~/.claude/**)"]},
+    }
+
+    def test_the_install_door_lands_env_deny_and_ask_with_one_backup_and_one_receipt(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}}, self._EXTRA)
+
+        refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["env"]["AIPASS_HOME"] == str(manifest.parent.parent)
+        assert updated["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+        assert updated["permissions"]["deny"] == ["Bash(git push*)", "Read(~/.secrets/**)"]
+        assert updated["permissions"]["ask"] == ["Edit(~/.claude/**)"]
+        (backup,) = _backups(settings_path)
+        assert backup.endswith(".setup-sh")
+        (receipt,) = _receipts(settings_path)
+        assert receipt["door"] == "setup-sh"
+        assert "Added deny rule: Bash(git push*)" in receipt["summary"]
+        assert f"Set env AIPASS_HOME={manifest.parent.parent}" in receipt["summary"]
+
+    def test_the_install_door_keeps_an_existing_env_value_and_never_duplicates_a_deny_rule(self, tmp_path) -> None:
+        existing = {"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}, "permissions": {"deny": ["Bash(git push*)"]}}
+        manifest, settings_path = _backup_world(tmp_path, existing, self._EXTRA)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
+        assert updated["permissions"]["deny"] == ["Bash(git push*)", "Read(~/.secrets/**)"]
+        assert not [a for a in actions if "CLAUDE_CODE_DISABLE_AUTO_MEMORY" in a or "Bash(git push*)" in a]
+
+    @pytest.mark.parametrize(
+        ("var", "value", "lands"),
+        [("MSYSTEM", "MINGW64", True), ("MSYSTEM", "MSYS", True), ("OSTYPE", "msys", True), (None, None, False)],
+        ids=["git-bash-mingw64", "msys", "ostype-msys", "not-msys"],
+    )
+    def test_pythonutf8_lands_only_under_an_msys_shell(self, tmp_path, monkeypatch, var, value, lands) -> None:
+        if var:
+            monkeypatch.setenv(var, value)
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}}, self._EXTRA)
+
+        refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        env = json.loads(settings_path.read_text(encoding="utf-8"))["env"]
+        assert ("PYTHONUTF8" in env) is lands
+        if lands:
+            assert env["PYTHONUTF8"] == "1"
+
+
+# =============================================================================
+# TestAipassHomeRepoint — install re-points AIPASS_HOME, doctor never does (FPLAN-0645)
+# =============================================================================
+
+
+class TestAipassHomeRepoint:
+    """refresh_provider_hooks re-points exactly AIPASS_HOME; auto_wire_provider leaves it."""
+
+    _EXTRA = {"env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}
+
+    def _world(self, tmp_path, home: str):
+        existing = {"env": {"AIPASS_HOME": home, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}
+        return _backup_world(tmp_path, existing, self._EXTRA)
+
+    def test_the_install_door_re_points_a_different_home_and_keeps_every_other_env_key(self, tmp_path) -> None:
+        old = str(tmp_path / "old_clone")
+        manifest, settings_path = self._world(tmp_path, old)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        new = str(manifest.parent.parent)
+        env = json.loads(settings_path.read_text(encoding="utf-8"))["env"]
+        assert env["AIPASS_HOME"] == new
+        assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
+        assert f"Re-pointed AIPASS_HOME {old} -> {new}" in actions
+        (receipt,) = _receipts(settings_path)
+        assert f"Re-pointed AIPASS_HOME {old} -> {new}" in receipt["summary"]
+
+    def test_doctor_fix_keeps_the_old_home_and_says_nothing_about_it(self, tmp_path) -> None:
+        old = str(tmp_path / "old_clone")
+        manifest, settings_path = self._world(tmp_path, old)
+
+        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+
+        assert json.loads(settings_path.read_text(encoding="utf-8"))["env"]["AIPASS_HOME"] == old
+        assert not [a for a in actions if "AIPASS_HOME" in a]
+
+    def test_a_home_that_already_matches_emits_no_line(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {}, self._EXTRA)
+        settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(manifest.parent.parent)}}), encoding="utf-8")
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert not [a for a in actions if "AIPASS_HOME" in a]

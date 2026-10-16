@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-07-11
 # Modified: 2026-10-15
 # =============================================
@@ -25,9 +25,15 @@ not set gets set; a key the user has set to a DIFFERENT value is reported and
 left alone, because an explicit human value outranks the manifest. No other key
 in the file is read or written.
 
-Both wire doors merge it: ``refresh_provider_hooks`` at install (setup.sh) and
-``auto_wire_provider`` in-process (``doctor --fix``, the wire prompt), so a fresh
-clone gets the scalars at install rather than at the first doctor run.
+Both wire doors merge the same four things — hooks, env, permissions and the
+scalars — through the same helpers: ``refresh_provider_hooks`` at install (setup.sh)
+and ``auto_wire_provider`` in-process (``doctor --fix``, the wire prompt), so a fresh
+clone is fully wired at install rather than at the first doctor run. Env and
+permissions joined the install door in FPLAN-0645, retiring setup.sh's second,
+stdlib heredoc that wrote them with no backup. PYTHONUTF8=1 under Git Bash/MSYS is
+the one platform-guarded key; the wire owns that guard (``_is_msys_shell``).
+Install re-points AIPASS_HOME to the tree being installed; doctor never does
+(``_repoint_aipass_home``); every other env key stays additive on both doors.
 
 BACKUP AND RECEIPT FIRST (FPLAN-0645)
 -------------------------------------
@@ -42,7 +48,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -85,6 +91,10 @@ SETTINGS_DESCRIPTIONS: Dict[str, str] = {
 }
 
 WIRE_COMMAND = "aipass doctor --fix"
+
+# The one platform-guarded env key (moved from setup.sh's stdlib heredoc, FPLAN-0645).
+MSYS_ENV_KEY = "PYTHONUTF8"
+MSYS_ENV_VALUE = "1"
 
 STATE_SET = "set"
 STATE_MISSING = "missing"
@@ -242,6 +252,83 @@ def _strip_and_readd_hooks(
     return merged, actions
 
 
+def _is_msys_shell(environ: Optional[Mapping[str, str]] = None) -> bool:
+    """True under Git Bash / MSYS / MinGW on Windows — the one place PYTHONUTF8 belongs.
+
+    The predicate setup.sh's stdlib heredoc used, moved here unchanged: ``MSYSTEM``
+    (exported by Git Bash, MINGW64 / MSYS) or ``OSTYPE`` naming msys / MINGW.
+    *environ* defaults to ``os.environ`` read at call time (the seam is for the test).
+    """
+    env = os.environ if environ is None else environ
+    shell = env.get("MSYSTEM", "") + env.get("OSTYPE", "")
+    return "MSYS" in shell or "msys" in shell or "MINGW" in shell
+
+
+def _merge_env(settings: dict, claude_section: dict, manifest_path: Path) -> List[str]:
+    """Additive env merge: the manifest's env keys the file lacks, plus PYTHONUTF8 under MSYS.
+
+    ``{{REPO_ROOT}}`` resolves to the manifest's parent's parent, ``{{PROJECT_ROOT}}`` to
+    the cwd. A key already in the file keeps the file's value. PYTHONUTF8=1 is the one
+    platform-guarded key (Rich output in Windows hook processes); the manifest carries
+    no guard syntax, so the wire owns this one conditional.
+    """
+    actions: List[str] = []
+    wanted: Dict[str, str] = {}
+    repo_root = str(manifest_path.parent.parent)
+    project_root = str(Path.cwd())
+    for key, value in claude_section.get("env", {}).items():
+        wanted[key] = value.replace("{{REPO_ROOT}}", repo_root).replace("{{PROJECT_ROOT}}", project_root)
+    if _is_msys_shell():
+        wanted.setdefault(MSYS_ENV_KEY, MSYS_ENV_VALUE)
+    if not wanted:
+        return actions
+    env_block = settings.setdefault("env", {})
+    for key, resolved in wanted.items():
+        if key not in env_block:
+            env_block[key] = resolved
+            actions.append(f"Set env {key}={resolved}")
+    return actions
+
+
+def _repoint_aipass_home(settings: dict, manifest_path: Path) -> List[str]:
+    """Install only: point env.AIPASS_HOME at the tree being installed, whatever it said.
+
+    The one env key the install door overwrites (owner ruling, FPLAN-0645): a re-install
+    from a new clone location heals the split the old heredoc used to heal. Absent is
+    _merge_env's job; matching emits no line. doctor --fix never calls this — a fix from
+    a second checkout must not take the home from the first.
+    """
+    env_block = settings.get("env")
+    if not isinstance(env_block, dict) or "AIPASS_HOME" not in env_block:
+        return []
+    repo_root = str(manifest_path.parent.parent)
+    old = env_block["AIPASS_HOME"]
+    if old == repo_root:
+        return []
+    env_block["AIPASS_HOME"] = repo_root
+    return [f"Re-pointed AIPASS_HOME {old} -> {repo_root}"]
+
+
+def _merge_permissions(settings: dict, claude_section: dict) -> List[str]:
+    """Additive deny + ask merge: a manifest rule the file lacks is appended, none removed."""
+    actions: List[str] = []
+    manifest_perms = claude_section.get("permissions", {})
+    manifest_deny = manifest_perms.get("deny", [])
+    manifest_ask = manifest_perms.get("ask", [])
+    if not (manifest_deny or manifest_ask):
+        return actions
+    permissions = settings.setdefault("permissions", {})
+    for kind, rules in (("deny", manifest_deny), ("ask", manifest_ask)):
+        current = permissions.setdefault(kind, [])
+        existing = set(current)
+        for rule in rules:
+            if rule not in existing:
+                current.append(rule)
+                existing.add(rule)
+                actions.append(f"Added {kind} rule: {rule}")
+    return actions
+
+
 def _write_with_receipt(
     settings_path: Path, settings: dict, record: BackupRecord, actions: List[str], updated_line: str
 ) -> None:
@@ -260,12 +347,13 @@ def _write_with_receipt(
 
 
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
-    """Write the manifest's hooks and settings scalars into ~/.claude/settings.json.
+    """Write the manifest's hooks, env, permissions and settings scalars into ~/.claude/settings.json.
 
     The install-time entry point: setup.sh's venv-python heredoc is its only caller.
     The in-process path (`doctor --fix`, the interactive wire-prompt) goes through
     auto_wire_provider instead — the two are siblings, not a chain. What they share
-    is _strip_and_readd_hooks and _merge_settings_scalars, the single sources of
+    is _strip_and_readd_hooks, _merge_env, _merge_permissions and
+    _merge_settings_scalars, the single sources of
     truth for each merge, so upgrades never leave a stale bridge entry from an old
     manifest version alongside the current one, and both doors treat a human's own
     settings value the same way: report it, never overwrite it.
@@ -295,10 +383,16 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
     settings["hooks"] = merged_hooks
+    claude_section = manifest.get("cli", {}).get("claude", {})
+    actions.extend(_merge_env(settings, claude_section, manifest_path))
+    actions.extend(_repoint_aipass_home(settings, manifest_path))
+    actions.extend(_merge_permissions(settings, claude_section))
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
 
     record = backup_before_write(settings_path, DOOR_SETUP_SH)
-    _write_with_receipt(settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks + settings)")
+    _write_with_receipt(
+        settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks, env, permissions, settings)"
+    )
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions
 
@@ -346,42 +440,8 @@ def auto_wire_provider(
     settings["hooks"] = merged_hooks
     actions.extend(hook_actions)
 
-    manifest_env = claude_section.get("env", {})
-    if manifest_env:
-        if "env" not in settings:
-            settings["env"] = {}
-        repo_root = str(manifest_path.parent.parent)
-        project_root = str(Path.cwd())
-        for key, value in manifest_env.items():
-            if key not in settings["env"]:
-                resolved = value.replace("{{REPO_ROOT}}", repo_root)
-                resolved = resolved.replace("{{PROJECT_ROOT}}", project_root)
-                settings["env"][key] = resolved
-                actions.append(f"Set env {key}={resolved}")
-
-    manifest_perms = claude_section.get("permissions", {})
-    manifest_deny = manifest_perms.get("deny", [])
-    manifest_ask = manifest_perms.get("ask", [])
-
-    if manifest_deny or manifest_ask:
-        if "permissions" not in settings:
-            settings["permissions"] = {}
-        if "deny" not in settings["permissions"]:
-            settings["permissions"]["deny"] = []
-        if "ask" not in settings["permissions"]:
-            settings["permissions"]["ask"] = []
-
-        existing_deny = set(settings["permissions"]["deny"])
-        for rule in manifest_deny:
-            if rule not in existing_deny:
-                settings["permissions"]["deny"].append(rule)
-                actions.append(f"Added deny rule: {rule}")
-
-        existing_ask = set(settings["permissions"]["ask"])
-        for rule in manifest_ask:
-            if rule not in existing_ask:
-                settings["permissions"]["ask"].append(rule)
-                actions.append(f"Added ask rule: {rule}")
+    actions.extend(_merge_env(settings, claude_section, manifest_path))
+    actions.extend(_merge_permissions(settings, claude_section))
 
     # Top-level scalars the manifest names (DPLAN-0347) — same write, same backup.
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
