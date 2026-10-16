@@ -21,7 +21,7 @@ Check system health metrics without leaving your workflow. Returns structured da
 | `disk`      | Disk usage for the root filesystem             |
 | `memory`    | Memory and swap usage (psutil, portable)       |
 | `uptime`    | System uptime from psutil's boot time          |
-| `processes` | Count of currently running processes            |
+| `processes` | Count of processes (every pid the host lists)   |
 | `battery`   | Charge, mains, state, time left (none is an answer) |
 | `summary`   | All of the above combined into one report       |
 
@@ -72,6 +72,27 @@ vitals = handler.machine_vitals()
 
 The contract in full is in the branch README; it is pinned by
 `tests/test_machine_vitals.py`.
+
+## Published Function: `machine_processes(limit=20)`
+
+The busiest processes on the host, for "the fan is loud and no agent is
+running - what is?" (contract C-B, DPLAN-0414 theme 3).
+
+```python
+from aipass.skills.lib.system_status import handler
+top = handler.machine_processes(20)
+```
+
+- `{"sampled_at", "window_ms", "total", "sort": "cpu", "processes": [...]}`;
+  each row is `pid`, `name`, `cpu_pct`, `mem_pct`, `mem_mb`, `user`, `state`.
+- The top `limit` (clamped to 1..100) by `cpu_pct`, ties by `mem_pct`.
+  `cpu_pct` is a real ~0.5 s sample, normalised to the whole machine (a
+  4-core box at full tilt sums to ~100, not ~400). `total` counts every pid.
+- The process name only - never its command line, arguments, environment or
+  working directory. A process that vanishes or is denied mid-sample is left
+  out; an unreadable owner is `user: None`.
+- Off, unreadable switch, or no psutil: the same refusal `machine_vitals()`
+  answers.
 
 ## Usage
 
