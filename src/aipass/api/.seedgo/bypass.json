@@ -77,8 +77,8 @@
     {
       "file": "apps/handlers/host/lifetime.py",
       "standard": "logged_fallback",
-      "lines": [343, 349],
-      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9)."
+      "lines": [413, 419],
+      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9). Lines moved 343/349 -> 407/413 with DPLAN-0408's server_home above them, 407/413 -> 413/419 when _runtime_dir followed it."
     },
     {
       "file": "apps/handlers/host/tokens.py",

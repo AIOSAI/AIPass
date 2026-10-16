@@ -183,6 +183,11 @@
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
+      "file": "apps/handlers/security/settings_backup.py",
+      "standard": "json_structure",
+      "reason": "Stdlib only by contract (FPLAN-0645): the receipt line in ~/.claude/.backup/settings/receipts.jsonl is a shape shared with @aipass's Python doors, not branch operational JSON, and a gate that cannot import blocks every edit on the machine."
+    },
+    {
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.rm_gate.handle' — not statically imported by design. Wired in PreToolUse.rm_gate."

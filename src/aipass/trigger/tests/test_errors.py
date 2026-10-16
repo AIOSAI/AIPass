@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — what the registry stores and returns, in tests/test_error_registry.py
+# seedgo: no-test-needed(covered_elsewhere) — registry storage and reads, in tests/test_error_registry.py
 # seedgo: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
 
 import time
@@ -519,6 +519,38 @@ class TestHandleCommandResolve:
 
         assert result is True
         assert "missing" in capsys.readouterr().err.lower(), "Expected 'missing' in error() output"
+
+
+# ---------------------------------------------------------------------------
+# handle_command — "detail" subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestHandleCommandDetail:
+    """Tests for the 'detail' subcommand."""
+
+    def test_detail_prints_logged_markup_text_verbatim_instead_of_crashing(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Shipped defect: a logged '[/dim]' raised MarkupError and detail answered Unknown command."""
+        _mocks()["get_entry"].return_value = {
+            "id": "e042",
+            "fingerprint": "f00d" * 10,
+            "status": "suppressed",
+            "suppress_reason": "noise [bold] by design",
+            "log_path": "logs/[x].log",
+            "message": "help text printed [/dim] raw",
+            "normalized_message": "help text printed [/dim] <id> [red]",
+        }
+
+        result = errors.handle_command("errors", ["detail", "e042"])
+
+        out = capsys.readouterr().out
+        assert result is True
+        assert _has_line(out, "help text printed [/dim] raw")
+        assert _has_line(out, "help text printed [/dim] <id> [red]")
+        assert _has_line(out, "noise [bold] by design")
+        assert _has_line(out, "logs/[x].log")
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-08-20
-# Modified: 2026-10-03
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -46,6 +46,9 @@ from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 
+# tests -> api -> aipass -> src -> the checkout root.
+THIS_CHECKOUT = Path(__file__).resolve().parents[4]
+
 
 @pytest.fixture
 def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
@@ -61,6 +64,9 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     serving is not a test.
     """
     monkeypatch.setattr(host_lifetime, "_runtime_dir", lambda: tmp_path)
+    # The home is this checkout, so the server is this process's copy, whatever
+    # home the machine running the suite has enrolled (DPLAN-0408).
+    monkeypatch.setenv("AIPASS_HOME", str(THIS_CHECKOUT))
     monkeypatch.setattr(host_lifetime, "json_handler", MagicMock())
     monkeypatch.setattr(host_lifetime, "logger", MagicMock())
     monkeypatch.setattr(host_lifetime, "SETTLE_SECONDS", 0.0)
@@ -635,6 +641,93 @@ class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
         gate.assert_called_once_with()
 
         assert "--host 127.0.0.1 --port 8790" in written.read_text(encoding="utf-8")
+
+
+class TestTheServerRunsOnItsHomesInterpreter:
+    """
+    DPLAN-0408: `aipass install` runs these doors in the uv tool venv, which has no
+    fastapi; the server it spelled as itself died on start. It is the home's server.
+    """
+
+    @pytest.fixture(params=[("linux", "bin", "python"), ("win32", "Scripts", "python.exe")])
+    def other_home(self, request: Any, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+        platform, directory, name = request.param
+        home = runtime / "home"
+        python = home / ".venv" / directory / name
+        entry = home / "src" / "aipass" / "api" / "apps" / "api.py"
+        for made in (python, entry):
+            made.parent.mkdir(parents=True, exist_ok=True)
+            made.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.setattr(sys, "platform", platform)
+        return {"python": python, "entry": entry, "branch": entry.parents[1]}
+
+    def test_a_detached_server_is_the_homes_python_and_api_run_from_the_home(
+        self, other_home: dict, bind_ok: None
+    ) -> None:
+        with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
+            host_lifetime.serve_detached()
+
+        assert popen.call_args.args[0][:2] == [str(other_home["python"]), str(other_home["entry"])]
+        assert popen.call_args.kwargs["cwd"] == str(other_home["branch"])
+
+    def test_the_unit_names_the_same_python_api_and_working_directory(
+        self, other_home: dict, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(host_autostart, "is_supported", gate := MagicMock(return_value=True))
+
+        text = host_lifetime.write_unit().read_text(encoding="utf-8")
+        gate.assert_called_once_with()
+
+        assert f"{other_home['python']} {other_home['entry']} host-api serve" in text
+        assert f"WorkingDirectory={other_home['branch']}" in text
+
+    def test_a_home_without_its_venv_python_refuses_and_spawns_nothing(self, other_home: dict, bind_ok: None) -> None:
+        other_home["python"].unlink()
+
+        with patch.object(subprocess, "Popen") as popen:
+            with pytest.raises(host_lifetime.LifetimeError) as raised:
+                host_lifetime.serve_detached()
+
+        popen.assert_not_called()
+        assert str(other_home["python"]) in str(raised.value)
+
+    def test_the_record_log_and_unit_live_in_the_homes_logs(
+        self, tmp_path: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The home's drone reads this record: status, stop and a repair serve --detach must find it."""
+        home = tmp_path / "home"
+        python = home / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
+        python = python / ("python.exe" if sys.platform == "win32" else "python")
+        entry = home / "src" / "aipass" / "api" / "apps" / "api.py"
+        for made in (python, entry):
+            made.parent.mkdir(parents=True, exist_ok=True)
+            made.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.setattr(host_lifetime, "json_handler", operations := MagicMock())
+        monkeypatch.setattr(host_lifetime, "logger", log := MagicMock())
+        monkeypatch.setattr(host_lifetime, "SETTLE_SECONDS", 0.0)
+        monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
+        home_logs = entry.parents[1] / "logs"
+
+        with patch.object(subprocess, "Popen", return_value=_spawned()):
+            record = host_lifetime.serve_detached()
+
+        operations.log_operation.assert_called_once_with("host_api_serve_detached", record)
+        assert record["log"] == str(home_logs / host_lifetime.LOG_NAME)
+        # The home rides as a Path argument; compare it as one. Its repr renders
+        # forward slashes on Windows, so a str(home) substring check fails there.
+        assert log.info.call_args_list[0].args[1] == home
+        assert {host_lifetime.record_path().parent, host_lifetime.log_path().parent} == {home_logs}
+        assert host_lifetime.unit_path().parent == home_logs
+        assert json.loads((home_logs / host_lifetime.RECORD_NAME).read_text(encoding="utf-8"))["pid"] == record["pid"]
+
+    def test_a_copy_inside_its_home_runs_on_this_interpreter(self, runtime: Path, bind_ok: None) -> None:
+        with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
+            host_lifetime.serve_detached()
+
+        assert popen.call_args.args[0][0] == sys.executable
+        assert popen.call_args.kwargs["cwd"] == str(Path(host_lifetime.__file__).resolve().parents[3])
 
 
 class TestTwoServersAreNeverStartedByAccident:

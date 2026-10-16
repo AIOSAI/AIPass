@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
@@ -866,3 +866,99 @@ class TestRepoDoorRunReads:
         assert "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n" in get_help("run")
         assert repo_door.REFUSE_RUN_SUB.format(sub="<sub>") in text
         assert repo_door.REFUSE_NO_GITHUB.format(repo="<repo>") in text
+
+    @pytest.mark.parametrize(
+        "short", [["-R", "AIOSAI/other"], ["-R=AIOSAI/other"], ["-RAIOSAI/other"]], ids=["spaced", "equals", "attached"]
+    )
+    def test_every_form_of_gh_short_repo_flag_beside_the_door_is_refused(
+        self, github_world: dict[str, Path], short: list[str]
+    ) -> None:
+        """Red first: the attached -RAIOSAI/other passed and named a second repo beside --repo <path>."""
+        calls: list[list[str]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=_gh_recorder(calls)),
+        ):
+            result = handle_command("run", ["list", *short, "--repo", "projects/ext"])
+
+        assert result == {"stdout": "", "stderr": repo_door.REFUSE_RUN_SHORT_FLAG, "exit_code": 1}
+        assert calls == []
+
+
+# ===========================================================================
+# The door's git runner: a time budget per verb, and no terminal prompt
+# ===========================================================================
+
+# The two reads the door makes outside its runner: the ledger's HEAD and the repo's top level.
+_OUTSIDE_THE_RUNNER = (["git", "rev-parse", "--verify", "-q", "HEAD"], ["git", "rev-parse", "--show-toplevel"])
+
+
+def _git_recorder(calls: list[tuple[list[str], dict]], hang: str | None = None):
+    """A subprocess.run that records every git call's argv and keywords and runs it, or times out on *hang*."""
+
+    def run(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if argv not in _OUTSIDE_THE_RUNNER:
+            calls.append((list(argv), kwargs))
+        if hang is not None and argv[:2] == ["git", hang]:
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout") or 0)
+        return _REAL_RUN(argv, *args, **kwargs)
+
+    return run
+
+
+class TestRepoDoorGitRunner:
+    """Every git call the runner makes carries a timeout and GIT_TERMINAL_PROMPT=0; a timeout names verb and seconds."""
+
+    def test_fetch_gets_the_network_budget_and_the_local_reads_the_local_one_never_prompting(
+        self, tracked_world: dict[str, Path]
+    ) -> None:
+        """Mutants: timeout dropped; env not passed; fetch given the local number."""
+        calls: list[tuple[list[str], dict]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.handlers.git.repo_door.subprocess.run", side_effect=_git_recorder(calls)),
+        ):
+            result = handle_command("fetch", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert [(argv[1], kwargs.get("timeout")) for argv, kwargs in calls] == [
+            ("symbolic-ref", 60),
+            ("fetch", 120),
+            ("rev-parse", 60),
+            ("log", 60),
+            ("log", 60),
+        ]
+        for _argv, kwargs in calls:
+            assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+            assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.environ["GIT_CONFIG_GLOBAL"], "a copy of os.environ"
+
+    def test_merge_gets_the_network_budget(self, tracked_world: dict[str, Path]) -> None:
+        _remote_commit(tracked_world, "r1.txt")
+        calls: list[tuple[list[str], dict]] = []
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.handlers.git.repo_door.subprocess.run", side_effect=_git_recorder(calls)),
+        ):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        [merge] = [kwargs for argv, kwargs in calls if argv[1] == "merge"]
+        assert merge["timeout"] == 120
+
+    @pytest.mark.parametrize("verb", ["fetch", "sync", "merge-upstream"])
+    def test_a_fetch_that_hangs_fails_naming_the_verb_and_the_seconds(
+        self, tracked_world: dict[str, Path], verb: str
+    ) -> None:
+        """Red first: the TimeoutExpired was never raised, and with no timeout a dead remote hung drone."""
+        ext = tracked_world["ext"].resolve()
+        with (
+            patch(f"{_RAIL}.is_verified_admin_caller", return_value=True),
+            patch("aipass.drone.apps.handlers.git.repo_door.subprocess.run", side_effect=_git_recorder([], "fetch")),
+        ):
+            result = handle_command(verb, ["--repo", "projects/ext"])
+
+        assert result == {
+            "stdout": "",
+            "stderr": f"{verb} failed in {ext}: git fetch timed out after 120 s in {ext}",
+            "exit_code": 1,
+        }

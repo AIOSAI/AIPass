@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for module and command discovery
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-09-27
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/modules/discovery.py and the discovery and module registry handlers it drives."""
@@ -273,6 +273,25 @@ class TestHandlerGetHelp:
 
         assert mock_run.call_args[0][0][-2:] == ["run", "--help"]
         assert "Help for the run command" in result.text
+
+    def test_help_and_discovery_run_on_the_interpreter_the_selector_names_for_the_branch(self, temp_test_dir: Path):
+        """Both launch sites ask branch_interpreter for THIS branch (mutant: sys.executable at either site)."""
+        apps_dir = temp_test_dir / "apps"
+        apps_dir.mkdir(parents=True)
+        (apps_dir / "testbranch.py").write_text("# entry", encoding="utf-8")
+        done = MagicMock(stdout=b"Usage: testbranch\n", stderr=b"", returncode=0)
+
+        with (
+            patch(
+                "aipass.drone.apps.handlers.discovery_handler.branch_interpreter",
+                side_effect=lambda path: f"python-for:{path}",
+            ),
+            patch("aipass.drone.apps.handlers.discovery_handler.subprocess.run", return_value=done) as mock_run,
+        ):
+            handler_get_help(str(temp_test_dir), "testbranch")
+            handler_discover_modules(str(temp_test_dir), "testbranch")
+
+        assert [launch.args[0][0] for launch in mock_run.call_args_list] == [f"python-for:{temp_test_dir}"] * 2
 
     def test_raises_when_entry_point_missing(self, temp_test_dir: Path):
         """Should raise CommandExecutionError when no entry point exists."""

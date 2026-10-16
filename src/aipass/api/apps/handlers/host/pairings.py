@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: pairings.py
 # Description: Host API Pairings — one-use, five-minute codes a phone trades for its bearer
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-13
 # Modified: 2026-10-13
 # =============================================
@@ -57,6 +57,8 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 import segno
 
@@ -72,6 +74,10 @@ STORE_VERSION = 1
 DEFAULT_TTL_SECONDS = 300
 MIN_TTL_SECONDS = 30
 MAX_TTL_SECONDS = 900
+
+# The listener probe before a mint: long enough for a tailnet hop, short enough
+# that a dead server is refused before anyone looks away.
+PROBE_TIMEOUT_SECONDS = 3.0
 
 # The same randomness as a bearer: the code is a bearer for five minutes.
 _CODE_BYTES = 32
@@ -262,8 +268,44 @@ def bind_address(allow_loopback: bool = True) -> Tuple[str, int]:
 def _pairing_url(code: str) -> str:
     """The face's URL with the code in the fragment, which a browser never sends."""
     host, port = bind_address()
+    return f"{_origin(host, port)}/#pair={code}"
+
+
+def _origin(host: str, port: int) -> str:
+    """http://<host>:<port>, an IPv6 host in brackets."""
     shown = f"[{host}]" if ":" in host else host
-    return f"http://{shown}:{port}/#pair={code}"
+    return f"http://{shown}:{port}"
+
+
+def _require_listener(label: str, scope: str) -> None:
+    """
+    Refuse a code no server is there to redeem: one GET on the bind's face.
+
+    The owner's sandbox, 2026-10-13: the install minted a QR for a server that
+    had died, and the phone said "site can't be reached". A serve record is not
+    the check (it named a dead pid); an HTTP answer is. The refusal's text is
+    the whole fix, pasteable: nobody reads the lines above a failure's last.
+
+    Raises:
+        PairingError: Nothing answers, or the server answers with an error.
+    """
+    host, port = bind_address()
+    try:
+        with urllib_request.urlopen(f"{_origin(host, port)}/", timeout=PROBE_TIMEOUT_SECONDS):
+            return
+    except urllib_error.HTTPError as e:
+        logger.warning("[host_api] pairing refused: the server on %s:%s answered %s", host, port, e.code)
+        raise PairingError(
+            f"The server on {host}:{port} answers {e.code}, not the phone face, so a code would open nothing. "
+            f"See what it is serving:\n  drone @api host-api status"
+        ) from e
+    except (urllib_error.URLError, OSError) as e:
+        logger.warning("[host_api] pairing refused: no server answers on %s:%s (%s)", host, port, type(e).__name__)
+        raise PairingError(
+            f"No server answers on {host}:{port}, so a code would open nothing. Start it, then mint again:\n"
+            f"  drone @api host-api serve --detach\n"
+            f"  drone @api host-api pair {label} --scope {scope}"
+        ) from e
 
 
 # ==============================================
@@ -286,7 +328,8 @@ def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = DEFAULT_TTL
 
     Raises:
         PairingError: Empty label, unknown scope, a ttl outside 30..900, a
-            stored bind with no address a phone can open, or a store that
+            stored bind with no address a phone can open, no server answering
+            on it (the text is the commands that fix it), or a store that
             cannot be read or written. Nothing is stored when it raises.
     """
     wanted = (label or "").strip()
@@ -301,6 +344,7 @@ def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = DEFAULT_TTL
 
     code = secrets_lib.token_urlsafe(_CODE_BYTES)
     url = _pairing_url(code)
+    _require_listener(wanted, scope)
     now = datetime.now(timezone.utc)
     row = {
         "id": uuid.uuid4().hex[:12],

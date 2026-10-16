@@ -66,6 +66,14 @@ conflict is read (`git diff --name-only --diff-filter=U`), then `git merge --abo
 and tree back as they were, and the refusal names the conflicted paths: resolving is the owner's, by
 hand. It never rebases, resets, stashes or pushes; push is its own verb.
 
+**The door's git never hangs and never prompts.** Every call the door's own runner makes carries a
+timeout: 120 s for `fetch` and `merge`, which talk to the remote or run merge drivers, 60 s for the
+local reads. The child's environment is a copy of drone's with `GIT_TERMINAL_PROMPT=0`, so a
+credential prompt fails at once instead of waiting on a terminal nobody is at. A call that runs out
+of time is the verb's failure, naming git's verb, the seconds and the repo (`fetch failed in <repo>:
+git fetch timed out after 120 s in <repo>`). Before this, a dead remote held drone until its own
+60-second command timeout killed the parent and left git running (DPLAN-0409 C2).
+
 **`run` reads only.** `run list`, `run view <id> [--log | --log-failed]` and `run watch <id>` read
 the repo's GitHub Actions runs, so a tag pushed through the door can be watched through it (baud's
 v0.3.0 release build, 2026-10-13). The door reads the repo's `origin` URL, https or ssh, with or
@@ -75,13 +83,14 @@ remote can carry a token. `rerun`, `cancel`, `delete` and `download` stay home-o
 `-R`. `projects/baud` reads as a path or as OWNER/NAME, so the disk decides: a value naming a
 directory, absolute or relative to the AIPass root, is the door's. Anything else reaches gh
 untouched, as it always has. A mistyped path therefore comes back as gh's own "could not resolve"
-error, not as a door refusal. `run watch` keeps the passthrough's 60-second timeout, at home and
+error, not as a door refusal. gh's `-R` is refused in every spelling beside the door's path:
+`-R VALUE`, `-R=VALUE` and the attached `-RVALUE`. `run watch` keeps the passthrough's 60-second timeout, at home and
 through the door alike.
 
 The refusal texts are constants in `repo_door.py`, and `drone @git --help` renders those same
 constants — one wording, two places, no copy. Pinned by `TestRepoDoorRefusals`,
 `TestRepoDoorHappyPath`, `TestRepoDoorFetchAndSync`, `TestRepoDoorMergeUpstream` and
-`TestRepoDoorRunReads` in `tests/test_git_access_gh_door.py`, against real repos with a real bare
+`TestRepoDoorRunReads` and `TestRepoDoorGitRunner` in `tests/test_git_access_gh_door.py`, against real repos with a real bare
 origin and a second clone standing in for another machine. gh alone is faked: the tests assert the
 argv the door builds.
 

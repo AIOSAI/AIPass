@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-13
 # Modified: 2026-10-13
 # =============================================
@@ -19,9 +19,11 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from email.message import Message
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -41,8 +43,15 @@ fastapi_required = pytest.mark.skipif(not host_server.is_available(), reason="th
 
 
 @pytest.fixture
-def paired(store: Path) -> Any:
-    """A token store in tmp_path, a tailnet-shaped bind stored beside it, quiet logs."""
+def listener() -> Any:
+    """The network edge: a server that answers the mint's GET on the bind, recorded."""
+    with patch.object(host_pairings.urllib_request, "urlopen") as urlopen:
+        yield urlopen
+
+
+@pytest.fixture
+def paired(store: Path, listener: Any) -> Any:
+    """A token store in tmp_path, a tailnet-shaped bind stored beside it, a server on it, quiet logs."""
     with patch(PATCH_CONFIG_LOGGER), patch(PATCH_PAIRINGS_LOGGER):
         host_config.save_config({"host": TAILNET_SHAPED, "port": 8787})
         yield store
@@ -102,6 +111,35 @@ class TestMintPairing:
     ) -> None:
         with pytest.raises(host_pairings.PairingError):
             host_api_module.mint_pairing(label, scope, ttl)
+        assert not host_pairings.store_path().exists()
+
+    def test_the_mint_asks_the_bind_itself_whether_a_server_answers(self, paired: Path, listener: Any) -> None:
+        host_api_module.mint_pairing("phone")
+
+        assert listener.call_args.args[0] == f"http://{TAILNET_SHAPED}:8787/"
+
+    def test_no_server_on_the_bind_refuses_with_the_two_commands_and_stores_nothing(
+        self, paired: Path, listener: Any
+    ) -> None:
+        """The owner's sandbox, 2026-10-13: a QR minted for a dead server."""
+        listener.side_effect = URLError(ConnectionRefusedError(111, "Connection refused"))
+
+        with pytest.raises(host_api_module.PairingError) as raised:
+            host_api_module.mint_pairing("phone", "operate")
+
+        lines = str(raised.value).splitlines()
+        assert lines[0].startswith(f"No server answers on {TAILNET_SHAPED}:8787")
+        assert lines[1:] == ["  drone @api host-api serve --detach", "  drone @api host-api pair phone --scope operate"]
+        assert not host_pairings.store_path().exists()
+
+    def test_a_server_answering_an_error_refuses_and_names_status(self, paired: Path, listener: Any) -> None:
+        listener.side_effect = HTTPError(f"http://{TAILNET_SHAPED}:8787/", 503, "Service Unavailable", Message(), None)
+
+        with pytest.raises(host_api_module.PairingError) as raised:
+            host_api_module.mint_pairing("phone")
+
+        assert "answers 503" in str(raised.value)
+        assert str(raised.value).endswith("drone @api host-api status")
         assert not host_pairings.store_path().exists()
 
     def test_the_door_refusal_is_a_token_error(self) -> None:
@@ -276,6 +314,20 @@ class TestPairCommand:
         assert exit_info.value.code == 1
         _, err = capsys.readouterr()
         assert "a phone cannot reach it" in err
+        assert not host_pairings.store_path().exists()
+
+    def test_pair_with_no_server_exits_1_and_prints_both_commands(
+        self, paired: Path, listener: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        listener.side_effect = URLError(ConnectionRefusedError(111, "Connection refused"))
+
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("host-api", ["pair", "phone", "--scope", "operate"])
+
+        assert exit_info.value.code == 1
+        _, err = capsys.readouterr()
+        assert "drone @api host-api serve --detach" in err
+        assert "drone @api host-api pair phone --scope operate" in err
         assert not host_pairings.store_path().exists()
 
     def test_pair_refuses_a_ttl_that_is_not_seconds(self, paired: Path, capsys: pytest.CaptureFixture) -> None:

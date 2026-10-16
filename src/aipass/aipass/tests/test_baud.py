@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -246,7 +246,6 @@ class TestPhoneReadiness:
         assert baud.phone_readiness(host_config=object()).api is False
 
 
-_RECEIPT = "~/.secrets/aipass/host_api/<label>.token"
 _PAIR = "drone @api host-api pair phone --scope operate"
 _HEADING = "Pair your phone"
 _CAMERA = "Open your phone's camera and point it at this code."
@@ -264,7 +263,7 @@ _AUTOSTART = "drone @api host-api autostart"
 
 
 def _ready(host: str = "127.0.0.1", tailnet: str = _TAILNET_IP, server: str = "serving") -> baud.PhoneReady:
-    return baud.PhoneReady(api=True, host=host, port=8787, tailnet=tailnet, server=server, receipt=_RECEIPT)
+    return baud.PhoneReady(api=True, host=host, port=8787, tailnet=tailnet, server=server)
 
 
 class TestPrintPhoneReady:
@@ -375,9 +374,6 @@ class _ApiDoor(_ApiStore):
     def enable_unit(self, dry_run: bool = False) -> dict:
         self.calls.append(("enable_unit", dry_run))
         return self._answer("enable_unit", _steps("systemctl --user enable --now unit", ok=None if dry_run else True))
-
-    def receipt_path(self, label: str) -> Path:
-        return Path.home() / ".secrets" / "aipass" / "host_api" / f"{label}.token"
 
     def issue_token(self, *_args: object, **_kwargs: object) -> None:
         raise AssertionError("the install minted a token")
@@ -537,11 +533,6 @@ class TestFinishPhone:
         out, _err = capsys.readouterr()
         assert f"would keep @api's bind (now {_TAILNET_IP}:8787), already a tailnet address" in out
         assert "would move" not in out
-
-    def test_the_receipt_line_comes_from_apis_receipt_path(self, closed_port):
-        door = _ApiDoor()
-        door.port = closed_port
-        assert baud.phone_readiness(dry_run=True, host_config=door).receipt == _RECEIPT
 
 
 class TestPairingQR:

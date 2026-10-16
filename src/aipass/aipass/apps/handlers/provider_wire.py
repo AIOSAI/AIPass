@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.2
+# Version: 1.5.1
 # Created: 2026-07-11
-# Modified: 2026-09-29
+# Modified: 2026-10-15
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -25,22 +25,47 @@ not set gets set; a key the user has set to a DIFFERENT value is reported and
 left alone, because an explicit human value outranks the manifest. No other key
 in the file is read or written.
 
-Both wire doors merge it: ``refresh_provider_hooks`` at install (setup.sh) and
-``auto_wire_provider`` in-process (``doctor --fix``, the wire prompt), so a fresh
-clone gets the scalars at install rather than at the first doctor run.
+Both wire doors merge the same four things — hooks, env, permissions and the
+scalars — through the same helpers: ``refresh_provider_hooks`` at install (setup.sh)
+and ``plan_wire_provider`` + ``apply_settings_plan`` in-process (``doctor --fix``, the
+wire prompt: the doctor shows the plan and asks before it applies, FPLAN-0646), so a fresh
+clone is fully wired at install rather than at the first doctor run. Env and
+permissions joined the install door in FPLAN-0645, retiring setup.sh's second,
+stdlib heredoc that wrote them with no backup. PYTHONUTF8=1 under Git Bash/MSYS is
+the one platform-guarded key; the wire owns that guard (``_is_msys_shell``).
+Install re-points AIPASS_HOME to the tree being installed; doctor never does
+(``_repoint_aipass_home``); every other env key stays additive on both doors.
+
+BACKUP AND RECEIPT FIRST (FPLAN-0645)
+-------------------------------------
+Both doors back the settings file up through ``settings_backup`` immediately before
+their write and append a receipt after it. A failed backup raises
+``SettingsBackupError`` and the file is not written; a write the fleet writer
+reports failed raises the same error and leaves no receipt. The old same-day
+``settings.json.bak.<date>`` copy is retired: a second write that day overwrote it.
 """
 
 from __future__ import annotations
 
+import copy
+import difflib
 import json
 import os
-import shutil
-from datetime import datetime, timezone
+import re
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.settings_backup import (
+    DOOR_DOCTOR_FIX,
+    DOOR_SETUP_SH,
+    BackupRecord,
+    SettingsBackupError,
+    backup_before_write,
+    sha256_of,
+    write_receipt,
+)
 
 # =============================================================================
 # HOOK & ENV DESCRIPTIONS
@@ -72,6 +97,10 @@ SETTINGS_DESCRIPTIONS: Dict[str, str] = {
 }
 
 WIRE_COMMAND = "aipass doctor --fix"
+
+# The one platform-guarded env key (moved from setup.sh's stdlib heredoc, FPLAN-0645).
+MSYS_ENV_KEY = "PYTHONUTF8"
+MSYS_ENV_VALUE = "1"
 
 STATE_SET = "set"
 STATE_MISSING = "missing"
@@ -229,13 +258,252 @@ def _strip_and_readd_hooks(
     return merged, actions
 
 
+def _is_msys_shell(environ: Optional[Mapping[str, str]] = None) -> bool:
+    """True under Git Bash / MSYS / MinGW on Windows — the one place PYTHONUTF8 belongs.
+
+    The predicate setup.sh's stdlib heredoc used, moved here unchanged: ``MSYSTEM``
+    (exported by Git Bash, MINGW64 / MSYS) or ``OSTYPE`` naming msys / MINGW.
+    *environ* defaults to ``os.environ`` read at call time (the seam is for the test).
+    """
+    env = os.environ if environ is None else environ
+    shell = env.get("MSYSTEM", "") + env.get("OSTYPE", "")
+    return "MSYS" in shell or "msys" in shell or "MINGW" in shell
+
+
+def _merge_env(settings: dict, claude_section: dict, manifest_path: Path) -> List[str]:
+    """Additive env merge: the manifest's env keys the file lacks, plus PYTHONUTF8 under MSYS.
+
+    ``{{REPO_ROOT}}`` resolves to the manifest's parent's parent, ``{{PROJECT_ROOT}}`` to
+    the cwd. A key already in the file keeps the file's value. PYTHONUTF8=1 is the one
+    platform-guarded key (Rich output in Windows hook processes); the manifest carries
+    no guard syntax, so the wire owns this one conditional.
+    """
+    actions: List[str] = []
+    wanted: Dict[str, str] = {}
+    repo_root = str(manifest_path.parent.parent)
+    project_root = str(Path.cwd())
+    for key, value in claude_section.get("env", {}).items():
+        wanted[key] = value.replace("{{REPO_ROOT}}", repo_root).replace("{{PROJECT_ROOT}}", project_root)
+    if _is_msys_shell():
+        wanted.setdefault(MSYS_ENV_KEY, MSYS_ENV_VALUE)
+    if not wanted:
+        return actions
+    env_block = settings.setdefault("env", {})
+    for key, resolved in wanted.items():
+        if key not in env_block:
+            env_block[key] = resolved
+            actions.append(f"Set env {key}={resolved}")
+    return actions
+
+
+def _repoint_aipass_home(settings: dict, manifest_path: Path) -> List[str]:
+    """Install only: point env.AIPASS_HOME at the tree being installed, whatever it said.
+
+    The one env key the install door overwrites (owner ruling, FPLAN-0645): a re-install
+    from a new clone location heals the split the old heredoc used to heal. Absent is
+    _merge_env's job; matching emits no line. doctor --fix never calls this — a fix from
+    a second checkout must not take the home from the first.
+    """
+    env_block = settings.get("env")
+    if not isinstance(env_block, dict) or "AIPASS_HOME" not in env_block:
+        return []
+    repo_root = str(manifest_path.parent.parent)
+    old = env_block["AIPASS_HOME"]
+    if old == repo_root:
+        return []
+    env_block["AIPASS_HOME"] = repo_root
+    return [f"Re-pointed AIPASS_HOME {old} -> {repo_root}"]
+
+
+def _merge_permissions(settings: dict, claude_section: dict) -> List[str]:
+    """Additive deny + ask merge: a manifest rule the file lacks is appended, none removed."""
+    actions: List[str] = []
+    manifest_perms = claude_section.get("permissions", {})
+    manifest_deny = manifest_perms.get("deny", [])
+    manifest_ask = manifest_perms.get("ask", [])
+    if not (manifest_deny or manifest_ask):
+        return actions
+    permissions = settings.setdefault("permissions", {})
+    for kind, rules in (("deny", manifest_deny), ("ask", manifest_ask)):
+        current = permissions.setdefault(kind, [])
+        existing = set(current)
+        for rule in rules:
+            if rule not in existing:
+                current.append(rule)
+                existing.add(rule)
+                actions.append(f"Added {kind} rule: {rule}")
+    return actions
+
+
+def _write_with_receipt(
+    settings_path: Path,
+    settings: dict,
+    record: BackupRecord,
+    actions: List[str],
+    updated_line: str,
+    consent: Optional[str] = None,
+) -> None:
+    """Write the settings a door merged, then its receipt; the backup lines go in *actions*.
+
+    *record* is the door's own ``backup_before_write``, taken just before this call.
+    *consent* (``y (tty)``, ``--yes``, ``install``) becomes the receipt summary's first
+    line, ``consent: <it>``, when given (FPLAN-0646).
+
+    The fleet writer returns False on a failed write instead of raising; that raises
+    ``SettingsBackupError`` naming the path here, and no receipt is written.
+    """
+    if record.backup is not None:
+        actions.append(f"Backed up settings to {record.backup}")
+    else:
+        actions.append("No settings file yet — nothing to back up")
+    if not json_handler.write_json(settings_path, settings):
+        logger.error("[provider_wire] settings write failed at %s; no receipt written", settings_path)
+        raise SettingsBackupError(f"settings write failed at {settings_path}; no receipt written")
+    actions.append(updated_line)
+    summary = ([f"consent: {consent}"] if consent else []) + actions
+    receipt = write_receipt(record, sha256_of(settings_path), summary)
+    actions.append(f"Receipt: {receipt}")
+
+
+# =============================================================================
+# PLAN, THEN WRITE (FPLAN-0646)
+# =============================================================================
+
+
+class SettingsPlan(NamedTuple):
+    """A change to the provider settings file, computed and not yet written.
+
+    *actions* are the door's past-tense lines (what it reports after the write);
+    *planned* are the same changes in the planned tense, one per line, for the
+    question — only lines that change the file. *notes* are the lines that change
+    nothing (a human value kept). *door* names the writer for the backup and receipt.
+    """
+
+    settings_path: Path
+    before: dict
+    after: dict
+    actions: List[str]
+    planned: List[str]
+    notes: List[str]
+    door: str
+    updated_line: str
+
+
+_REFRESHED = re.compile(
+    r"^Refreshed (?P<event>\S+): (?P<n>\d+) bridge hook\(s\)(?: \(replaced (?P<stale>\d+) stale\))?$"
+)
+
+_PLANNED_PREFIXES = (
+    ("Added deny rule: ", "Add deny rule "),
+    ("Added ask rule: ", "Add ask rule "),
+    ("Dropped orphaned hook event (no live entries): ", "Drop orphaned hook event "),
+    ("Set ", "Set "),
+)
+
+
+def _planned_line(action: str) -> Optional[str]:
+    """The planned-tense form of a past-tense action line; None for a line that changes nothing."""
+    refreshed = _REFRESHED.match(action)
+    if refreshed:
+        stale = f" (replace {refreshed['stale']} stale)" if refreshed["stale"] else ""
+        return f"Re-add {refreshed['n']} bridge hook(s) in {refreshed['event']}{stale}"
+    for past, planned in _PLANNED_PREFIXES:
+        if action.startswith(past):
+            return planned + action[len(past) :]
+    return None
+
+
+def _make_plan(
+    settings_path: Path, before: dict, after: dict, actions: List[str], door: str, updated_line: str
+) -> SettingsPlan:
+    """Split a door's action lines into the planned changes and the notes."""
+    planned: List[str] = []
+    notes: List[str] = []
+    for action in actions:
+        line = _planned_line(action)
+        if line is None:
+            notes.append(action)
+        else:
+            planned.append(line)
+    return SettingsPlan(settings_path, before, after, actions, planned, notes, door, updated_line)
+
+
+def _serialized(settings: dict) -> List[str]:
+    """The settings as the fleet json writer lays them out, one entry per line."""
+    return json.dumps(settings, indent=2, ensure_ascii=False).splitlines()
+
+
+def settings_diff(before: dict, after: dict) -> List[str]:
+    """A unified diff of the settings as they are against the settings as they would land."""
+    return list(
+        difflib.unified_diff(
+            _serialized(before), _serialized(after), "settings.json (now)", "settings.json (after)", lineterm=""
+        )
+    )
+
+
+def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None) -> Optional[SettingsPlan]:
+    """What the doctor's wire door would write, computed without writing.
+
+    Hooks: manifest-driven strip-and-readd (removes stale AIPass bridge entries).
+    Env vars, permissions and the settings scalar slot: additive merge only — never
+    removed or overwritten; a settings key the user set to a different value is a
+    note, left as the user set it. ``apply_settings_plan`` writes it.
+
+    None when the manifest is unreadable or carries no ``cli.claude`` section — the
+    door then has nothing to do. A hook refresh that leaves an event as it was is not
+    a planned change, so a fully wired file plans nothing.
+
+    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time
+    (the seam is for the test).
+    """
+    manifest = json_handler.read_json(manifest_path)
+    if manifest is None:
+        return None
+    claude_section = manifest.get("cli", {}).get("claude", {})
+    if not claude_section:
+        return None
+
+    if settings_path is None:
+        settings_path = Path.home() / ".claude" / "settings.json"
+    settings = (json_handler.read_json(settings_path) if settings_path.exists() else {}) or {}
+    before = copy.deepcopy(settings)
+
+    existing_hooks = settings.get("hooks", {}) or {}
+    merged_hooks, hook_actions = _strip_and_readd_hooks(existing_hooks, claude_section.get("hooks", []))
+    settings["hooks"] = merged_hooks
+    unchanged = {event for event in merged_hooks if existing_hooks.get(event) == merged_hooks[event]}
+    actions = [a for a in hook_actions if not any(a.startswith(f"Refreshed {e}:") for e in unchanged)]
+
+    actions.extend(_merge_env(settings, claude_section, manifest_path))
+    actions.extend(_merge_permissions(settings, claude_section))
+    # Top-level scalars the manifest names (DPLAN-0347) — same write, same backup.
+    actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
+    return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
+
+
+def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent: Optional[str] = None) -> List[str]:
+    """Write a plan through its backed-up door: backup, write, receipt. Returns the action lines.
+
+    *door* overrides the plan's own (``install`` for the install tail's doctor run);
+    *consent* is recorded as the receipt's first summary line. A failed backup raises
+    ``SettingsBackupError`` and nothing is written.
+    """
+    actions = list(plan.actions)
+    record = backup_before_write(plan.settings_path, door or plan.door)
+    _write_with_receipt(plan.settings_path, copy.deepcopy(plan.after), record, actions, plan.updated_line, consent)
+    json_handler.log_operation("apply_settings_plan", {"door": door or plan.door, "actions": len(actions)})
+    return actions
+
+
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
-    """Write the manifest's hooks and settings scalars into ~/.claude/settings.json.
+    """Write the manifest's hooks, env, permissions and settings scalars into ~/.claude/settings.json.
 
     The install-time entry point: setup.sh's venv-python heredoc is its only caller.
     The in-process path (`doctor --fix`, the interactive wire-prompt) goes through
-    auto_wire_provider instead — the two are siblings, not a chain. What they share
-    is _strip_and_readd_hooks and _merge_settings_scalars, the single sources of
+    plan_wire_provider and apply_settings_plan instead — siblings, not a chain. What they share
+    is _strip_and_readd_hooks, _merge_env, _merge_permissions and
+    _merge_settings_scalars, the single sources of
     truth for each merge, so upgrades never leave a stale bridge entry from an old
     manifest version alongside the current one, and both doors treat a human's own
     settings value the same way: report it, never overwrite it.
@@ -250,6 +518,9 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
     *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
     setup.sh passes nothing.  It exists so the tests write a tmp file instead of
     patching ``Path.home`` (the seam is for the test).
+
+    Backs the file up (door ``setup-sh``) before the write and leaves a receipt after;
+    a failed backup raises ``SettingsBackupError`` and nothing is written.
     """
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:
@@ -262,98 +533,15 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
     settings["hooks"] = merged_hooks
-    actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
-
-    json_handler.write_json(settings_path, settings)
-    actions.append("Updated ~/.claude/settings.json (hooks + settings)")
-    json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
-    return actions
-
-
-def auto_wire_provider(
-    manifest_path: Path, interactive: bool = True, settings_path: Optional[Path] = None
-) -> List[str]:
-    """Auto-wire provider settings from manifest into ~/.claude/settings.json.
-
-    Hooks: manifest-driven strip-and-readd (removes stale AIPass bridge entries).
-    Env vars, permissions and the settings scalar slot: additive merge only — never
-    removed or overwritten. A settings key the user has set to a different value is
-    reported in the returned actions and left as the user set it.
-    Returns list of action descriptions (for logging/display).
-
-    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
-    doctor and the wire prompt pass nothing.  It exists so the tests write a tmp
-    file instead of patching ``Path.home`` (the seam is for the test).
-    """
-    actions: List[str] = []
-
-    manifest = json_handler.read_json(manifest_path)
-    if manifest is None:
-        return actions
     claude_section = manifest.get("cli", {}).get("claude", {})
-    if not claude_section:
-        return actions
-
-    if settings_path is None:
-        settings_path = Path.home() / ".claude" / "settings.json"
-    if settings_path.exists():
-        settings = json_handler.read_json(settings_path) or {}
-    else:
-        settings = {}
-
-    if settings_path.exists():
-        date_stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        backup_path = settings_path.with_suffix(f".json.bak.{date_stamp}")
-        shutil.copy2(settings_path, backup_path)
-        actions.append(f"Backed up settings to {backup_path.name}")
-
-    manifest_hooks = claude_section.get("hooks", [])
-    merged_hooks, hook_actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
-    settings["hooks"] = merged_hooks
-    actions.extend(hook_actions)
-
-    manifest_env = claude_section.get("env", {})
-    if manifest_env:
-        if "env" not in settings:
-            settings["env"] = {}
-        repo_root = str(manifest_path.parent.parent)
-        project_root = str(Path.cwd())
-        for key, value in manifest_env.items():
-            if key not in settings["env"]:
-                resolved = value.replace("{{REPO_ROOT}}", repo_root)
-                resolved = resolved.replace("{{PROJECT_ROOT}}", project_root)
-                settings["env"][key] = resolved
-                actions.append(f"Set env {key}={resolved}")
-
-    manifest_perms = claude_section.get("permissions", {})
-    manifest_deny = manifest_perms.get("deny", [])
-    manifest_ask = manifest_perms.get("ask", [])
-
-    if manifest_deny or manifest_ask:
-        if "permissions" not in settings:
-            settings["permissions"] = {}
-        if "deny" not in settings["permissions"]:
-            settings["permissions"]["deny"] = []
-        if "ask" not in settings["permissions"]:
-            settings["permissions"]["ask"] = []
-
-        existing_deny = set(settings["permissions"]["deny"])
-        for rule in manifest_deny:
-            if rule not in existing_deny:
-                settings["permissions"]["deny"].append(rule)
-                actions.append(f"Added deny rule: {rule}")
-
-        existing_ask = set(settings["permissions"]["ask"])
-        for rule in manifest_ask:
-            if rule not in existing_ask:
-                settings["permissions"]["ask"].append(rule)
-                actions.append(f"Added ask rule: {rule}")
-
-    # Top-level scalars the manifest names (DPLAN-0347) — same write, same backup.
+    actions.extend(_merge_env(settings, claude_section, manifest_path))
+    actions.extend(_repoint_aipass_home(settings, manifest_path))
+    actions.extend(_merge_permissions(settings, claude_section))
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
 
-    json_handler.write_json(settings_path, settings)
-    actions.append("Updated ~/.claude/settings.json")
-
-    json_handler.log_operation("auto_wire_provider", {"actions": len(actions)})
+    record = backup_before_write(settings_path, DOOR_SETUP_SH)
+    _write_with_receipt(
+        settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks, env, permissions, settings)"
+    )
+    json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions

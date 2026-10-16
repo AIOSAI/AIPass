@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight and citizen-count rows
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight and the drone count."""
@@ -340,10 +340,10 @@ class TestRunDoctorPreflight:
             _error_count, hook_action_items = run_doctor_preflight()
         assert hook_action_items == []
 
-    def test_fix_true_passed_through_to_compute_groups(self) -> None:
+    def test_fix_true_and_the_install_door_passed_through_to_compute_groups(self) -> None:
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
             run_doctor_preflight(fix=True)
-        mock_compute.assert_called_once_with(fix=True)
+        mock_compute.assert_called_once_with(fix=True, door="install")
 
     def test_error_count_reflects_fail_glyphs(self) -> None:
         groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}

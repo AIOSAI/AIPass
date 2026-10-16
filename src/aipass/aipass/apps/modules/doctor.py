@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.6
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-09-29
+# Modified: 2026-10-15
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -29,6 +29,7 @@ from aipass.aipass.apps.handlers.cross_os import RunRecordError, generate_run_re
 from aipass.aipass.apps.handlers.cross_os.doctor_rows import check_cross_os, record_path_arg
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.provider_wire import platform_bridge_command
+from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
     check_bwrap_functional,
@@ -55,12 +56,13 @@ from aipass.aipass.apps.modules._doctor_fix import (
     print_remediation_report,
 )
 from aipass.aipass.apps.modules._doctor_wire import (
-    _auto_wire_provider,
     _prompt_auto_wire as prompt_auto_wire,
     check_settings_scalars,
     check_wire_verify,
+    fix_provider_settings,
     merge_manifest_rows,
     reconcile_stale_deny,
+    settings_fix_report,
 )
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_cpu,
@@ -440,7 +442,6 @@ def _find_manifest() -> Path | None:
 
 def check_provider_manifest(
     interactive: bool = False,
-    fix: bool = False,
     settings_path: Optional[Path] = None,
     os_name: Optional[str] = None,
 ) -> List[CheckResult]:
@@ -448,11 +449,12 @@ def check_provider_manifest(
 
     Public because a second module reads it: init_flow's report gathers the
     manifest gaps through it without a full doctor run. Doctor's own callers:
-    the gated group, the Configuration group, and handle_command's --fix path.
+    the gated group, the Configuration group, and _compute_doctor_groups. The
+    --fix write is not here: it plans, shows and asks in fix_provider_settings
+    (FPLAN-0646), and this check reads the result.
 
     Args:
-        interactive: Offer the wire prompt when hooks are missing.
-        fix: Apply the fix path.
+        interactive: Offer the wire prompt (the plan, its diff, one question).
         settings_path: The provider settings file, ``~/.claude/settings.json``
             when None. os_name: handed to platform_bridge_command, ``os.name``
             when None. Both are seams for the tests — a tmp settings file and a
@@ -523,7 +525,7 @@ def check_provider_manifest(
                 "hooks",
                 GLYPH_WARN,
                 f"{len(missing_hooks)} hook(s) missing from provider settings: {', '.join(missing_hooks)}",
-                "Run aipass init run or manually add bridge entries to ~/.claude/settings.json",
+                "Run 'aipass doctor --fix' to wire them (it backs the settings file up first)",
             )
         )
 
@@ -593,23 +595,21 @@ def check_provider_manifest(
     settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
 
-    # --- Interactive auto-wire prompt / --fix auto-accept ---
+    # --- Interactive auto-wire prompt ---
     # Gate on what the wire verb would actually change, not on the glyphs: a settings key
     # the user set to their own value warns forever and must never trigger the prompt.
-    if (interactive or fix) and (missing_hooks or missing_env or missing_deny or missing_ask or missing_settings):
-        wired = False
-        if fix:
-            actions = _auto_wire_provider(manifest_path, interactive=False)
-            for action in actions:
-                success(action)
-            wired = bool(actions)
-        else:
-            wired = prompt_auto_wire(
-                manifest_path, missing_hooks, missing_env, missing_deny, missing_ask, missing_settings
-            )
-
+    if interactive and (missing_hooks or missing_env or missing_deny or missing_ask or missing_settings):
+        wired = prompt_auto_wire(
+            manifest_path,
+            missing_hooks,
+            missing_env,
+            missing_deny,
+            missing_ask,
+            missing_settings,
+            settings_path=settings_path,
+        )
         if wired:  # the re-read after a wire reads the same file, on the same platform
-            return check_provider_manifest(interactive=False, fix=False, settings_path=settings_path, os_name=os_name)
+            return check_provider_manifest(interactive=False, settings_path=settings_path, os_name=os_name)
 
     return results
 
@@ -1210,9 +1210,18 @@ def _check_scaffold() -> List[CheckResult]:
 
 
 def _compute_doctor_groups(
-    verbose: bool = False, interactive: bool = False, fix: bool = False
+    verbose: bool = False,
+    interactive: bool = False,
+    fix: bool = False,
+    door: str = DOOR_DOCTOR_FIX,
+    yes: bool = False,
 ) -> Dict[str, List[CheckResult]]:
-    """Run all six check groups (optionally auto-fixing). Returns them by group name."""
+    """Run all six check groups (optionally auto-fixing). Returns them by group name.
+
+    With *fix*, the settings step shows its plan and asks once before writing
+    (FPLAN-0646): *yes* skips the question, door ``install`` never asks, and *door*
+    names the writer in the settings backup and receipt.
+    """
     group_specs = [
         ("System", _check_system),
         ("Identity", check_identity),
@@ -1229,17 +1238,20 @@ def _compute_doctor_groups(
             groups[name] = runner()
             progress.remove_task(task_id)
 
-    if interactive or fix:
-        manifest_results = check_provider_manifest(interactive=interactive, fix=fix)
+    if fix:
+        settings_rows = [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        manifest_results = check_provider_manifest()
+        if manifest_results:
+            groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
+        stale_results = [CheckResult(*tup) for tup in reconcile_stale_deny(fix=False)]
+        services = groups.get("Services", [])
+        groups["Services"] = [r for r in services if r.label != "rm deny migration"] + stale_results + settings_rows
+    elif interactive:
+        manifest_results = check_provider_manifest(interactive=True)
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
 
     if fix:
-        stale_results = [CheckResult(*tup) for tup in reconcile_stale_deny(fix=True)]
-        if stale_results:
-            services = groups.get("Services", [])
-            groups["Services"] = [r for r in services if r.label != "rm deny migration"] + stale_results
-
         wire_recheck = [CheckResult(*r) for r in check_wire_verify()]
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
@@ -1281,13 +1293,13 @@ def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int
     return pass_count, warn_count, error_count
 
 
-def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = False) -> int:
-    """Run all six groups and print results. Returns error count."""
+def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = False, yes: bool = False) -> int:
+    """Run all six groups and print results. Returns error count. *yes*: --fix writes without asking."""
     console.print()
     console.print("[bold cyan]aipass doctor[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix)
+    groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix, yes=yes)
     pass_count, warn_count, error_count = _print_doctor_groups(groups)
 
     logger.info("[doctor] run complete — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
@@ -1309,7 +1321,7 @@ def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
     console.print("[bold cyan]Running aipass doctor...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=fix)
+    groups = _compute_doctor_groups(fix=fix, door=DOOR_INSTALL)
     _pass_count, _warn_count, error_count = _print_doctor_groups(groups)
 
     logger.info("[doctor] preflight complete — errors=%d", error_count)
@@ -1343,8 +1355,9 @@ def print_help() -> None:
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass doctor[/green]           [dim]# Run all checks[/dim]")
     console.print("  [green]aipass doctor --verbose[/green] [dim]# Show sub-check detail[/dim]")
-    console.print("  [green]aipass doctor --fix[/green]     [dim]# Auto-wire, owner seat repair + remediation[/dim]")
-    console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation as JSON (for spawn)[/dim]")
+    console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
+    console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
+    console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
     console.print("  [green]aipass doctor --cross-os[/green][dim]# OS-gap + routing/version/hooks pre-flight[/dim]")
     console.print("  [green]aipass doctor --cross-os --e2e[/green][dim]# …also run the heavy e2e suite[/dim]")
     console.print(
@@ -1399,14 +1412,18 @@ def handle_command(command: str, args: list[str]) -> bool:
     verbose = "--verbose" in args or "-v" in args
     fix_mode = "--fix" in args
     json_mode = "--json" in args
+    yes_mode = "--yes" in args
 
     if json_mode and fix_mode:
+        settings_report = settings_fix_report(_find_manifest(), yes=yes_mode)
         project_root = find_project_root(Path.cwd())
         if project_root:
-            print_json_report(project_root)
+            print_json_report(project_root, provider_settings=settings_report)
+        else:
+            console.print(json.dumps({"provider_settings": settings_report}, indent=2), markup=False, highlight=False)
         return True
 
-    error_count = run_doctor(verbose=verbose, interactive=True, fix=fix_mode)
+    error_count = run_doctor(verbose=verbose, interactive=True, fix=fix_mode, yes=yes_mode)
     if fix_mode:
         project_root = find_project_root(Path.cwd())
         if project_root:

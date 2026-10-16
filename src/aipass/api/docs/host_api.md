@@ -235,6 +235,11 @@ credential, once, for five minutes.
 - **No receipt.** The paired token is listed and revoked like any other.
 - **An address a phone can open.** `mint_pairing` refuses an unset or wildcard
   bind; the verb also refuses loopback, before anything is minted.
+- **A server that answers.** `mint_pairing` sends one GET to the bind's `/`
+  before it stores anything: a serve record can name a pid that died. Nothing
+  answering refuses with the two commands that fix it (`serve --detach`, then
+  the same `pair`); an error status refuses and names `host-api status`. In the
+  door, so the installer's mint has it too.
 
 The module door: `mint_pairing(label, scope="read", ttl_seconds=300) -> dict`,
 `render_qr(text) -> str` and `PairingError` (a `TokenError`), on

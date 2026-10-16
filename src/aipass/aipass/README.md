@@ -27,6 +27,8 @@ The install starts the phone server itself when nothing else will. When it
 answers on this machine's tailnet address, the install waits for you to press
 Enter, then shows a pairing QR: point the phone's camera at it and the face
 opens, signed in. The code is one use and expires in five minutes.
+`--source PATH|URL` clones AIPass from a local checkout's committed HEAD or
+another URL instead of the public repo (the install sandbox).
 
 **Set up.** `aipass init run` walks the ten stages — welcome, system detect,
 profile, style questions, tool choice, first agent, ping sweep, smoke test,
@@ -97,7 +99,8 @@ Under them, `apps/handlers/` holds the implementation groups: `system_detect/`,
 `readme_map/` for live documentation reads; `baud/` for fetch, verify, unpack,
 binary, install and point; `cross_os/` for the pre-flight lane;
 `handoff_platform/` for the OS-dispatched session launch; `provider_wire.py`
-and `provider_reconcile.py` for the provider settings; `ping_sweep/` for
+and `provider_reconcile.py` for the provider settings, with `settings_backup.py`
+for the backup and receipt each of their writes takes first; `ping_sweep/` for
 reachability; `help_flag.py`, `module_root.py`, `json/` and `ui/` for the
 plumbing. `shared/` is a separate contract — stdlib-only, because other
 branches import it.

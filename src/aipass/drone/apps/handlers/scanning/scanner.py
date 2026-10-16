@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scanner.py
 # Description: Module scanning for command discovery
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-09-28
+# Modified: 2026-10-13
 # =============================================
 
 """Core scanning logic for discovering available commands in a branch.
@@ -21,7 +21,6 @@ Reuses existing discovery-handler functions where possible.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from aipass.prax import logger
@@ -30,6 +29,7 @@ from aipass.drone.apps.handlers.discovery_handler import (
     get_entry_point,
     parse_help_for_commands,
 )
+from aipass.drone.apps.handlers.registry_handler import branch_interpreter
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
         return []
 
     result = subprocess.run(
-        [sys.executable, str(entry_point.relative_to(branch_path)), "--help"],
+        [branch_interpreter(branch_path), str(entry_point.relative_to(branch_path)), "--help"],
         cwd=branch_path,
         capture_output=True,
         timeout=10,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-08
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -16,6 +16,7 @@
 
 import io
 import json
+import re
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -39,6 +40,7 @@ from aipass.aipass.apps.modules.doctor import (
     check_provider_manifest,
     handle_command,
     run_doctor,
+    run_doctor_preflight,
 )
 from aipass.aipass.tests.support_doctor import _home_at
 
@@ -84,7 +86,7 @@ class TestDoctorHandleCommand:
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as run:
             result = handle_command("doctor", [])
         assert result is True
-        run.assert_called_once_with(verbose=False, interactive=True, fix=False)
+        run.assert_called_once_with(verbose=False, interactive=True, fix=False, yes=False)
 
     def test_info_flag_calls_introspection(self) -> None:
         """--info flag triggers print_introspection (returns True)."""
@@ -131,7 +133,7 @@ class TestDoctorHandleCommand:
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as mock_run:
             with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 handle_command("doctor", ["--verbose"])
-        mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False)
+        mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False, yes=False)
 
     @pytest.mark.parametrize(("args", "shown"), [(["--verbose"], True), ([], False)])
     def test_verbose_shows_pytest_collect_errors(
@@ -570,28 +572,34 @@ class TestProviderSettingsScalars:
         """A value the user set themselves wins: reported, and it must not trigger auto-wire."""
         manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"includeGitInstructions": True})
 
-        with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider") as wire:
-            results = self._run(manifest, tmp_path, fix=True)
+        settings = tmp_path / ".claude" / "settings.json"
+        original = settings.read_bytes()
+
+        results = self._run(manifest, tmp_path)
+        with _home_at(tmp_path):
+            rows = _doctor_wire.fix_provider_settings(manifest, yes=True)
 
         row = [r for r in results if r.label == "includeGitInstructions"][0]
         assert row.glyph == GLYPH_WARN
         assert row.detail == "manifest wants false, provider has true"
         assert "Your value stands" in row.remediation
         assert "aipass doctor --fix" in row.remediation
-        wire.assert_not_called()
+        assert rows == []
+        assert settings.read_bytes() == original
+        assert not (tmp_path / ".claude" / ".backup").exists()
 
     def test_missing_key_alone_still_triggers_the_fix_wire(self, tmp_path) -> None:
-        """A settable gap is the one thing that still makes --fix run the wire verb.
-        Mutant `interactive=False` -> `interactive=True` on the --fix wire call goes red."""
+        """A settable gap is the one thing that still makes --fix --yes write the wire."""
         manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"env": {}})
 
-        with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider", return_value=[]) as wire:
-            self._run(manifest, tmp_path, fix=True)
+        with _home_at(tmp_path):
+            rows = _doctor_wire.fix_provider_settings(manifest, yes=True)
 
-        wire.assert_called_once_with(manifest, interactive=False)
+        written = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        assert rows == []
+        assert written["includeGitInstructions"] is False
 
-    @pytest.mark.parametrize("path", ["fix", "prompt"])
-    def test_the_pass_after_a_wire_reads_the_handed_file_on_the_handed_platform(self, tmp_path, path) -> None:
+    def test_the_pass_after_a_wire_reads_the_handed_file_on_the_handed_platform(self, tmp_path) -> None:
         """After a wire, the re-read keeps settings_path and os_name: it never falls back to the home.
 
         The settings file lives outside HOME and HOME is an empty scratch dir, so a
@@ -629,20 +637,17 @@ class TestProviderSettingsScalars:
 
         def _wire(*_args, **_kwargs):
             settings.write_text(json.dumps({**wired, "includeGitInstructions": False}), encoding="utf-8")
-            return ["includeGitInstructions set"] if path == "fix" else True
+            return True
 
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor._auto_wire_provider", side_effect=_wire) as fix_wire,
             patch("aipass.aipass.apps.modules.doctor.prompt_auto_wire", side_effect=_wire) as prompt_wire,
             _home_at(empty_home),
         ):
-            results = check_provider_manifest(
-                interactive=path == "prompt", fix=path == "fix", settings_path=settings, os_name="nt"
-            )
+            results = check_provider_manifest(interactive=True, settings_path=settings, os_name="nt")
 
-        called = fix_wire if path == "fix" else prompt_wire
-        assert called.call_count == 1
+        assert prompt_wire.call_count == 1
+        assert prompt_wire.call_args.kwargs["settings_path"] == settings
         rows = {r.label: r.glyph for r in results if r.label in ("hooks", "includeGitInstructions")}
         assert rows == {"hooks": GLYPH_PASS, "includeGitInstructions": GLYPH_PASS}
 
@@ -926,49 +931,199 @@ class TestPromptAutoWireIsatty:
     """Guard: non-tty stdin must not block on input() (#663)."""
 
     @staticmethod
-    def _args() -> dict:
+    def _args(tmp_path) -> dict:
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"env": {}}), encoding="utf-8")
         return {
-            "manifest_path": MagicMock(),
-            "missing_hooks": ["some_hook"],
+            "manifest_path": manifest,
+            "missing_hooks": [],
             "missing_env": [],
             "missing_deny": [],
             "missing_ask": [],
+            "missing_settings": ["includeGitInstructions"],
+            "settings_path": settings,
         }
 
-    def test_non_tty_stdin_skips_prompt_and_declines(self) -> None:
+    def test_non_tty_stdin_skips_prompt_and_declines(self, tmp_path) -> None:
         """Non-tty stdin must NOT call input() — it declines and warns instead.
         Mutant `if not sys.stdin.isatty():` -> `if False:` reads the line and goes red."""
         stdin = _Stdin("n\n", tty=False)
         with (
             patch("sys.stdin", stdin),
             patch.object(_doctor_wire, "_print_manual_wire_warning") as mock_warn,
+            _home_at(tmp_path),
         ):
-            result = _doctor_wire._prompt_auto_wire(**self._args())
+            result = _doctor_wire._prompt_auto_wire(**self._args(tmp_path))
 
         assert result is False
         assert stdin.read() == "n\n"
         mock_warn.assert_called_once()
 
-    def test_tty_stdin_prompts_and_respects_decline(self) -> None:
-        """Tty stdin still prompts; a 'n' answer declines.
+    def test_tty_stdin_prompts_and_respects_decline(self, tmp_path) -> None:
+        """Tty stdin still prompts; a 'n' answer declines and writes nothing.
         Mutant `answer = input(...)` -> `answer = "n"` leaves stdin unread and goes red."""
+        args = self._args(tmp_path)
+        original = args["settings_path"].read_bytes()
         stdin = _Stdin("n\nleft\n", tty=True)
         with (
             patch("sys.stdin", stdin),
             patch.object(_doctor_wire, "_print_manual_wire_warning"),
+            _home_at(tmp_path),
         ):
-            result = _doctor_wire._prompt_auto_wire(**self._args())
+            result = _doctor_wire._prompt_auto_wire(**args)
 
         assert result is False
         assert stdin.read() == "left\n"
+        assert args["settings_path"].read_bytes() == original
 
-    def test_tty_stdin_accepts_and_wires(self) -> None:
-        """Tty stdin with a 'y' answer runs the wire and returns True."""
-        with (
-            patch("sys.stdin", _Stdin("y\n", tty=True)),
-            patch.object(_doctor_wire, "_auto_wire_provider", return_value=["wired hook"]) as mock_wire,
-        ):
-            result = _doctor_wire._prompt_auto_wire(**self._args())
+    def test_tty_stdin_accepts_and_wires(self, tmp_path) -> None:
+        """Tty stdin with a 'y' answer writes the wire and its receipt carries the tty consent."""
+        args = self._args(tmp_path)
+        with patch("sys.stdin", _Stdin("y\n", tty=True)), _home_at(tmp_path):
+            result = _doctor_wire._prompt_auto_wire(**args)
 
+        written = json.loads(args["settings_path"].read_text(encoding="utf-8"))
+        receipts = tmp_path / ".claude" / ".backup" / "settings" / "receipts.jsonl"
+        (line,) = receipts.read_text(encoding="utf-8").splitlines()
         assert result is True
-        mock_wire.assert_called_once()
+        assert written["includeGitInstructions"] is False
+        assert json.loads(line)["summary"][0] == "consent: y (tty)"
+
+
+class TestPreflightWireDoor:
+    """The install tail's doctor preflight wires the settings file under the install door (FPLAN-0645)."""
+
+    def test_the_preflight_backs_up_under_the_install_door_and_prints_both_paths(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
+        mod = "aipass.aipass.apps.modules.doctor"
+        stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
+        for name in (*stubbed, "_check_sandbox", "check_wire_verify", "_fix_owner_seating"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
+        monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
+
+        with _home_at(tmp_path):
+            run_doctor_preflight()
+
+        folder = tmp_path / ".claude" / ".backup" / "settings"
+        lines = (folder / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["door"] for line in lines] == ["install"]
+        (backup,) = [p for p in folder.iterdir() if p.name != "receipts.jsonl"]
+        assert backup.name.endswith(".install")
+        # Rich may wrap a long tmp path: compare with all whitespace collapsed.
+        out = "".join(capsys.readouterr().out.split())
+        assert "".join(f"Backed up settings to {backup}".split()) in out
+        assert "".join(f"Receipt: {folder / 'receipts.jsonl'}".split()) in out
+
+
+class TestDoctorFixAsks:
+    """doctor --fix shows the settings plan and asks once; --yes and install never ask (FPLAN-0646)."""
+
+    @staticmethod
+    def _world(tmp_path, monkeypatch) -> "tuple":
+        # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
+        mod = "aipass.aipass.apps.modules.doctor"
+        stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
+        for name in (*stubbed, "_check_sandbox", "check_wire_verify", "_fix_owner_seating"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        manifest = claude / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "permissions": {"deny": ["Edit(~/.claude/**)"]}}}}),
+            encoding="utf-8",
+        )
+        settings = claude / "settings.json"
+        settings.write_text(json.dumps({"permissions": {"deny": ["Bash(rm -r *)"]}}), encoding="utf-8")
+        monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
+        return settings, settings.read_bytes(), claude / ".backup" / "settings"
+
+    @staticmethod
+    def _consents(folder) -> list:
+        lines = (folder / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
+        return [json.loads(line)["summary"][0] for line in lines]
+
+    def test_a_tty_no_answer_writes_nothing(self, tmp_path, monkeypatch, capsys) -> None:
+        """Answer n: the file is byte-identical, no backup folder, and doctor says nothing changed.
+        Mutant: apply the plans before the answer -> the file changes and goes red."""
+        settings, original, _folder = self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("n\n", tty=True)), _home_at(tmp_path):
+            run_doctor(fix=True, interactive=True)
+
+        out = " ".join(capsys.readouterr().out.split())
+        assert settings.read_bytes() == original
+        assert not (tmp_path / ".claude" / ".backup").exists()
+        assert " ".join(_doctor_wire.NOTHING_CHANGED.split()) in out
+
+    def test_b_tty_yes_answer_writes_with_a_tty_receipt(self, tmp_path, monkeypatch) -> None:
+        """Answer y: both plans land, each backed up, each receipt carrying the tty consent."""
+        settings, original, folder = self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("y\n", tty=True)), _home_at(tmp_path):
+            run_doctor(fix=True, interactive=True)
+
+        deny = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["deny"]
+        assert settings.read_bytes() != original
+        assert deny == ["Edit(~/.claude/**)"]
+        assert self._consents(folder) == ["consent: y (tty)", "consent: y (tty)"]
+        assert len([p for p in folder.iterdir() if p.name != "receipts.jsonl"]) == 2
+
+    def test_c_no_tty_without_yes_writes_nothing(self, tmp_path, monkeypatch, capsys) -> None:
+        """No tty, no --yes: nothing written, the row names the --yes command.
+        Mutant `if not sys.stdin.isatty():` -> `if False:` reads the answer, writes, and goes red."""
+        settings, original, _folder = self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("y\n", tty=False)), _home_at(tmp_path):
+            run_doctor(fix=True, interactive=True)
+
+        out = " ".join(capsys.readouterr().out.split())
+        assert settings.read_bytes() == original
+        assert not (tmp_path / ".claude" / ".backup").exists()
+        assert " ".join(_doctor_wire.NOT_APPLIED_NO_TTY.split()) in out
+
+    def test_d_yes_without_tty_writes_without_asking(self, tmp_path, monkeypatch, capsys) -> None:
+        """--yes with no tty: written, no question printed, the receipt carries --yes."""
+        settings, original, folder = self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
+            handle_command("doctor", ["--fix", "--yes"])
+
+        out = capsys.readouterr().out
+        assert settings.read_bytes() != original
+        assert "Apply these" not in out
+        assert "Planned changes" not in out
+        assert self._consents(folder) == ["consent: --yes", "consent: --yes"]
+
+    def test_e_the_plan_shows_a_unified_diff(self, tmp_path, monkeypatch, capsys) -> None:
+        """The shown plan carries the removed stale rule and the added manifest rule as diff lines."""
+        self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("n\n", tty=True)), _home_at(tmp_path):
+            run_doctor(fix=True, interactive=True)
+
+        lines = capsys.readouterr().out.splitlines()
+        assert any(re.match(r'-\s+"Bash\(rm -r \*\)"', line) for line in lines)
+        assert any(re.match(r'\+\s+"Edit\(~/\.claude/\*\*\)"', line) for line in lines)
+
+    def test_f_the_install_preflight_never_asks(self, tmp_path, monkeypatch, capsys) -> None:
+        """Install with no tty writes without the question; the receipts carry the install consent.
+        Mutant: ask inside the install door -> no tty means nothing written, red."""
+        settings, original, folder = self._world(tmp_path, monkeypatch)
+        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
+            run_doctor_preflight()
+
+        assert settings.read_bytes() != original
+        assert "Apply these" not in capsys.readouterr().out
+        assert self._consents(folder) == ["consent: install", "consent: install"]

@@ -43,6 +43,13 @@ exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/`
 those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
 state, then remove it.
 
+**Scratch is not judged** (auto_fix 1.5.0, 2026-10-15, devpulse 320d5948). An edit under a directory
+named `docs.local`, `dropbox`, `.backup` or `.archive`, or under the harness scratchpad (a `scratchpad`
+directory below a `claude-<uid>` one), runs no check, records nothing, and answers
+`[diagnostics] skipped: <ground> is scratch`. The lane's rows are the shipped tree's; on a probe they
+were an order to dress it, and a recorded error would have blocked the seat's next edit. Git-ignored
+paths are deliberately NOT skipped: `.trinity/` is ignored, and its JSON is what the corruption check guards.
+
 ## The injection ledger — what a seat was told, per turn
 
 `apps/modules/injection_ledger.py` (DPLAN-0347 hooks row 3) writes one JSONL line per engine dispatch that

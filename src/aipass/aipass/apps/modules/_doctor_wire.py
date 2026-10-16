@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-05-08
-# Modified: 2026-09-29
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -13,7 +13,7 @@ Extracted from doctor.py to keep module sizes manageable.
 Provides:
   - HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS / SETTINGS_DESCRIPTIONS — what each one is for
   - Bridge pattern — hooks wired as $AIPASS_HOME bridge commands (no script copying)
-  - _auto_wire_provider()  — hooks: manifest-driven strip-and-readd; env/permissions/settings: additive merge
+  - fix_provider_settings() — --fix's settings step: plan, show the diff, ask once, write (FPLAN-0646)
   - check_settings_scalars() — doctor's diff row per manifest settings key, with the cure command
 """
 
@@ -23,7 +23,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, List, NamedTuple
+from typing import Any, List, NamedTuple, Optional
 
 from aipass.cli.apps.modules import console, success
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -39,10 +39,14 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_SET,
     WIRE_COMMAND,
     SettingsGap,
-    auto_wire_provider as _auto_wire_provider,
+    SettingsPlan,
+    apply_settings_plan,
     manifest_settings,
+    plan_wire_provider,
+    settings_diff,
     settings_gaps,
 )
+from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
 
 
@@ -50,7 +54,7 @@ from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
 # STALE DENY RULE MIGRATION (implementation in handler; re-exported here)
 # =============================================================================
 
-from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny  # noqa: F401
+from aipass.aipass.apps.handlers.provider_reconcile import plan_stale_deny, reconcile_stale_deny  # noqa: F401
 
 
 # =============================================================================
@@ -133,6 +137,118 @@ def check_settings_scalars(
 
 
 # =============================================================================
+# SHOW THE PLAN, ASK ONCE (FPLAN-0646)
+# =============================================================================
+
+SETTINGS_FIX_LABEL = "settings fix"
+YES_COMMAND = "aipass doctor --fix --yes"
+NOT_APPLIED_NO_TTY = f"not applied: no tty — {YES_COMMAND}"
+NOT_APPLIED_DECLINED = "not applied: declined"
+NOTHING_CHANGED = "Nothing changed. Re-run with --yes to apply without the question."
+CONSENT_TTY = "y (tty)"
+CONSENT_YES = "--yes"
+CONSENT_INSTALL = "install"
+
+
+def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Path] = None) -> List[SettingsPlan]:
+    """The settings changes --fix would make: the wire, then the stale-deny removal on top of it.
+
+    Only plans that change the file are returned; the second is computed from the
+    first's result, so applying both in order lands exactly the diff shown.
+    """
+    plans: List[SettingsPlan] = []
+    wire = plan_wire_provider(manifest_path, settings_path) if manifest_path is not None else None
+    if wire is not None and wire.planned:
+        plans.append(wire)
+    stale = plan_stale_deny(settings_path, base=plans[0].after if plans else None)
+    if stale is not None:
+        plans.append(stale)
+    return plans
+
+
+def _render_settings_plan(plans: List[SettingsPlan]) -> int:
+    """Print every planned change, one per line, then the unified diff. Returns the change count."""
+    planned = [line for plan in plans for line in plan.planned]
+    console.print(f"\n[bold]Planned changes to ~/.claude/settings.json ({len(planned)}):[/bold]")
+    for line in planned:
+        console.print(f"  • {line}", markup=False, highlight=False)
+    for plan in plans:
+        for note in plan.notes:
+            console.print(f"  {note}", markup=False, highlight=False, style="dim")
+    console.print()
+    for line in settings_diff(plans[0].before, plans[-1].after):
+        console.print(line, markup=False, highlight=False)
+    console.print()
+    return len(planned)
+
+
+def _ask_apply(count: int) -> Optional[str]:
+    """Ask the one question on a tty. Returns the consent string, or None for n / EOF / Ctrl-C."""
+    try:
+        answer = input(f"Apply these {count} changes to ~/.claude/settings.json? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt) as exc:
+        logger.info("[doctor] settings question interrupted: %s", type(exc).__name__)
+        answer = "n"
+    return CONSENT_TTY if answer in ("y", "yes") else None
+
+
+def _apply_settings_plans(plans: List[SettingsPlan], door: str, consent: str, show: bool = True) -> None:
+    """Write each plan through its backed-up door; the wire plan takes *door*, the reconcile its own."""
+    for plan in plans:
+        actions = apply_settings_plan(plan, door if plan.door == DOOR_DOCTOR_FIX else None, consent)
+        if show:
+            for action in actions:
+                success(action)
+
+
+def fix_provider_settings(
+    manifest_path: Optional[Path], door: str = DOOR_DOCTOR_FIX, yes: bool = False
+) -> List[SettingsCheckResult]:
+    """--fix's settings step: plan, show, ask once, write — or say why nothing was written.
+
+    The install door (``install``) never asks; ``--yes`` writes without the question;
+    a doctor-fix run with no tty and no ``--yes`` writes nothing. Returns the rows to
+    add to the Services group: empty when written or when nothing needed changing.
+    """
+    plans = plan_settings_fix(manifest_path)
+    if not plans:
+        return []
+    if door == DOOR_INSTALL:
+        consent: Optional[str] = CONSENT_INSTALL
+    elif yes:
+        consent = CONSENT_YES
+    else:
+        count = _render_settings_plan(plans)
+        if not sys.stdin.isatty():
+            logger.info("[doctor] --fix with no tty and no --yes — settings plan shown, nothing written")
+            return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_NO_TTY, YES_COMMAND)]
+        consent = _ask_apply(count)
+        if consent is None:
+            _print_manual_wire_warning([], [], [], [], [])
+            console.print(NOTHING_CHANGED)
+            return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_DECLINED, YES_COMMAND)]
+    _apply_settings_plans(plans, door, consent)
+    json_handler.log_operation("settings_fix", {"door": door, "consent": consent, "plans": len(plans)})
+    return []
+
+
+def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dict:
+    """The settings plan for ``doctor --fix --json``: written only with ``--yes`` (``applied``)."""
+    plans = plan_settings_fix(manifest_path)
+    report = {
+        "planned": [line for plan in plans for line in plan.planned],
+        "notes": [note for plan in plans for note in plan.notes],
+        "diff": settings_diff(plans[0].before, plans[-1].after) if plans else [],
+        "applied": False,
+    }
+    if plans and yes:
+        _apply_settings_plans(plans, DOOR_DOCTOR_FIX, CONSENT_YES, show=False)
+        report["applied"] = True
+    json_handler.log_operation("settings_fix_report", {"plans": len(plans), "applied": report["applied"]})
+    return report
+
+
+# =============================================================================
 # INTERACTIVE WIRE PROMPTS
 # =============================================================================
 
@@ -144,49 +260,34 @@ def _prompt_auto_wire(
     missing_deny: List[str],
     missing_ask: List[str],
     missing_settings: List[str] | None = None,
+    settings_path: Optional[Path] = None,
 ) -> bool:
-    """Prompt user to auto-wire provider settings, or print manual warning.
+    """Show the planned wire line by line with its diff, ask once, or print the manual warning.
 
     Returns True if wiring was performed.
     """
     missing_settings = missing_settings or []
-    hook_count = len(missing_hooks)
-    env_count = len(missing_env)
-    perm_count = len(missing_deny) + len(missing_ask)
     logger.warning(
         "[doctor] %d hooks, %d env vars, %d permissions, %d settings missing",
-        hook_count,
-        env_count,
-        perm_count,
+        len(missing_hooks),
+        len(missing_env),
+        len(missing_deny) + len(missing_ask),
         len(missing_settings),
     )
-    parts = []
-    if hook_count:
-        parts.append(f"{hook_count} hooks")
-    if env_count:
-        parts.append(f"{env_count} env vars")
-    if perm_count:
-        parts.append(f"{perm_count} permissions")
-    if missing_settings:
-        parts.append(f"{len(missing_settings)} settings")
-    console.print(f"\n[bold]{', '.join(parts)} missing[/bold]")
-    console.print("[dim]Review details: .claude/hooks/README.md[/dim]")
+    plan = plan_wire_provider(manifest_path, settings_path)
+    consent: Optional[str] = None
+    if plan is not None and plan.planned:
+        count = _render_settings_plan([plan])
+        console.print("[dim]Review details: .claude/hooks/README.md[/dim]")
+        if not sys.stdin.isatty():
+            logger.info("[doctor] non-interactive stdin — auto-wire prompt skipped, treating as decline")
+        else:
+            consent = _ask_apply(count)
 
-    if not sys.stdin.isatty():
-        logger.info("[doctor] non-interactive stdin — auto-wire prompt skipped, treating as decline")
-        answer = "n"
-    else:
-        try:
-            answer = input("Auto-wire provider settings? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt) as exc:
-            logger.info("[doctor] auto-wire prompt interrupted: %s", type(exc).__name__)
-            answer = "n"
-
-    if answer in ("y", "yes"):
-        actions = _auto_wire_provider(manifest_path, interactive=True)
-        for action in actions:
+    if plan is not None and consent is not None:
+        for action in apply_settings_plan(plan, consent=consent):
             success(action)
-        return bool(actions)
+        return True
 
     _print_manual_wire_warning(missing_hooks, missing_env, missing_deny, missing_ask, missing_settings)
     return False
@@ -243,7 +344,7 @@ def print_introspection() -> None:
     console.print("[yellow]Provides:[/yellow]")
     console.print("  [dim]- HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS[/dim]")
     console.print("  [dim]- Bridge pattern — hooks wired as $AIPASS_HOME bridge commands[/dim]")
-    console.print("  [dim]- _auto_wire_provider() — hooks: strip-and-readd; env/permissions: additive merge[/dim]")
+    console.print("  [dim]- fix_provider_settings() — plan, show, ask once, write through the backed-up doors[/dim]")
     console.print()
 
 

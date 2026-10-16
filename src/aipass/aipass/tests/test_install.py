@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.3.1
+# Version: 1.4.1
 # Created: 2026-07-05
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -23,6 +23,7 @@ from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
     REPO_URL,
     TOTAL_STEPS,
+    SourceRefused,
     acquire_install_lock,
     _ask_permission_mode,
     _build_install_prompt,
@@ -36,6 +37,7 @@ from aipass.aipass.apps.modules.install import (
     _print_next_steps,
     _registry_user_name,
     _resolve_home,
+    _resolve_source,
     _run_doctor_preflight,
     _run_setup,
     handle_command,
@@ -322,6 +324,156 @@ class TestCloneRepo:
         assert "git clone failed (exit 128) — git's own message is above" in capsys.readouterr().err
 
 
+def _checkout(tmp_path: Path) -> Path:
+    """A directory that reads as a checkout: a .git directory, made without running git (no git from this seat)."""
+    repo = tmp_path / "checkout"
+    (repo / ".git").mkdir(parents=True)
+    return repo
+
+
+class TestSource:
+    """--source (DPLAN-0408): clone from a local checkout's committed HEAD, or a URL, never a silent fall back."""
+
+    def test_no_source_is_the_public_repo(self) -> None:
+        assert _resolve_source(None) == REPO_URL
+
+    @pytest.mark.parametrize("url", ["https://example.org/AIPass.git", "git@example.org:o/AIPass.git"])
+    def test_a_url_is_cloned_as_given(self, url: str) -> None:
+        assert _resolve_source(url) == url
+
+    def test_a_local_checkout_is_cloned_through_file_uri(self, tmp_path: Path) -> None:
+        """file:// keeps --depth 1 honoured and takes the committed HEAD only, never the working tree."""
+        repo = _checkout(tmp_path)
+        assert _resolve_source(str(repo)) == repo.resolve().as_uri()
+        assert _resolve_source(str(repo)).startswith("file://")
+
+    def test_a_worktree_whose_dot_git_is_a_file_is_a_checkout(self, tmp_path: Path) -> None:
+        repo = tmp_path / "worktree"
+        repo.mkdir()
+        (repo / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        assert _resolve_source(str(repo)) == repo.resolve().as_uri()
+
+    def test_refusals_name_the_path(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nowhere"
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        a_file = tmp_path / "file.txt"
+        a_file.write_text("x", encoding="utf-8")
+        cases = {
+            str(missing): f"{missing} does not exist",
+            str(plain): f"{plain} is not a repository (no .git)",
+            str(a_file): f"{a_file} is not a directory",
+            "": "it needs a path or a URL",
+        }
+        for given, words in cases.items():
+            with pytest.raises(SourceRefused) as exc:
+                _resolve_source(given)
+            assert str(exc.value) == words
+
+    def test_the_clone_argv_carries_the_source(self, tmp_path: Path, tools_on_path) -> None:
+        """Shallow clone of the given source into the home. Mutant: the clone hard-codes REPO_URL -> red."""
+        home = tmp_path / "home"
+        uri = _checkout(tmp_path).resolve().as_uri()
+        tools_on_path("git")
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
+            assert _clone_repo(home, dry_run=False, source=uri) is True
+        clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
+        assert clone_calls[0].args[0] == ["git", "clone", "--depth", "1", uri, str(home)]
+
+    def test_the_dry_run_names_the_source(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        uri = _checkout(tmp_path).resolve().as_uri()
+        with patch(f"{_MOD}.subprocess.run") as run:
+            assert _clone_repo(tmp_path / "home", dry_run=True, source=uri) is True
+        run.assert_not_called()
+        assert f"would run: git clone --depth 1 {uri}" in " ".join(capsys.readouterr().out.split())
+
+    def test_run_install_hands_the_resolved_source_to_the_clone(self, tmp_path: Path) -> None:
+        """Mutant: --source parsed but not passed to the clone -> the public repo is cloned -> red."""
+        repo = _checkout(tmp_path)
+        home = tmp_path / "AIPass"
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=home),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._clone_repo", return_value=False) as clone,
+            patch(_BUS),
+        ):
+            rc = run_install(non_interactive=True, dry_run=False, source=str(repo))
+        assert rc == 1
+        clone.assert_called_once_with(home, False, source=repo.resolve().as_uri())
+
+    def test_a_bad_source_is_refused_before_anything_is_made(self, tmp_path, capsys) -> None:
+        """Exit 2 with the path named; no home resolved, no lock, no clone, no fall back to GitHub."""
+        missing = tmp_path / "nowhere"
+        with (
+            patch(f"{_MOD}._resolve_home") as resolve,
+            patch(f"{_MOD}._clone_repo") as clone,
+        ):
+            rc = run_install(non_interactive=True, dry_run=False, source=str(missing))
+        assert rc == 2
+        resolve.assert_not_called()
+        clone.assert_not_called()
+        assert f"--source refused: {missing} does not exist" in " ".join(capsys.readouterr().err.split())
+
+    def test_handle_command_threads_source_and_refuses_a_valueless_one(self, tmp_path: Path) -> None:
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--source", str(tmp_path), "--no-chat"])
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-chat"])
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-chat", "--source"])
+        assert [c.kwargs["source"] for c in run.call_args_list] == [str(tmp_path), None, ""]
+
+    def test_the_help_lists_source(self, capsys: pytest.CaptureFixture[str]) -> None:
+        print_help()
+        printed = " ".join(capsys.readouterr().out.split())
+        assert "aipass install --source PATH|URL" in printed
+        assert "a local path clones its committed HEAD; for the install sandbox" in printed
+
+
+class TestFlagSpellings:
+    """DPLAN-0409 C3: every value flag reads `--flag value` and `--flag=value` alike, in one place."""
+
+    @pytest.mark.parametrize(
+        ("flag", "kwarg", "value"),
+        [
+            ("--path", "path", "/opt/aipass-home"),
+            ("--baud-tag", "baud_tag", "v0.2.1"),
+            ("--source", "source", "/src/a"),
+        ],
+    )
+    def test_both_spellings_reach_run_install_with_the_same_value(self, flag: str, kwarg: str, value: str) -> None:
+        """Mutant: the equals branch removed -> `--source=/x` clones the public repo -> red."""
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", [flag, value, "--no-chat"])
+            with pytest.raises(SystemExit):
+                handle_command("install", [f"{flag}={value}", "--no-chat"])
+        assert [c.kwargs[kwarg] for c in run.call_args_list] == [value, value]
+
+    @pytest.mark.parametrize(
+        ("given", "words"), [("--source=", "--source refused"), ("--baud-tag=", "--baud-tag refused")]
+    )
+    def test_an_empty_equals_value_is_refused_with_2_and_nothing_made(self, given, words, capsys) -> None:
+        with (
+            patch(f"{_MOD}._resolve_home") as resolve,
+            patch(f"{_MOD}._clone_repo") as clone,
+        ):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", [given, "--no-chat"])
+        assert exc.value.code == 2
+        resolve.assert_not_called()
+        clone.assert_not_called()
+        assert words in capsys.readouterr().err
+
+    def test_absent_flags_keep_their_defaults(self) -> None:
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-chat"])
+        kwargs = run.call_args.kwargs
+        assert (kwargs["path"], kwargs["baud_tag"], kwargs["source"]) == (None, "latest", None)
+
+
 class TestRunSetup:
     """Running the repo setup.sh."""
 
@@ -441,7 +593,7 @@ class TestRunInstall:
             patch(_BUS) as bus,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
-        clone.assert_called_once_with(home, False)
+        clone.assert_called_once_with(home, False, source=REPO_URL)
         setup.assert_not_called()
         assert rc == 1
         bus.fire.assert_called_once_with(

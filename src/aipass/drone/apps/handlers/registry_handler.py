@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.2.5
+# Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-10-04
+# Modified: 2026-10-13
 # =============================================
 
 """
@@ -15,8 +15,9 @@ All file I/O and data transformation for the registry lives here.
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.prax import logger
 from .exceptions import (
@@ -93,6 +94,195 @@ def _record_passport_fault(passport_path: Path, registry_path: Path, exc: Except
         f"registry {registry_path} was used without its credential check"
     )
     logger.warning("%s", _PASSPORT_FAULT)
+
+
+# The registry that marks a directory as an AIPass home, not a project's own.
+HOME_REGISTRY = "AIPASS_REGISTRY.json"
+
+
+class AipassHome(NamedTuple):
+    """Where the AIPass home is, which source named it, and what was tried when none did."""
+
+    path: Optional[Path]
+    source: str
+    tried: tuple
+
+
+def _interpreter_home() -> Path:
+    """The directory holding this interpreter's venv: ``<home>`` for ``<home>/.venv/bin/python3``."""
+    return Path(sys.prefix).parent
+
+
+def _enrolment_file() -> Optional[Path]:
+    """``~/.aipass/trusted_projects.json``, or None when there is no user home directory to look in."""
+    try:
+        return Path.home() / ".aipass" / "trusted_projects.json"
+    except RuntimeError as exc:
+        logger.warning("AIPass home: no user home directory to find the enrolment file in: %s", exc)
+        return None
+
+
+def _enrolled_homes(enrolment: Path) -> List[tuple]:
+    """``(enrolled, path)`` for each enrolled project that holds an AIPASS_REGISTRY.json.
+
+    Raises OSError or ValueError when the file cannot be read as the enrolment
+    record: a fault to name, never "nothing enrolled".
+    """
+    data = json.loads(enrolment.read_text(encoding="utf-8"))
+    projects = data.get("projects") if isinstance(data, dict) else None
+    if not isinstance(projects, dict):
+        raise ValueError("'projects' is not an object")
+    homes = []
+    for raw, entry in projects.items():
+        path = Path(raw)
+        if (path / HOME_REGISTRY).is_file():
+            enrolled = entry.get("enrolled", "") if isinstance(entry, dict) else ""
+            homes.append((str(enrolled), path))
+    return homes
+
+
+def resolve_aipass_home() -> AipassHome:
+    """The AIPass home: the one answer every AIPASS_HOME reader in drone asks.
+
+    Order, first answer wins (@devpulse's brief, 2026-10-13):
+
+    1. ``AIPASS_HOME`` set — an explicit setting beats a guess, used as given.
+    2. The interpreter's own install: the installed ``drone`` runs on
+       ``<home>/.venv/bin/python3``, so ``Path(sys.prefix).parent`` is the home
+       when it holds an AIPASS_REGISTRY.json. A system Python or a tool venv
+       fails that check and falls through.
+    3. The homes enrolled in ``~/.aipass/trusted_projects.json``: the projects
+       there that hold an AIPASS_REGISTRY.json, the newest ``enrolled`` first.
+       (The prefer-the-interpreter's-parent rule is step 2 already: had that
+       parent held a registry, step 2 would have answered.)
+
+    A terminal opened before setup.sh wrote ``AIPASS_HOME`` into the shell rc
+    still reaches the core branches through 2 or 3.
+
+    Returns:
+        AipassHome. ``path`` is None only when all three failed, and ``tried``
+        then names each, so the tip can say what a person could act on.
+    """
+    explicit = os.environ.get("AIPASS_HOME")
+    if explicit:
+        return AipassHome(Path(explicit), "AIPASS_HOME", ())
+
+    tried = ["AIPASS_HOME is unset"]
+    interpreter_home = _interpreter_home()
+    if (interpreter_home / HOME_REGISTRY).is_file():
+        return AipassHome(interpreter_home, "interpreter", ())
+    tried.append(f"{interpreter_home} (the interpreter's install) holds no {HOME_REGISTRY}")
+
+    homes, why_none = _enrolled_or_reason(_enrolment_file())
+    if not homes:
+        tried.append(why_none)
+        return AipassHome(None, "", tuple(tried))
+    enrolled, home = max(homes, key=lambda pair: pair[0])
+    if len(homes) > 1:
+        logger.info("AIPass home: %d enrolled homes; chose %s, the newest enrolled (%s)", len(homes), home, enrolled)
+    return AipassHome(home, "enrolled", ())
+
+
+def _enrolled_or_reason(enrolment: Optional[Path]) -> tuple:
+    """``(homes, "")`` from the enrolment file, or ``([], why there are none)``.
+
+    An unreadable file is a reason to print, never an empty enrolment: the
+    tip names it, so a person can see which file to repair.
+    """
+    if enrolment is None:
+        return [], "there is no user home directory holding .aipass/trusted_projects.json"
+    if not enrolment.is_file():
+        return [], f"{enrolment} does not exist"
+    try:
+        homes = _enrolled_homes(enrolment)
+    except (OSError, ValueError) as exc:
+        logger.warning("AIPass home: the enrolment file %s could not be read: %s", enrolment, exc)
+        return [], f"{enrolment} could not be read ({exc})"
+    if not homes:
+        return [], f"{enrolment} enrolls no project holding {HOME_REGISTRY}"
+    return homes, ""
+
+
+def missing_home_tip() -> str:
+    """The tip printed under "Branch not found", or "" when an AIPass home resolved."""
+    home = resolve_aipass_home()
+    if home.path is not None:
+        return ""
+    return (
+        "  Tip: no AIPass home found. Tried: "
+        + "; ".join(home.tried)
+        + ".\n  Set AIPASS_HOME=/path/to/AIPass to reach the core branches."
+    )
+
+
+# The homes whose interpreter choice this process has already logged: once per
+# home, not once per routed command.
+_ANNOUNCED_HOMES: set = set()
+
+
+# Where a venv keeps its python, by platform: (directory, file name).
+VENV_LAYOUTS = {"windows": ("Scripts", "python.exe"), "posix": ("bin", "python")}
+
+
+def _venv_layout() -> tuple:
+    """This platform's venv layout, one of VENV_LAYOUTS."""
+    return VENV_LAYOUTS["windows"] if os.name == "nt" else VENV_LAYOUTS["posix"]
+
+
+def _venv_python(home: Path) -> Path:
+    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python`` or ``Scripts/python.exe``."""
+    directory, name = _venv_layout()
+    return home / ".venv" / directory / name
+
+
+def branch_interpreter(branch_path: str | Path) -> str:
+    """Which python runs a branch's app: the interpreter of the AIPass home the branch lives in.
+
+    A stranger's machine holds aipass twice: the uv tool venv whose ``drone``
+    comes first on PATH, and the home's own ``.venv`` with the home's code
+    installed editable. A home app run on the tool venv's python imports its
+    handlers from the tool's site-packages, and the handlers fence refuses a
+    caller outside its tree (the owner's sandbox, DPLAN-0408, 2026-10-13).
+
+    * The branch is outside the resolved home (a project's own branch, a
+      declared root), or no home resolved: ``sys.executable``, as always.
+    * The home is ``Path(sys.prefix).parent``, so this drone IS the home's:
+      ``sys.executable``.
+    * Otherwise the home's own venv python when it exists, logged INFO once.
+    * No venv there: ``sys.executable``, with a WARNING naming the home, once.
+      setup.sh makes the venv; a home without one is half-installed.
+
+    The venv path is returned as found, never resolved: a venv's python is a
+    symlink to the base interpreter, and following it would lose the venv.
+    """
+    home = resolve_aipass_home().path
+    if home is None:
+        return sys.executable
+    home = home.resolve()
+    if not Path(branch_path).resolve().is_relative_to(home) or home == _interpreter_home().resolve():
+        return sys.executable
+    venv_python = _venv_python(home)
+    announce = home not in _ANNOUNCED_HOMES
+    _ANNOUNCED_HOMES.add(home)
+    if venv_python.is_file():
+        if announce:
+            logger.info(
+                "Branch apps in the AIPass home %s run on its own interpreter %s; this drone's %s belongs to "
+                "another install",
+                home,
+                venv_python,
+                sys.executable,
+            )
+        return str(venv_python)
+    if announce:
+        logger.warning(
+            "The AIPass home %s has no %s (setup.sh makes it; this home is half-installed). "
+            "Its branch apps run on this drone's own %s, whose handlers may refuse them.",
+            home,
+            venv_python,
+            sys.executable,
+        )
+    return sys.executable
 
 
 def _first_registry_in(directory: Path) -> Optional[Path]:
@@ -190,7 +380,7 @@ def find_registry() -> Path:
     1. Explicitly set path via set_registry_path()
     2. AIPASS_REGISTRY environment variable
     3. Walk up from cwd (skipping registries that fail credential check)
-    4. AIPASS_HOME env var — for external projects where CWD walk finds nothing
+    4. The AIPass home (resolve_aipass_home) — for external projects where CWD walk finds nothing
     5. Walk up from drone package location
     6. Default: package-relative path
 
@@ -210,12 +400,11 @@ def find_registry() -> Path:
                     return hit
                 continue
 
-    # AIPASS_HOME fallback — for external projects where CWD walk finds nothing
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if aipass_home:
-        hit = _first_registry_in(Path(aipass_home))
-        if hit is not None:
-            return hit
+    # The AIPass home — AIPASS_HOME, else the interpreter's install, else an
+    # enrolled home — for external projects where the CWD walk finds nothing
+    hit = _get_aipass_home_registry_path()
+    if hit is not None:
+        return hit
 
     # Walk up from this file (fallback for pip editable installs)
     current = Path(__file__).resolve().parent
@@ -403,11 +592,11 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
 
 
 def _get_aipass_home_registry_path() -> Optional[Path]:
-    """Return the AIPass home registry path from AIPASS_HOME env var, or None."""
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if not aipass_home:
+    """Return the registry in the AIPass home resolve_aipass_home() names, or None."""
+    home = resolve_aipass_home().path
+    if home is None:
         return None
-    return _first_registry_in(Path(aipass_home))
+    return _first_registry_in(home)
 
 
 def load_registry() -> Dict[str, Any]:

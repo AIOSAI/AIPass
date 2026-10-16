@@ -1,20 +1,26 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.5.2
+# Version: 1.6.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-08
+# Modified: 2026-10-15
 # =============================================
 
-"""Tests for apps/handlers/security/edit_gate.py."""
+"""Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
+
+# settings_backup.py is pinned here, not in a file of its own: new test files are gated
+# (.aipass/test_write_policy.json) and FPLAN-0645 named this file. A move is @devpulse's word.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that edit_gate.py parses and imports, ruff and collection cover it
 # seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
 # seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
+import datetime
+import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +29,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import handle
+from aipass.hooks.apps.handlers.security import settings_backup
 from aipass.hooks.apps.modules import diagnostics_state as ds
 from aipass.hooks.apps.modules import engine_closure
 
@@ -1010,3 +1017,97 @@ class TestTheEngineClosureIsNotLeftCrashing:
         err = capsys.readouterr().err
         assert "drone @hooks closure list" in err
         assert "files in the hook engine's import closure" not in err
+
+
+@pytest.fixture
+def claude_home(tmp_path: Path, monkeypatch) -> Path:
+    """A tmp ~/.claude holding a settings.json and settings.local.json; the gate's home seam points at it."""
+    claude = tmp_path / "home" / ".claude"
+    claude.mkdir(parents=True)
+    # Bytes, not text: the test below pins the backup to the file's exact bytes, and
+    # text mode on Windows would write CRLF and fail that oracle for the wrong reason.
+    (claude / "settings.json").write_bytes(b'{"model": "before"}\n')
+    (claude / "settings.local.json").write_bytes(b'{"local": "before"}\n')
+    monkeypatch.setattr(settings_backup, "_claude_dir", lambda: claude)
+    return claude
+
+
+def _receipts(claude: Path) -> list[dict]:
+    text = (claude / ".backup" / "settings" / "receipts.jsonl").read_text(encoding="utf-8")
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def _backups(claude: Path) -> list[str]:
+    return sorted(p.name for p in (claude / ".backup" / "settings").iterdir() if p.name != "receipts.jsonl")
+
+
+class TestSettingsBackup:
+    """FPLAN-0645: ~/.claude/settings*.json never changes without a copy and a receipt."""
+
+    def test_an_edit_keeps_the_original_bytes_and_one_receipt_then_allows(self, claude_home, tmp_path):
+        seat = tmp_path / "AIPass" / "src" / "aipass" / "hooks"
+        (seat / ".trinity").mkdir(parents=True)
+        edit = {"file_path": str(claude_home / "settings.json"), "old_string": "before", "new_string": "after"}
+        result = settings_backup.handle({"tool_name": "Edit", "tool_input": edit, "cwd": str(seat)})
+        assert result == {"stdout": "", "exit_code": 0}
+        (backup,) = _backups(claude_home)
+        assert re.fullmatch(r"settings\.json\.\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.edit-tool", backup)
+        kept = (claude_home / ".backup" / "settings" / backup).read_bytes()
+        assert kept == b'{"model": "before"}\n'
+        (receipt,) = _receipts(claude_home)
+        assert receipt["door"] == "edit-tool" and receipt["file"] == "settings.json" and receipt["backup"] == backup
+        assert receipt["before_sha256"] == hashlib.sha256(kept).hexdigest()
+        assert receipt["actor"] == "hooks" and receipt["after_sha256"] is None
+        assert receipt["summary"] == ["Edit", "before → after"]
+
+    def test_a_write_to_settings_local_is_the_write_tool_door(self, claude_home, tmp_path):
+        write = {"file_path": str(claude_home / "settings.local.json"), "content": "{}"}
+        result = settings_backup.handle({"tool_name": "Write", "tool_input": write, "cwd": str(tmp_path)})
+        assert result["exit_code"] == 0
+        (receipt,) = _receipts(claude_home)
+        assert receipt["door"] == "write-tool" and receipt["file"] == "settings.local.json"
+        assert receipt["actor"] == str(tmp_path.resolve())
+        assert _backups(claude_home) == [receipt["backup"]]
+
+    def test_a_bash_write_is_the_bash_door_and_the_summary_carries_the_command(self, claude_home, tmp_path):
+        command = f"sed -i s/before/after/ {claude_home / 'settings.json'}"
+        result = settings_backup.handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(tmp_path)})
+        assert result["exit_code"] == 0
+        (receipt,) = _receipts(claude_home)
+        assert receipt["door"] == "bash" and receipt["file"] == "settings.json"
+        assert receipt["summary"] == ["Bash", command]
+
+    def test_a_backup_folder_that_cannot_be_made_refuses_and_names_the_path(self, claude_home, tmp_path):
+        blocker = claude_home / ".backup" / "settings"
+        blocker.parent.mkdir()
+        blocker.write_text("a file where the folder goes", encoding="utf-8")
+        edit = {"file_path": str(claude_home / "settings.json"), "old_string": "before", "new_string": "after"}
+        result = settings_backup.handle({"tool_name": "Edit", "tool_input": edit, "cwd": str(tmp_path)})
+        assert result["exit_code"] == 2
+        parsed = json.loads(result["stdout"])
+        assert parsed["decision"] == "block"
+        assert f"Backup: {blocker}" in parsed["reason"]
+
+    def test_an_edit_anywhere_else_is_allowed_with_no_backup_and_no_folder(self, claude_home, tmp_path):
+        elsewhere = tmp_path / "other" / "settings.json"
+        project = tmp_path / "repo" / ".claude" / "settings.json"
+        for path in (elsewhere, project):
+            path.parent.mkdir(parents=True)
+            path.write_text("{}", encoding="utf-8")
+            edit = {"file_path": str(path), "old_string": "{}", "new_string": "[]"}
+            result = settings_backup.handle({"tool_name": "Edit", "tool_input": edit, "cwd": str(tmp_path)})
+            assert result == {"stdout": "", "exit_code": 0}
+        assert not (claude_home / ".backup").exists()
+
+    def test_two_edits_in_one_second_keep_two_backups_the_second_suffixed(self, claude_home, tmp_path, monkeypatch):
+        instant = datetime.datetime(2026, 10, 15, 17, 30, 2).astimezone()
+        monkeypatch.setattr(settings_backup, "_now", lambda: instant)
+        edit = {"file_path": str(claude_home / "settings.json"), "old_string": "before", "new_string": "after"}
+        for _ in range(2):
+            assert (
+                settings_backup.handle({"tool_name": "Edit", "tool_input": edit, "cwd": str(tmp_path)})["exit_code"]
+                == 0
+            )
+        first = "settings.json.2026-10-15T17-30-02.edit-tool"
+        assert _backups(claude_home) == [first, f"{first}-2"]
+        assert [r["backup"] for r in _receipts(claude_home)] == [first, f"{first}-2"]

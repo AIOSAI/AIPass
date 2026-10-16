@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-13
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -119,6 +119,15 @@ REFUSE_NO_GITHUB = (
 
 # The remote fetch reads, and push writes to.
 _REMOTE = "origin"
+
+# fetch talks to the remote and merge may run a merge driver over every file,
+# so a slow link or a large history gets two minutes before the door gives up.
+GIT_NETWORK_TIMEOUT = 120
+# Every other call the door's runner makes is a local read (symbolic-ref,
+# rev-parse, status, diff, log, remote get-url): seconds on any tree, so a
+# minute is a hang, not a slow answer.
+GIT_LOCAL_TIMEOUT = 60
+_NETWORK_VERBS = ("fetch", "merge")
 
 # What drone's router stamps onto every routed command, and what the rail reads.
 _STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
@@ -456,9 +465,19 @@ class Standing(NamedTuple):
 
 
 def _run_git(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
-    """Run git in *repo_root*; raise _GitFailed only when git itself cannot run."""
+    """Run git in *repo_root*; raise _GitFailed when git cannot run or does not finish in time.
+
+    The child never prompts: with GIT_TERMINAL_PROMPT=0 a credential prompt
+    fails at once instead of waiting on a terminal nobody is at.
+    """
+    timeout = GIT_NETWORK_TIMEOUT if argv[0] in _NETWORK_VERBS else GIT_LOCAL_TIMEOUT
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
-        return subprocess.run(["git", *argv], capture_output=True, text=True, cwd=str(repo_root))
+        return subprocess.run(
+            ["git", *argv], capture_output=True, text=True, cwd=str(repo_root), timeout=timeout, env=env
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise _GitFailed(f"git {argv[0]} timed out after {timeout} s in {repo_root}") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise _GitFailed(f"git {argv[0]} could not run: {exc}") from exc
 
@@ -685,7 +704,8 @@ def gh_run_args(args: list[str], repo_root: Path) -> tuple[list[str], str]:
     """
     if not args or args[0] not in RUN_READS:
         return [], REFUSE_RUN_SUB.format(sub=args[0] if args else "")
-    if any(arg == "-R" or arg.startswith("-R=") for arg in args):
+    # gh's only -R short flag is --repo: -R VALUE, -R=VALUE and the attached -RVALUE all name a repo.
+    if any(arg.startswith("-R") for arg in args):
         return [], REFUSE_RUN_SHORT_FLAG
     try:
         slug = github_slug(_git_out(repo_root, "remote", "get-url", _REMOTE))

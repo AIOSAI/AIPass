@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-17
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -31,6 +31,7 @@ from aipass.drone.apps.handlers.git import (
     diff_handler,
     log_handler,
     tracked_handler,
+    untrack_handler,
     export_handler,
     show_handler,
     blame_handler,
@@ -70,6 +71,7 @@ _COMMANDS = (
     "run",
     "workflow",
     "commit",
+    "untrack",
     "checkout",
     "sync",
     "merge-main",
@@ -267,6 +269,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_close_pr(args)
     if command == "commit":
         return _handle_commit(args)
+    if command == "untrack":
+        return _handle_untrack(args)
     if command == "checkout":
         return _handle_checkout(args)
     if command == "sync":
@@ -1222,6 +1226,33 @@ def _handle_commit(args: list[str], repo_root: Path | None = None) -> dict:
     return commit_handler.commit_changes(message, all_files=all_files, files=files, repo_root=repo_root)
 
 
+def _handle_untrack(args: list[str]) -> dict:
+    """Handle the untrack subcommand (owner tier): `untrack [--recursive] <path ...>`, out of the index only.
+
+    The twin of `git rm --cached`. Paths are read as `tracked` reads them; the
+    working tree is untouched and nothing is committed. Exit 1 when any path was
+    refused, after the accepted ones left the index.
+    """
+    recursive = "--recursive" in args
+    paths = [arg for arg in args if arg != "--recursive"]
+    flag = next((arg for arg in paths if arg.startswith("-")), None)
+    if flag is not None:
+        return {"stdout": "", "stderr": f"Unknown argument for 'untrack': {flag}", "exit_code": 1}
+    if not paths:
+        return {"stdout": "", "stderr": "Usage: drone @git untrack [--recursive] <path ...>", "exit_code": 1}
+    result = untrack_handler.untrack(lock_handler.find_repo_root(), caller_cwd(), paths, recursive=recursive)
+    if not result["ok"]:
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+    lines = [f"left the index  {path}" for path in result["removed"]]
+    if result["removed"]:
+        lines.append(result["message"])
+    return {
+        "stdout": "\n".join(lines),
+        "stderr": "\n".join(result["refused"]),
+        "exit_code": 1 if result["refused"] else 0,
+    }
+
+
 def _handle_checkout(args: list[str]) -> dict:
     """Handle the checkout subcommand (owner tier)."""
     if not args:
@@ -1345,7 +1376,7 @@ def get_introspective() -> str:
         "Connected Handlers:\n"
         "  handlers/git/\n"
         "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
-        "    - tracked_handler.py, export_handler.py\n"
+        "    - tracked_handler.py, untrack_handler.py, export_handler.py\n"
         "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - merge_main_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
@@ -1356,7 +1387,7 @@ def get_introspective() -> str:
         "Machine surface: --json on status, log, show, remote\n"
         "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
         "issue,run,workflow)"
-        " | owner (pr,commit,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
+        " | owner (pr,commit,untrack,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
         "unlock,merge,smart-sync,fix,tag)\n"
     )
 
@@ -1406,7 +1437,10 @@ def print_introspection() -> None:
         " [cyan]show_handler.py[/cyan], [cyan]remote_handler.py[/cyan]"
     )
     c.print("    - [cyan]commit_handler.py[/cyan], [cyan]checkout_handler.py[/cyan], [cyan]sync_handler.py[/cyan]")
-    c.print("    - [cyan]merge_main_handler.py[/cyan], [cyan]tracked_handler.py[/cyan], [cyan]export_handler.py[/cyan]")
+    c.print(
+        "    - [cyan]merge_main_handler.py[/cyan], [cyan]tracked_handler.py[/cyan],"
+        " [cyan]untrack_handler.py[/cyan], [cyan]export_handler.py[/cyan]"
+    )
     c.print(
         "    - [cyan]dev_pr_handler.py[/cyan], [cyan]branches_handler.py[/cyan],"
         " [cyan]delete_branch_handler.py[/cyan], [cyan]close_pr_handler.py[/cyan],"

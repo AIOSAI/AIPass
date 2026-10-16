@@ -14,7 +14,7 @@ shelf is committed — write it as if it ships.
 | [wiring.md](wiring.md) | The two-tier hook model, every event and its wiring shape, entry names vs handler filenames, and what a new handler needs in provider settings |
 | [engine.md](engine.md) | Dispatch, promote (source is not live until promoted), gates fail closed while injectors skip, the merged output document, dynamic handler import, and the import-time working-directory rule |
 | [project_config.md](project_config.md) | Which config runs (the AIPass root, ignored branch configs, external projects behind trust, never "no hooks"), the project template, the retired watchdog, and the release notice |
-| [git_gate.md](git_gate.md) | Raw git and gh refused for every seat (the admin seat included), the drone twins, the protected files, and the rm gate (every delete is the admin seat's) |
+| [git_gate.md](git_gate.md) | Raw git and gh refused for every seat (the admin seat included), the drone twins, the protected files, the rm gate (every delete is the admin seat's), and the settings backup |
 | [edit_gate.md](edit_gate.md) | The branch and project fences, the direction table, and the verified admin-seat exemption |
 | [bash_writes.md](bash_writes.md) | The scripted lane: which write targets a shell command can be seen to name, what it deliberately misses, and both Windows path spellings |
 | [trinity_memory_gate.md](trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and how a write is judged on what it authors |

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
@@ -729,6 +730,24 @@ class TestSetupSystemLogger:
         first = logging_setup.setup_system_logger()
         second = logging_setup.setup_system_logger()
         assert first is second
+
+    def test_a_system_logs_home_that_cannot_be_made_mutes_that_tier_and_never_raises(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
+    ):
+        """DPLAN-0409 C4: setup_system_logger called get_system_logs_dir() bare, so it raised."""
+
+        def unmakeable():
+            raise PermissionError(13, "Permission denied", "system_logs")
+
+        monkeypatch.setattr(logging_setup, "get_system_logs_dir", unmakeable)
+        with caplog.at_level(logging.ERROR, logger=logging_setup.logger.name):
+            result = logging_setup.setup_system_logger()
+
+        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+        assert failed == ["Log handler failed for prax_logger.log: [Errno 13] Permission denied: 'system_logs'"]
+        assert [type(h) is logging.NullHandler for h in result.handlers] == [True, False]
+        assert isinstance(result.handlers[1], RotatingFileHandler)
+        assert Path(result.handlers[1].baseFilename) == tmp_path / "local" / "prax_logger.log"
 
 
 # =============================================

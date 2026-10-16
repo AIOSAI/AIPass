@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_handler.py
 # Description: Registry loading, lookup and credential verification
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-04
+# Modified: 2026-10-13
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -14,6 +14,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Generator
@@ -434,6 +435,219 @@ class TestFindRegistry:
         result = find_registry()
         assert result.parent == nested
         assert result.name == "SUB_REGISTRY.json"
+
+
+# ===================================================================
+# 7a. resolve_aipass_home() — the home without AIPASS_HOME
+# ===================================================================
+
+
+def _an_aipass_home(directory: Path, branch: str = "api") -> Path:
+    """A directory that is an AIPass home: an AIPASS_REGISTRY.json listing one branch."""
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_registry(directory, {"metadata": {}, "branches": [{"name": branch, "path": str(directory / branch)}]})
+    return directory
+
+
+def _enrol(enrolment: Path, projects: dict[Path, str]) -> Path:
+    """Write trusted_projects.json in the shape the install writes, enrolling each path at its time."""
+    enrolment.parent.mkdir(parents=True, exist_ok=True)
+    record = {str(path): {"enrolled": when, "config_hash": "x", "config_path": ""} for path, when in projects.items()}
+    enrolment.write_text(json.dumps({"version": 1, "projects": record}), encoding="utf-8")
+    return enrolment
+
+
+@pytest.fixture
+def stranger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """A fresh terminal after the install: AIPASS_HOME unset, the cwd in a tree with no registry.
+
+    The interpreter and the enrolment file point into tmp_path; each test puts
+    a home in one, both, or neither.
+    """
+    monkeypatch.delenv("AIPASS_HOME", raising=False)
+    monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+    interpreter = tmp_path / "install"
+    enrolment = tmp_path / "user" / ".aipass" / "trusted_projects.json"
+    monkeypatch.setattr(registry_handler, "_interpreter_home", lambda: interpreter)
+    monkeypatch.setattr(registry_handler, "_enrolment_file", lambda: enrolment)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    return {"interpreter": interpreter, "enrolment": enrolment, "tmp": tmp_path}
+
+
+class TestAipassHomeResolution:
+    """AIPASS_HOME, else the interpreter's install, else the newest enrolled home; each must hold the registry."""
+
+    def test_the_interpreters_install_is_the_home(self, stranger: dict[str, Path]) -> None:
+        """The installed drone runs on <home>/.venv: its parent answers, with nothing set."""
+        home = _an_aipass_home(stranger["interpreter"])
+
+        assert registry_handler.resolve_aipass_home() == (home, "interpreter", ())
+
+    def test_an_explicit_aipass_home_beats_the_interpreter(
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the AIPASS_HOME read moved below the interpreter check — the guess wins."""
+        _an_aipass_home(stranger["interpreter"])
+        chosen = _an_aipass_home(stranger["tmp"] / "chosen")
+        monkeypatch.setenv("AIPASS_HOME", str(chosen))
+
+        assert registry_handler.resolve_aipass_home().path == chosen
+
+    def test_an_interpreter_parent_without_a_registry_falls_through_to_the_one_enrolled_home(
+        self, stranger: dict[str, Path]
+    ) -> None:
+        """Mutant: the interpreter's parent returned without the registry check — a system Python names /usr."""
+        stranger["interpreter"].mkdir()
+        enrolled = _an_aipass_home(stranger["tmp"] / "AIPass")
+        _enrol(stranger["enrolment"], {enrolled: "2026-10-13T20:00:00+00:00"})
+
+        assert registry_handler.resolve_aipass_home() == (enrolled, "enrolled", ())
+
+    def test_projects_that_are_not_homes_are_skipped_and_the_newest_home_wins(self, stranger: dict[str, Path]) -> None:
+        """Mutant: min() for max() — the oldest enrolment answers."""
+        older = _an_aipass_home(stranger["tmp"] / "old_checkout")
+        newer = _an_aipass_home(stranger["tmp"] / "AIPass")
+        project = stranger["tmp"] / "baud"
+        project.mkdir()
+        _write_registry(project, _minimal_registry(), name="BAUD_REGISTRY.json")
+        _enrol(
+            stranger["enrolment"],
+            {
+                older: "2026-09-01T00:00:00+00:00",
+                newer: "2026-10-13T20:00:00+00:00",
+                project: "2026-10-13T21:00:00+00:00",
+            },
+        )
+
+        assert registry_handler.resolve_aipass_home().path == newer
+
+    def test_with_both_empty_nothing_resolves_and_the_tip_names_what_was_tried(self, stranger: dict[str, Path]) -> None:
+        stranger["interpreter"].mkdir()
+        project = stranger["tmp"] / "baud"
+        project.mkdir()
+        _enrol(stranger["enrolment"], {project: "2026-10-13T20:00:00+00:00"})
+
+        home = registry_handler.resolve_aipass_home()
+
+        assert home.path is None
+        assert home.tried == (
+            "AIPASS_HOME is unset",
+            f"{stranger['interpreter']} (the interpreter's install) holds no AIPASS_REGISTRY.json",
+            f"{stranger['enrolment']} enrolls no project holding AIPASS_REGISTRY.json",
+        )
+        assert registry_handler.missing_home_tip() == (
+            "  Tip: no AIPass home found. Tried: " + "; ".join(home.tried) + ".\n"
+            "  Set AIPASS_HOME=/path/to/AIPass to reach the core branches."
+        )
+
+    def test_an_unreadable_enrolment_file_is_named_not_read_as_empty(self, stranger: dict[str, Path]) -> None:
+        stranger["enrolment"].parent.mkdir(parents=True)
+        stranger["enrolment"].write_text("{not json", encoding="utf-8")
+
+        home = registry_handler.resolve_aipass_home()
+
+        assert home.path is None
+        assert home.tried[-1].startswith(f"{stranger['enrolment']} could not be read (")
+
+    def test_the_tip_is_silent_once_a_home_resolved(self, stranger: dict[str, Path]) -> None:
+        _an_aipass_home(stranger["interpreter"])
+
+        assert registry_handler.missing_home_tip() == ""
+
+    def test_a_branch_in_the_home_resolves_from_outside_any_registry(self, stranger: dict[str, Path]) -> None:
+        """The stranger's `drone @api ...` from ~: get_branch_by_name finds @api in the interpreter's home."""
+        home = _an_aipass_home(stranger["interpreter"])
+
+        assert find_registry() == home / "AIPASS_REGISTRY.json"
+        branch = registry_handler.get_branch_by_name("api")
+        assert branch is not None
+        assert branch["path"] == str(home / "api")
+
+    def test_a_deleted_cwd_still_resolves_through_the_interpreter(
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = _an_aipass_home(stranger["interpreter"])
+        TestCredentialCheckWithNoCurrentDirectory._no_cwd(monkeypatch)
+
+        assert find_registry() == home / "AIPASS_REGISTRY.json"
+
+
+def _with_venv(home: Path, layout: str = "posix") -> Path:
+    """Give *home* its own venv python in *layout*, the way setup.sh does; returns that python."""
+    directory, name = registry_handler.VENV_LAYOUTS[layout]
+    python = home / ".venv" / directory / name
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    return python
+
+
+class TestBranchInterpreter:
+    """A branch app runs on the interpreter of the AIPass home it lives in, not on whichever drone came first."""
+
+    @pytest.fixture(autouse=True)
+    def _posix_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
+
+    def test_an_enrolled_homes_branch_runs_on_the_homes_venv_announced_once(self, stranger: dict[str, Path]) -> None:
+        """The sandbox: the uv tool's drone, an enrolled home with its own .venv (mutant: always sys.executable)."""
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        python = _with_venv(home)
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        with patch.object(registry_handler, "logger") as log:
+            first = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+            second = registry_handler.branch_interpreter(home / "src" / "aipass" / "flow")
+
+        assert first == second == str(python.resolve())
+        assert log.info.call_count == 1
+        assert python.resolve() in log.info.call_args.args
+        log.warning.assert_not_called()
+
+    @pytest.mark.parametrize("layout", ["posix", "windows"])
+    def test_aipass_home_set_to_another_install_takes_its_venv_in_either_layout(
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch, layout: str
+    ) -> None:
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        python = _with_venv(home, layout)
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS[layout])
+
+        assert registry_handler.branch_interpreter(home / "src" / "aipass" / "api") == str(python.resolve())
+
+    def test_a_home_without_a_venv_keeps_sys_executable_and_warns_naming_it(self, stranger: dict[str, Path]) -> None:
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        with patch.object(registry_handler, "logger") as log:
+            chosen = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+
+        assert chosen == sys.executable
+        assert log.warning.call_count == 1
+        assert home.resolve() in log.warning.call_args.args
+
+    def test_the_drones_own_home_keeps_sys_executable_even_with_a_venv(self, stranger: dict[str, Path]) -> None:
+        """The exact rule: on a dev checkout the .venv IS this interpreter (mutant: the own-home check removed)."""
+        home = _an_aipass_home(stranger["interpreter"])
+        _with_venv(home)
+
+        with patch.object(registry_handler, "logger") as log:
+            chosen = registry_handler.branch_interpreter(home / "src" / "aipass" / "api")
+
+        assert chosen == sys.executable
+        log.warning.assert_not_called()
+        log.info.assert_not_called()
+
+    def test_a_branch_outside_the_home_and_no_home_at_all_keep_sys_executable(self, stranger: dict[str, Path]) -> None:
+        """A declared root's branch is not the home's (mutant: the inside-the-home check removed)."""
+        assert registry_handler.branch_interpreter(stranger["tmp"] / "wren" / "src") == sys.executable
+
+        home = _an_aipass_home(stranger["tmp"] / "AIPass")
+        _with_venv(home)
+        _enrol(stranger["enrolment"], {home: "2026-10-13T20:00:00+00:00"})
+
+        assert registry_handler.branch_interpreter(stranger["tmp"] / "wren" / "src") == sys.executable
 
 
 # ===================================================================

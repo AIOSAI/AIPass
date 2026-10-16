@@ -1,35 +1,51 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
-# Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.3.4
+# Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
+# Version: 1.7.1
 # Created: 2026-08-01
-# Modified: 2026-09-29
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
 
 # Strip-and-readd hook merge kills the double-fire bug (DPLAN-0279),
-# plus the additive settings scalar slot (DPLAN-0347).
+# plus the additive settings scalar slot (DPLAN-0347), plus the backup and
+# receipt every settings writer takes first (FPLAN-0645, settings_backup.py,
+# reached through the three writer doors).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import functools
+import hashlib
 import json
+import os
+from datetime import datetime
+from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
 
-from aipass.aipass.apps.handlers import provider_wire
+from aipass.aipass.apps.handlers import provider_wire, settings_backup
+from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny
+from aipass.aipass.apps.handlers.settings_backup import SettingsBackupError
 from aipass.aipass.apps.handlers.provider_wire import (
     STATE_DIFFERENT,
     STATE_MISSING,
     STATE_SET,
-    platform_bridge_command,
-    auto_wire_provider,
+    apply_settings_plan,
     manifest_settings,
+    plan_wire_provider,
+    platform_bridge_command,
     refresh_provider_hooks,
     settings_gaps,
 )
+
+
+def _wire(manifest, settings_path) -> list:
+    """The doctor's wire door: plan the manifest's merge, then write it (what --fix --yes does)."""
+    plan = plan_wire_provider(manifest, settings_path)
+    assert plan is not None
+    return apply_settings_plan(plan)
 
 
 def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
@@ -68,7 +84,7 @@ class TestPlatformBridgeCommand:
         result = platform_bridge_command(other_cmd, os_name="nt")
         assert result == other_cmd
 
-    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "auto_wire_provider"])
+    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "plan_and_apply"])
     def test_both_wire_doors_write_the_windows_command(self, tmp_path, monkeypatch, door) -> None:
         """End to end: each public door writes the Windows interpreter into a settings file under tmp_path.
 
@@ -84,7 +100,7 @@ class TestPlatformBridgeCommand:
         if door == "refresh_provider_hooks":
             refresh_provider_hooks(manifest, settings_path=settings_path)
         else:
-            auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+            _wire(manifest, settings_path)
         written = json.loads(settings_path.read_text(encoding="utf-8"))
         written_cmd = written["hooks"]["Stop"][0]["hooks"][0]["command"]
         assert written_cmd == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
@@ -229,7 +245,8 @@ class TestRefreshProviderHooks:
 
 
 class TestAutoWireProviderHooks:
-    """Tests confirming auto_wire_provider (used by doctor --fix + interactive wire-prompt) now
+    """Tests confirming the doctor's wire door (plan_wire_provider + apply_settings_plan, behind
+    doctor --fix and the interactive wire-prompt)
     strip-and-readds hooks, while env vars and permissions remain purely additive.
     """
 
@@ -250,7 +267,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
@@ -287,7 +304,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["env"]["EXISTING_VAR"] == "keep-me"
@@ -363,7 +380,7 @@ class TestSettingsScalarSlot:
             encoding="utf-8",
         )
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
@@ -382,7 +399,7 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is True
@@ -402,8 +419,324 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": False}), encoding="utf-8")
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
         assert not [a for a in actions if "includeGitInstructions" in a]
+
+
+# =============================================================================
+# TestSettingsBackup — a backup and a receipt before every write (FPLAN-0645)
+# =============================================================================
+
+_FROZEN = datetime(2026, 10, 15, 17, 30, 2)
+_STAMP = "2026-10-15T17-30-02"
+
+
+class _FrozenDatetime(datetime):
+    """The clock edge, held at one second: names are known and a same-second collision is forced."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return _FROZEN
+
+
+def _backup_world(tmp_path, existing: dict | None, extra: dict | None = None):
+    """A manifest wanting one scalar, and a settings file under tmp_path/.claude (absent when None)."""
+    manifest = tmp_path / "provider_manifest.json"
+    claude = {"hooks": [], "settings": {"includeGitInstructions": False}, **(extra or {})}
+    manifest.write_text(json.dumps({"cli": {"claude": claude}}), encoding="utf-8")
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    if existing is not None:
+        settings_path.write_text(json.dumps(existing), encoding="utf-8")
+    return manifest, settings_path
+
+
+def _folder(settings_path: Path) -> Path:
+    return settings_path.parent / ".backup" / "settings"
+
+
+def _backups(settings_path: Path) -> list:
+    return sorted(p.name for p in _folder(settings_path).iterdir() if p.name != "receipts.jsonl")
+
+
+def _receipts(settings_path: Path) -> list:
+    lines = (_folder(settings_path) / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _is_root() -> bool:
+    return getattr(os, "geteuid", lambda: -1)() == 0
+
+
+class TestSettingsBackup:
+    """Every door that writes the provider settings file backs it up and leaves a receipt first."""
+
+    @pytest.fixture(autouse=True)
+    def _frozen_clock(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings_backup, "datetime", _FrozenDatetime)
+
+    def test_a_wire_over_an_existing_file_backs_up_the_original_bytes_and_leaves_one_receipt(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {"env": {"KEEP": "1"}})
+        original = settings_path.read_bytes()
+
+        actions = _wire(manifest, settings_path)
+
+        name = f"settings.json.{_STAMP}.doctor-fix"
+        assert _backups(settings_path) == [name]
+        assert (_folder(settings_path) / name).read_bytes() == original
+        (receipt,) = _receipts(settings_path)
+        assert receipt["door"] == "doctor-fix"
+        assert receipt["file"] == "settings.json"
+        assert receipt["backup"] == name
+        assert receipt["pid"] == os.getpid()
+        assert receipt["time"] == _FROZEN.astimezone().isoformat(timespec="seconds")
+        assert receipt["before_sha256"] == _sha(original)
+        assert receipt["after_sha256"] == _sha(settings_path.read_bytes()) != _sha(original)
+        assert "Set includeGitInstructions=false" in receipt["summary"]
+        assert f"Backed up settings to {_folder(settings_path) / name}" in actions
+        assert f"Receipt: {_folder(settings_path) / 'receipts.jsonl'}" in actions
+        assert not list(settings_path.parent.glob("settings.json.bak.*"))
+        if os.name != "nt":  # permission bits are POSIX-only
+            assert (_folder(settings_path) / name).stat().st_mode & 0o777 == 0o600
+            assert _folder(settings_path).stat().st_mode & 0o777 == 0o700
+
+    def test_two_writes_in_one_second_stack_two_backups_and_overwrite_neither(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+        original = settings_path.read_bytes()
+
+        _wire(manifest, settings_path)
+        after_first = settings_path.read_bytes()
+        _wire(manifest, settings_path)
+
+        name = f"settings.json.{_STAMP}.doctor-fix"
+        assert _backups(settings_path) == [name, f"{name}-2"]
+        assert (_folder(settings_path) / name).read_bytes() == original
+        assert (_folder(settings_path) / f"{name}-2").read_bytes() == after_first != original
+        assert [r["backup"] for r in _receipts(settings_path)] == [name, f"{name}-2"]
+
+    def test_a_first_install_takes_no_backup_and_its_receipt_says_so(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, None)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert _backups(settings_path) == []
+        (receipt,) = _receipts(settings_path)
+        assert receipt["door"] == "setup-sh"
+        assert receipt["backup"] is None
+        assert receipt["note"] == "no file existed"
+        assert receipt["before_sha256"] is None
+        assert receipt["after_sha256"] == _sha(settings_path.read_bytes())
+        assert "No settings file yet — nothing to back up" in actions
+
+    @pytest.mark.skipif(
+        os.name == "nt" or _is_root(), reason="a read-only directory needs POSIX bits and a non-root user"
+    )
+    @pytest.mark.parametrize("receipt_exists", [False, True], ids=["receipt-refused", "backup-copy-refused"])
+    def test_an_unwritable_backup_folder_refuses_and_leaves_the_settings_bytes_unchanged(
+        self, tmp_path, receipt_exists
+    ) -> None:
+        # The only route to a failed backup is a filesystem permission: the folder is made read-only.
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+        original = settings_path.read_bytes()
+        folder = _folder(settings_path)
+        folder.mkdir(parents=True)
+        if receipt_exists:
+            (folder / "receipts.jsonl").write_text("", encoding="utf-8")
+        folder.chmod(0o500)
+        try:
+            with pytest.raises(SettingsBackupError) as refused:
+                _wire(manifest, settings_path)
+        finally:
+            folder.chmod(0o700)
+
+        assert str(folder) in str(refused.value)
+        assert settings_path.read_bytes() == original
+        assert _backups(settings_path) == []
+
+    def test_a_write_the_fleet_writer_reports_failed_raises_and_leaves_no_receipt(self, tmp_path, monkeypatch) -> None:
+        """The fleet writer returns False on a failed write; the door raises and logs no receipt.
+        Mutant: the write_json return ignored -> a receipt line lands and nothing raises, red."""
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+        original = settings_path.read_bytes()
+        written: list = []
+
+        def _failed_write(path, _data) -> bool:
+            written.append(path)
+            return False
+
+        monkeypatch.setattr(provider_wire.json_handler, "write_json", _failed_write)
+
+        with pytest.raises(SettingsBackupError) as refused:
+            _wire(manifest, settings_path)
+
+        receipts = _folder(settings_path) / "receipts.jsonl"
+        lines = receipts.read_text(encoding="utf-8").splitlines() if receipts.exists() else []
+        assert str(settings_path) in str(refused.value)
+        assert lines == []
+        assert settings_path.read_bytes() == original
+        assert written == [settings_path]
+
+    @pytest.mark.parametrize("door", ["setup-sh", "reconcile-stale-deny"])
+    def test_each_other_writer_leaves_its_backup_and_receipt_under_its_door_name(
+        self, tmp_path, monkeypatch, door
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        manifest, settings_path = _backup_world(tmp_path, {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(keep*)"]}})
+        original = settings_path.read_bytes()
+
+        detail = ""
+        if door == "setup-sh":
+            refresh_provider_hooks(manifest, settings_path=settings_path)
+        else:
+            ((_label, _glyph, detail, _remedy),) = reconcile_stale_deny(fix=True)
+
+        name = f"settings.json.{_STAMP}.{door}"
+        assert _backups(settings_path) == [name]
+        assert (_folder(settings_path) / name).read_bytes() == original
+        (receipt,) = _receipts(settings_path)
+        assert receipt["door"] == door
+        assert receipt["before_sha256"] == _sha(original)
+        assert receipt["after_sha256"] == _sha(settings_path.read_bytes()) != _sha(original)
+        if door == "reconcile-stale-deny":
+            assert receipt["summary"][0] == "Removed stale deny rules: Bash(rm -rf*)"
+            assert str(_folder(settings_path) / name) in detail
+            assert str(_folder(settings_path) / "receipts.jsonl") in detail
+
+    def test_the_receipt_names_the_branch_the_cwd_sits_in_else_the_cwd_path(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        home = tmp_path / "home"
+        branch = home / "src" / "scout"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / "apps").mkdir()
+        (home / "TEST_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "scout"}}), encoding="utf-8"
+        )
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+
+        monkeypatch.chdir(branch / "apps")
+        _wire(manifest, settings_path)
+        monkeypatch.chdir(outside)
+        _wire(manifest, settings_path)
+
+        assert [r["actor"] for r in _receipts(settings_path)] == ["scout", str(outside)]
+
+
+# =============================================================================
+# TestInstallDoorEnvAndPermissions — setup.sh's second heredoc folded in (FPLAN-0645)
+# =============================================================================
+
+
+class TestInstallDoorEnvAndPermissions:
+    """refresh_provider_hooks merges manifest env and permissions too, through auto_wire's helpers."""
+
+    @pytest.fixture(autouse=True)
+    def _not_msys(self, monkeypatch) -> None:
+        monkeypatch.delenv("MSYSTEM", raising=False)
+        monkeypatch.delenv("OSTYPE", raising=False)
+
+    _EXTRA = {
+        "env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+        "permissions": {"deny": ["Bash(git push*)", "Read(~/.secrets/**)"], "ask": ["Edit(~/.claude/**)"]},
+    }
+
+    def test_the_install_door_lands_env_deny_and_ask_with_one_backup_and_one_receipt(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}}, self._EXTRA)
+
+        refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["env"]["AIPASS_HOME"] == str(manifest.parent.parent)
+        assert updated["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+        assert updated["permissions"]["deny"] == ["Bash(git push*)", "Read(~/.secrets/**)"]
+        assert updated["permissions"]["ask"] == ["Edit(~/.claude/**)"]
+        (backup,) = _backups(settings_path)
+        assert backup.endswith(".setup-sh")
+        (receipt,) = _receipts(settings_path)
+        assert receipt["door"] == "setup-sh"
+        assert "Added deny rule: Bash(git push*)" in receipt["summary"]
+        assert f"Set env AIPASS_HOME={manifest.parent.parent}" in receipt["summary"]
+
+    def test_the_install_door_keeps_an_existing_env_value_and_never_duplicates_a_deny_rule(self, tmp_path) -> None:
+        existing = {"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}, "permissions": {"deny": ["Bash(git push*)"]}}
+        manifest, settings_path = _backup_world(tmp_path, existing, self._EXTRA)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
+        assert updated["permissions"]["deny"] == ["Bash(git push*)", "Read(~/.secrets/**)"]
+        assert not [a for a in actions if "CLAUDE_CODE_DISABLE_AUTO_MEMORY" in a or "Bash(git push*)" in a]
+
+    @pytest.mark.parametrize(
+        ("var", "value", "lands"),
+        [("MSYSTEM", "MINGW64", True), ("MSYSTEM", "MSYS", True), ("OSTYPE", "msys", True), (None, None, False)],
+        ids=["git-bash-mingw64", "msys", "ostype-msys", "not-msys"],
+    )
+    def test_pythonutf8_lands_only_under_an_msys_shell(self, tmp_path, monkeypatch, var, value, lands) -> None:
+        if var:
+            monkeypatch.setenv(var, value)
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}}, self._EXTRA)
+
+        refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        env = json.loads(settings_path.read_text(encoding="utf-8"))["env"]
+        assert ("PYTHONUTF8" in env) is lands
+        if lands:
+            assert env["PYTHONUTF8"] == "1"
+
+
+# =============================================================================
+# TestAipassHomeRepoint — install re-points AIPASS_HOME, doctor never does (FPLAN-0645)
+# =============================================================================
+
+
+class TestAipassHomeRepoint:
+    """refresh_provider_hooks re-points exactly AIPASS_HOME; the doctor wire leaves it."""
+
+    _EXTRA = {"env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}
+
+    def _world(self, tmp_path, home: str):
+        existing = {"env": {"AIPASS_HOME": home, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}}
+        return _backup_world(tmp_path, existing, self._EXTRA)
+
+    def test_the_install_door_re_points_a_different_home_and_keeps_every_other_env_key(self, tmp_path) -> None:
+        old = str(tmp_path / "old_clone")
+        manifest, settings_path = self._world(tmp_path, old)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        new = str(manifest.parent.parent)
+        env = json.loads(settings_path.read_text(encoding="utf-8"))["env"]
+        assert env["AIPASS_HOME"] == new
+        assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
+        assert f"Re-pointed AIPASS_HOME {old} -> {new}" in actions
+        (receipt,) = _receipts(settings_path)
+        assert f"Re-pointed AIPASS_HOME {old} -> {new}" in receipt["summary"]
+
+    def test_doctor_fix_keeps_the_old_home_and_says_nothing_about_it(self, tmp_path) -> None:
+        old = str(tmp_path / "old_clone")
+        manifest, settings_path = self._world(tmp_path, old)
+
+        actions = _wire(manifest, settings_path)
+
+        assert json.loads(settings_path.read_text(encoding="utf-8"))["env"]["AIPASS_HOME"] == old
+        assert not [a for a in actions if "AIPASS_HOME" in a]
+
+    def test_a_home_that_already_matches_emits_no_line(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {}, self._EXTRA)
+        settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(manifest.parent.parent)}}), encoding="utf-8")
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert not [a for a in actions if "AIPASS_HOME" in a]
