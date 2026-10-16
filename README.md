@@ -217,7 +217,7 @@ devpulse (orchestrator)
 | Version | See [git tags](https://github.com/AIOSAI/AIPass/tags) |
 | Agents | 18 core + user-created |
 | Quality | Automated standards, gated in CI across every agent |
-| Tests | Every agent ships its own suite; the whole fleet runs on Linux for Python 3.10–3.13, and on Windows and macOS for 3.12 |
+| Tests | Every agent ships its own suite; the whole fleet runs on Linux for Python 3.10–3.13, and on macOS for 3.12 |
 
 **Test quality, in progress.** A passing suite only proves something if its tests can fail. seedgo audits every agent's tests for the ones that can't — tests that check the mock instead of the code, assertions that pass on any output, tests that touch live state — and the fleet is being worked through agent by agent, rewriting or retiring what doesn't hold up. That work lands on the [`dev` branch](https://github.com/AIOSAI/AIPass/tree/dev) first.
 
@@ -225,7 +225,7 @@ devpulse (orchestrator)
 
 - Python 3.10+
 - [Claude Code](https://code.claude.com/docs)
-- Linux, macOS, or Windows via Git Bash (tested in CI; WSL should work but is untested)
+- Linux or macOS (both tested in CI). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. Native Windows and Git Bash are no longer tested in CI (retired 2026-10-15); the code keeps its Windows paths but nothing proves them.
 - `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
 - Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)

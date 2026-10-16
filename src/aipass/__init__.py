@@ -3,4 +3,4 @@
 git clone + ./setup.sh — https://github.com/AIOSAI/AIPass
 """
 
-__version__ = "2.8.17"
+__version__ = "2.8.18"

@@ -101,8 +101,8 @@ just that one merge commit — **cosmetic and trivially resolved**.
 The PR gate (verified against `.github/workflows/`):
 - [ ] `ci.yml` → **lint**, **test**, **standards** (= seedgo-audit / the README + 100%-floor check, runs `.github/scripts/seedgo_audit.py`), **coverage**
 - [ ] `security.yml` → Security Scan / dependency-scan
-- [ ] `e2e-wheel.yml` → 3-OS wheel smoke (path-filtered: fires on `src/**`, `tests/e2e/**`, `pyproject.toml`)
-- [ ] `windows-test.yml` / `macos-test.yml` → required checks, run on every PR (must NEVER be path-filtered or they park as "Expected/waiting" forever and block merge)
+- [ ] `e2e-wheel.yml` → Linux + macOS wheel smoke (path-filtered: fires on `src/**`, `tests/e2e/**`, `pyproject.toml`)
+- [ ] `macos-test.yml` → required check `macos-setup`, runs on every PR (must NEVER be path-filtered or it parks as "Expected/waiting" forever and blocks merge). The Windows lane is retired (DPLAN-0410, 2026-10-15): `windows-test.yml(windows_disabled)` is unread by Actions and `windows-setup` is no longer a required check. Branch protection names checks by JOB id, not workflow name.
 - [ ] **Hash-pinned CI deps:** tool installs are pinned from `.github/requirements/*.txt` locks. A new security advisory against a pinned dep (esp. pip-audit's 29-package tree) can red `security.yml` with zero code change on our side. Fix = dependabot lock bump (grouped weekly, label `ci`) or regen via the `pip-compile` command in each `.in` file header — never a code revert.
 - [ ] If "all green but can't merge": it's usually post-push mergeability **lag**. Confirm ground truth via the public API (no gh, no gate):
       - `curl -s https://api.github.com/repos/AIOSAI/AIPass/commits/<sha>/check-runs` → all check-runs success (incl. app checks: codecov, CodeQL)
