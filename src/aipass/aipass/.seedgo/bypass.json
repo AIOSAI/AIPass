@@ -169,8 +169,8 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [167, 633],
-      "reason": "167: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:361) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 633: _registry_citizen_names's one caller (drone row, doctor.py:699) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:375). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines)."
+      "lines": [168, 629],
+      "reason": "168: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:362) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 629: _registry_citizen_names's one caller (drone row, doctor.py:695) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:376). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
@@ -227,8 +227,8 @@
     {
       "file": "tests/test_doctor.py",
       "standard": "through_the_command",
-      "lines": [30],
-      "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public caller, check_provider_manifest with fix or a yes at the prompt, writes the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed. The module is private because the CLI never routes to it (discover_modules skips it)."
+      "lines": [31],
+      "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public callers, run_doctor --fix (fix_provider_settings) and check_provider_manifest with a yes at the prompt, write the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed, and the FPLAN-0646 ask tests run through run_doctor and handle_command, reading the module only for its message constants. The module is private because the CLI never routes to it (discover_modules skips it). Re-pinned 2026-10-15 (FPLAN-0646: import re moved it 30 -> 31)."
     },
     {
       "file": "shared/scaffold_content.py",

@@ -42,8 +42,9 @@ It observes presence only and never errors —
 |---|---|
 | `doctor` | The interactive report — the default, and it may offer to wire what it found |
 | `doctor --verbose` | The same report with per-check detail |
-| `doctor --fix` | A remediation report: the repair command for each failing row |
-| `doctor --fix --json` | That report as JSON. `--json` alone falls through to the normal report |
+| `doctor --fix` | A remediation report: the repair command for each failing row. A settings change is shown and asked first |
+| `doctor --fix --yes` | The same, writing the settings change without the question |
+| `doctor --fix --json` | That report as JSON, with the planned settings change under `provider_settings`; written only with `--yes`. `--json` alone falls through to the normal report |
 | `doctor --cross-os` | Cross-OS pre-flight — OS-gap cross-reference plus routing, versions and hook status |
 | `doctor --cross-os --e2e` | ...also runs the real e2e wiring suite. Heavy, opt-in |
 | `doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
@@ -64,7 +65,16 @@ same merge, all four parts, runs from the installer's `refresh_provider_hooks`,
 so both doors agree; under Git Bash on Windows both also set `PYTHONUTF8=1`.
 The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
-take the home from the first (the home-agreement row flags that split). Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+take the home from the first (the home-agreement row flags that split).
+
+Nothing is written before you see it. `doctor --fix` and plain `doctor` print
+the planned changes, one line each, then a unified diff of the file, and ask
+once: `Apply these N changes to ~/.claude/settings.json? [y/N]`. Anything but
+`y` writes nothing. With no terminal to ask on, `doctor --fix` writes nothing
+and its row says `not applied: no tty — aipass doctor --fix --yes`; `--yes`
+writes without the question. The install tail never asks: it runs inside the
+one Enter you already gave the installer. Each receipt records the consent:
+`y (tty)`, `--yes` or `install`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 

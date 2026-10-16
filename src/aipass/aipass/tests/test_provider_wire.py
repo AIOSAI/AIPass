@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-08-01
 # Modified: 2026-10-15
 # =============================================
@@ -32,12 +32,20 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_DIFFERENT,
     STATE_MISSING,
     STATE_SET,
-    platform_bridge_command,
-    auto_wire_provider,
+    apply_settings_plan,
     manifest_settings,
+    plan_wire_provider,
+    platform_bridge_command,
     refresh_provider_hooks,
     settings_gaps,
 )
+
+
+def _wire(manifest, settings_path) -> list:
+    """The doctor's wire door: plan the manifest's merge, then write it (what --fix --yes does)."""
+    plan = plan_wire_provider(manifest, settings_path)
+    assert plan is not None
+    return apply_settings_plan(plan)
 
 
 def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
@@ -76,7 +84,7 @@ class TestPlatformBridgeCommand:
         result = platform_bridge_command(other_cmd, os_name="nt")
         assert result == other_cmd
 
-    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "auto_wire_provider"])
+    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "plan_and_apply"])
     def test_both_wire_doors_write_the_windows_command(self, tmp_path, monkeypatch, door) -> None:
         """End to end: each public door writes the Windows interpreter into a settings file under tmp_path.
 
@@ -92,7 +100,7 @@ class TestPlatformBridgeCommand:
         if door == "refresh_provider_hooks":
             refresh_provider_hooks(manifest, settings_path=settings_path)
         else:
-            auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+            _wire(manifest, settings_path)
         written = json.loads(settings_path.read_text(encoding="utf-8"))
         written_cmd = written["hooks"]["Stop"][0]["hooks"][0]["command"]
         assert written_cmd == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
@@ -237,7 +245,8 @@ class TestRefreshProviderHooks:
 
 
 class TestAutoWireProviderHooks:
-    """Tests confirming auto_wire_provider (used by doctor --fix + interactive wire-prompt) now
+    """Tests confirming the doctor's wire door (plan_wire_provider + apply_settings_plan, behind
+    doctor --fix and the interactive wire-prompt)
     strip-and-readds hooks, while env vars and permissions remain purely additive.
     """
 
@@ -258,7 +267,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
@@ -295,7 +304,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["env"]["EXISTING_VAR"] == "keep-me"
@@ -371,7 +380,7 @@ class TestSettingsScalarSlot:
             encoding="utf-8",
         )
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
@@ -390,7 +399,7 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is True
@@ -410,7 +419,7 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": False}), encoding="utf-8")
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
@@ -477,7 +486,7 @@ class TestSettingsBackup:
         manifest, settings_path = _backup_world(tmp_path, {"env": {"KEEP": "1"}})
         original = settings_path.read_bytes()
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         name = f"settings.json.{_STAMP}.doctor-fix"
         assert _backups(settings_path) == [name]
@@ -502,9 +511,9 @@ class TestSettingsBackup:
         manifest, settings_path = _backup_world(tmp_path, {"env": {}})
         original = settings_path.read_bytes()
 
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
         after_first = settings_path.read_bytes()
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         name = f"settings.json.{_STAMP}.doctor-fix"
         assert _backups(settings_path) == [name, f"{name}-2"]
@@ -543,7 +552,7 @@ class TestSettingsBackup:
         folder.chmod(0o500)
         try:
             with pytest.raises(SettingsBackupError) as refused:
-                auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+                _wire(manifest, settings_path)
         finally:
             folder.chmod(0o700)
 
@@ -574,7 +583,7 @@ class TestSettingsBackup:
         assert receipt["before_sha256"] == _sha(original)
         assert receipt["after_sha256"] == _sha(settings_path.read_bytes()) != _sha(original)
         if door == "reconcile-stale-deny":
-            assert receipt["summary"] == ["Removed stale deny rules: Bash(rm -rf*)"]
+            assert receipt["summary"][0] == "Removed stale deny rules: Bash(rm -rf*)"
             assert str(_folder(settings_path) / name) in detail
             assert str(_folder(settings_path) / "receipts.jsonl") in detail
 
@@ -593,9 +602,9 @@ class TestSettingsBackup:
         manifest, settings_path = _backup_world(tmp_path, {"env": {}})
 
         monkeypatch.chdir(branch / "apps")
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
         monkeypatch.chdir(outside)
-        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        _wire(manifest, settings_path)
 
         assert [r["actor"] for r in _receipts(settings_path)] == ["scout", str(outside)]
 
@@ -670,7 +679,7 @@ class TestInstallDoorEnvAndPermissions:
 
 
 class TestAipassHomeRepoint:
-    """refresh_provider_hooks re-points exactly AIPASS_HOME; auto_wire_provider leaves it."""
+    """refresh_provider_hooks re-points exactly AIPASS_HOME; the doctor wire leaves it."""
 
     _EXTRA = {"env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}}
 
@@ -696,7 +705,7 @@ class TestAipassHomeRepoint:
         old = str(tmp_path / "old_clone")
         manifest, settings_path = self._world(tmp_path, old)
 
-        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        actions = _wire(manifest, settings_path)
 
         assert json.loads(settings_path.read_text(encoding="utf-8"))["env"]["AIPASS_HOME"] == old
         assert not [a for a in actions if "AIPASS_HOME" in a]

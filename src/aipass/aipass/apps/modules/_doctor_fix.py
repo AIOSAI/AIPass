@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Optional
 
 from aipass.cli.apps.modules import console
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -207,9 +207,15 @@ def format_text_report(items: List[RemediationItem], project_name: str) -> str:
 # =============================================================================
 
 
-def format_json_report(items: List[RemediationItem], project_name: str) -> str:
-    """Format remediation items as JSON for spawn consumption."""
-    report = {
+def format_json_report(
+    items: List[RemediationItem], project_name: str, provider_settings: Optional[dict] = None
+) -> str:
+    """Format remediation items as JSON for spawn consumption.
+
+    *provider_settings*, when given, is the settings plan (planned lines, diff,
+    ``applied``) and rides under its own key (FPLAN-0646).
+    """
+    report: dict = {
         "project": project_name,
         "total_issues": len(items),
         "critical_count": sum(1 for i in items if i.severity == "critical"),
@@ -225,6 +231,8 @@ def format_json_report(items: List[RemediationItem], project_name: str) -> str:
             for item in items
         ],
     }
+    if provider_settings is not None:
+        report["provider_settings"] = provider_settings
     return json.dumps(report, indent=2)
 
 
@@ -273,11 +281,14 @@ def print_remediation_report(project_root: Path) -> int:
     return len(items)
 
 
-def print_json_report(project_root: Path) -> int:
-    """Print JSON remediation report to stdout. Returns issue count."""
+def print_json_report(project_root: Path, provider_settings: Optional[dict] = None) -> int:
+    """Print JSON remediation report to stdout. Returns issue count.
+
+    Printed with markup off: a diff line or a rule in the JSON must never be read as Rich markup.
+    """
     project_name = detect_project_name(project_root)
     items = generate_remediation(project_root)
-    console.print(format_json_report(items, project_name))
+    console.print(format_json_report(items, project_name, provider_settings), markup=False, highlight=False)
     return len(items)
 
 
