@@ -25,7 +25,7 @@ drone @api host-api status                              # Is the phone's server 
 - **Hands out authenticated clients.** A consumer imports a ready service — OpenRouter chat, Google Drive, Google Calendar — and never writes an auth flow of its own. Plumbing, never product: what you do with the service is yours.
 - **Owns the credentials.** Keys, OAuth tokens and per-provider secrets live under `~/.secrets/aipass/`, owner-only on disk, and are read through this branch. A raw value is never printed to a terminal.
 - **Accounts for usage.** Every generation can be tracked by caller, aggregated, and cleaned up on a retention window.
-- **Serves the phone.** The host API binds one address this machine holds and answers the BAUD face: reads of the fleet, the git surface, files, settings, a photo upload, and a terminal socket into a real tmux room.
+- **Serves the phone.** The host API binds one address this machine holds and answers the BAUD face: reads of the fleet, the git surface, files, settings, a photo upload, a terminal socket into a real tmux room, and a backup door that starts @backup's lanes and reads their status.
 - **Pairs a phone by its camera.** `drone @api host-api pair phone --scope operate` prints a
   QR. The phone's camera opens it and the face signs itself in: no token is typed, copied,
   mailed or shown.
@@ -105,7 +105,7 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 |---|---|
 | [docs/clients.md](docs/clients.md) | The in-process Python API other branches import, and the contract registry |
 | [docs/host_api.md](docs/host_api.md) | The Stage 0 host API: bind rule, tokens, scopes, routes, the read cache |
-| [docs/host_surfaces.md](docs/host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads |
+| [docs/host_surfaces.md](docs/host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads, the backup door |
 | [docs/host_autostart.md](docs/host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |

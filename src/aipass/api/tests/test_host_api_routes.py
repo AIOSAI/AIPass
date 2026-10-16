@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -20,10 +20,13 @@
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.drone as drone
+from aipass.api.apps.handlers.host import backup as host_backup
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
@@ -33,6 +36,11 @@ from aipass.api.apps.handlers.host import tokens as host_tokens
 # rule reads a target imported from this branch's package as one it judges,
 # and this silences a logger on purpose.
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
+PATCH_BACKUP_DRONE = "aipass.api.apps.handlers.host.backup.drone"
+PATCH_BACKUP_LOGGER = "aipass.api.apps.handlers.host.backup.logger"
+PATCH_BACKUP_JSON = "aipass.api.apps.handlers.host.backup.json_handler"
+PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
+PATCH_DENIALS_JSON = "aipass.api.apps.handlers.host.denials.json_handler"
 
 
 # =============================================
@@ -360,3 +368,163 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
         unguarded = [route for route in declared if api.get(route).status_code != 401]
 
         assert unguarded == [], f"these routes answered without a token: {unguarded}"
+
+
+@fastapi_required
+class TestTheBackupDoorAnswersThroughTheRealApp:
+    """POST /v1/backup/run, GET /v1/backup/job and GET /v1/backup/status, wired (DPLAN-0411)."""
+
+    @pytest.fixture
+    def backup(self, store: Path, seated: Path, monkeypatch: Any):
+        """The real app, a read and an operate token, a fresh job table, and drone replaced at backup.py."""
+        from fastapi.testclient import TestClient
+
+        workers: list = []
+        monkeypatch.setattr(host_backup, "JOBS", host_backup.JobTable(start=lambda target, args: workers.append(args)))
+        router = MagicMock()
+        router.RoutingError = drone.RoutingError
+        with (
+            patch(PATCH_SERVER_LOGGER),
+            patch(PATCH_BACKUP_DRONE, router),
+            patch(PATCH_BACKUP_LOGGER),
+            patch(PATCH_BACKUP_JSON),
+            patch(PATCH_DENIALS_LOGGER),
+            patch(PATCH_DENIALS_JSON),
+        ):
+            _, read_raw = host_tokens.issue_token("phone", "read")
+            _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            yield (
+                client,
+                {"Authorization": f"Bearer {read_raw}"},
+                {"Authorization": f"Bearer {operate_raw}"},
+                router,
+                workers,
+            )
+
+    def test_run_answers_202_with_the_running_job(self, backup: Any) -> None:
+        api, _, operate, _, workers = backup
+
+        response = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate)
+
+        assert response.status_code == 202
+        job = response.json()
+        assert set(job) == {"job", "project", "lane", "state", "started_at"}
+        assert (job["project"], job["lane"], job["state"]) == ("AIPASS", "snapshot", "running")
+        assert len(workers) == 1
+
+    def test_a_read_token_is_refused_on_run_and_starts_nothing(self, backup: Any) -> None:
+        api, read, _, _, workers = backup
+
+        response = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=read)
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "forbidden"
+        assert workers == []
+
+    def test_a_second_run_is_400_with_the_already_running_sentence(self, backup: Any) -> None:
+        api, _, operate, _, _ = backup
+        first = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate).json()
+
+        response = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate)
+
+        assert response.status_code == 400
+        assert response.json()["error"] == {
+            "code": "verb_refused",
+            "message": f"snapshot already running for AIPASS since {first['started_at']}",
+        }
+
+    @pytest.mark.parametrize("body", [{"project": "AIPASS"}, {"project": "AIPASS", "lane": "nightly"}, {"lane": "all"}])
+    def test_a_missing_lane_bad_lane_or_missing_project_is_400(self, backup: Any, body: dict) -> None:
+        api, _, operate, _, workers = backup
+
+        response = api.post("/v1/backup/run", json=body, headers=operate)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "verb_refused"
+        assert workers == []
+
+    def test_an_unknown_project_is_400_in_the_census_words(self, backup: Any) -> None:
+        api, _, operate, _, _ = backup
+
+        with patch.object(host_fleet, "list_projects", return_value={"projects": []}):
+            response = api.post("/v1/backup/run", json={"project": "VERA", "lane": "snapshot"}, headers=operate)
+
+        assert response.status_code == 400
+        assert "No project named 'VERA'" in response.json()["error"]["message"]
+
+    def test_backup_unreachable_before_start_is_503_with_a_ref(self, backup: Any) -> None:
+        api, _, operate, router, workers = backup
+        router.resolve_branch.side_effect = drone.RoutingError("Branch not found: @backup")
+
+        response = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "verb_unavailable"
+        assert error["message"] == host_denials.SENTENCES["verb_unavailable"]
+        assert error["ref"]
+        assert workers == []
+
+    def test_a_job_reads_with_a_read_token(self, backup: Any) -> None:
+        api, read, operate, _, _ = backup
+        job = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate).json()
+
+        response = api.get("/v1/backup/job", params={"id": job["job"]}, headers=read)
+
+        assert response.status_code == 200
+        assert response.json() == job
+
+    def test_an_unknown_job_is_404_job_unknown(self, backup: Any) -> None:
+        api, read, _, _, _ = backup
+
+        response = api.get("/v1/backup/job", params={"id": "b7f3c2"}, headers=read)
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "job_unknown"
+
+    def test_status_passes_backup_through_with_the_running_list(self, backup: Any, seated: Path) -> None:
+        api, read, operate, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=0, stdout=json.dumps({"runs": 64}), stderr="")
+        job = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}, headers=operate).json()
+
+        response = api.get("/v1/backup/status", params={"project": "AIPASS", "sizes": "1"}, headers=read)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert Path(body.pop("root")) == seated.resolve()
+        assert body == {
+            "runs": 64,
+            "project": "AIPASS",
+            "running": [{"job": job["job"], "lane": "snapshot", "started_at": job["started_at"]}],
+        }
+        assert router.route_command.call_args.args[2][1:] == ["--json", "--sizes"]
+
+    def test_status_without_sizes_does_not_ask_for_them(self, backup: Any) -> None:
+        api, read, _, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=0, stdout="{}", stderr="")
+
+        api.get("/v1/backup/status", params={"project": "AIPASS"}, headers=read)
+
+        assert router.route_command.call_args.args[2][1:] == ["--json"]
+
+    def test_a_status_that_is_not_json_is_503_naming_the_missing_flag(self, backup: Any) -> None:
+        api, read, _, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=0, stdout="╭─ Backup ─╮", stderr="")
+
+        response = api.get("/v1/backup/status", params={"project": "AIPASS"}, headers=read)
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "verb_unavailable"
+        assert response.json()["error"]["message"] == host_backup.STATUS_JSON_MISSING
+
+    def test_every_backup_route_is_behind_the_auth(self, backup: Any) -> None:
+        api, _, _, _, _ = backup
+
+        answered = [
+            api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}).status_code,
+            api.get("/v1/backup/job", params={"id": "b7f3c2"}).status_code,
+            api.get("/v1/backup/status", params={"project": "AIPASS"}).status_code,
+        ]
+
+        assert answered == [401, 401, 401]

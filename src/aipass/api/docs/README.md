@@ -10,7 +10,7 @@ is the face; these are what you open when something breaks.
 |---|---|
 | [clients.md](clients.md) | The in-process Python API other branches import, and the contract registry |
 | [host_api.md](host_api.md) | The Stage 0 host API: the bind rule, tokens, scopes, routes, the read cache |
-| [host_surfaces.md](host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads |
+| [host_surfaces.md](host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads, the backup door |
 | [host_autostart.md](host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [git_surface.md](git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [git_remote.md](git_remote.md) | The remote lane, its two fields, and why credentials never travel |

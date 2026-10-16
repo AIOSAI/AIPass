@@ -9,6 +9,14 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **The phone's host API has a backup door** (@api, `handlers/host/backup.py` 1.0.0, `backup_route.py` 1.0.0, `server.py` 1.1.1; DPLAN-0411, the owner's ask of 2026-10-16 for a Backup card in BAUD's apps wheel). `POST /v1/backup/run` (operate) takes `{project, lane}` with `lane` one of `snapshot`, `versioned`, `all`, `drive_sync`, resolves the project through the read lane's resolver, runs `drone @backup <lane> <root>` on a worker thread and answers **202** with the running job at once, since `all` and `drive_sync` outlive a phone request; the same lane already running for that project is a 400 naming when it started. `GET /v1/backup/job?id=` (read) answers the job as `running`, `done` or `failed` with the last 600 characters of its output verbatim; jobs live in the server's memory, a finished one is kept an hour, and a forgotten id is **404 `job_unknown`**. `GET /v1/backup/status?project=[&sizes=1]` (read) passes `drone @backup status <root> --json` through with the server's running jobs added, and answers 503 rather than scrape the panel when `--json` is not on the machine. The door owns no mechanism: it imports no subprocess code and reaches @backup only through drone's router. Every wire shape is devpulse's backup door contract. 51 tests, five mutants red.
+
+---
+
 ## [2026-10-15] — v2.8.18: Windows leaves CI, Windows users run AIPass inside WSL2
 
 ### Changed

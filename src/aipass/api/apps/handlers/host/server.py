@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-13
+# Modified: 2026-10-16
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -94,6 +94,7 @@ Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
                                      headless kill, and theirs is the one door.
     POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never
                                      gated — lock must fire from anywhere.
+    /v1/backup/run (operate, 202), /v1/backup/job, /v1/backup/status (read) - @backup's door, backup_route.py
 
 RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
     POST /v1/notify                - Phase 4, content-minimized through the relay
@@ -116,6 +117,7 @@ from typing import Any, Dict, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.apps.handlers.host import backup_route as host_backup_route
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import face as host_face
@@ -1144,6 +1146,7 @@ def create_app() -> Any:
         """Lock the machine, through @skills. Takes nothing and asks nothing."""
         return host_verbs.lock_screen()
 
+    host_backup_route.register(app, _deny, require_scope)
     # ---------------------------------------------------------- settings --
     # The desktop's two gears, served (DPLAN-0300): reads ride the read scope
     # because a dial's position is observation; writes are operate because
