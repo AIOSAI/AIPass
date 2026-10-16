@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-04
+# Modified: 2026-10-15
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -22,6 +22,31 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SKIP_EXTENSIONS = {".md", ".txt", ".log", ".csv", ".html"}
+
+# Untracked working ground: where agents are meant to try things. The lane's rows are the
+# shipped tree's; on a probe they read as an order to dress it with a META block and a layer,
+# and a recorded type error would fence the seat's next edit (devpulse 320d5948, three
+# sightings on two seats). Matched on whole directory names. Not "every git-ignored path":
+# .trinity/ is ignored, and its JSON is exactly what the corruption check guards.
+SCRATCH_DIRS = {"docs.local", "dropbox", ".backup", ".archive"}
+_HARNESS_ROOT = re.compile(r"claude(-\d+)?")
+
+
+def _scratch_ground(file_path: str) -> str | None:
+    """The scratch ground *file_path* lies in, None when it is the tree's.
+
+    The harness scratchpad is a ``scratchpad`` directory below a ``claude-<uid>`` one
+    (<temp>/claude-<uid>/<project>/<session>/scratchpad/); a ``scratchpad`` without that
+    root is a tree directory like any other.
+    """
+    dirs = [part for part in file_path.replace("\\", "/").split("/") if part][:-1]
+    for part in dirs:
+        if part in SCRATCH_DIRS:
+            return part
+    if "scratchpad" in dirs and any(_HARNESS_ROOT.fullmatch(p) for p in dirs[: dirs.index("scratchpad")]):
+        return "the harness scratchpad"
+    return None
+
 
 PYTHON_PATTERNS = {
     "bad_optional": {
@@ -471,6 +496,13 @@ def handle(hook_data: dict) -> dict:
         ext = Path(file_path).suffix.lower()
         if ext in SKIP_EXTENSIONS:
             return {"stdout": "", "exit_code": 0}
+
+        scratch = _scratch_ground(file_path)
+        if scratch:
+            return {
+                "stdout": json.dumps({"systemMessage": f"[diagnostics] skipped: {scratch} is scratch"}),
+                "exit_code": 0,
+            }
 
         errors: list[str] = []
         unanswered: list[str] = []

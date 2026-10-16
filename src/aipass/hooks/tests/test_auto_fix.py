@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-04
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -571,3 +571,55 @@ class TestOpenPatternWordBoundary:
 
         errors = _check_patterns(str(executor))
         assert not any("encoding" in e for e in errors), f"false positive still fires: {errors}"
+
+
+# Scratch the lane once ordered dressed (devpulse 320d5948): probes in docs.local and the harness scratchpad.
+_SCRATCH = [
+    pytest.param(("docs.local", "probe.py"), "docs.local", str, id="docs.local"),
+    pytest.param(("dropbox", "handoff.py"), "dropbox", str, id="dropbox"),
+    pytest.param((".backup", "old.json"), ".backup", str, id="backup-json"),
+    pytest.param((".archive", "gone.py"), ".archive", str, id="archive"),
+    pytest.param(("claude-1000", "proj", "sess", "scratchpad", "proof.py"), "the harness scratchpad", str, id="pad"),
+    pytest.param(("docs.local", "probe.py"), "docs.local", lambda p: str(PureWindowsPath(p)), id="windows-form"),
+]
+
+
+class TestScratchIsNotJudged:
+    @pytest.mark.parametrize(("parts", "named", "spell"), _SCRATCH)
+    def test_a_scratch_edit_is_skipped_runs_no_check_and_leaves_the_seat_record(
+        self, parts, named, spell, tmp_path, monkeypatch
+    ):
+        ran: list = []
+        monkeypatch.setattr(auto_fix.subprocess, "run", lambda *a, **k: ran.append(a))
+        probe = tmp_path.joinpath(*parts)
+        probe.parent.mkdir(parents=True)
+        probe.write_text("import os\n{", encoding="utf-8")
+        ds.save_seat("nosession", str(tmp_path / "held.py"), [{"line": 1, "message": "held"}])
+
+        result = handle({"tool_name": "Write", "tool_input": {"file_path": spell(probe)}})
+
+        assert json.loads(result["stdout"]) == {"systemMessage": f"[diagnostics] skipped: {named} is scratch"}
+        assert "sound" not in result
+        assert ran == []
+        held = ds.load_seat("nosession")
+        assert held is not None
+        assert held["errors"] == [{"line": 1, "message": "held"}]
+
+    @pytest.mark.parametrize(
+        "parts",
+        [
+            pytest.param(("apps", "scratchpad", "mod.py"), id="pad-without-harness-root"),
+            pytest.param(("docs.localized", "mod.py"), id="name-sharing-a-prefix"),
+        ],
+    )
+    def test_a_tree_path_that_only_resembles_scratch_is_still_judged(self, parts, tmp_path, monkeypatch):
+        monkeypatch.setattr(auto_fix, "_run_python_checks", lambda path: ["LINT: mod.py:1:1: F401 unused"])
+        monkeypatch.setattr(auto_fix, "_run_seedgo_checklist", lambda path: [])
+        monkeypatch.setattr(auto_fix, "_run_pyright_check", lambda path, unanswered: [])
+        monkeypatch.setattr(auto_fix, "_run_ruff_lint_structured", lambda path, unanswered: [])
+
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path.joinpath(*parts))}})
+
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert context.startswith("[AUTO-FIX] 1 error(s) in mod.py")
+        assert result.get("sound") == "auto fix diagnostics"
