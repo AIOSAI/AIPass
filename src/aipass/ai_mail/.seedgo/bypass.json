@@ -188,8 +188,8 @@
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
-      "lines": [193, 261, 595],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08). 193: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and log_wake_result plus the report's wake_result carry it. 261: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 595: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+      "lines": [198, 299, 633],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08 and 2026-10-16). 198: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and log_wake_result plus the report's wake_result carry it. 299: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 633: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",

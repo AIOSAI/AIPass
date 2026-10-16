@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-02
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -29,7 +29,12 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
-from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail, _run_main
+from aipass.ai_mail.tests.support_dispatch_monitor import (
+    _assert_sent_as_ai_mail,
+    _assert_sent_from,
+    _foreign_project,
+    _run_main,
+)
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -306,6 +311,49 @@ def test_a_bounce_with_no_stderr_log_says_none_was_captured(monkeypatch, main_ar
     sends.assert_called_once()
     body = sends.call_args[0][0][5]  # ["drone", "@ai_mail", "send", sender, subject, body]
     assert "no stderr captured" in body
+
+
+def test_a_bounce_to_a_sender_in_the_targets_other_project_is_sent_from_the_target_home(
+    monkeypatch, main_argv, tmp_path
+):
+    """Shipped defect: sent from ai_mail's AIPass home, the fence refused @vera's bounces (e26abd25)."""
+    argv, lock_file, _ = main_argv
+    _foreign_project(tmp_path, "sender", "branch")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_from(sends, Path(lock_file).parent.parent)
+    assert not (Path(lock_file).parent / "last_bounce.json").exists()
+
+
+def test_a_bounce_to_a_sender_outside_the_targets_project_stays_in_ai_mail_home(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+    _foreign_project(tmp_path, "branch")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_as_ai_mail(sends)
+
+
+def test_a_bounce_inside_ai_mails_own_project_stays_in_ai_mail_home(monkeypatch, main_argv, tmp_path):
+    """tmp_path stands in for AIPass: ai_mail's home is moved into it, beside the target and the sender."""
+    argv, _, _ = main_argv
+    _foreign_project(tmp_path, "sender", "branch", "ai_mail")
+    (tmp_path / "ai_mail").mkdir()
+    monkeypatch.setattr(mod, "_AI_MAIL_DIR", tmp_path / "ai_mail")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_from(sends, tmp_path / "ai_mail")
 
 
 # --- Notification naming test ------------------------------------------

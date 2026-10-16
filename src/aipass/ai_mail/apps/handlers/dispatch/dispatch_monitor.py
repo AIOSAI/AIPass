@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.8.1
+# Version: 2.9.0
 # Created: 2026-03-02
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -46,6 +46,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
 from aipass.ai_mail.apps.handlers.dispatch import report as report_mod
+from aipass.ai_mail.apps.handlers.paths import find_project_root
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_caller_project_branches
 
 # Startup timeout: if zero stdout after this many seconds, kill and retry
 STARTUP_TIMEOUT = 90
@@ -110,7 +112,7 @@ NO_WAKE_BACK_FLAG = "--no-wake-back"
 WAKE_RESULT_DECLINED = "declined"
 
 
-def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
+def wake_sender(sender: str, branch_email: str, exit_code: int, target_home: Optional[Path] = None) -> str:
     """Wake the dispatcher back after target completion.
 
     A door: main() calls it, and its tags are read in dispatch_wake.log and by managers.
@@ -128,6 +130,9 @@ def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
 
     Never called when the caller passed --no-wake-back: main() records
     WAKE_RESULT_DECLINED ("declined") in that line instead.
+
+    target_home is the woken branch's home; the manager mail is sent from it
+    when the manager lives in that branch's project and not in AIPass.
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -169,7 +174,7 @@ def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
             # The wake is correctly refused; the NOTIFICATION is not optional. Until
             # this, the branch returned here having neither woken nor mailed, and
             # said "mail delivered" while delivering nothing.
-            if _mail_wake_back(sender, branch_email, exit_code):
+            if _mail_wake_back(sender, branch_email, exit_code, target_home):
                 return "mailed_manager"
             return "failed_manager_mail"
 
@@ -196,7 +201,36 @@ def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
 
 
-def _send_from_ai_mail(recipient: str, subject: str, body: str) -> subprocess.CompletedProcess:
+def _sending_home(recipient: str, target_home: Optional[Path]) -> Path:
+    """Where a monitor notice is sent from: ai_mail's home, unless that crosses the project fence.
+
+    e26abd25 moved every notice to ai_mail's home, inside AIPass. A manager in
+    another project (@vera, Vera-Studio) then had its wake-backs refused by
+    delivery's cross-project fence: 3 on 2026-10-15/16. When the recipient is a
+    citizen of the woken branch's own project and that project is not AIPass,
+    the notice is sent from the woken branch's home, which sits beside the
+    recipient. The fence itself is unchanged (devpulse's ruling A, 2026-10-16).
+    """
+    if target_home is None:
+        return _AI_MAIL_DIR
+    target_root = find_project_root(target_home)
+    if target_root is None or target_root == find_project_root(_AI_MAIL_DIR):
+        return _AI_MAIL_DIR
+    try:
+        project_branches = get_caller_project_branches(str(target_home))
+    except RegistryUnreadable as e:
+        logger.warning(
+            "[monitor] %s's project registry unreadable, notice to %s sent from ai_mail: %s", target_home, recipient, e
+        )
+        return _AI_MAIL_DIR
+    if recipient.strip().lower() in {k.lower() for k in project_branches}:
+        return target_home
+    return _AI_MAIL_DIR
+
+
+def _send_from_ai_mail(
+    recipient: str, subject: str, body: str, target_home: Optional[Path]
+) -> subprocess.CompletedProcess:
     """Send one of the monitor's notices through drone, as @ai_mail.
 
     The bounce and the wake-back are the mail system's own notices. They ran in
@@ -205,6 +239,10 @@ def _send_from_ai_mail(recipient: str, subject: str, body: str) -> subprocess.Co
     identity conflict on every one (665 since 2026-08-18, reported by @drone on
     2026-10-04). Both claims now name ai_mail: its home as cwd and its name in
     the env, whoever started the monitor (ai_mail's decision, 2026-10-04).
+
+    The one exception is _sending_home's: a recipient in the woken branch's
+    non-AIPass project is sent to from that branch's home, so drone logs the
+    identity conflict again, for those sends only.
     """
     env = dict(os.environ)
     env["AIPASS_BRANCH_NAME"] = "ai_mail"
@@ -213,12 +251,12 @@ def _send_from_ai_mail(recipient: str, subject: str, body: str) -> subprocess.Co
         capture_output=True,
         text=True,
         timeout=30,
-        cwd=str(_AI_MAIL_DIR),
+        cwd=str(_sending_home(recipient, target_home)),
         env=env,
     )
 
 
-def _mail_wake_back(sender: str, branch_email: str, exit_code: int) -> bool:
+def _mail_wake_back(sender: str, branch_email: str, exit_code: int, target_home: Optional[Path]) -> bool:
     """Deliver the wake-back as MAIL when the sender cannot be woken.
 
     Managers are blocklisted from wakes and that is correct — two claudes on one
@@ -245,7 +283,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int) -> bool:
         f"off the next phase if there is one."
     )
     try:
-        result = _send_from_ai_mail(sender, subject, body)
+        result = _send_from_ai_mail(sender, subject, body, target_home)
         if result.returncode != 0:
             logger.warning(
                 "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",
@@ -311,7 +349,7 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
 
     # Send via drone (resolves paths, handles routing)
     try:
-        return _send_from_ai_mail(sender, subject, body).returncode == 0
+        return _send_from_ai_mail(sender, subject, body, Path(lock_file).parent.parent).returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
         logger.warning("[monitor] Bounce email send failed for %s: %s", branch_email, e)
         # Fallback: write bounce to a file if email fails
@@ -1155,7 +1193,7 @@ def main():
     # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
     # arbitrary — see the block comment on the report write.
     if wake_back:
-        wake_result = wake_sender(sender, branch_email, exit_code)
+        wake_result = wake_sender(sender, branch_email, exit_code, target_home=branch_path)
     else:
         # The caller declined (wake_branch(wake_back=False), e.g. @daemon's
         # scheduled nudges): a nudge owes no reply, and waking the sender back

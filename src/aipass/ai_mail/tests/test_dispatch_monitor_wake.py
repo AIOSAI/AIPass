@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, log_wake_result, main()'s wake."""
@@ -28,7 +28,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     main,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
-from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail
+from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail, _assert_sent_from, _foreign_project
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -357,8 +357,8 @@ class TestWakeBackIntegration:
 
         wake_calls = []
 
-        def track_wake(sender, branch_email, exit_code):
-            wake_calls.append((sender, branch_email, exit_code))
+        def track_wake(sender, branch_email, exit_code, target_home):
+            wake_calls.append((sender, branch_email, exit_code, target_home))
             return "success"
 
         bounce = MagicMock()
@@ -379,7 +379,7 @@ class TestWakeBackIntegration:
 
         assert exc_info.value.code == 0
         assert len(wake_calls) == 1
-        assert wake_calls[0] == ("@sender", "@test_branch", 0)
+        assert wake_calls[0] == ("@sender", "@test_branch", 0, Path(lock_file).parent.parent)
         bounce.assert_not_called()
         log_result.assert_called_once_with("@test_branch", "@sender", 0, "success", str(lock_file))
 
@@ -390,8 +390,8 @@ class TestWakeBackIntegration:
         wake_calls = []
         mock_bounce = MagicMock()
 
-        def track_wake(sender, branch_email, exit_code):
-            wake_calls.append((sender, branch_email, exit_code))
+        def track_wake(sender, branch_email, exit_code, target_home):
+            wake_calls.append((sender, branch_email, exit_code, target_home))
             return "success"
 
         monkeypatch.setattr("sys.argv", argv)
@@ -754,6 +754,18 @@ class TestWakeBackDeclinedByCaller:
         got = self._run_main(monkeypatch, argv, self._manager_gate_status(), tmp_path)
 
         _assert_sent_as_ai_mail(got["sent"])
+
+    def test_a_wake_back_to_a_manager_in_the_targets_other_project_is_sent_from_the_target_home(
+        self, monkeypatch, main_argv, tmp_path
+    ):
+        """Shipped defect: sent from ai_mail's AIPass home, the fence refused 3 @vera wake-backs (e26abd25)."""
+        argv, lock_file, _ = main_argv
+        _foreign_project(tmp_path, "sender", "branch")
+
+        got = self._run_main(monkeypatch, argv, self._manager_gate_status(), tmp_path)
+
+        _assert_sent_from(got["sent"], Path(lock_file).parent.parent)
+        assert "wake_result=mailed_manager" in self._wake_log(lock_file)
 
     def test_without_the_flag_a_builder_sender_is_still_woken(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, _ = main_argv
