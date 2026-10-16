@@ -1,17 +1,20 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
-# Description: Drive sync module — uploads versioned store to Google Drive
-# Version: 2.0.1
+# Description: Drive sync module — uploads the snapshot store to Google Drive
+# Version: 2.1.0
 # Created: 2026-04-17
-# Modified: 2026-08-11
+# Modified: 2026-10-16
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
 
-Scans the versioned store, checks the tracker for changes, and uploads
-new or modified files via the Drive upload engine.
+Scans the snapshot store, checks the tracker for changes, and uploads
+new or modified files via the Drive upload engine, under
+<BACKUP_FOLDER_NAME>/<project>/snapshot/. The versioned store never leaves the
+machine (DPLAN-0411); what an earlier versioned sync put on Drive is left there.
 
-Flow: auth → store path → scan → tracker filter → upload_batch → save tracker.
+Flow: auth → store path → scan → ignore + never-leaves filter → set aside a
+tracker from another lane → tracker filter → upload_batch → save tracker.
 No pre-resolve — workers create folders on demand via the client's lock pattern.
 """
 
@@ -32,7 +35,7 @@ from aipass.cli.apps.modules import console
 
 from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
 from aipass.backup.apps.handlers.audit import trail
-from aipass.backup.apps.handlers.path.builder import build_versioned_store
+from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.modules.display import show_drive_result
 
 
@@ -44,7 +47,7 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- Drive sync via @api gateway")
+    console.print("  Status: Phase 4 -- snapshot store to Drive via @api gateway")
     console.print("  Handlers: drive/client, drive/upload, drive/tracker")
 
 
@@ -53,6 +56,7 @@ def print_help():
     print_introspection()
     console.print()
     console.print("Usage: drive_sync <project_root> \\[options]")
+    console.print("  Uploads the snapshot store, whatever the project's drive_sync setting says.")
     console.print("  --force       Force re-upload of all files")
     console.print("  --project     Override project name")
     console.print("  --note        Add a note to uploaded files")
@@ -65,7 +69,7 @@ def run_drive_sync(
     force: bool = False,
     show_panels: bool = True,
 ) -> dict:
-    """Run Drive sync -- upload versioned store to Google Drive.
+    """Run Drive sync -- upload the snapshot store to Google Drive.
 
     Args:
         project_root: Absolute path to the project.
@@ -75,14 +79,17 @@ def run_drive_sync(
         show_panels: Show rich CLI output.
 
     Returns:
-        Dict with success, uploaded, failed, skipped, bytes_uploaded,
-        duration, location, total keys.
+        Dict with success, uploaded, failed, skipped, held_back,
+        bytes_uploaded, duration, location, total keys.
     """
     from aipass.backup.apps.handlers.drive.client import DriveClient
+    from aipass.backup.apps.handlers.drive.floor import hold_back
     from aipass.backup.apps.handlers.drive.tracker import (
+        DRIVE_LANE,
         check_needs_upload,
         load_tracker,
         save_tracker,
+        set_aside_foreign_tracker,
     )
     from aipass.backup.apps.handlers.drive.upload import upload_batch
 
@@ -93,6 +100,7 @@ def run_drive_sync(
         "uploaded": 0,
         "failed": 0,
         "skipped": 0,
+        "held_back": 0,
         "total": 0,
         "bytes_uploaded": 0,
         "duration": 0.0,
@@ -108,11 +116,11 @@ def run_drive_sync(
         logger.warning(f"[backup] Drive sync auth failed: {result['error']}")
         return result
 
-    # 2. Build versioned store path
-    store_path = build_versioned_store(project_root)
+    # 2. Build snapshot store path
+    store_path = build_snapshot_path(project_root)
     result["location"] = str(store_path)
     if not store_path.exists():
-        result["error"] = f"Versioned store not found: {store_path}"
+        result["error"] = f"Snapshot store not found: {store_path}"
         result["duration"] = time.time() - start
         logger.warning(f"[backup] {result['error']}")
         return result
@@ -121,10 +129,16 @@ def run_drive_sync(
     #    contain files swept in before an ignore rule was added).
     spec = load_spec(str(project_root))
     raw_files = [f for f in store_path.rglob("*") if f.is_file()]
-    all_files = [f for f in raw_files if not is_ignored(str(f.relative_to(store_path)), spec)]
-    ignored_count = len(raw_files) - len(all_files)
+    kept = [f for f in raw_files if not is_ignored(str(f.relative_to(store_path)), spec)]
+    ignored_count = len(raw_files) - len(kept)
     if ignored_count:
         logger.info(f"[backup] Drive sync: filtered {ignored_count} ignored files from store")
+
+    # 3b. The never-leaves floor, a spec of its own so .backupignore cannot
+    #     negate it. The snapshot keeps these files; Drive never gets them.
+    all_files, result["held_back"] = hold_back(kept, store_path)
+    if result["held_back"]:
+        logger.info(f"[backup] Drive sync: held back {result['held_back']} files the never-leaves floor matches")
 
     result["total"] = len(all_files)
 
@@ -132,14 +146,16 @@ def run_drive_sync(
         result["success"] = True
         result["duration"] = time.time() - start
         if show_panels:
-            console.print("[dim]No files found in versioned store.[/dim]")
+            console.print("[dim]No files found in snapshot store.[/dim]")
         return result
 
     # 4. Resolve project name
     if not project_name:
         project_name = Path(project_root).name
 
-    # 5. Load tracker + filter
+    # 5. Load tracker + filter. A tracker from the versioned era is moved
+    #    aside first: its keys name versioned-store paths.
+    set_aside_foreign_tracker(project_root)
     tracker = load_tracker(project_root)
     if force:
         files_to_upload = all_files
@@ -189,6 +205,7 @@ def run_drive_sync(
             tracker,
             note=note,
             progress_fn=progress_fn,
+            lane_folder=DRIVE_LANE,
         )
     finally:
         if progress is not None:
@@ -210,6 +227,7 @@ def run_drive_sync(
             "uploaded": result["uploaded"],
             "failed": result["failed"],
             "skipped": skipped,
+            "held_back": result["held_back"],
             "bytes_uploaded": result["bytes_uploaded"],
         },
     )

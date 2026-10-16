@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracker.py
 # Description: Drive upload tracker — mtime+size dedup for file sync
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-10-16
 # =============================================
 
 """Drive upload tracker.
@@ -11,6 +11,13 @@
 Maintains a persistent mapping of local file paths to Drive metadata
 (file ID, mtime, size) so repeat syncs can skip unchanged files.
 Tracker is stored at ``<project>/.backup/drive_tracker.json``.
+
+The document is stamped with the lane it tracks (``"_lane": "snapshot"``).
+Until DPLAN-0411 the Drive lane uploaded the versioned store, and those
+trackers carry no stamp: their keys are versioned-store paths, so a snapshot
+sync reading one would skip nothing it should and update ids it must not.
+set_aside_foreign_tracker moves such a tracker to drive_tracker.versioned.json
+beside it -- kept, never deleted -- so the snapshot lane starts fresh.
 """
 
 from __future__ import annotations
@@ -24,6 +31,12 @@ from ..audit import trail
 from ..json import json_handler
 
 TRACKER_FILENAME = "drive_tracker.json"
+# Where a tracker from another lane is kept once the snapshot lane takes over.
+SET_ASIDE_FILENAME = "drive_tracker.versioned.json"
+# The top-level key naming the lane a tracker answers for, and the one lane
+# that leaves the machine. Every other key in the document is a file entry.
+LANE_KEY = "_lane"
+DRIVE_LANE = "snapshot"
 
 
 def _tracker_path(project_root: str) -> Path:
@@ -35,6 +48,9 @@ def _tracker_path(project_root: str) -> Path:
 
 def load_tracker(project_root: str) -> dict:
     """Load tracker from .backup/drive_tracker.json.
+
+    The lane stamp is not a file entry and is left out of the answer; it is
+    written back by save_tracker.
 
     Returns:
         Dict keyed by relative file path with metadata values.
@@ -52,6 +68,7 @@ def load_tracker(project_root: str) -> dict:
         data = {}
     if not isinstance(data, dict):
         raise json_handler.InvalidDocument(f"Drive tracker is not a JSON object: {path}")
+    data.pop(LANE_KEY, None)
     trail.log_operation(
         "load_tracker",
         {"project_root": project_root, "entries": len(data)},
@@ -60,7 +77,7 @@ def load_tracker(project_root: str) -> dict:
 
 
 def save_tracker(project_root: str, tracker: dict) -> None:
-    """Save tracker to .backup/drive_tracker.json.
+    """Save tracker to .backup/drive_tracker.json, stamped with DRIVE_LANE.
 
     Raises:
         WriteFailed: The tracker could not be written. A sync whose tracker
@@ -68,12 +85,58 @@ def save_tracker(project_root: str, tracker: dict) -> None:
             rather than counted as a success.
     """
     path = _tracker_path(project_root)
-    if not json_handler.write_json(path, tracker):
+    if not json_handler.write_json(path, {LANE_KEY: DRIVE_LANE, **tracker}):
         raise json_handler.WriteFailed(f"Drive tracker write failed: {path}")
     trail.log_operation(
         "save_tracker",
         {"project_root": project_root, "entries": len(tracker)},
     )
+
+
+def set_aside_foreign_tracker(project_root: str) -> Path | None:
+    """Move a tracker that does not answer for DRIVE_LANE out of the way.
+
+    A tracker whose stamp is absent or names another lane, and which holds at
+    least one entry, is renamed to SET_ASIDE_FILENAME beside it. An empty one
+    (drive_clear leaves ``{}``) has nothing to keep and stays where it is.
+
+    Returns:
+        The set-aside path when a tracker was moved, else None.
+
+    Raises:
+        InvalidDocument: The tracker exists but cannot be read as a JSON object.
+        WriteFailed: SET_ASIDE_FILENAME already exists. Overwriting it would
+            delete the tracker an earlier run kept, so the sync stops instead.
+    """
+    path = _tracker_path(project_root)
+    data = json_handler.read_json(path)
+    if data is None:
+        if path.exists():
+            raise json_handler.InvalidDocument(f"Drive tracker unreadable: {path}")
+        return None
+    if not isinstance(data, dict):
+        raise json_handler.InvalidDocument(f"Drive tracker is not a JSON object: {path}")
+    lane = data.get(LANE_KEY)
+    entries = len(data) - (LANE_KEY in data)
+    if lane == DRIVE_LANE or entries == 0:
+        return None
+
+    aside = path.with_name(SET_ASIDE_FILENAME)
+    if aside.exists():
+        raise json_handler.WriteFailed(
+            f"Drive tracker {path} tracks lane {lane or 'versioned (unstamped)'}, "
+            f"and {aside} already exists; move one of them by hand"
+        )
+    path.rename(aside)
+    logger.info(
+        f"[backup] Drive tracker for lane {lane or 'versioned (unstamped)'} set aside as {aside} "
+        f"({entries} entries); a fresh {DRIVE_LANE} tracker starts"
+    )
+    trail.log_operation(
+        "tracker_set_aside",
+        {"project_root": project_root, "lane": lane, "entries": entries, "set_aside": str(aside)},
+    )
+    return aside
 
 
 def check_needs_upload(

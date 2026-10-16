@@ -2,29 +2,62 @@
 
 # Store cleanup — what exists and what does not
 
-Which deletions this branch performs, and the sweeps it advertises but does not implement.
+Which deletions this branch performs, what triggers each, and what it still advertises but does not do.
 
-Mirror cleanup (`handlers/cleanup/mirror.py`) removes snapshot files **whose source no longer exists**. That is its only trigger.
+Two lanes delete from a store, each on its own trigger:
 
-There is **no lane** that removes files which are now *ignored* but still present in the source tree. A directory added to `.backupignore` after a backup stays in `snapshots/` and `versioned/` indefinitely:
+| Lane | Removes | Trigger |
+|---|---|---|
+| Mirror cleanup, `handlers/cleanup/mirror.py` | `snapshots/` files | the source file no longer exists; runs inside every snapshot |
+| `prune`, `modules/prune.py` + `handlers/cleanup/prune.py` | `snapshots/` files and `versioned/` file-folders | the ignore spec now matches the project path; runs only when called |
 
-- `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. There is no ignore-aware sweep: a file that became ignored keeps its snapshot copy while its source exists. (`cleanup_deleted_files()` used to accept a `should_ignore` callback it never called; the parameter was dropped 2026-09-27.)
-- `versioned/` — has no cleanup path at all. The store is append-only, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
+### Mirror cleanup
+
+Removes a snapshot file **whose source no longer exists**. That is its only
+trigger: a file that is still in the source tree keeps its snapshot copy even
+when it became ignored, because `_should_delete()` only asks whether the source
+exists. (`cleanup_deleted_files()` used to accept a `should_ignore` callback it
+never called; the parameter was dropped 2026-09-27.) It never touches `versioned/`.
+
+### `prune` — copies the ignore spec now matches (2026-10-16, DPLAN-0411)
+
+```
+drone @backup prune <project_root|@name>            # list, delete nothing
+drone @backup prune <project_root|@name> --apply    # delete what the list names
+```
+
+A path is pruned by the backup's own filter rule (`scan/filter.py`): `load_spec()`
+(the project's `.backupignore` behind the built-in floor, `BUILTIN_IGNORE_PATTERNS`)
+matches its project-relative path, and the project's `whitelist` does not keep it.
+A whitelisted path is one the next run copies straight back, so it is never listed.
+
+- `snapshots/` — one candidate per **file**, `snapshots/<rel_path>`.
+- `versioned/` — one candidate per **file-folder**: the folder `build_versioned_file_path()`
+  makes for one source file, holding the current copy, its baseline and its
+  `<name>_diffs/`. A file-folder under `root/` is read as a root-level file; the
+  layout gives a project file `root/<name>` the same folder and cannot tell the two apart.
+
+The listing prints, per store, one row per top-level directory (count and bytes;
+root-level files under `(root files)`), then the grand total. Without `--apply`
+nothing is deleted and the last line says so. With `--apply` each listed path is
+removed, one `prune_removed` row per path in `logs/operations.jsonl`, directories
+left empty are removed, and the last line names what was removed and freed. A
+path that cannot be removed is an error on stderr and the command exits non-zero;
+it is never counted as removed.
+
+`prune` never touches the remote copy. Drive entries for pruned files are not
+removed from Drive; that remains the owner's by hand.
+
+### What is still not implemented
 
 **`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`
 key (default `10`), `register` writes it, and `status` prints it as "Max
-versions" — but no code reads it. Re-verified 2026-09-05: the only three
-mentions in the whole tree are the two defaults that write it
-(`project/config.py:24`, `project/setup.py:41`) and the one line that displays
-it (`modules/status.py:80`). Nothing prunes old versions.
+versions" — but no code reads it. Nothing prunes old versions of a file that is
+still backed up; `prune` removes whole file-folders of ignored paths only. Treat
+`max_versions` as advertised-but-unimplemented.
 
-The only deletion of a *backed-up* file anywhere in this branch is
-`mirror.py:59`, the vanished-source snapshot sweep above. (There is one other
-`unlink` in the tree, `state/backup_timestamps.py:61`, but it removes that
-module's own temp file when an atomic write fails — it never touches a store.)
-Treat `max_versions` as advertised-but-unimplemented until a pruning lane exists.
-
-Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
+The versioned store is otherwise append-only and holds two copies of every new
+file (current + baseline), so it grows to roughly 2× the source.
 
 **The `*.tmp` copies made before the rule (2026-09-11).** The AIPass store
 (`/.backup/`, last snapshotted 2026-08-15) held 498 temp copies in `snapshots/`
@@ -43,6 +76,8 @@ Removing a now-ignored tree from a store is currently a manual `rm -rf` of the c
   mirrors `src/aipass/<branch>/`. The gate is not routed around. The copies
   are inert: `drive_sync` re-filters the store through `load_spec()`, so they
   never upload. They go when a pruning lane exists.
+  *(2026-10-16: `prune` is that lane. `*.tmp` is in the built-in floor, so
+  `prune` lists these file-folders; they stay until `--apply` is run.)*
 
 ---
 

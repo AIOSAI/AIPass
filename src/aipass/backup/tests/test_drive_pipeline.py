@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.5
+# Version: 3.0.6
 # Created: 2026-06-12
-# Modified: 2026-10-04
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -565,11 +565,11 @@ class TestDriveTracker:
         assert drive_tracker.load_tracker(str(tmp_path / "unseeded")) == {}
 
     def test_save_tracker_writes_json_under_the_projects_backup_dir(self, tmp_path: Path) -> None:
-        """The tracker lands on disk as JSON, under the project's .backup/."""
+        """The tracker lands on disk as JSON, under the project's .backup/, stamped with its lane."""
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
         written = tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME
-        assert json.loads(written.read_text(encoding="utf-8")) == {"file.txt": {"drive_id": "abc"}}
+        assert json.loads(written.read_text(encoding="utf-8")) == {"_lane": "snapshot", "file.txt": {"drive_id": "abc"}}
 
 
 # ---------------------------------------------------------------------------
@@ -809,9 +809,9 @@ class TestDriveSync:
 
     @staticmethod
     def _store(tmp_path: Path) -> tuple[Path, Path]:
-        """A project with an empty versioned store where the real builder looks for it."""
+        """A project with an empty snapshot store where the real builder looks for it."""
         project = tmp_path / "project"
-        store = project / ".backup" / "versioned"
+        store = project / ".backup" / "snapshots"
         store.mkdir(parents=True)
         return project, store
 
@@ -849,22 +849,22 @@ class TestDriveSync:
         assert result["error"] == "No creds"
         assert uploads == []
 
-    def test_run_drive_sync_names_a_missing_versioned_store_and_uploads_nothing(
+    def test_run_drive_sync_names_a_missing_snapshot_store_and_uploads_nothing(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
-        """A missing versioned store is named back, and nothing is uploaded."""
+        """A missing snapshot store is named back, and nothing is uploaded."""
         project = tmp_path / "project"
         project.mkdir()
-        missing = project / ".backup" / "versioned"
+        missing = project / ".backup" / "snapshots"
         _install_offline_client(monkeypatch)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
         assert result["success"] is False
-        assert result["error"] == f"Versioned store not found: {missing}"
+        assert result["error"] == f"Snapshot store not found: {missing}"
         assert uploads == []
 
     def test_run_drive_sync_hands_every_untracked_file_to_one_upload_batch(
@@ -895,9 +895,9 @@ class TestDriveSync:
         """Files matching .backupignore are excluded from the upload list."""
         project, store = self._store(tmp_path)
         for rel in (
-            "src/app.py/app.py",
-            "node_modules/pkg/index.js/index.js",
-            "node_modules/other/lib.js/lib.js",
+            "src/app.py",
+            "node_modules/pkg/index.js",
+            "node_modules/other/lib.js",
         ):
             (store / rel).parent.mkdir(parents=True, exist_ok=True)
             (store / rel).write_text("code", encoding="utf-8")
@@ -915,16 +915,15 @@ class TestDriveSync:
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
-        """Temps a pre-rule versioned run stored never go to Drive (DPLAN-0338)."""
+        """Temps a pre-rule snapshot run stored never go to Drive (DPLAN-0338)."""
         # The store is re-filtered through load_spec, so the built-in *.tmp floor
         # reaches copies made before it existed -- for a .backupignore that never
         # names *.tmp, which is every one seeded before the rule.
         project, store = self._store(tmp_path)
         for rel in (
-            "data_json/state.json/state.json",
-            "data_json/tmpab12cd34.tmp/tmpab12cd34.tmp",
-            "data_json/tmpab12cd34.tmp/tmpab12cd34-baseline-2026-08-15.tmp",
-            "data_json/.4242_7.tmp/.4242_7.tmp",
+            "data_json/state.json",
+            "data_json/tmpab12cd34.tmp",
+            "data_json/.4242_7.tmp",
         ):
             (store / rel).parent.mkdir(parents=True, exist_ok=True)
             (store / rel).write_text("x", encoding="utf-8")
@@ -934,7 +933,7 @@ class TestDriveSync:
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
         assert result["total"] == 1
-        assert [f.relative_to(store).as_posix() for f in uploads[0]] == ["data_json/state.json/state.json"]
+        assert [f.relative_to(store).as_posix() for f in uploads[0]] == ["data_json/state.json"]
 
     def test_drive_sync_help_flag_prints_usage_and_never_runs_the_sync(
         self,
@@ -961,15 +960,15 @@ class TestDriveSync:
 
         # Two projects, not one run twice: the first run writes a tracker, and a
         # second run over the same store would skip every file and never reach
-        # the upload at all. build_versioned_store is NOT patched here -- the
-        # real builder already answers <project>/.backup/versioned, which is
+        # the upload at all. build_snapshot_path is NOT patched here -- the
+        # real builder already answers <project>/.backup/snapshots, which is
         # inside tmp_path, so the product's own path code runs.
         # The Google edge is sealed by conftest's autouse seal, the client is
         # a MagicMock, and upload_batch is the recorder below: nothing dials.
         def _seed(name: str) -> Path:
-            """A project whose versioned store holds one file to upload."""
+            """A project whose snapshot store holds one file to upload."""
             project = tmp_path / name
-            store = project / ".backup" / "versioned"
+            store = project / ".backup" / "snapshots"
             store.mkdir(parents=True)
             (store / "file.txt").write_text("content", encoding="utf-8")
             return project

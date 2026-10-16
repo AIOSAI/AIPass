@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: drive_stats.py
-# Description: Drive stats module — shows file tracker statistics
-# Version: 1.0.0
+# Description: Drive stats module — shows file tracker statistics and the Drive account quota
+# Version: 1.1.0
 # Created: 2026-04-17
-# Modified: 2026-06-12
+# Modified: 2026-10-16
 # =============================================
 
-"""Drive Stats Module — displays tracker statistics for a project."""
+"""Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""
 
 import os
 import sys
@@ -19,9 +19,10 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error as cli_error
+from aipass.cli.apps.modules import console, error as cli_error, warning
 
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.report.formatter import _human_bytes
 
 
 MODULE_NAME = "drive_stats"
@@ -32,8 +33,8 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- tracker statistics")
-    console.print("  Handlers: drive/tracker")
+    console.print("  Status: Phase 4 -- tracker statistics, account quota")
+    console.print("  Handlers: drive/tracker, drive/client")
 
 
 def print_help():
@@ -41,6 +42,54 @@ def print_help():
     print_introspection()
     console.print()
     console.print("Usage: drive_stats <project_root>")
+    console.print("  Prints the project's tracker, then the Drive account's storage used and limit")
+    console.print("  (about.get storageQuota) -- one live, read-only Drive call.")
+
+
+def show_drive_quota() -> bool:
+    """Print the Drive account's storage used and limit, as two lines.
+
+    Reads ``about.get(fields="storageQuota")`` through an authenticated
+    DriveClient, the client every other Drive verb uses. Drive sends the
+    numbers as strings and leaves ``limit`` out for an account with unlimited
+    storage; an absent field is said, never filled in.
+
+    Returns:
+        True when both lines were printed, False when a number was missing or
+        Drive could not be asked (the reason goes to stderr).
+    """
+    from aipass.backup.apps.handlers.drive.client import DriveClient
+
+    client = DriveClient()
+    if not client.authenticate():
+        warning(f"Drive quota unavailable: {client.last_error or 'Drive authentication failed'}")
+        return False
+
+    request = client.drive_service.about().get(fields="storageQuota")
+    answer = client._api_call(request)
+    quota = answer.get("storageQuota") if isinstance(answer, dict) else None
+    if not quota or quota.get("usage") is None:
+        reason = (
+            (client.last_error or "about.get got no answer")
+            if answer is None
+            else "about.get returned no storageQuota usage"
+        )
+        warning(f"Drive quota unavailable: {reason}")
+        logger.warning(f"[backup] Drive quota unavailable: {reason}")
+        return False
+
+    usage = int(quota["usage"])
+    console.print(f"  Drive used:  {_human_bytes(usage)} ({usage:,} bytes)")
+    limit = quota.get("limit")
+    if limit is None:
+        console.print("  Drive limit: none reported -- Drive sends no limit for unlimited storage")
+        logger.info(f"[backup] Drive quota: {usage} used, no limit reported")
+        trail.log_operation("drive_quota_read", {"usage": usage, "limit": None})
+        return False
+    console.print(f"  Drive limit: {_human_bytes(int(limit))} ({int(limit):,} bytes)")
+    logger.info(f"[backup] Drive quota: {usage} used of {limit}")
+    trail.log_operation("drive_quota_read", {"usage": usage, "limit": int(limit)})
+    return True
 
 
 def run_drive_stats(project_root: str) -> bool:
@@ -75,11 +124,13 @@ def run_drive_stats(project_root: str) -> bool:
             {"project_root": project_root, "total": stats["total"]},
         )
         logger.info(f"[backup] Drive stats: {stats['total']} tracked files")
-        return True
     except Exception as exc:
         logger.warning(f"Failed to load tracker for {project_root}: {exc}")
         cli_error(f"Error loading tracker: {exc}")
         return False
+
+    show_drive_quota()
+    return True
 
 
 def handle_command(command: str, args: list) -> bool:

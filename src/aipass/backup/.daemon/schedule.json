@@ -13,6 +13,20 @@
         "fresh": true
       },
       "prompt": "AUTOMATED DAEMON TEST. Do ONLY this: run drone @ai_mail email @devpulse \"DAEMON TEST \u2014 backup\" \"Woke via @daemon systemd timer. No memory touched.\" then STOP. Do NOT run startup, do NOT update memory, do NOT do anything else."
+    },
+    {
+      "id": "nightly-all",
+      "enabled": true,
+      "schedule": {
+        "type": "daily",
+        "time": "05:00"
+      },
+      "command": "drone @backup all --registered --quiet",
+      "timeout_seconds": 1800,
+      "notify": {
+        "email": "@devpulse"
+      },
+      "_note": "WHAT: the nightly backup of every registered project (DPLAN-0411 item 7). A command job: the daemon tick runs 'drone @backup all --registered --quiet' as a subprocess from src/aipass/backup/, no shell, so no agent is woken and no tokens are spent. For each project in registry order it runs snapshot, then versioned over the same scan, then drive_sync only when that project's drive_sync setting is on ('drone @backup settings drive_sync on|off @name'); one project's failure never stops the next, and the exit is non-zero when any project failed. WHEN: daily at 05:00 local, the owner 2026-10-16 00:01: 'say at 5am backup runs all daily, so we are always backed up'. The daily window is +/-15 min, so 04:45-05:15; it is clear of @prax's 04:30 module scan (60 s) and Sunday 04:00 tmp sweep (120 s) and @seedgo's Sunday 03:00 cycle, but NOT of @daemon's rounds rotation, also 05:00 (drone @daemon queue, 2026-10-16): the two fall due on the same tick, and while this job holds the tick lock the rounds wake may wait behind it. Kept at 05:00 because that is the owner's hour; moving it is editing 'time' here. catch_up is on by default, so a 05:00 missed with the machine off fires once on the first tick after. WHY 1800 s: unmeasured as a whole - the dispatch forbade running all against the real stores on the night it was built, so 30 minutes is the owner's figure, not a measurement. A command job holds the tick lock for its whole run, and other branches' timer fires step aside meanwhile. A timeout stops the whole process tree and is FAILED on the runstate row, but what was already copied stays copied, and the next night starts over. If the DONE lines show runs near 1800 s, raise timeout_seconds here, or look first for a project whose store grew (drone @backup status @name --json --sizes). WHERE IT SHOWS: daemon logs/run.log and ~/.aipass/daemon-tick.log (FIRE and DONE lines with exit code, duration and output tail, which ends with the one summary line per project), the runstate row backup:nightly-all in daemon_json/daemon_runstate.json, each project's own .backup/ changelog, this branch's logs/operations.jsonl, and a start and a finish mail to @devpulse. TURNING IT OFF is enabled:false; turning one project's Drive upload off is the settings verb, not this file."
     }
   ]
 }

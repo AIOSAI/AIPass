@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Project config handler — load/save per-project backup config
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-09-03
+# Modified: 2026-10-16
 # =============================================
 
 """Project configuration handler.
@@ -78,6 +78,37 @@ def save_project_config(project_root: str, config: dict) -> bool:
         return False
     trail.log_operation("project_config_saved", {"project_root": project_root})
     return True
+
+
+def set_project_setting(project_root: str, key: str, value: object) -> bool:
+    """Write one key into the project's config document, leaving the rest as written.
+
+    The raw document is read, not the DEFAULTS-merged view: saving the merged
+    view would freeze every default into the file, and a later change to a
+    default would never reach this project.
+
+    Args:
+        project_root: Absolute path to the project root.
+        key: Config key to set.
+        value: Value to store under it.
+
+    Returns:
+        True when the write succeeded, False otherwise.
+
+    Raises:
+        InvalidDocument: The config exists but cannot be read as a JSON object.
+            Writing over it would erase every setting it held.
+    """
+    config_path = builder.build_config_path(project_root)
+    config = json_handler.read_json(config_path)
+    if config is None:
+        if config_path.exists():
+            raise json_handler.InvalidDocument(f"Project config unreadable: {config_path}")
+        config = {}
+    if not isinstance(config, dict):
+        raise json_handler.InvalidDocument(f"Project config is not a JSON object: {config_path}")
+    config[key] = value
+    return save_project_config(project_root, config)
 
 
 # =============================================

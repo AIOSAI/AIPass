@@ -80,7 +80,7 @@
     {
       "file": "apps/handlers/drive/tracker.py",
       "standard": "logged_fallback",
-      "lines": [103, 117],
+      "lines": [166, 180],
       "reason": "needs_upload answers True on a path it cannot relativise or stat, on purpose and named in its docstring: the upload that follows reports the real failure, where False would skip the file silently on every run. Decision of @backup, fleet green leg 5."
     }
   ],

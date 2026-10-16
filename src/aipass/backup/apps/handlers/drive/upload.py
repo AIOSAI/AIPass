@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-16
 # =============================================
 
 """Google Drive upload engine.
@@ -43,6 +43,7 @@ def upload_single_file(
     project_name: str,
     backup_root: Path,
     note: str = "",
+    lane_folder: str = "",
 ) -> bool:
     """Upload one file with resumable MediaFileUpload.
 
@@ -56,6 +57,9 @@ def upload_single_file(
         project_name: Project name for Drive folder hierarchy.
         backup_root: Root path for computing relative file paths.
         note: Optional note for logging.
+        lane_folder: Folder under the project folder the file lands in
+            (drive_sync passes the lane, "snapshot"). Tracker keys stay
+            relative to backup_root.
 
     Returns:
         True on success, False on failure.
@@ -75,7 +79,7 @@ def upload_single_file(
         logger.info(f"File {local_file} not relative to {backup_root}")
         rel_path = Path(local_file.name)
 
-    parent_dir = str(rel_path.parent)
+    parent_dir = str(Path(lane_folder) / rel_path.parent)
     if parent_dir and parent_dir != ".":
         target_folder_id = client.get_or_create_nested_folder(
             project_folder_id,
@@ -178,6 +182,7 @@ def upload_batch(
     max_workers: int = 3,
     batch_save_interval: int = 50,
     progress_fn: Any = None,
+    lane_folder: str = "",
 ) -> dict:
     """Threaded batch upload using ThreadPoolExecutor.
 
@@ -193,6 +198,7 @@ def upload_batch(
         max_workers: Max concurrent upload threads.
         batch_save_interval: Save tracker every N uploads.
         progress_fn: Optional callback called after each upload.
+        lane_folder: Folder under the project folder every file lands in.
 
     Returns:
         Dict with success, uploaded, failed counts.
@@ -216,6 +222,7 @@ def upload_batch(
             project_name,
             backup_root,
             note=note,
+            lane_folder=lane_folder,
         )
 
     def _process_future(future: object) -> bool:

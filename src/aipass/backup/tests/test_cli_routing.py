@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.6
+# Version: 2.0.7
 # Created: 2026-06-12
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -280,10 +280,14 @@ class TestPrintHelp:
         all_row = next(row for row in commands if row.split()[0] == "all")
         assert "drive" in all_row.lower(), f"'all' row hides its drive stage: {all_row}"
 
+        # settings has one live key now; the row must not call it unimplemented.
+        settings_row = next(row for row in commands if row.split()[0] == "settings")
+        assert "drive_sync" in settings_row and "Not implemented" not in settings_row, settings_row
+
         # Flags live in the verbs, not the router, so the page has to name them,
         # in OPTIONS, where a reader looks for them.
         documented_flags = [row.split()[0] for row in options]
-        for flag in ("--name", "--quiet", "--force", "--project", "--note", "--public"):
+        for flag in ("--name", "--quiet", "--registered", "--force", "--project", "--note", "--public"):
             assert flag in documented_flags, f"OPTIONS block has no row for {flag}"
 
     @pytest.mark.parametrize("mod", SIMPLE_MODULES)
@@ -464,6 +468,12 @@ def secrets_watch(secrets_audit: _SecretsWatch) -> Generator[list[str], None, No
         secrets_audit.touched = None
 
 
+def _drive_sync_on(project: Path) -> None:
+    """Write a project config with drive_sync on, so 'all' reaches its Drive step."""
+    (project / ".backup").mkdir()
+    (project / ".backup" / "config.json").write_text('{"drive_sync": true}', encoding="utf-8")
+
+
 class TestNoWriteEscapesToRealSecrets:
     """The 'all' cycle must never reach live credential storage from a test.
 
@@ -487,8 +497,10 @@ class TestNoWriteEscapesToRealSecrets:
         # Each double stands where a real run would have gone, so each is checked
         # against the arguments the real step takes. The doubles are compared by
         # name as a whole map, so a step added to DOWNSTREAM_AFTER_SENTINEL
-        # without an expectation here fails.
+        # without an expectation here fails. drive_sync is switched on, since
+        # 'all' skips the Drive step for a project that has it off (DPLAN-0411).
         project = str(tmp_path)
+        _drive_sync_on(tmp_path)
 
         with ExitStack() as stack:
             snap = stack.enter_context(patch.object(all_module, "run_snapshot"))
@@ -517,6 +529,7 @@ class TestNoWriteEscapesToRealSecrets:
 
     def test_no_write_reaches_real_secret_storage(self, tmp_path: Path, secrets_watch: list[str]) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
+        _drive_sync_on(tmp_path)
         with ExitStack() as stack:
             stack.enter_context(patch.object(all_module, "run_snapshot"))
             for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]:
@@ -547,8 +560,8 @@ class TestStubFailsHonestly:
 
         # The exact sentence the operator gets, not an either/or over two words.
         assert str(caught.value) == (
-            "settings is not implemented — the settings UI is deferred (Phase 3). "
-            "Edit .backup/config.json in the project directly for now."
+            "settings sets one key today, drive_sync on|off <project_path|@name>; "
+            "the settings UI is deferred (Phase 3). Edit .backup/config.json in the project directly for anything else."
         )
 
     def test_settings_stub_leaves_the_run_marked_failed(
@@ -567,7 +580,7 @@ class TestStubFailsHonestly:
         assert code == 1
         err = capsys.readouterr().err
         assert "settings failed" in err
-        assert "settings is not implemented" in err
+        assert "settings sets one key today" in err
 
 
 class TestRestoreRefusesAMalformedInvocation:
