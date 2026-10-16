@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-15] — v2.8.18: Windows leaves CI, Windows users run AIPass inside WSL2
 
 ### Changed
 
