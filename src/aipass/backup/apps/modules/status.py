@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-23
 # Modified: 2026-10-16
 # =============================================
@@ -45,8 +45,8 @@ MODULE_NAME = "status"
 PRIMARY_COMMAND = "status"
 
 #: The lanes the contract reports, in its order. Each one's last run is read
-#: from the project's changelog by its ``mode``; drive_sync writes no changelog
-#: entry today, so its lane answers null until it does.
+#: from the project's changelog by its ``mode``; drive_sync writes its entry
+#: after a run whose uploads all succeeded.
 LANES = ("snapshot", "versioned", "drive_sync")
 FLAGS = ("--json", "--sizes")
 

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.6
+# Version: 3.0.7
 # Created: 2026-06-12
 # Modified: 2026-10-16
 # =============================================
@@ -703,42 +703,41 @@ class TestDriveUpload:
 
 
 class TestDriveDestinationPath:
-    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/<store-relative path>, pure computation."""
+    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/snapshot/<store-relative path>, pure computation."""
 
-    def test_drive_path_opens_with_the_root_and_project_folders_the_lane_creates(self, tmp_path: Path) -> None:
-        """A store-root file lands under <root folder>/<project dir name>/, not at the Drive root."""
+    def test_drive_path_opens_with_the_root_project_and_lane_folders_the_lane_creates(self, tmp_path: Path) -> None:
+        """A store-root file lands under <root folder>/<project dir name>/snapshot/, not at the project folder."""
         project = tmp_path / "myproject"
 
         result = path_builder.build_drive_path(str(project), "notes.txt")
 
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "notes.txt"
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "notes.txt"
 
     def test_drive_path_keeps_the_relative_files_parent_folders_instead_of_flattening(self, tmp_path: Path) -> None:
         """A nested store-relative file keeps every parent segment -- upload creates one folder each."""
-        # The shape is the versioned store's own: <parent>/<name-folder>/<name>
-        # (builder.build_versioned_file_path), which is what drive_sync hands the
-        # engine as backup_root-relative. Flattening to the bare leaf is exactly
-        # upload.py:75-76's not-relative fallback, and it is NOT this path.
+        # The shape is the snapshot store's own, a mirror of the project, which is
+        # what drive_sync hands the engine as store-relative. Flattening to the
+        # bare leaf is upload_single_file's not-relative fallback, and it is NOT
+        # this path.
         project = tmp_path / "myproject"
 
-        result = path_builder.build_drive_path(str(project), "src/app.py/app.py")
+        result = path_builder.build_drive_path(str(project), "src/pkg/app.py")
 
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "src" / "app.py" / "app.py"
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "src" / "pkg" / "app.py"
 
     def test_drive_path_does_not_re_hash_a_long_name_the_store_already_hashed(self, tmp_path: Path) -> None:
         """A >50-char name passes through untouched: the Drive lane has no hashing step."""
-        # build_versioned_file_path applies name[:30]_md5[:8] on the way INTO the
-        # store, so the store-relative path already carries the shortened folder.
-        # Nothing in handlers/drive/ hashes anything; borrowing the local twin's
-        # recipe here would rename the file a second time, and the upload would
-        # then publish under a name no tracker key or restore lookup matches.
+        # The snapshot mirror keeps every name as the project has it, and nothing
+        # in handlers/drive/ hashes anything. Borrowing build_versioned_file_path's
+        # name[:30]_md5[:8] recipe here would publish under a name no tracker key
+        # matches.
         project = tmp_path / "myproject"
         long_name = "a" * 51 + ".txt"
 
         result = path_builder.build_drive_path(str(project), f"docs/{long_name}")
 
         assert result.name == long_name
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "docs" / long_name
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "docs" / long_name
 
 
 # ---------------------------------------------------------------------------

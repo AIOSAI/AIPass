@@ -81,6 +81,16 @@ logs one line saying so, and starts a fresh tracker. If a
 overwriting it; move one of the two by hand. An empty tracker (what
 `drive_clear` leaves) has nothing to keep and is simply reused.
 
+## The changelog entry
+
+A run whose uploads all succeeded appends one entry to the project's
+`.backup/changelog.json`, the same shape snapshot and versioned write, with
+`mode` `drive_sync` and `files_copied` set to the files uploaded in that run.
+`status --json` reads the Drive lane's `last` and `files` from it. A run with
+a failed upload, or with nothing to upload, writes none: the snapshot lane's
+rule for a run that copied nothing. The `all` cycle's Drive step is the same
+function, so it writes the same entry.
+
 `share` is the single-file lane: it uploads one file and prints the shareable
 link as its final line, so the link can be captured from stdout.
 

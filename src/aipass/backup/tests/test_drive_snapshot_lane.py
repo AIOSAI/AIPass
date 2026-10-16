@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_drive_snapshot_lane.py
 # Description: Tests for the Drive lane's source store, its tracker lane stamp and the never-leaves floor
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -28,7 +28,8 @@ from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
-from aipass.backup.apps.modules import drive_sync
+from aipass.backup.apps.handlers.state.changelog import load_changelog
+from aipass.backup.apps.modules import drive_sync, status
 
 # conftest's autouse sealed_google_edge seals both doors to the real account;
 # the DriveClient below is a MagicMock that talks to nobody.
@@ -195,6 +196,56 @@ class TestTheTrackerAnswersForOneLane:
         assert _tracker_doc(project, drive_tracker.SET_ASIDE_FILENAME) == earlier
         assert _tracker_doc(project) == foreign
         assert uploads == []
+
+
+class TestTheRunIsReadByStatus:
+    """A run that uploads leaves one drive_sync changelog entry, which status --json reads as the lane's last run."""
+
+    def test_a_run_that_uploads_leaves_the_drive_lane_non_null_in_status(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
+    ) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("src/app.py", "notes.txt", "kept.txt"))
+        # One file is already on Drive: the entry counts what this run uploaded, not the store.
+        stat = (project / ".backup" / "snapshots" / "kept.txt").stat()
+        drive_tracker.save_tracker(
+            str(project), {"kept.txt": {"drive_id": "d", "local_size": stat.st_size, "local_mtime": stat.st_mtime}}
+        )
+        _offline_client(monkeypatch)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        entries = load_changelog(str(project))
+        assert [(e["mode"], e["files_copied"]) for e in entries] == [("drive_sync", 2)]
+        lane = status.build_status(str(project))["lanes"]["drive_sync"]
+        assert lane == {"last": entries[0]["timestamp"], "files": 2}
+
+    def test_a_run_with_a_failed_upload_writes_no_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("a.txt", "b.txt"))
+        _offline_client(monkeypatch)
+        partial = {"success": False, "uploaded": 1, "failed": 1, "bytes_uploaded": 0}
+        monkeypatch.setattr(drive_upload, "upload_batch", lambda *args, **kwargs: partial)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert load_changelog(str(project)) == []
+
+    def test_a_run_with_everything_up_to_date_writes_no_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
+    ) -> None:
+        # The snapshot lane's rule: a run that found nothing to copy writes no entry.
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("a.txt",))
+        stat = (project / ".backup" / "snapshots" / "a.txt").stat()
+        drive_tracker.save_tracker(
+            str(project), {"a.txt": {"drive_id": "d", "local_size": stat.st_size, "local_mtime": stat.st_mtime}}
+        )
+        _offline_client(monkeypatch)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert uploads == [] and load_changelog(str(project)) == []
 
 
 class TestTheNeverLeavesFloor:

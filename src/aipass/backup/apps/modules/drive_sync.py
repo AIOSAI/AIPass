@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-04-17
 # Modified: 2026-10-16
 # =============================================
@@ -36,6 +36,9 @@ from aipass.cli.apps.modules import console
 from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import build_snapshot_path
+from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.state.changelog import append_changelog
+from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.modules.display import show_drive_result
 
 
@@ -219,6 +222,22 @@ def run_drive_sync(
 
     # 7. Save tracker
     save_tracker(project_root, tracker)
+
+    # 8. One changelog entry per run that uploaded cleanly, the shape snapshot
+    #    and versioned write; status --json reads the Drive lane's last run
+    #    from it. A run with a failed upload, or with nothing to upload,
+    #    writes none -- the snapshot lane's rule for a run that copied nothing.
+    if result["success"]:
+        run = BackupResult(
+            mode=PRIMARY_COMMAND,
+            project_root=project_root,
+            files_copied=result["uploaded"],
+            files_checked=len(all_files),
+            files_skipped=skipped,
+            bytes_copied=result["bytes_uploaded"],
+            duration_seconds=result["duration"],
+        )
+        append_changelog(project_root, build_metadata(run))
 
     trail.log_operation(
         "drive_sync_complete",

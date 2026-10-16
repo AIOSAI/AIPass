@@ -84,8 +84,9 @@ reads, exactly the shape pinned in devpulse's `backup_door_contract.md`
 `store` is present only with `--sizes`, which walks both stores. Each lane's
 `last` and `files` come from the project's changelog: the last entry of that
 mode, its `timestamp` and `files_copied`. A snapshot that found no changes writes
-no entry, so `snapshot.last` is the last snapshot that copied. `drive_sync` writes
-no changelog entry yet, so its lane is null. `registered` means the root has a
+no entry, so `snapshot.last` is the last snapshot that copied; the same rule holds
+for `drive_sync`, whose entry counts the files a clean run uploaded. `runs` counts
+every entry, Drive runs included. `registered` means the root has a
 `.backup/config.json`. A root with no store answers `registered: false`, every
 `last` null, `runs: 0`, exit 0; an absent root exits non-zero with one line on
 stderr. `--sizes` without `--json` is refused.
