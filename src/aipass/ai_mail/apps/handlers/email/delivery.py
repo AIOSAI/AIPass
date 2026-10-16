@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.4.4
+# Version: 3.5.0
 # Created: 2025-12-02
-# Modified: 2026-10-04
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -35,7 +35,7 @@ from typing import Dict, Tuple, List, Optional, Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.paths import find_repo_root, find_project_root
+from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
 from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
 
 if sys.platform == "win32":
@@ -768,6 +768,7 @@ def deliver_email_to_branch(
             # stacking a second one. No key = plain delivery, unchanged.
             effective_key = upsert_key if upsert_key is not None else email_data.get("upsert_key")
             existing = None
+            delivered_id = ""
             if effective_key:
                 existing = _find_upsert_target(inbox_data["messages"], email_data["from"], effective_key)
 
@@ -826,6 +827,7 @@ def deliver_email_to_branch(
 
                 # Prepend message to inbox (newest first)
                 inbox_data["messages"].insert(0, message)
+                delivered_id = message["id"]
 
             from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
 
@@ -865,7 +867,13 @@ def deliver_email_to_branch(
     # repeating, so it stays silent — one feed line per repeat is the stacking
     # problem again, just in the bell instead of in the inbox.
     if not updated_in_place:
-        _emit_notification_event(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
+        _emit_notification_event(
+            email_data["from"],
+            to_branch,
+            email_data["subject"],
+            email_data.get("message", ""),
+            address=_mail_address(delivered_id, to_branch, branch_path),
+        )
 
     # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
@@ -948,8 +956,38 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
         email_data.get("to", str(inbox_file)),
         email_data.get("subject", ""),
         email_data.get("message", ""),
+        address=_mail_address(
+            reply_id, email_data.get("to") or inbox_file.parent.parent.name, inbox_file.parent.parent
+        ),
     )
     return True, "", reply_id
+
+
+def _project_name(branch_home: Path) -> str:
+    """The project a branch is a citizen of, as its registry names it: BAUD_REGISTRY.json -> "baud".
+
+    A root holding several registries is answered by the one named after the
+    root's directory. No root, or no such registry, answers "unknown", named.
+    """
+    root = find_project_root(branch_home)
+    stems = [r.name[: -len(REGISTRY_SUFFIX)] for r in registries_in(root)] if root is not None else []
+    if root is not None and len(stems) > 1:
+        stems = [st for st in stems if st.lower() == root.name.lower()]
+    if len(stems) != 1:
+        logger.warning(
+            "[delivery] no project registry names %s's project (root %s): project 'unknown'", branch_home, root
+        )
+        return "unknown"
+    return stems[0].lower()
+
+
+def _mail_address(mail_id: str, recipient: str, branch_home: Path) -> Dict[str, str]:
+    """Where the phone finds a delivered mail: its inbox id, the recipient branch, its project (DPLAN-0414 C-A)."""
+    return {
+        "mail_id": str(mail_id),
+        "recipient": str(recipient).lstrip("@"),
+        "project": _project_name(branch_home),
+    }
 
 
 _NOTIFICATION_TIMESTAMPS: Dict[str, List[float]] = {}
@@ -959,7 +997,9 @@ _NOTIFICATION_MAX = 3
 _NOTIFICATION_WINDOW = 30.0  # seconds
 
 
-def _emit_notification_event(sender: str, recipient: str, subject: str, message: str = "") -> None:
+def _emit_notification_event(
+    sender: str, recipient: str, subject: str, message: str = "", address: Optional[Dict[str, str]] = None
+) -> None:
     """
     Write a "mail" event to the notification feed for new email.
 
@@ -971,6 +1011,8 @@ def _emit_notification_event(sender: str, recipient: str, subject: str, message:
         recipient: Email recipient address (e.g., @ai_mail)
         subject: Email subject line
         message: Email body (first ~100 chars shown in notification)
+        address: mail_id, recipient and project, merged into the event so a
+            reader can open the whole message (_mail_address)
     """
     import time
 
@@ -998,7 +1040,7 @@ def _emit_notification_event(sender: str, recipient: str, subject: str, message:
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(title, body, source=sender.replace("@", ""), kind="mail")
+        send_notification(title, body, source=sender.replace("@", ""), kind="mail", extra=address)
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
     except Exception as e:
         logger.warning("[delivery] _emit_notification_event() failed for %s: %s", recipient, e)
