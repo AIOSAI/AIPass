@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_pump.py
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -23,6 +23,7 @@
 # seedgo: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
 import ast
+import asyncio
 import errno
 import os
 import signal
@@ -30,11 +31,12 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_attach import (
@@ -967,3 +969,31 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
 
         assert "except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError)" in handler
         assert "raise" not in handler
+
+
+class TestARoomThatEndsClosesItsSocketWith4000:
+    """DPLAN-0414 C-C: the phone tells "room ended" from "server hung up" by the close code alone."""
+
+    def test_an_empty_read_closes_the_socket_with_4000_room_ended(self) -> None:
+        """
+        The room's PTY reads empty: the socket is closed 4000 "room ended", the session hung up once.
+
+        Driven through run_pump with a stand-in socket whose client never
+        speaks, so the only way the pump ends is the room ending first.
+        """
+        session = SimpleNamespace(room="aipass-api", read=lambda: b"", hangups=0)
+        session.hangup = lambda: setattr(session, "hangups", session.hangups + 1)
+
+        async def silent_client() -> dict:
+            await asyncio.Event().wait()
+            return {}
+
+        websocket = MagicMock()
+        websocket.close = AsyncMock()
+        websocket.receive = silent_client
+
+        close_code = asyncio.run(host_pump.run_pump(websocket, session))
+
+        websocket.close.assert_awaited_once_with(code=4000, reason="room ended")
+        assert close_code is None, "the room ended first; the client sent no code"
+        assert session.hangups == 1

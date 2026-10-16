@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: machine.py
-# Description: Host API Machine Handler — the phone's vitals, proxied from @skills
-# Version: 1.0.2
+# Description: Host API Machine Handler — the phone's vitals and process list, proxied from @skills
+# Version: 1.1.0
 # Created: 2026-09-13
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -66,18 +66,26 @@ and never an error, and the face prints the skill's sentence for its code.
     skill promises never to raise for a reading, so this is a defect in the
     door itself, and it is a 503 naming it rather than a 500 traceback.
 
-NOT HERE: the process LIST. The dict's `processes` section is a count and rides
-through as-is. A top-N sweep costs 30 ms and exposes process names, so it gets
-its own route, its own cache and its own privacy rule — names and counts, never
-a command line — in the row that builds it.
+THE PROCESS LIST
+------------------------------------------------------------------------
+The vitals' `processes` section is a count and rides through as-is. The list
+is its own read, `GET /v1/machine/processes` (DPLAN-0414 contract C-B), relayed
+from @skills' `machine_processes(limit)` the same way: the dict verbatim, the
+same refusal mapping. Names only, never a command line, is the skill's rule.
+
+One read is a real CPU sample of about half a second, so the phone asks for it
+when a sheet opens, never on the monitor row's poll. Nothing is cached: the list
+answers "what is running now", and the skill clamps the limit itself. Its
+success carries no `ok` key, so a refusal is told apart by `ok is False`.
 
 Classes:
     MachineRefused    - The skill refused the whole read, with its reason code
     MachineDoorFailed - The door raised, or answered outside its published shape
 
 Functions:
-    read_machine() - The machine's vitals, at most one read per second
-    forget()       - Drop the cached reading so the next read asks @skills' machine_vitals() again
+    read_machine()   - The machine's vitals, at most one read per second
+    read_processes() - The busiest processes, one fresh sample per call
+    forget()         - Drop the cached reading so the next read asks @skills' machine_vitals() again
 """
 
 from typing import Any, Dict
@@ -101,6 +109,10 @@ NO_DETAIL = "@skills refused the machine read and gave no detail"
 # travels to a handset (CodeQL py/stack-trace-exposure, PR #774). The words
 # themselves go to the host log, with the traceback.
 DOOR_RAISED = "@skills' machine_vitals() raised; the error is in this host's log"
+
+# The one sentence the process route sends when its door failed, either way it
+# failed. The particulars go to the host log, never to the handset.
+PROCESSES_DOOR_FAILED = "@skills' machine_processes() could not answer; the reason is in this host's log"
 
 _vitals = ReadCache("machine_vitals", MACHINE_TTL_SECONDS)
 
@@ -137,6 +149,49 @@ def read_machine() -> Dict[str, Any]:
         MachineDoorFailed: The door raised or broke its shape. Never cached.
     """
     return _vitals.get(_VITALS_KEY, _ask_the_skill)
+
+
+def read_processes(limit: int) -> Dict[str, Any]:
+    """
+    The busiest processes, as @skills' system_status answers them.
+
+    Args:
+        limit: How many to list. Passed through; the skill clamps it to 1..100.
+
+    Returns:
+        The skill's dict, verbatim: sampled_at, window_ms, total, sort and
+        processes. A fresh sample on every call, never cached.
+
+    Raises:
+        MachineRefused: The answer carries ok False.
+        MachineDoorFailed: The call raised, or the answer is not a dict.
+    """
+    # Imported here, never at module top — see the docstring.
+    from aipass.skills.lib.system_status import handler as system_status
+
+    try:
+        answer = system_status.machine_processes(limit)
+    except Exception as exc:
+        # The skill never raises for a reading; a raise is a defect in the door.
+        logger.error("[host_api] @skills' machine_processes() raised %s: %s", type(exc).__name__, exc, exc_info=True)
+        json_handler.log_operation("host_api_processes_door_failed", {"error": type(exc).__name__})
+        raise MachineDoorFailed(PROCESSES_DOOR_FAILED) from exc
+
+    if not isinstance(answer, dict):
+        message = f"@skills' machine_processes() answered outside its published shape: a {type(answer).__name__}"
+        logger.error("[host_api] %s", message)
+        json_handler.log_operation("host_api_processes_door_failed", {"error": "shape"})
+        raise MachineDoorFailed(message)
+
+    # A success carries no `ok`; only an explicit False is a refusal.
+    if answer.get("ok") is False:
+        reason = answer.get("reason")
+        detail = answer.get("detail")
+        logger.warning("[host_api] @skills refused the process read: %s", reason)
+        json_handler.log_operation("host_api_processes_refused", {"reason": reason})
+        raise MachineRefused(reason, detail if isinstance(detail, str) and detail else NO_DETAIL)
+
+    return answer
 
 
 def forget() -> None:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-10-16
 # =============================================
@@ -18,6 +18,7 @@
 # seedgo: no-test-needed(duplicate_test) — read_agent_settings() and list_projects(), test_host_{settings,fleet}.py
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -28,6 +29,7 @@ import aipass.drone as drone
 from aipass.api.apps.handlers.host import backup as host_backup
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -41,6 +43,10 @@ PATCH_BACKUP_LOGGER = "aipass.api.apps.handlers.host.backup.logger"
 PATCH_BACKUP_JSON = "aipass.api.apps.handlers.host.backup.json_handler"
 PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
 PATCH_DENIALS_JSON = "aipass.api.apps.handlers.host.denials.json_handler"
+PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
+PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
+# @skills' process door, patched where it lives: machine.py imports it inside the call.
+PATCH_PROCESSES_DOOR = "aipass.skills.lib.system_status.handler.machine_processes"
 
 
 # =============================================
@@ -615,3 +621,158 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
         assert response.status_code == 503
         error = response.json()["error"]
         assert (error["code"], error["message"]) == ("verb_unavailable", host_denials.SENTENCES["verb_unavailable"])
+
+
+def _processes() -> dict:
+    """What machine_processes() answers, contract C-B's shape, manufactured here. A success has no `ok` key."""
+    chrome = {"pid": 1234, "name": "chrome", "cpu_pct": 42.5, "mem_pct": 3.1, "mem_mb": 512, "state": "running"}
+    kworker = {"pid": 77, "name": "kworker", "cpu_pct": 0.0, "mem_pct": 0.0, "mem_mb": 0, "state": "idle"}
+    return {
+        "sampled_at": "2026-10-16T21:44:00.000+00:00",
+        "window_ms": 503,
+        "total": 245,
+        "sort": "cpu",
+        "processes": [{**chrome, "user": "u"}, {**kworker, "user": None}],
+    }
+
+
+# A failed door's whole error body: its code and the one fixed sentence, nothing of the exception's.
+_DOOR_FAILED = {"code": "machine_door_failed", "message": host_machine.PROCESSES_DOOR_FAILED}
+
+
+@fastapi_required
+class TestTheMachineProcessesRoute:
+    """GET /v1/machine/processes (DPLAN-0414 C-B): the skill's dict verbatim, refused exactly as /v1/machine."""
+
+    @pytest.fixture
+    def processes(self, store: Path):
+        """The real app, a read token, and @skills' process door replaced where it lives."""
+        from fastapi.testclient import TestClient
+
+        with (
+            patch(PATCH_SERVER_LOGGER),
+            patch(PATCH_MACHINE_LOGGER) as log,
+            patch(PATCH_MACHINE_JSON),
+            patch(PATCH_DENIALS_LOGGER),
+            patch(PATCH_DENIALS_JSON),
+            patch(PATCH_PROCESSES_DOOR, autospec=True) as door,
+        ):
+            _, raw = host_tokens.issue_token("phone", "read")
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            yield client, {"Authorization": f"Bearer {raw}"}, door, log
+
+    def test_the_route_requires_a_token(self, processes: Any) -> None:
+        """Process names are machine state; they sit behind the same auth as everything."""
+        api, _, door, _ = processes
+
+        response = api.get("/v1/machine/processes")
+
+        assert response.status_code == 401
+        door.assert_not_called()
+
+    def test_a_success_passes_through_untouched_with_the_default_limit(self, processes: Any) -> None:
+        """The whole body is compared, so any reshaping in the request path goes red; no limit asks for 20."""
+        api, read, door, _ = processes
+        door.return_value = _processes()
+
+        response = api.get("/v1/machine/processes", headers=read)
+
+        assert response.status_code == 200
+        assert response.json() == _processes()
+        door.assert_called_once_with(20)
+
+    @pytest.mark.parametrize("limit", [5, 500, 0])
+    def test_the_limit_travels_verbatim_for_the_skill_to_clamp(self, processes: Any, limit: int) -> None:
+        """The skill owns the 1..100 clamp; a second clamp here would be a second answer."""
+        api, read, door, _ = processes
+        door.return_value = _processes()
+
+        response = api.get("/v1/machine/processes", params={"limit": limit}, headers=read)
+
+        assert response.status_code == 200
+        door.assert_called_once_with(limit)
+
+    def test_a_limit_that_is_not_a_number_is_a_400_and_samples_nothing(self, processes: Any) -> None:
+        """limit=abc is the caller's mistake, said in a sentence: never a 500, never a sample."""
+        api, read, door, _ = processes
+
+        response = api.get("/v1/machine/processes", params={"limit": "abc"}, headers=read)
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "machine_limit_refused"
+        assert "whole number" in error["message"]
+        door.assert_not_called()
+
+    def test_another_parameter_is_refused_not_dropped(self, processes: Any) -> None:
+        """A sort=mem the route ignored would read as a sort that worked."""
+        api, read, door, _ = processes
+
+        response = api.get("/v1/machine/processes", params={"sort": "mem"}, headers=read)
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "machine_parameters_refused"
+        assert "sort" in error["message"]
+        door.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("reason", "detail"),
+        [
+            ("psutil_missing", "pip install psutil, the recipe"),
+            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+        ],
+    )
+    def test_a_refusal_maps_the_way_the_vitals_refusal_does(self, processes: Any, reason: str, detail: str) -> None:
+        """ok False: 503 machine_refused, the code in `reason`, the fixed sentence, the detail off the wire."""
+        api, read, door, _ = processes
+        door.return_value = {"ok": False, "reason": reason, "detail": detail}
+
+        response = api.get("/v1/machine/processes", headers=read)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error == {
+            "code": "machine_refused",
+            "message": host_denials.SENTENCES["machine_refused"],
+            "reason": reason,
+            "ref": error["ref"],
+        }
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert detail not in response.text
+
+    def test_a_door_that_raises_is_a_503_with_the_fixed_sentence(self, processes: Any) -> None:
+        """The exception's words go to the host log with the traceback, never to the handset."""
+        api, read, door, log = processes
+        door.side_effect = RuntimeError("boom inside the door")
+
+        response = api.get("/v1/machine/processes", headers=read)
+
+        assert response.status_code == 503
+        assert response.json()["error"] == _DOOR_FAILED
+        assert "boom" not in response.text
+        logged = log.error.call_args
+        assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
+        assert logged.kwargs["exc_info"] is True
+
+    @pytest.mark.parametrize("answer", [None, [], "rows"])
+    def test_an_answer_that_is_not_a_dict_is_a_503(self, processes: Any, answer: Any) -> None:
+        """No dict means nothing to relay, and the fixed sentence says so."""
+        api, read, door, _ = processes
+        door.return_value = answer
+
+        response = api.get("/v1/machine/processes", headers=read)
+
+        assert response.status_code == 503
+        assert response.json()["error"] == _DOOR_FAILED
+
+    def test_every_read_is_a_fresh_sample(self, processes: Any) -> None:
+        """Nothing is cached: the list answers what is running now, so two reads are two samples."""
+        api, read, door, _ = processes
+        door.side_effect = [_processes(), {**_processes(), "sampled_at": "later"}]
+
+        first = api.get("/v1/machine/processes", headers=read).json()
+        second = api.get("/v1/machine/processes", headers=read).json()
+
+        assert door.call_count == 2
+        assert (first["sampled_at"], second["sampled_at"]) == (_processes()["sampled_at"], "later")
