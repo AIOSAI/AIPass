@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-15] — v2.8.17: the personal settings file never changes unseen (a backup and a receipt on every door, doctor --fix asks first), drone @git untrack, aipass install --source, the autofix lane skips scratch
 
 ### Added
 
