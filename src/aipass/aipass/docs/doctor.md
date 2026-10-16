@@ -87,7 +87,9 @@ it copies the file into `~/.claude/.backup/settings/` as
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
-written, the command fails and the settings file is left as it was. Code:
+written, the command fails and the settings file is left as it was. If the
+write itself fails, the command fails too and no receipt is written; the
+backup taken just before it stays. Code:
 [`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
 
 ## What it will not do

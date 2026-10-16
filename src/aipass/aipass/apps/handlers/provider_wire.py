@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-11
 # Modified: 2026-10-15
 # =============================================
@@ -40,7 +40,8 @@ BACKUP AND RECEIPT FIRST (FPLAN-0645)
 -------------------------------------
 Both doors back the settings file up through ``settings_backup`` immediately before
 their write and append a receipt after it. A failed backup raises
-``SettingsBackupError`` and the file is not written. The old same-day
+``SettingsBackupError`` and the file is not written; a write the fleet writer
+reports failed raises the same error and leaves no receipt. The old same-day
 ``settings.json.bak.<date>`` copy is retired: a second write that day overwrote it.
 """
 
@@ -60,6 +61,7 @@ from aipass.aipass.apps.handlers.settings_backup import (
     DOOR_DOCTOR_FIX,
     DOOR_SETUP_SH,
     BackupRecord,
+    SettingsBackupError,
     backup_before_write,
     sha256_of,
     write_receipt,
@@ -346,12 +348,17 @@ def _write_with_receipt(
     *record* is the door's own ``backup_before_write``, taken just before this call.
     *consent* (``y (tty)``, ``--yes``, ``install``) becomes the receipt summary's first
     line, ``consent: <it>``, when given (FPLAN-0646).
+
+    The fleet writer returns False on a failed write instead of raising; that raises
+    ``SettingsBackupError`` naming the path here, and no receipt is written.
     """
     if record.backup is not None:
         actions.append(f"Backed up settings to {record.backup}")
     else:
         actions.append("No settings file yet — nothing to back up")
-    json_handler.write_json(settings_path, settings)
+    if not json_handler.write_json(settings_path, settings):
+        logger.error("[provider_wire] settings write failed at %s; no receipt written", settings_path)
+        raise SettingsBackupError(f"settings write failed at {settings_path}; no receipt written")
     actions.append(updated_line)
     summary = ([f"consent: {consent}"] if consent else []) + actions
     receipt = write_receipt(record, sha256_of(settings_path), summary)

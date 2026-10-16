@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-08-01
 # Modified: 2026-10-15
 # =============================================
@@ -559,6 +559,29 @@ class TestSettingsBackup:
         assert str(folder) in str(refused.value)
         assert settings_path.read_bytes() == original
         assert _backups(settings_path) == []
+
+    def test_a_write_the_fleet_writer_reports_failed_raises_and_leaves_no_receipt(self, tmp_path, monkeypatch) -> None:
+        """The fleet writer returns False on a failed write; the door raises and logs no receipt.
+        Mutant: the write_json return ignored -> a receipt line lands and nothing raises, red."""
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+        original = settings_path.read_bytes()
+        written: list = []
+
+        def _failed_write(path, _data) -> bool:
+            written.append(path)
+            return False
+
+        monkeypatch.setattr(provider_wire.json_handler, "write_json", _failed_write)
+
+        with pytest.raises(SettingsBackupError) as refused:
+            _wire(manifest, settings_path)
+
+        receipts = _folder(settings_path) / "receipts.jsonl"
+        lines = receipts.read_text(encoding="utf-8").splitlines() if receipts.exists() else []
+        assert str(settings_path) in str(refused.value)
+        assert lines == []
+        assert settings_path.read_bytes() == original
+        assert written == [settings_path]
 
     @pytest.mark.parametrize("door", ["setup-sh", "reconcile-stale-deny"])
     def test_each_other_writer_leaves_its_backup_and_receipt_under_its_door_name(
