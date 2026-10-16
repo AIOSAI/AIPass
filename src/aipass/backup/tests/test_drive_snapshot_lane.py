@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_drive_snapshot_lane.py
-# Description: Tests for the Drive lane's source store, its tracker lane stamp and the never-leaves floor
-# Version: 1.1.0
+# Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
+# Version: 1.2.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
 
-"""Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane and the never-leaves floor."""
+"""Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
 
 # A second file for drive_sync, split by behaviour (template item 19):
 # test_drive_pipeline.py sits near the 1,500-line cap, and the three behaviours
@@ -20,16 +20,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import DEFAULT, MagicMock
 
 import pytest
 
+from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.state.changelog import load_changelog
-from aipass.backup.apps.modules import drive_sync, status
+from aipass.backup.apps.modules import display, drive_sync, status
+from aipass.cli.apps.modules import command_failed
 
 # conftest's autouse sealed_google_edge seals both doors to the real account;
 # the DriveClient below is a MagicMock that talks to nobody.
@@ -49,12 +51,22 @@ def uploads(monkeypatch: pytest.MonkeyPatch) -> list[list[Path]]:
     return batches
 
 
-def _offline_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Put a DriveClient that talks to nobody where the late import looks for one."""
+#: An account with room for anything these tests upload: 15 GiB free.
+ROOMY = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
+
+
+def _offline_client(monkeypatch: pytest.MonkeyPatch, quota: dict | None = ROOMY) -> MagicMock:
+    """Put a DriveClient that talks to nobody where the late import looks for one.
+
+    The about.get request answers with ``quota``; every other request answers
+    with ``_api_call.return_value``, which a test may set.
+    """
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = True
     instance.last_error = None
     instance.file_tracker = {}
+    about_request = instance.drive_service.about.return_value.get.return_value
+    instance._api_call.side_effect = lambda request, *args, **kwargs: quota if request is about_request else DEFAULT
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance
 
@@ -87,6 +99,25 @@ class TestTheLaneUploadsTheSnapshotStore:
         snapshots = project / ".backup" / "snapshots"
         assert result["location"] == str(snapshots)
         assert sorted(f.relative_to(snapshots).as_posix() for f in uploads[0]) == ["notes.txt", "src/app.py"]
+
+    def test_the_project_root_reaches_the_upload_engine_so_its_periodic_tracker_save_can_fire(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("a.txt",))
+        _offline_client(monkeypatch)
+        handed: list = []
+
+        def _record(client, files, project_name, backup_root, tracker, **kwargs) -> dict:
+            """Stand in for upload_batch: keep the project root it was handed."""
+            handed.append(kwargs.get("project_root"))
+            return {"success": True, "uploaded": len(files), "failed": 0, "bytes_uploaded": 0}
+
+        monkeypatch.setattr(drive_upload, "upload_batch", _record)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert handed == [str(project)]
 
     def test_a_project_with_only_a_versioned_store_names_the_missing_snapshot_and_uploads_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
@@ -296,3 +327,154 @@ class TestTheNeverLeavesFloor:
 
         assert [f.name for f in uploads[0]] == ["keep.txt"]
         assert result["held_back"] == 1
+
+
+#: Three files of 1000, 1000 and 970 bytes: 2,970 bytes, "2.9 KB" through the branch's one humaniser.
+SIZES = {"a.txt": 1000, "b.txt": 1000, "c.txt": 970}
+
+
+def _sized_store(project: Path) -> None:
+    """A snapshot store holding SIZES' files at their exact sizes."""
+    store = project / ".backup" / "snapshots"
+    store.mkdir(parents=True)
+    for name, size in SIZES.items():
+        (store / name).write_text("x" * size, encoding="utf-8")
+
+
+def _quota(usage: int, limit: int | None) -> dict:
+    """about.get's answer, numbers as strings the way Drive sends them; no limit key when limit is None."""
+    quota = {"usage": str(usage)}
+    if limit is not None:
+        quota["limit"] = str(limit)
+    return {"storageQuota": quota}
+
+
+def _main(argv: list[str]) -> int:
+    """Run the real entry point with argv."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["backup", *argv])
+        return entry.main()
+
+
+@pytest.fixture
+def quiet_headers(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the panel titles instead of drawing them."""
+    # header() fires @cli's event bus; replaced where display binds it, so nothing fires.
+    titles: list[str] = []
+    monkeypatch.setattr(display, "header", lambda title, *args, **kwargs: titles.append(title))
+    return titles
+
+
+class TestTheRunMustFitTheDrive:
+    """drive_sync weighs what it is about to upload against the account's free space before the first upload."""
+
+    REFUSAL = "Drive has 1.4 KB free; this run needs 2.9 KB. Nothing uploaded."
+
+    def test_a_run_that_does_not_fit_uploads_nothing_ends_on_the_one_sentence_and_exits_non_zero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=8566, limit=10000))
+
+        assert _main(["drive_sync", str(project)]) == 2
+
+        out = capsys.readouterr().out
+        assert out.splitlines()[-1] == self.REFUSAL
+        assert uploads == []
+        assert load_changelog(str(project)) == []
+        assert not (project / ".backup" / drive_tracker.TRACKER_FILENAME).exists()
+
+    def test_a_quiet_run_that_does_not_fit_still_says_the_sentence_and_is_not_a_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=8566, limit=10000))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert result["success"] is False and result["uploaded"] == 0
+        assert result["error"] == self.REFUSAL
+        assert capsys.readouterr().out.splitlines() == [self.REFUSAL]
+        assert command_failed() is True
+
+    def test_a_run_that_fits_says_the_headroom_on_its_first_line_and_uploads(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        uploads: list,
+        quiet_headers: list,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=20000 - 13926, limit=20000))
+
+        assert _main(["drive_sync", str(project)]) == 0
+
+        assert capsys.readouterr().out.splitlines()[0] == "Drive: 2.9 KB to upload, 13.6 KB free"
+        assert sorted(f.name for f in uploads[0]) == sorted(SIZES)
+
+    def test_a_run_that_needs_exactly_the_free_space_fits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=10000 - 2970, limit=10000))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert result["success"] is True and len(uploads[0]) == 3
+
+    def test_a_run_one_byte_over_the_free_space_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=10000 - 2969, limit=10000))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert result["success"] is False and uploads == []
+        assert result["error"] == "Drive has 2.9 KB free; this run needs 2.9 KB. Nothing uploaded."
+
+    def test_an_account_with_no_limit_passes_and_says_none_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, _quota(usage=10**12, limit=None))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert result["success"] is True and len(uploads[0]) == 3
+        assert capsys.readouterr().out.splitlines()[0] == "Drive: 2.9 KB to upload, no storage limit reported"
+
+    def test_a_quota_call_with_no_answer_is_an_error_that_uploads_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        client = _offline_client(monkeypatch, quota=None)
+        client.last_error = "quota request timed out"
+
+        assert _main(["drive_sync", str(project)]) == 2
+
+        expected = "Drive quota unavailable: quota request timed out. Nothing uploaded."
+        assert capsys.readouterr().out.splitlines()[-1] == expected
+        assert uploads == []
+
+    def test_an_answer_without_a_storage_quota_is_an_error_that_uploads_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _sized_store(project)
+        _offline_client(monkeypatch, quota={"user": {}})
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        expected = "Drive quota unavailable: about.get returned no storageQuota usage. Nothing uploaded."
+        assert result["success"] is False and result["error"] == expected
+        assert capsys.readouterr().out.splitlines() == [expected]
+        assert uploads == []

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.7
+# Version: 3.1.0
 # Created: 2026-06-12
 # Modified: 2026-10-16
 # =============================================
@@ -19,7 +19,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import DEFAULT, MagicMock, call
 
 import pytest
 
@@ -76,11 +76,18 @@ def _install_offline_client(
     authenticated: bool = True,
     last_error: str | None = None,
 ) -> MagicMock:
-    """Put a DriveClient that talks to nobody where the late import looks for one."""
+    """Put a DriveClient that talks to nobody where the late import looks for one.
+
+    Its about.get answers with 15 GiB free, so drive_sync's headroom check passes;
+    test_drive_snapshot_lane.py pins the headroom itself.
+    """
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = authenticated
     instance.last_error = last_error
     instance.file_tracker = {}
+    roomy = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
+    about_request = instance.drive_service.about.return_value.get.return_value
+    instance._api_call.side_effect = lambda request, *args, **kwargs: roomy if request is about_request else DEFAULT
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance
 
@@ -679,6 +686,37 @@ class TestDriveUpload:
         assert len(progress_calls) == 3
         assert result["uploaded"] == 3 and result["failed"] == 0
         assert sorted(tracker) == ["file_0.txt", "file_1.txt", "file_2.txt"]
+
+    def test_upload_batch_saves_the_tracker_to_disk_every_50_files_so_a_failing_run_keeps_its_uploads(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        drive_api: MagicMock,
+    ) -> None:
+        # DPLAN-0412 item 5: the periodic save was gated on a client attribute nothing set, so it never fired.
+        service = MagicMock(name="drive_service")
+        monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=service))
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        client.get_or_create_project_folder = MagicMock(return_value="proj_folder")
+        project = tmp_path / "project"
+        store = project / ".backup" / "snapshots"
+        store.mkdir(parents=True)
+        files = []
+        for index in range(120):
+            path = store / f"file_{index:03d}.txt"
+            path.write_text("x", encoding="utf-8")
+            files.append(path)
+        answers = iter([{"id": f"id_{n}"} for n in range(60)])
+        drive_api.side_effect = lambda request, max_retries=3: next(answers, None)
+
+        result = drive_upload.upload_batch(client, files, "proj", store, {}, max_workers=1, project_root=str(project))
+
+        assert result["uploaded"] == 60 and result["failed"] == 60
+        saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
+        uploaded = {f"file_{index:03d}.txt" for index in range(60)}
+        tracked = set(saved) - {drive_tracker.LANE_KEY}
+        assert len(tracked) >= 50 and tracked <= uploaded
 
     def test_upload_single_file_without_media_upload_fails_and_tracks_nothing(
         self,

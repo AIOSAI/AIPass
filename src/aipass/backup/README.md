@@ -86,7 +86,9 @@ The modules are the verbs. `register` scaffolds a project's store; `snapshot`
 mirrors, `versioned` keeps history, and `all` runs both lanes over one shared
 scan before handing off to `drive_sync` when the project has it on (`all
 --registered` does that for every registered project). `restore` reads history
-back out, `status` reports what is stored, `prune` lists (and with `--apply`
+back out, `status` reports what is stored and which lanes are running, `stop`
+ends a running lane by request (SIGTERM; the lane saves, says its counts and
+exits 130), `prune` lists (and with `--apply`
 deletes) stored copies the ignore rules now match, and `display` renders the panels the
 other lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
 `drive_clear` and `share`. `settings` sets one key, a project's `drive_sync` on
@@ -95,8 +97,8 @@ the door other branches import, publishing this branch's operation trail.
 
 Underneath, the handlers do the work: walking and filtering a tree, applying
 ignore rules, copying, diffing, building store paths, reading and writing the
-project's config and registry, keeping the changelog, talking to Drive, and
-writing this branch's own operation trail. They are shared by every module, and
+project's config and registry, keeping the changelog and the running-lane
+progress files, talking to Drive, and writing this branch's own operation trail. They are shared by every module, and
 they refuse to be imported from outside this branch —
 see [docs/module_fence.md](docs/module_fence.md).
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_all.py
-# Description: Tests for the all cycle's Drive switch and the --registered run over every project
-# Version: 1.0.1
+# Description: Tests for the all cycle's Drive switch, its Drive step's headroom refusal and the --registered run
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -24,6 +25,7 @@ import pytest
 
 from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import all as all_module
 from aipass.backup.apps.modules import display, drive_sync
@@ -138,6 +140,29 @@ class TestAllObeysTheDriveSyncSetting:
         assert drive_sync.handle_command("drive_sync", [str(project)]) is True
 
         assert ran.call_count == 1 and ran.call_args.args == (str(project),)
+
+
+class TestADriveStepThatCannotFit:
+    """all's Drive step is run_drive_sync itself, so a run that cannot fit ends all on the refusal sentence."""
+
+    def test_the_refusal_is_alls_last_line_the_local_stores_stand_and_the_exit_is_non_zero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The real run_drive_sync runs; only its client is offline, on a full account.
+        project = _project(tmp_path / "proj", drive_sync_on=True)
+        client = MagicMock(name="DriveClient")
+        client.authenticate.return_value = True
+        client._api_call.return_value = {"storageQuota": {"usage": "5000", "limit": "5000"}}
+        monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=client))
+
+        code = _main(["all", str(project), "--quiet"])
+
+        assert code == 2
+        last = capsys.readouterr().out.splitlines()[-1]
+        assert re.fullmatch(r"Drive has 0\.0 B free; this run needs \d+\.\d B\. Nothing uploaded\.", last), last
+        assert (project / ".backup" / "snapshots" / "file_0.txt").is_file()
+        assert (project / ".backup" / "versioned").is_dir()
+        client.drive_service.files.assert_not_called()
 
 
 class TestAllRegistered:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: drive_stats.py
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-17
 # Modified: 2026-10-16
 # =============================================
@@ -50,7 +50,8 @@ def show_drive_quota() -> bool:
     """Print the Drive account's storage used and limit, as two lines.
 
     Reads ``about.get(fields="storageQuota")`` through an authenticated
-    DriveClient, the client every other Drive verb uses. Drive sends the
+    DriveClient, the client every other Drive verb uses, by way of
+    handlers/drive/quota.py, the read drive_sync's headroom check shares. Drive sends the
     numbers as strings and leaves ``limit`` out for an account with unlimited
     storage; an absent field is said, never filled in.
 
@@ -59,36 +60,28 @@ def show_drive_quota() -> bool:
         Drive could not be asked (the reason goes to stderr).
     """
     from aipass.backup.apps.handlers.drive.client import DriveClient
+    from aipass.backup.apps.handlers.drive.quota import read_quota
 
     client = DriveClient()
     if not client.authenticate():
         warning(f"Drive quota unavailable: {client.last_error or 'Drive authentication failed'}")
         return False
 
-    request = client.drive_service.about().get(fields="storageQuota")
-    answer = client._api_call(request)
-    quota = answer.get("storageQuota") if isinstance(answer, dict) else None
-    if not quota or quota.get("usage") is None:
-        reason = (
-            (client.last_error or "about.get got no answer")
-            if answer is None
-            else "about.get returned no storageQuota usage"
-        )
-        warning(f"Drive quota unavailable: {reason}")
-        logger.warning(f"[backup] Drive quota unavailable: {reason}")
+    quota = read_quota(client)
+    if quota["error"]:
+        warning(f"Drive quota unavailable: {quota['error']}")
+        logger.warning(f"[backup] Drive quota unavailable: {quota['error']}")
         return False
 
-    usage = int(quota["usage"])
+    usage = quota["usage"]
     console.print(f"  Drive used:  {_human_bytes(usage)} ({usage:,} bytes)")
-    limit = quota.get("limit")
+    limit = quota["limit"]
     if limit is None:
         console.print("  Drive limit: none reported -- Drive sends no limit for unlimited storage")
         logger.info(f"[backup] Drive quota: {usage} used, no limit reported")
-        trail.log_operation("drive_quota_read", {"usage": usage, "limit": None})
         return False
-    console.print(f"  Drive limit: {_human_bytes(int(limit))} ({int(limit):,} bytes)")
+    console.print(f"  Drive limit: {_human_bytes(limit)} ({limit:,} bytes)")
     logger.info(f"[backup] Drive quota: {usage} used of {limit}")
-    trail.log_operation("drive_quota_read", {"usage": usage, "limit": int(limit)})
     return True
 
 

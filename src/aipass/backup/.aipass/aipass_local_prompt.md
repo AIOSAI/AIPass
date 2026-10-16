@@ -37,21 +37,22 @@ apps/
 │   ├── settings.py        # drive_sync on|off per project; anything else refuses
 │   ├── share.py           # single-file upload + share link
 │   ├── snapshot.py        # full mirror
-│   ├── status.py          # store info and history; --json is the door contract
+│   ├── status.py          # store info and history; --json is the door contract (running[] too)
+│   ├── stop.py            # SIGTERM a project's running lane(s), pid-guarded; lanes exit 130
 │   └── versioned.py       # incremental timestamped copy
 └── handlers/              # the work
     ├── audit/             # my own op trail -> logs/operations.jsonl
     ├── cleanup/           # mirror sweep + prune of ignore-matched stored copies
     ├── copy/              # copying for snapshot and versioned
     ├── diff/              # diff generation + restore from the store
-    ├── drive/             # auth, upload, tracker, share, never-leaves floor
+    ├── drive/             # auth, upload, tracker, share, never-leaves floor, quota
     ├── ignore/            # .backupignore spec + whitelist + the *.tmp floor
     ├── json/              # the fleet's json shim — @prax service, byte-identical
     ├── path/              # store paths, caller cwd, module_paths safe resolve
     ├── project/           # config, registry, setup
     ├── report/            # result formatting
     ├── scan/              # walk, filter, run ceiling
-    ├── state/             # changelog, metadata, timestamps
+    ├── state/             # changelog, metadata, timestamps, running files, stop flag, lane pid guard
     └── ui/                # settings window (archived under ui/.archive/)
 ```
 

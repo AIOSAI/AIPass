@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_status_json.py
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(stdlib) — json.dumps' encoding of the object once it is built
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +24,7 @@ import pytest
 
 from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
+from aipass.backup.apps.handlers.state import progress
 from aipass.backup.apps.modules import status
 
 NO_RUN = {"last": None, "files": None}
@@ -66,6 +68,7 @@ class TestStatusJsonWithoutAStore:
             "runs": 0,
             "lanes": {"snapshot": NO_RUN, "versioned": NO_RUN, "drive_sync": NO_RUN},
             "drive": {"tracked_files": 0},
+            "running": [],
         }
         assert not (root / ".backup").exists(), "status wrote a store it was only asked to read"
 
@@ -103,6 +106,7 @@ class TestStatusJsonFromTheStore:
                 "drive_sync": NO_RUN,
             },
             "drive": {"tracked_files": 2},
+            "running": [],
         }
 
     def test_sizes_adds_the_bytes_of_both_stores_and_nothing_else(
@@ -119,7 +123,7 @@ class TestStatusJsonFromTheStore:
         answer = _status_json(root, "--sizes", capsys=capsys)
 
         assert answer["store"] == {"snapshots_bytes": 12, "versioned_bytes": 11}
-        keys = ["project", "root", "registered", "mode", "drive_sync", "runs", "lanes", "store", "drive"]
+        keys = ["project", "root", "registered", "mode", "drive_sync", "runs", "lanes", "store", "drive", "running"]
         assert list(answer) == keys
 
 
@@ -151,6 +155,95 @@ class TestStatusJsonRefusals:
         out, err = capsys.readouterr()
         assert "--sizes is a --json option" in err
         assert "Backup Status" not in out
+
+
+class TestStatusJsonRunning:
+    """ "running" lists the lanes in flight from .backup/running/, [] when none (DPLAN-0412)."""
+
+    def test_a_lane_in_flight_is_listed_in_the_contract_shape_after_drive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = tmp_path / "proj"
+        _store(root)
+        monkeypatch.setattr(progress, "now", lambda: 1_800_000_000.0)
+        lane = progress.LaneProgress(str(root), "drive_sync", "drive_sync")
+        lane.start()
+        lane.plan(15414, bytes_total=3113851289)
+        lane.file_done("projects/photos/03.jpg", 325058560)
+
+        try:
+            answer = _status_json(root, capsys=capsys)
+        finally:
+            lane.close()
+
+        assert list(answer)[-2:] == ["drive", "running"]
+        assert answer["running"] == [
+            {
+                "verb": "drive_sync",
+                "lane": "drive_sync",
+                "pid": os.getpid(),
+                "started_at": "2027-01-15T08:00:00+00:00",
+                "progress": None,
+            }
+        ]
+
+    def test_progress_once_a_second_has_passed_carries_the_counts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = tmp_path / "proj"
+        _store(root)
+        moments = iter([1_800_000_000.0, 1_800_000_000.0, 1_800_000_002.0])
+        monkeypatch.setattr(progress, "now", lambda: next(moments))
+        lane = progress.LaneProgress(str(root), "drive_sync", "drive_sync")
+        lane.start()
+        lane.plan(15414, bytes_total=3113851289)
+        lane.file_done("projects/photos/03.jpg", 325058560)
+
+        try:
+            answer = _status_json(root, capsys=capsys)
+        finally:
+            lane.close()
+
+        assert answer["running"][0]["progress"] == {
+            "done": 1,
+            "total": 15414,
+            "failed": 0,
+            "bytes_done": 325058560,
+            "bytes_total": 3113851289,
+            "current": "projects/photos/03.jpg",
+            "updated_at": "2027-01-15T08:00:02+00:00",
+        }
+
+    def test_a_stale_file_is_left_out_and_removed_by_the_read(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = tmp_path / "proj"
+        store = _store(root)
+        (store / "running").mkdir()
+        stale = store / "running" / "snapshot.json"
+        entry_doc = {"verb": "snapshot", "lane": "snapshot", "pid": os.getpid()}
+        stale.write_text(
+            json.dumps({**entry_doc, "started_at": "2001-01-01T00:00:00+00:00", "progress": None}), encoding="utf-8"
+        )
+
+        answer = _status_json(root, capsys=capsys)
+
+        assert answer["running"] == []
+        assert not stale.exists()
+
+    def test_the_status_page_names_a_running_lane(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        root = tmp_path / "proj"
+        _store(root)
+        lane = progress.LaneProgress(str(root), "snapshot", "all")
+        lane.start()
+
+        try:
+            assert status.handle_command("status", [str(root)]) is True
+        finally:
+            lane.close()
+
+        out = capsys.readouterr().out
+        assert f"Running:      snapshot (all, pid {os.getpid()}), scanning" in out
 
 
 # =============================================

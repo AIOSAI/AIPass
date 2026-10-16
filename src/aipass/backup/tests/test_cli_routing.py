@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.7
+# Version: 2.0.8
 # Created: 2026-06-12
 # Modified: 2026-10-16
 # =============================================
@@ -319,7 +319,13 @@ class TestPrintHelp:
 #: the same tmp_path as the args, so a wrong operand, a wrong flag value or a
 #: hardcoded project root fails the row.
 STANDALONE_ENTRY_MODULES = [
-    pytest.param(all_module, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p)), id="all"),
+    pytest.param(
+        all_module,
+        "run_snapshot",
+        lambda p: [str(p)],
+        lambda p: call(str(p), verb=all_module.PRIMARY_COMMAND),
+        id="all",
+    ),
     # drive_check is account-wide and takes NO project: "run" is its only
     # executing route, and it reaches run_drive_check with NO arguments. An
     # unrecognised first arg is refused, never executed.
@@ -510,12 +516,15 @@ class TestNoWriteEscapesToRealSecrets:
             }
             all_module.handle_command(all_module.PRIMARY_COMMAND, [project])
 
-        assert snap.call_args_list == [call(project)]
+        # verb: each sub-lane's running file names the verb invoked (DPLAN-0412).
+        assert snap.call_args_list == [call(project, verb=all_module.PRIMARY_COMMAND)]
         assert sorted(doubles) == ["run_drive_sync", "run_versioned"]
 
         # show_panels is derived from the absence of --quiet, and this run has
         # no flags: True is the claim, not a placeholder.
-        assert doubles["run_drive_sync"].call_args_list == [call(project, show_panels=True)]
+        assert doubles["run_drive_sync"].call_args_list == [
+            call(project, show_panels=True, verb=all_module.PRIMARY_COMMAND)
+        ]
 
         # The single-scan rule: versioned is handed the list 'all' already
         # walked, never a path to re-walk. The seed .backupignore that

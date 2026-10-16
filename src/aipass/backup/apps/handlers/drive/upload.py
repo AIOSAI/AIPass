@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-04-16
 # Modified: 2026-10-16
 # =============================================
@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from aipass.prax import logger
 
 from ..audit import trail
+from ..state.stop_flag import stop_requested
 from . import tracker as tracker_mod
 
 try:
@@ -183,6 +184,8 @@ def upload_batch(
     batch_save_interval: int = 50,
     progress_fn: Any = None,
     lane_folder: str = "",
+    project_root: str | None = None,
+    on_file: Any = None,
 ) -> dict:
     """Threaded batch upload using ThreadPoolExecutor.
 
@@ -197,22 +200,39 @@ def upload_batch(
         note: Optional note for logging.
         max_workers: Max concurrent upload threads.
         batch_save_interval: Save tracker every N uploads.
-        progress_fn: Optional callback called after each upload.
+        progress_fn: Optional no-argument callback called after each upload.
         lane_folder: Folder under the project folder every file lands in.
+        project_root: The project whose ``.backup/drive_tracker.json`` the
+            tracker is saved to every ``batch_save_interval`` completed files,
+            so a run that dies part-way leaves what it uploaded tracked. None
+            (the default) saves nothing here; the caller saves at the end.
+        on_file: Optional callback after each finished upload with
+            (store-relative path, bytes uploaded, ok); the running file's writer.
+
+    The stop flag (handlers/state/stop_flag.py) is read as each upload starts
+    and as each one finishes: once it is up, the futures not yet started are
+    cancelled, a worker that picks one up anyway skips it, and the uploads in
+    flight finish and are counted.
 
     Returns:
-        Dict with success, uploaded, failed counts.
+        Dict with success, uploaded, failed counts, bytes_uploaded, and
+        stopped (True when the stop flag cut the batch short; success is then
+        False).
     """
     if not files:
         return {"success": True, "uploaded": 0, "failed": 0}
+
+    skipped = object()
 
     client.file_tracker = tracker
     uploaded = 0
     failed = 0
     bytes_uploaded = 0
 
-    def _upload_one(file_path: Path) -> bool:
-        """Upload a single file in a worker thread."""
+    def _upload_one(file_path: Path) -> object:
+        """Upload a single file in a worker thread; ``skipped`` when a stop came first."""
+        if stop_requested():
+            return skipped
         # Ensure thread has its own service
         if not getattr(client._thread_local, "service", None):
             client._thread_local.service = client._build_thread_service()
@@ -225,49 +245,76 @@ def upload_batch(
             lane_folder=lane_folder,
         )
 
-    def _process_future(future: object) -> bool:
-        """Process a completed upload future. Returns True on success."""
+    def _process_future(future: object) -> object:
+        """Process a completed upload future: its answer, or False when it raised."""
         try:
-            return bool(future.result())  # type: ignore[union-attr]
+            return future.result()  # type: ignore[union-attr]
         except Exception as exc:
             logger.info(f"Upload future failed: {exc}")
             return False
 
+    def _rel(path: Path) -> str:
+        """The store-relative name of a file, its own path when it is outside the store."""
+        try:
+            return str(path.relative_to(backup_root))
+        except ValueError as exc:
+            logger.info(f"File {path} not relative to {backup_root}, naming it whole: {exc}")
+            return str(path)
+
     def _maybe_batch_save(count: int) -> None:
         """Save tracker periodically during batch upload."""
-        if count % batch_save_interval == 0 and hasattr(client, "_project_root"):
+        if project_root and count % batch_save_interval == 0:
             try:
-                tracker_mod.save_tracker(client._project_root, tracker)  # type: ignore[attr-defined]
+                tracker_mod.save_tracker(project_root, tracker)
             except Exception as exc:
                 logger.info(f"Batch tracker save failed: {exc}")
 
+    cancelled = False
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_upload_one, f): f for f in files}
         completed = 0
 
         for future in as_completed(futures):
+            if future.cancelled():
+                continue
+            answer = _process_future(future)
+            if answer is skipped:
+                continue
             completed += 1
-            if _process_future(future):
+            nbytes = 0
+            if answer:
                 uploaded += 1
-                bytes_uploaded += _file_size(futures[future])
+                nbytes = _file_size(futures[future])
+                bytes_uploaded += nbytes
             else:
                 failed += 1
 
             if progress_fn:
                 progress_fn()
+            if on_file:
+                on_file(_rel(futures[future]), nbytes, bool(answer))
 
             _maybe_batch_save(completed)
 
+            if stop_requested() and not cancelled:
+                cancelled = True
+                for pending in futures:
+                    pending.cancel()
+
+    # A stop that lands after the last upload finished stopped nothing.
+    stopped = stop_requested() and completed < len(files)
+
     trail.log_operation(
         "upload_batch_complete",
-        {"uploaded": uploaded, "failed": failed, "total": len(files)},
+        {"uploaded": uploaded, "failed": failed, "total": len(files), "stopped": stopped},
     )
 
     return {
-        "success": failed == 0,
+        "success": failed == 0 and not stopped,
         "uploaded": uploaded,
         "failed": failed,
         "bytes_uploaded": bytes_uploaded,
+        "stopped": stopped,
     }
 
 

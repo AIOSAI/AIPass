@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot copy strategy — mirror destination tree with cleanup
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-10-16
 # =============================================
 
 """Snapshot copy handler — mirror destination tree with cleanup."""
@@ -18,6 +18,7 @@ from aipass.prax import logger
 from ..cleanup.mirror import cleanup_deleted_files
 from ..audit import trail
 from ..report.result import BackupResult
+from ..state.stop_flag import stop_requested
 
 
 def _should_skip_mtime(abs_path: str, target: str) -> bool:
@@ -87,17 +88,25 @@ def copy_snapshot(
     dest: str,
     project_root: str,
     on_progress=None,
+    on_file=None,
 ) -> dict:
     """Copy files into a snapshot destination with mirror-delete.
+
+    The stop flag (handlers/state/stop_flag.py) is read before each file: a
+    stop lets the file in flight finish and starts no other.
 
     Args:
         files: List of (absolute_path, relative_path) tuples.
         dest: Absolute destination directory path.
         project_root: Project root for cleanup source reference.
-        on_progress: Optional callback after each file.
+        on_progress: Optional no-argument callback after each file.
+        on_file: Optional callback after each file with (relative_path,
+            bytes_copied, ok); the running file's writer.
 
     Returns:
-        Dict with files_copied, bytes_copied, errors, files_deleted.
+        Dict with files_copied, bytes_copied, errors, files_deleted, and
+        files_done (files gone through) and stopped (True when the stop flag
+        ended the loop early).
     """
     dest_path = Path(os.path.realpath(dest))
 
@@ -110,9 +119,16 @@ def copy_snapshot(
 
     files_copied = 0
     bytes_copied = 0
+    files_done = 0
+    stopped = False
     errors: list[str] = []
 
     for abs_path, rel_path in files:
+        if stop_requested():
+            stopped = True
+            break
+        result_bytes = -1
+        failures_before = len(errors)
         try:
             result_bytes = _copy_single_file(abs_path, rel_path, dest_path, errors)
             if result_bytes >= 0:
@@ -121,15 +137,21 @@ def copy_snapshot(
         except OSError as e:
             logger.warning(f"Failed to copy {rel_path}: {e}")
             errors.append(f"{rel_path}: {e}")
+        ok = len(errors) == failures_before
+        files_done += 1
 
         if on_progress:
             on_progress()
+        if on_file:
+            on_file(rel_path, max(result_bytes, 0), ok)
 
     result = {
         "files_copied": files_copied,
         "bytes_copied": bytes_copied,
         "errors": errors,
         "files_deleted": files_deleted,
+        "files_done": files_done,
+        "stopped": stopped,
     }
     trail.log_operation(
         "copy_snapshot",
@@ -138,6 +160,7 @@ def copy_snapshot(
             "files_copied": files_copied,
             "bytes_copied": bytes_copied,
             "files_deleted": files_deleted,
+            "stopped": stopped,
         },
     )
     return result

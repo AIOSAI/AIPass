@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-23
 # Modified: 2026-10-16
 # =============================================
@@ -10,7 +10,9 @@
 
 ``status <root> --json [--sizes]`` answers the backup door's contract
 (src/aipass/devpulse/docs.local/backup_door_contract.md, "@backup: status
---json"): one JSON object on stdout and nothing else there.
+--json"): one JSON object on stdout and nothing else there. Its ``running``
+list (DPLAN-0412, "running") is read from the project's running files; a stale
+one is dropped and removed by the read. The page form names the running lanes too.
 """
 
 import json
@@ -40,6 +42,7 @@ from aipass.backup.apps.handlers.path.builder import (
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.state.changelog import load_changelog
+from aipass.backup.apps.handlers.state.progress import read_running
 
 MODULE_NAME = "status"
 PRIMARY_COMMAND = "status"
@@ -56,7 +59,7 @@ def print_introspection():
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
     console.print("  Status: Phase 3 — implemented")
-    console.print("  Handlers: path, project/config, state/changelog, drive/tracker")
+    console.print("  Handlers: path, project/config, state/changelog, state/progress, drive/tracker")
 
 
 def print_help():
@@ -106,6 +109,7 @@ def build_status(project_root: str, sizes: bool = False) -> dict:
 
     Raises:
         InvalidDocument: The config, changelog or Drive tracker is unreadable.
+            (A running file that cannot be read is stale, never an error.)
         OSError: A store directory could not be listed while measuring sizes.
     """
     config = load_project_config(project_root)
@@ -127,7 +131,20 @@ def build_status(project_root: str, sizes: bool = False) -> dict:
         }
     # load_tracker leaves the tracker's lane stamp out: every key it answers is a file.
     status["drive"] = {"tracked_files": len(tracker)}
+    status["running"] = read_running(project_root)
     return status
+
+
+def _running_line(entry: dict) -> str:
+    """One running lane for the page: lane, verb, pid, then counts or 'scanning'."""
+    counts = entry.get("progress")
+    if counts is None:
+        doing = "scanning"
+    else:
+        doing = f"{counts.get('done', 0):,} of {counts.get('total', 0):,} files"
+        if counts.get("current"):
+            doing += f", at {counts['current']}"
+    return f"{entry.get('lane')} ({entry.get('verb')}, pid {entry.get('pid')}), {doing}"
 
 
 def print_status_json(project_root: str, sizes: bool) -> None:
@@ -196,6 +213,8 @@ def handle_command(command: str, args: list) -> bool:
     console.print(f"  Max versions: {config.get('max_versions', 10)}")
     console.print(f"  Drive sync:   {config.get('drive_sync', False)}")
     console.print(f"  Total runs:   {len(changelog)}")
+    for entry in read_running(project_root):
+        console.print(f"  Running:      {_running_line(entry)}", markup=False, highlight=False)
 
     if changelog:
         console.print("\n  [bold]Recent backups:[/bold]")

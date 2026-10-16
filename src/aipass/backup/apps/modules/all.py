@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: all.py
 # Description: All module — full cycle: snapshot + versioned + drive (shared scan)
-# Version: 4.1.0
+# Version: 4.2.0
 # Created: 2026-04-17
 # Modified: 2026-10-16
 # =============================================
@@ -12,6 +12,10 @@
 registry order, and ends with one summary line per project. One project's
 failure never stops the next; any failure makes the exit non-zero. This is the
 line the nightly daemon job runs.
+
+A stop (DPLAN-0412) ends the sub-lane in flight and starts no other: each
+sub-lane writes its own running file with verb ``all``, and the entry point
+exits 130. ``all --registered`` starts no further project after a stop.
 """
 
 import os
@@ -38,8 +42,11 @@ from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
+from aipass.backup.apps.handlers.state.progress import LaneProgress
+from aipass.backup.apps.handlers.state.stop_flag import catch_sigterm, run_was_stopped, stop_requested
 from aipass.backup.apps.modules.display import refuse_missing_root, refuse_oversized_run
 from aipass.backup.apps.modules.snapshot import run_snapshot
+from aipass.backup.apps.modules.stop import report_stopped
 from aipass.backup.apps.modules.versioned import run_versioned
 
 MODULE_NAME = "all"
@@ -70,10 +77,31 @@ def run_all(project_root: str, show_panels: bool = True) -> dict:
 
     Returns:
         Dict with ok, snapshot_files, versioned_files, drive (uploaded,
-        skipped or failed) and seconds.
+        skipped or failed), seconds, and stopped (True when a stop ended the
+        cycle; the sub-lanes after it never started).
     """
+    with catch_sigterm():
+        return _all_run(project_root, show_panels)
+
+
+def _stopped_summary(summary: dict, start: float) -> dict:
+    """The cycle's summary after a stop: not ok, stopped, timed."""
+    summary["stopped"] = True
+    summary["seconds"] = time.monotonic() - start
+    return summary
+
+
+def _all_run(project_root: str, show_panels: bool) -> dict:
+    """The cycle proper, inside the stop handler."""
     start = time.monotonic()
-    summary: dict = {"ok": False, "snapshot_files": 0, "versioned_files": 0, "drive": "skipped", "seconds": 0.0}
+    summary: dict = {
+        "ok": False,
+        "snapshot_files": 0,
+        "versioned_files": 0,
+        "drive": "skipped",
+        "seconds": 0.0,
+        "stopped": False,
+    }
 
     # Refuse before the shared scan — snapshot/versioned each guard themselves,
     # but the scan below would otherwise run against a path that isn't there.
@@ -96,13 +124,15 @@ def run_all(project_root: str, show_panels: bool = True) -> dict:
         summary["seconds"] = time.monotonic() - start
         return summary
 
-    # ONE scan shared between both modes (single-scan rule)
-    config = load_project_config(project_root)
-    spec = load_spec(project_root)
-    whitelist_entries = load_whitelist(project_root)
-    max_size = config.get("max_file_size_mb", 100)
-    all_files = list(walk_project(project_root))
-    filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
+    # ONE scan shared between both modes (single-scan rule). The scan is the
+    # snapshot lane's first work, so it is announced as that lane, verb all.
+    with LaneProgress(project_root, "snapshot", PRIMARY_COMMAND):
+        config = load_project_config(project_root)
+        spec = load_spec(project_root)
+        whitelist_entries = load_whitelist(project_root)
+        max_size = config.get("max_file_size_mb", 100)
+        all_files = list(walk_project(project_root))
+        filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     # Refuse the whole cycle here, not just inside the sub-modules. A refusal
     # from run_snapshot alone does not stop this function: it would fall
@@ -114,10 +144,21 @@ def run_all(project_root: str, show_panels: bool = True) -> dict:
         summary["seconds"] = time.monotonic() - start
         return summary
 
-    snap_result = run_snapshot(project_root)
+    # A stop during the scan: snapshot has copied nothing, and nothing starts.
+    if stop_requested():
+        report_stopped("snapshot", PRIMARY_COMMAND, project_root, done=0, total=len(filtered), failed=0, bytes_done=0)
+        return _stopped_summary(summary, start)
+
+    snap_result = run_snapshot(project_root, verb=PRIMARY_COMMAND)
+    summary["snapshot_files"] = snap_result.files_copied
+    if run_was_stopped():
+        return _stopped_summary(summary, start)
     console.print()
 
-    ver_result = run_versioned(project_root, pre_scanned=filtered)
+    ver_result = run_versioned(project_root, pre_scanned=filtered, verb=PRIMARY_COMMAND)
+    summary["versioned_files"] = ver_result.files_copied
+    if run_was_stopped():
+        return _stopped_summary(summary, start)
 
     # Drive step, only when the project's drive_sync setting is on (DPLAN-0411).
     # A real True, not a truthy value: a hand-edited "false" string must not
@@ -135,8 +176,15 @@ def run_all(project_root: str, show_panels: bool = True) -> dict:
             drive_result = run_drive_sync(
                 project_root,
                 show_panels=show_panels,
+                verb=PRIMARY_COMMAND,
             )
-            if drive_result.get("error"):
+            if run_was_stopped():
+                summary["drive"] = "stopped"
+                return _stopped_summary(summary, start)
+            # A headroom refusal has already printed its sentence as the Drive
+            # step's last line (error_shown); repeating it would push it off
+            # the end of the run, where the contract puts it.
+            if drive_result.get("error") and not drive_result.get("error_shown"):
                 console.print(f"[bold]Drive sync: {drive_result['error']}[/bold]")
             if drive_result.get("error") or drive_result.get("failed"):
                 summary["drive"] = "failed"
@@ -164,8 +212,6 @@ def run_all(project_root: str, show_panels: bool = True) -> dict:
         f"versioned={ver_result.files_copied}, "
         f"drive_uploaded={drive_result.get('uploaded', 0)}, drive={summary['drive']}"
     )
-    summary["snapshot_files"] = snap_result.files_copied
-    summary["versioned_files"] = ver_result.files_copied
     summary["ok"] = snap_result.success and ver_result.success and summary["drive"] != "failed"
     summary["seconds"] = time.monotonic() - start
     return summary
@@ -189,6 +235,12 @@ def run_registered(show_panels: bool = True) -> bool:
         error("No projects registered — nothing for all --registered to back up")
         return False
 
+    with catch_sigterm():
+        return _registered_run(projects, show_panels)
+
+
+def _registered_run(projects: dict, show_panels: bool) -> bool:
+    """Every registered project in turn, inside the stop handler; a stop starts no further project."""
     rows: list[tuple[str, dict]] = []
     for name, entry in projects.items():
         root = entry.get("path", "") if isinstance(entry, dict) else ""
@@ -202,6 +254,11 @@ def run_registered(show_panels: bool = True) -> bool:
             summary = {"ok": False, "snapshot_files": 0, "versioned_files": 0, "drive": "skipped"}
             summary["seconds"] = time.monotonic() - start
         rows.append((name, summary))
+        if summary.get("stopped"):
+            # The stopped line the sub-lane printed stays the run's last line: no summary after it.
+            trail.log_operation("all_registered_stopped", {"projects": len(rows), "stopped_at": name})
+            logger.info(f"[backup] all --registered: stopped by request in {name}")
+            return False
 
     console.print()
     console.print("all --registered summary:")

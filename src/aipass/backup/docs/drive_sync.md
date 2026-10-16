@@ -69,6 +69,49 @@ leaves the machine refuses them. The floor is a separate spec, applied after the
 project's own, so no line in a `.backupignore` -- a `!` negation included -- can
 reopen it.
 
+## Headroom: the run must fit the Drive
+
+Before the first upload -- after the ignore re-filter, the never-leaves floor
+and the tracker filter -- `drive_sync` sums the bytes of the files it is about
+to upload and reads the account quota through `apps/handlers/drive/quota.py`
+(`about.get` `storageQuota`, the same read `drive_stats` prints). Free space is
+`limit - usage`, never below zero. Sizes are humanised by `_human_bytes` in
+`apps/handlers/report/formatter.py`, the one humaniser the branch uses (1024
+steps, one decimal).
+
+- **It fits:** the run's first stdout line is `Drive: 2.9 GB to upload, 13.6 GB
+  free`, then the upload runs.
+- **No limit reported** (unlimited storage): it passes, and the first line is
+  `Drive: 2.9 GB to upload, no storage limit reported`.
+- **It does not fit:** nothing is uploaded, and the run's last stdout line is
+  `Drive has 1.4 GB free; this run needs 2.9 GB. Nothing uploaded.`
+- **The quota cannot be read** (no answer, or no `storageQuota` usage): nothing
+  is uploaded, and the last stdout line is `Drive quota unavailable: <reason>.
+  Nothing uploaded.` It is never a silent pass.
+
+A refused run returns `success` false with `error` set to that sentence and
+`error_shown` true, writes a `drive_sync_refused` trail row (with
+`bytes_planned`), no changelog entry, and calls cli's `mark_command_failed()`,
+so the verb exits 2. The sentence goes to stdout rather than through
+`error()`, which prints to stderr: the contract wants it as the last stdout
+line. A run with nothing to upload never asks for the quota.
+
+`all`'s Drive step is the same function, so an `all` whose Drive step cannot
+fit ends on the same sentence, exits 2, and keeps what its snapshot and
+versioned steps wrote. `all` does not repeat the sentence (`error_shown`).
+Under `all --registered` the per-project summary still follows it, as it
+follows every project. The wire shape is the "Drive headroom" section of
+`src/aipass/devpulse/docs.local/backup_door_contract.md`; it is not retyped
+here.
+
+## The tracker is saved while the upload runs
+
+`upload_batch` takes the project root from `drive_sync` and saves
+`.backup/drive_tracker.json` every 50 completed files, failures counted, as
+well as once at the end of the run. A run that is killed or fails part-way
+leaves the files it uploaded tracked, so the next run skips them instead of
+uploading them again as orphans.
+
 ## The tracker answers for one lane
 
 `.backup/drive_tracker.json` records what has been uploaded, keyed by path
