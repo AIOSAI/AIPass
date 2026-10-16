@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-07-11
-# Modified: 2026-09-29
+# Modified: 2026-10-15
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -28,19 +28,32 @@ in the file is read or written.
 Both wire doors merge it: ``refresh_provider_hooks`` at install (setup.sh) and
 ``auto_wire_provider`` in-process (``doctor --fix``, the wire prompt), so a fresh
 clone gets the scalars at install rather than at the first doctor run.
+
+BACKUP AND RECEIPT FIRST (FPLAN-0645)
+-------------------------------------
+Both doors back the settings file up through ``settings_backup`` immediately before
+their write and append a receipt after it. A failed backup raises
+``SettingsBackupError`` and the file is not written. The old same-day
+``settings.json.bak.<date>`` copy is retired: a second write that day overwrote it.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.settings_backup import (
+    DOOR_DOCTOR_FIX,
+    DOOR_SETUP_SH,
+    BackupRecord,
+    backup_before_write,
+    sha256_of,
+    write_receipt,
+)
 
 # =============================================================================
 # HOOK & ENV DESCRIPTIONS
@@ -229,6 +242,23 @@ def _strip_and_readd_hooks(
     return merged, actions
 
 
+def _write_with_receipt(
+    settings_path: Path, settings: dict, record: BackupRecord, actions: List[str], updated_line: str
+) -> None:
+    """Write the settings a door merged, then its receipt; the backup lines go in *actions*.
+
+    *record* is the door's own ``backup_before_write``, taken just before this call.
+    """
+    if record.backup is not None:
+        actions.append(f"Backed up settings to {record.backup}")
+    else:
+        actions.append("No settings file yet — nothing to back up")
+    json_handler.write_json(settings_path, settings)
+    actions.append(updated_line)
+    receipt = write_receipt(record, sha256_of(settings_path), actions)
+    actions.append(f"Receipt: {receipt}")
+
+
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
     """Write the manifest's hooks and settings scalars into ~/.claude/settings.json.
 
@@ -250,6 +280,9 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
     *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
     setup.sh passes nothing.  It exists so the tests write a tmp file instead of
     patching ``Path.home`` (the seam is for the test).
+
+    Backs the file up (door ``setup-sh``) before the write and leaves a receipt after;
+    a failed backup raises ``SettingsBackupError`` and nothing is written.
     """
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:
@@ -264,14 +297,17 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
     settings["hooks"] = merged_hooks
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
 
-    json_handler.write_json(settings_path, settings)
-    actions.append("Updated ~/.claude/settings.json (hooks + settings)")
+    record = backup_before_write(settings_path, DOOR_SETUP_SH)
+    _write_with_receipt(settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks + settings)")
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions
 
 
 def auto_wire_provider(
-    manifest_path: Path, interactive: bool = True, settings_path: Optional[Path] = None
+    manifest_path: Path,
+    interactive: bool = True,
+    settings_path: Optional[Path] = None,
+    door: str = DOOR_DOCTOR_FIX,
 ) -> List[str]:
     """Auto-wire provider settings from manifest into ~/.claude/settings.json.
 
@@ -284,6 +320,10 @@ def auto_wire_provider(
     *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
     doctor and the wire prompt pass nothing.  It exists so the tests write a tmp
     file instead of patching ``Path.home`` (the seam is for the test).
+
+    *door* names the writer in the backup and receipt: ``doctor-fix`` by default,
+    ``install`` when the install tail's doctor preflight wires. A failed backup raises
+    ``SettingsBackupError`` and nothing is written.
     """
     actions: List[str] = []
 
@@ -300,12 +340,6 @@ def auto_wire_provider(
         settings = json_handler.read_json(settings_path) or {}
     else:
         settings = {}
-
-    if settings_path.exists():
-        date_stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        backup_path = settings_path.with_suffix(f".json.bak.{date_stamp}")
-        shutil.copy2(settings_path, backup_path)
-        actions.append(f"Backed up settings to {backup_path.name}")
 
     manifest_hooks = claude_section.get("hooks", [])
     merged_hooks, hook_actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
@@ -352,8 +386,8 @@ def auto_wire_provider(
     # Top-level scalars the manifest names (DPLAN-0347) — same write, same backup.
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
 
-    json_handler.write_json(settings_path, settings)
-    actions.append("Updated ~/.claude/settings.json")
+    record = backup_before_write(settings_path, door)
+    _write_with_receipt(settings_path, settings, record, actions, "Updated ~/.claude/settings.json")
 
     json_handler.log_operation("auto_wire_provider", {"actions": len(actions)})
     return actions

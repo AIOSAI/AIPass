@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-10-08
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -39,6 +39,7 @@ from aipass.aipass.apps.modules.doctor import (
     check_provider_manifest,
     handle_command,
     run_doctor,
+    run_doctor_preflight,
 )
 from aipass.aipass.tests.support_doctor import _home_at
 
@@ -588,7 +589,7 @@ class TestProviderSettingsScalars:
         with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider", return_value=[]) as wire:
             self._run(manifest, tmp_path, fix=True)
 
-        wire.assert_called_once_with(manifest, interactive=False)
+        wire.assert_called_once_with(manifest, interactive=False, door="doctor-fix")
 
     @pytest.mark.parametrize("path", ["fix", "prompt"])
     def test_the_pass_after_a_wire_reads_the_handed_file_on_the_handed_platform(self, tmp_path, path) -> None:
@@ -972,3 +973,38 @@ class TestPromptAutoWireIsatty:
 
         assert result is True
         mock_wire.assert_called_once()
+
+
+class TestPreflightWireDoor:
+    """The install tail's doctor preflight wires the settings file under the install door (FPLAN-0645)."""
+
+    def test_the_preflight_backs_up_under_the_install_door_and_prints_both_paths(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
+        mod = "aipass.aipass.apps.modules.doctor"
+        stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
+        for name in (*stubbed, "_check_sandbox", "check_wire_verify", "_fix_owner_seating"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
+        monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
+
+        with _home_at(tmp_path):
+            run_doctor_preflight()
+
+        folder = tmp_path / ".claude" / ".backup" / "settings"
+        lines = (folder / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["door"] for line in lines] == ["install"]
+        (backup,) = [p for p in folder.iterdir() if p.name != "receipts.jsonl"]
+        assert backup.name.endswith(".install")
+        # Rich may wrap a long tmp path: compare with all whitespace collapsed.
+        out = "".join(capsys.readouterr().out.split())
+        assert "".join(f"Backed up settings to {backup}".split()) in out
+        assert "".join(f"Receipt: {folder / 'receipts.jsonl'}".split()) in out

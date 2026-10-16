@@ -65,6 +65,18 @@ agree. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.p
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
+## Every write to your provider settings backs up first
+
+Before any of these doors writes the personal settings file (`doctor --fix`,
+the install tail's doctor run, setup.sh's hook refresh, the stale-deny cleanup),
+it copies the file into `~/.claude/.backup/settings/` as
+`settings.json.<date>T<time>.<door>`. Then, after the write, it adds one line to
+`receipts.jsonl` in the same folder: when, which door, who, the backup's name,
+and the file's sha256 before and after. `doctor --fix` prints both paths. The
+backups are never pruned or rotated. If the backup or the receipt cannot be
+written, the command fails and the settings file is left as it was. Code:
+[`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
+
 ## What it will not do
 
 `doctor --fix` will not apply a scaffold update. An update can replace files, so

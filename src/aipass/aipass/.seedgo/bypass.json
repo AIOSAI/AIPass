@@ -169,8 +169,8 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [166, 629],
-      "reason": "166: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:360) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 629: _registry_citizen_names's one caller (drone row, doctor.py:695) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:373). Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [167, 633],
+      "reason": "167: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:361) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 633: _registry_citizen_names's one caller (drone row, doctor.py:699) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:375). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
