@@ -1024,8 +1024,10 @@ def claude_home(tmp_path: Path, monkeypatch) -> Path:
     """A tmp ~/.claude holding a settings.json and settings.local.json; the gate's home seam points at it."""
     claude = tmp_path / "home" / ".claude"
     claude.mkdir(parents=True)
-    (claude / "settings.json").write_text('{"model": "before"}\n', encoding="utf-8")
-    (claude / "settings.local.json").write_text('{"local": "before"}\n', encoding="utf-8")
+    # Bytes, not text: the test below pins the backup to the file's exact bytes, and
+    # text mode on Windows would write CRLF and fail that oracle for the wrong reason.
+    (claude / "settings.json").write_bytes(b'{"model": "before"}\n')
+    (claude / "settings.local.json").write_bytes(b'{"local": "before"}\n')
     monkeypatch.setattr(settings_backup, "_claude_dir", lambda: claude)
     return claude
 

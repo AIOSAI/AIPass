@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.1
 # Created: 2026-08-20
-# Modified: 2026-10-13
+# Modified: 2026-10-15
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -715,7 +715,9 @@ class TestTheServerRunsOnItsHomesInterpreter:
 
         operations.log_operation.assert_called_once_with("host_api_serve_detached", record)
         assert record["log"] == str(home_logs / host_lifetime.LOG_NAME)
-        assert str(home) in str(log.info.call_args_list[0])
+        # The home rides as a Path argument; compare it as one. Its repr renders
+        # forward slashes on Windows, so a str(home) substring check fails there.
+        assert log.info.call_args_list[0].args[1] == home
         assert {host_lifetime.record_path().parent, host_lifetime.log_path().parent} == {home_logs}
         assert host_lifetime.unit_path().parent == home_logs
         assert json.loads((home_logs / host_lifetime.RECORD_NAME).read_text(encoding="utf-8"))["pid"] == record["pid"]
