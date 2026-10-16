@@ -9,6 +9,14 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Windows leaves CI; Windows users run AIPass inside WSL2** (the owner's ruling 2026-10-15 after a precedent survey; DPLAN-0410). The `Windows Test` lane is retired by rename, `windows-test.yml` → `windows-test.yml(windows_disabled)`: GitHub Actions runs every `.yml` under `.github/workflows/` whatever its stem, so the suffix sits after the extension and the file stays in git, unread. The `e2e-wheel` matrix drops its `windows-latest` leg. Nothing else moves, as every project that took this road did (Ansible, Celery, Redis, metis, clanker): the product files carrying Windows branches, the Windows-behaviour tests that run on Linux through a mocked platform and seedgo's `windows_compat` standard all stay, so the code keeps tolerating Windows paths while no runner proves them. The README's platform line now reads Linux and macOS natively, Windows through WSL2, and says plainly that native Windows and Git Bash are no longer tested. One Windows-only test (hooks `test_cc_sessions`) no longer runs anywhere. The `Windows Test` required status check in branch protection is the owner's to remove; until it goes, every PR waits on it.
+
+---
+
 ## [2026-10-15] — v2.8.17: the personal settings file never changes unseen (a backup and a receipt on every door, doctor --fix asks first), drone @git untrack, aipass install --source, the autofix lane skips scratch
 
 ### Added
