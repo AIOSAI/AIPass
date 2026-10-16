@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: backup.py
-# Description: Host API Backup Handler — the backup door: start a lane, read a job, read the store
-# Version: 1.0.0
+# Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -9,16 +9,19 @@
 """
 Host API Backup Handler
 
-The backup door (DPLAN-0411): the logic behind POST /v1/backup/run, GET
-/v1/backup/job and GET /v1/backup/status. Every shape on the wire is the one in
-devpulse's backup door contract; this module names none of its own.
+The backup door (DPLAN-0411, DPLAN-0412): the logic behind POST /v1/backup/run,
+POST /v1/backup/cancel, GET /v1/backup/job and GET /v1/backup/status. Every
+shape on the wire is the one in devpulse's backup door contract; this module
+names none of its own.
 
 THE DOOR OWNS NO MECHANISM
 ------------------------------------------------------------------------
-@backup owns the lanes and `status --json`. This module imports no subprocess
-machinery and reaches @backup only through drone.route_command, the verb lane's
-pattern. The argv per lane is the contract's table and nothing more: snapshot,
-versioned and all take --quiet, drive_sync has none.
+@backup owns the lanes, `stop` and `status --json`. This module imports no
+subprocess machinery and reaches @backup only through drone.route_command, the
+verb lane's pattern. The argv per lane is the contract's table and nothing
+more: snapshot, versioned and all take --quiet, drive_sync has none. A cancel
+is `stop <root> <lane>` on the request thread; @backup sends the signal and
+waits for the lane, and the job closes by itself when the lane exits.
 
 The project resolves through the READ lane's resolver: the seat through the
 local citizen registry (matched case-insensitively), any other name through
@@ -36,16 +39,29 @@ and lane runs at a time; different lanes overlap, and @backup's own locks
 decide what that means. A finished job is kept an hour, then dropped, and a
 server restart forgets every job.
 
+A job is running, then done (exit 0), stopped (exit 130: the lane ended on a
+stop request) or failed (any other exit, a timeout, or a RoutingError mid-run).
+
+RUNNING COMES FROM @BACKUP
+------------------------------------------------------------------------
+The status route's "running" is @backup's own list, read from its running
+files, so a run started from a terminal or by the daemon shows too. Each entry
+gains "job": this server's id for the run it started on that root under that
+verb, else null. An older @backup whose status has no "running" falls back to
+this server's own in-flight jobs, with one log line saying so.
+
 Classes:
     JobUnknown        - No job by that id on this server (404 job_unknown)
+    NotRunning        - @backup's stop found nothing running (404 not_running)
     StatusJsonMissing - @backup answered status with something that is not one JSON object
     JobTable          - The in-memory job table and its lock
 
 Functions:
     start_run()    - Start one lane for one project, answer the job
+    stop_run()     - Ask @backup to stop one lane for one project
     read_job()     - One job, by id
-    read_status()  - @backup's status for one project, plus this server's running jobs
-    answer()       - Run one of the three and answer (status, body) for the route
+    read_status()  - @backup's status for one project, its running list with job ids
+    answer()       - Run one of the four and answer (status, body) for the route
     start_worker() - Start a daemon thread, the table's default starter
 """
 
@@ -78,6 +94,12 @@ LANES: Dict[str, List[str]] = {
 
 RUN_TIMEOUT_SECONDS = 1800
 
+#: @backup's stop waits up to 30 s for a lane before SIGKILL; this leaves it room.
+CANCEL_TIMEOUT_SECONDS = 60
+
+#: The exit of a lane that ended on a stop request.
+STOPPED_EXIT = 130
+
 # status reads the store's index; --sizes walks it, which is seconds, not minutes.
 STATUS_TIMEOUT_SECONDS = 120
 
@@ -89,6 +111,7 @@ KEEP_FINISHED = timedelta(hours=1)
 
 STATE_RUNNING = "running"
 STATE_DONE = "done"
+STATE_STOPPED = "stopped"
 STATE_FAILED = "failed"
 
 STATUS_JSON_MISSING = (
@@ -100,6 +123,10 @@ WORKER_DIED = "The backup worker stopped before @backup answered; the reason is 
 
 class JobUnknown(Exception):
     """No job by that id on this server: never started, dropped after an hour, or lost to a restart."""
+
+
+class NotRunning(Exception):
+    """@backup's stop exited non-zero: nothing of that lane is running for the project. Carries its line."""
 
 
 class StatusJsonMissing(VerbUnavailable):
@@ -198,7 +225,7 @@ class JobTable:
 
     def finish(self, job_id: str, exit_code: Optional[int], summary: str, error: Optional[str]) -> None:
         """
-        Close a running job: done on exit 0, failed on anything else.
+        Close a running job: done on exit 0, stopped on STOPPED_EXIT, failed on anything else.
 
         Args:
             job_id: The job to close.
@@ -213,9 +240,14 @@ class JobTable:
                 return
             finished = self.clock()
             record["finished"] = finished
+            state = STATE_FAILED
+            if error is None and exit_code == 0:
+                state = STATE_DONE
+            elif error is None and exit_code == STOPPED_EXIT:
+                state = STATE_STOPPED
             record["job"].update(
                 {
-                    "state": STATE_DONE if exit_code == 0 and error is None else STATE_FAILED,
+                    "state": state,
                     "finished_at": _iso(finished),
                     "exit": exit_code,
                     "summary": summary,
@@ -241,13 +273,33 @@ class JobTable:
             return dict(record["job"])
 
     def running(self, root: Path) -> List[Dict[str, Any]]:
-        """This server's in-flight jobs for one project root, as the status route lists them."""
+        """This server's in-flight jobs for one project root, the list when @backup's status has none."""
         with self._lock:
             return [
                 {"job": record["job"]["job"], "lane": record["job"]["lane"], "started_at": record["job"]["started_at"]}
                 for record in self._jobs.values()
                 if record["root"] == root and record["finished"] is None
             ]
+
+    def attach(self, root: Path, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        @backup's running entries, each with "job" added.
+
+        Args:
+            root: The resolved project root the entries belong to.
+            entries: @backup's "running" list, entry for entry.
+
+        Returns:
+            Each entry as @backup wrote it plus "job": the id of this server's
+            in-flight job on *root* whose lane is the entry's "verb", else None.
+        """
+        with self._lock:
+            started = {
+                record["job"]["lane"]: record["job"]["job"]
+                for record in self._jobs.values()
+                if record["root"] == root and record["finished"] is None
+            }
+        return [{**entry, "job": started.get(entry.get("verb"))} for entry in entries]
 
     def _sweep(self) -> None:
         """Drop every job that finished more than KEEP_FINISHED ago. The caller holds the lock."""
@@ -317,6 +369,18 @@ def _root_of(project: str) -> Path:
         raise VerbUnavailable(str(e)) from e
 
 
+def _check_lane(lane: str) -> None:
+    """
+    Refuse anything but one of the four lanes.
+
+    Raises:
+        VerbRefused: No lane, or one the door does not run.
+    """
+    if lane not in LANES:
+        named = f"Unknown lane {lane!r}" if lane else "A lane is required"
+        raise VerbRefused(f"{named} — the backup door runs {', '.join(LANES)}")
+
+
 def _door() -> None:
     """
     Check that drone can find @backup before a job is opened.
@@ -347,10 +411,7 @@ def start_run(project: str, lane: str) -> Dict[str, Any]:
             or the same lane already running for this project.
         VerbUnavailable: The census, drone or the worker could not answer.
     """
-    if lane not in LANES:
-        named = f"Unknown lane {lane!r}" if lane else "A lane is required"
-        raise VerbRefused(f"{named} — the backup door runs {', '.join(LANES)}")
-
+    _check_lane(lane)
     root = _root_of(project)
     _door()
     job = JOBS.begin(project, lane, root)
@@ -358,6 +419,43 @@ def start_run(project: str, lane: str) -> Dict[str, Any]:
     json_handler.log_operation("host_api_backup_started", {"job": job["job"], "project": project, "lane": lane})
     logger.info("[host_api] backup %s started for %s as job %s", lane, project, job["job"])
     return job
+
+
+def stop_run(project: str, lane: str) -> Dict[str, Any]:
+    """
+    Ask @backup to stop one lane for one project. The job table is not touched:
+    the run's job closes by itself when its lane exits.
+
+    Args:
+        project: The project, verbatim from the request.
+        lane: One of LANES, the verb that was pressed.
+
+    Returns:
+        {project, lane, stopped: True, message}, message being stop's line verbatim.
+
+    Raises:
+        VerbRefused: No lane, an unknown lane, no project or an unknown project.
+        NotRunning: @backup's stop exited non-zero; carries its line.
+        VerbUnavailable: The census or @backup could not answer.
+    """
+    _check_lane(lane)
+    root = _root_of(project)
+
+    try:
+        result = drone.route_command(BACKUP, "stop", [str(root), lane], timeout=CANCEL_TIMEOUT_SECONDS)
+    except drone.RoutingError as e:
+        logger.error("[host_api] drone could not run %s stop: %s", BACKUP, e)
+        raise VerbUnavailable(f"{BACKUP} stop could not be run: {e}") from e
+
+    if result.exit_code != 0:
+        line = (result.stdout or "").strip() or (result.stderr or "").strip()
+        logger.info("[host_api] backup %s stop for %s exited %s: %s", lane, project, result.exit_code, line)
+        raise NotRunning(line)
+
+    message = (result.stdout or "").strip()
+    json_handler.log_operation("host_api_backup_stopped", {"project": project, "lane": lane})
+    logger.info("[host_api] backup %s stopped for %s: %s", lane, project, message)
+    return {"project": project, "lane": lane, "stopped": True, "message": message}
 
 
 def read_job(job_id: str) -> Dict[str, Any]:
@@ -378,7 +476,7 @@ def read_job(job_id: str) -> Dict[str, Any]:
 
 def read_status(project: str, sizes: bool = False) -> Dict[str, Any]:
     """
-    @backup's status for one project, with project, root and running added.
+    @backup's status for one project, with project and root added and a job id on each running entry.
 
     Args:
         project: The project, verbatim from the request.
@@ -386,12 +484,14 @@ def read_status(project: str, sizes: bool = False) -> Dict[str, Any]:
 
     Returns:
         @backup's object, then "project" as asked, "root" as resolved and
-        "running", this server's in-flight jobs for the project.
+        "running": @backup's list, each entry with "job" added, or this
+        server's in-flight jobs when @backup's status has no "running".
 
     Raises:
         VerbRefused: No project, or an unknown one.
         StatusJsonMissing: @backup answered something that is not one JSON object.
-        VerbUnavailable: The census or @backup could not answer.
+        VerbUnavailable: The census or @backup could not answer, or "running"
+            is not a list of objects.
     """
     root = _root_of(project)
     args = [str(root), "--json"] + (["--sizes"] if sizes else [])
@@ -415,28 +515,39 @@ def read_status(project: str, sizes: bool = False) -> Dict[str, Any]:
 
     answered["project"] = project
     answered["root"] = str(root)
-    answered["running"] = JOBS.running(root)
+    if "running" not in answered:
+        logger.info("[host_api] %s status has no running list (older @backup); listing this server's jobs", BACKUP)
+        answered["running"] = JOBS.running(root)
+        return answered
+
+    running = answered["running"]
+    if not isinstance(running, list) or not all(isinstance(entry, dict) for entry in running):
+        raise VerbUnavailable(f"{BACKUP} status answered running as {type(running).__name__}, not a list of objects")
+    answered["running"] = JOBS.attach(root, running)
     return answered
 
 
 def answer(call: Callable[..., Dict[str, Any]], *args: Any) -> Tuple[int, Dict[str, Any]]:
     """
-    Run one of the three and answer (status, body), with no web framework in it.
+    Run one of the four and answer (status, body), with no web framework in it.
 
     Args:
-        call: start_run, read_job or read_status.
+        call: start_run, stop_run, read_job or read_status.
         *args: Its arguments.
 
     Returns:
         (200, the answer), or (status, {"code", "message", ...}): 400
-        verb_refused and 404 job_unknown carry their own sentence; 503
-        verb_unavailable carries the fixed one and a ref into this host's log,
-        or STATUS_JSON_MISSING when @backup's status --json is absent.
+        verb_refused, 404 job_unknown and 404 not_running carry their own
+        sentence (not_running @backup's line verbatim); 503 verb_unavailable
+        carries the fixed one and a ref into this host's log, or
+        STATUS_JSON_MISSING when @backup's status --json is absent.
     """
     try:
         return 200, call(*args)
     except JobUnknown as e:
         return 404, {"code": "job_unknown", "message": str(e)}
+    except NotRunning as e:
+        return 404, {"code": "not_running", "message": str(e)}
     except VerbRefused as e:
         return 400, {"code": "verb_refused", "message": str(e)}
     except StatusJsonMissing as e:

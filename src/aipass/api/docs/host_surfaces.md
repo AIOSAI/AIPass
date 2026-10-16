@@ -251,23 +251,31 @@ either way — answering 503 with the install hint, a 404 on a route that should
 as "wrong URL".
 
 **The backup door proxies @backup and owns no backup.** `POST /v1/backup/run`,
-`GET /v1/backup/job` and `GET /v1/backup/status` (`backup.py`, hung on the app by
-`backup_route.py`) reach `drone @backup` through drone's router and nothing else: a run is
-`drone @backup <lane> <root>`, with `--quiet` on `snapshot`, `versioned` and `all` and
-none on `drive_sync`, which has no such flag; status is `drone @backup status <root>
---json [--sizes]`, parsed and passed through with `project`, `root` and `running` added.
+`POST /v1/backup/cancel`, `GET /v1/backup/job` and `GET /v1/backup/status` (`backup.py`,
+hung on the app by `backup_route.py`) reach `drone @backup` through drone's router and
+nothing else: a run is `drone @backup <lane> <root>` (`--quiet` on every lane but
+`drive_sync`, which has no such flag); a cancel is `drone @backup stop <root> <lane>`;
+status is `drone @backup status <root> --json [--sizes]`, passed through with `project`
+and `root` added.
 The root comes from the read lane's resolver, the seat in any case or a census name, so
 @backup is handed a path this server did not compose and never a `@name`. Every shape is
-devpulse's backup door contract (DPLAN-0411). A status answer that is not one JSON object
-is a 503 saying `--json` is not on this machine; the Rich panel is never scraped.
+devpulse's backup door contract (DPLAN-0411, DPLAN-0412). A status answer that is not one
+JSON object is a 503 saying `--json` is not on this machine; the Rich panel is never scraped.
 
-**Start and poll, because a lane outlives a request.** A snapshot takes seconds, `all`
-and `drive_sync` can take minutes, and the timeout is 30 minutes, longer than a phone
-keeps a request open. So the run answers **202** with the job at once and runs the lane on a worker
+**`running` is @backup's list** (its running files: terminal and daemon runs too), entry
+for entry, each with `job`: this server's id for a run it started there under the entry's
+`verb`, else `null`. No `running` key (older @backup): this server's in-flight jobs and one
+log line. Not a list of objects: 503.
+
+**Cancel never touches the job table.** `stop` runs on the request thread (60 s timeout,
+over @backup's 30 s wait); the job closes when its lane exits.
+
+**Start and poll, because a lane outlives a request.** A lane can take minutes and its
+timeout is 30, longer than a phone keeps a request open. So the run answers **202** with the job at once and runs the lane on a worker
 thread; the phone polls the job every few seconds. One job per project and lane runs at a
 time, the second a 400 naming who started first and when; different lanes overlap and
 @backup's own locks decide the rest. `summary` is the last 600 characters of the output,
-verbatim. A run that never reached @backup is a 503 and opens no job; one that died behind
+verbatim. A job ends `done` (exit 0), `stopped` (130) or `failed` (anything else). A run that never reached @backup is a 503 and opens no job; one that died behind
 the door is a `failed` job with drone's sentence in `error`.
 
 **A restart forgets every job.** Jobs live in the server's memory, and a finished one is

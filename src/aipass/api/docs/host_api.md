@@ -92,8 +92,9 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
 | `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
-| `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
-| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through, plus `running`. No `--json` on this machine: **503** |
+| `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line verbatim. Nothing running: **404** `not_running`, @backup's line |
+| `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
+| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |
 | `GET /v1/agent-settings?branch=` | read | One branch's three owned claude settings — an absent key reads `null` |
 | `POST /v1/agent-settings` | operate | Patch those three. Three-state by JSON's nature: absent touches nothing, `null` removes, a value sets |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |

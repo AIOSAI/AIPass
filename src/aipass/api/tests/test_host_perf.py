@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-18
 # Modified: 2026-10-16
 # =============================================
@@ -99,7 +99,10 @@ LOOP_SAFE_GETS = {"/v1/ping", "/v1/whoami"}
 # holds a threading lock, so the threadpool cannot lose one of its writes.
 # /v1/backup/run (DPLAN-0411) is the third: its one write is the job table,
 # and every read and write of that table holds the table's threading lock.
-LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run"}
+# /v1/backup/cancel (DPLAN-0412) is the fourth: it writes nothing of this
+# server's (no job table, no file), so the loop has nothing of it to serialize,
+# and @backup's stop can wait 30 s for a lane, which must not hold the loop.
+LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run", "/v1/backup/cancel"}
 
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),

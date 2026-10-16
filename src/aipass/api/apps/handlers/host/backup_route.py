@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: backup_route.py
-# Description: Host API Backup Routes — the backup door's three routes, hung on the app
-# Version: 1.0.0
+# Description: Host API Backup Routes — the backup door's four routes, hung on the app
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -13,15 +13,18 @@
 """
 Host API Backup Routes
 
-The backup door (DPLAN-0411): POST /v1/backup/run, GET /v1/backup/job and GET
-/v1/backup/status. The answers are backup.py's; this file is the glue that hangs
-them on the app. Here and not in server.py, which sits at its 1500-line cap.
+The backup door (DPLAN-0411, DPLAN-0412): POST /v1/backup/run, POST
+/v1/backup/cancel, GET /v1/backup/job and GET /v1/backup/status. The answers are
+backup.py's; this file is the glue that hangs them on the app. Here and not in
+server.py, which sits at its 1500-line cap.
 
-The run is operate scope and answers 202 with the job; the two reads are read
-scope. Every refusal leaves through the server's one envelope.
+The run is operate scope and answers 202 with the job; the cancel is operate
+scope and answers 200 with @backup's stop line, 404 not_running when nothing
+of that lane runs; the two reads are read scope. A job reads running, done,
+stopped or failed. Every refusal leaves through the server's one envelope.
 
 Functions:
-    register() - Add the three backup routes to an app
+    register() - Add the four backup routes to an app
 """
 
 from typing import Any, Callable, Dict, Tuple
@@ -42,7 +45,7 @@ except ImportError as e:
 
 def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], Any]) -> None:
     """
-    Add the three backup routes to *app*.
+    Add the four backup routes to *app*.
 
     Args:
         app: The FastAPI app.
@@ -68,12 +71,24 @@ def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], 
         lane = str(payload.get("lane") or "")
         return _answered(host_backup.answer(host_backup.start_run, project, lane))
 
+    # def, not async: @backup's stop can wait 30 s for the lane to go, and the
+    # cancel writes nothing of this server's, so the loop has nothing to guard.
+    @app.post("/v1/backup/cancel")
+    def backup_cancel(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Stop one lane for one project through @backup. 200 with its line; 404 not_running."""
+        project = str(payload.get("project") or "")
+        lane = str(payload.get("lane") or "")
+        return _answered(host_backup.answer(host_backup.stop_run, project, lane))
+
     @app.get("/v1/backup/job")
     def backup_job(
         job_id: str = Query(default="", alias="id"),
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """One job: running, done or failed. 404 job_unknown once it is forgotten."""
+        """One job: running, done, stopped or failed. 404 job_unknown once it is forgotten."""
         return _answered(host_backup.answer(host_backup.read_job, job_id))
 
     @app.get("/v1/backup/status")
@@ -82,7 +97,7 @@ def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], 
         sizes: bool = False,
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """@backup's status for a project, plus this server's running jobs for it."""
+        """@backup's status for a project, its running list with this server's job ids."""
         return _answered(host_backup.answer(host_backup.read_status, project, sizes))
 
     json_handler.log_operation("host_api_backup_routes_registered", {"lanes": list(host_backup.LANES)})

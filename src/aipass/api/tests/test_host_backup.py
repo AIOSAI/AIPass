@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_backup.py
-# Description: Tests for the host API's backup door — runs, jobs and status (DPLAN-0411)
-# Version: 1.0.0
+# Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-10-16
 # =============================================
@@ -21,6 +21,7 @@
 
 import json
 import threading
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, List, Tuple
@@ -109,6 +110,13 @@ def door(seated: Path, clock: FakeClock, starter: Starter, monkeypatch: Any):
         patch(PATCH_DENIALS_JSON),
     ):
         yield router
+
+
+@pytest.fixture
+def backup_log(door: Any):
+    """The handler's logger, read by a test. Patched inside the door, so it unwinds first."""
+    with patch(PATCH_BACKUP_LOGGER) as log:
+        yield log
 
 
 @pytest.fixture
@@ -236,6 +244,81 @@ class TestStartRun:
         assert host_backup.read_status("AIPASS")["running"] == []
 
 
+class TestStopRun:
+    """POST /v1/backup/cancel's logic: @backup's stop on the request thread, its line verbatim."""
+
+    def test_a_cancel_routes_stop_with_root_and_lane_and_answers_its_line_verbatim(
+        self, door: Any, seated: Path
+    ) -> None:
+        door.route_command.return_value = _result("stopped drive_sync (pid 175450)\n", command="stop")
+
+        answered = host_backup.stop_run("AIPASS", "drive_sync")
+
+        assert answered == {
+            "project": "AIPASS",
+            "lane": "drive_sync",
+            "stopped": True,
+            "message": "stopped drive_sync (pid 175450)",
+        }
+        target, verb, argv = door.route_command.call_args.args
+        assert (target, verb) == ("@backup", "stop")
+        assert len(argv) == 2
+        assert Path(argv[0]) == seated.resolve()
+        assert argv[1] == "drive_sync"
+        assert door.route_command.call_args.kwargs == {"timeout": host_backup.CANCEL_TIMEOUT_SECONDS}
+
+    @pytest.mark.parametrize(
+        ("stdout", "stderr"),
+        [("drive_sync is not running for AIPass\n", ""), ("", "drive_sync is not running for AIPass\n")],
+    )
+    def test_a_stop_that_exits_non_zero_is_not_running_with_its_line_verbatim(
+        self, door: Any, stdout: str, stderr: str
+    ) -> None:
+        door.route_command.return_value = _result(stdout, exit_code=1, stderr=stderr, command="stop")
+
+        with pytest.raises(host_backup.NotRunning) as not_running:
+            host_backup.stop_run("AIPASS", "drive_sync")
+
+        assert str(not_running.value) == "drive_sync is not running for AIPass"
+
+    def test_backup_unreachable_on_stop_is_unavailable(self, door: Any) -> None:
+        door.route_command.side_effect = drone.RoutingError("Branch not found: @backup")
+
+        with pytest.raises(host_backup.VerbUnavailable):
+            host_backup.stop_run("AIPASS", "snapshot")
+
+    @pytest.mark.parametrize("lane", ["", "nightly"])
+    def test_a_missing_or_unknown_lane_is_refused_before_backup_is_asked(self, door: Any, lane: str) -> None:
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.stop_run("AIPASS", lane)
+
+        assert "snapshot, versioned, all, drive_sync" in str(refused.value)
+        door.route_command.assert_not_called()
+
+    def test_a_missing_project_is_refused(self, door: Any) -> None:
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.stop_run("", "snapshot")
+
+        assert "project is required" in str(refused.value)
+        door.route_command.assert_not_called()
+
+    def test_an_unknown_project_is_refused_in_the_census_words(self, door: Any, census: Path) -> None:
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.stop_run("VERA", "snapshot")
+
+        assert "No project named 'VERA'" in str(refused.value)
+        door.route_command.assert_not_called()
+
+    def test_a_cancel_leaves_the_job_table_untouched(self, door: Any, starter: Starter) -> None:
+        job = host_backup.start_run("AIPASS", "snapshot")
+        door.route_command.return_value = _result("stopped snapshot (pid 1234)\n", command="stop")
+
+        host_backup.stop_run("AIPASS", "snapshot")
+
+        assert host_backup.read_job(job["job"]) == job
+        assert len(starter.pending) == 1
+
+
 class TestReadJob:
     """GET /v1/backup/job's logic: running, done or failed, then forgotten."""
 
@@ -270,6 +353,32 @@ class TestReadJob:
         assert read["exit"] == 2
         assert read["summary"] == "copied 3 files\nstore is locked"
         assert read["error"] is None
+
+    def test_a_lane_that_exits_130_is_stopped_with_its_words_in_summary(self, door: Any, starter: Starter) -> None:
+        door.route_command.return_value = _result(
+            "copied 1204 files\nstopped by request: 1,204 of 15,414 files, 310 MB\n", exit_code=130
+        )
+        job = host_backup.start_run("AIPASS", "drive_sync")
+        starter.run_all()
+
+        read = host_backup.read_job(job["job"])
+
+        assert read["state"] == "stopped"
+        assert read["exit"] == 130
+        assert read["summary"] == "copied 1204 files\nstopped by request: 1,204 of 15,414 files, 310 MB"
+        assert read["error"] is None
+
+    @pytest.mark.parametrize("exit_code", [-15, 1])
+    def test_a_killed_or_failing_lane_stays_failed_not_stopped(
+        self, door: Any, starter: Starter, exit_code: int
+    ) -> None:
+        door.route_command.return_value = _result("copied 3 files\n", exit_code=exit_code)
+        job = host_backup.start_run("AIPASS", "drive_sync")
+        starter.run_all()
+
+        read = host_backup.read_job(job["job"])
+
+        assert (read["state"], read["exit"]) == ("failed", exit_code)
 
     def test_the_summary_is_the_last_600_characters_verbatim(self, door: Any, starter: Starter) -> None:
         output = "".join(f"line {n}\n" for n in range(400)) + "snapshot=15414 files"
@@ -363,6 +472,54 @@ class TestReadStatus:
         assert finished["job"] != running["job"]
         assert answered["running"] == [{"job": running["job"], "lane": "snapshot", "started_at": running["started_at"]}]
 
+    def test_a_status_with_no_running_key_falls_back_to_the_table_and_says_so(self, door: Any, backup_log: Any) -> None:
+        door.route_command.return_value = _result(json.dumps(STATUS))
+        job = host_backup.start_run("AIPASS", "snapshot")
+
+        answered = host_backup.read_status("AIPASS")
+
+        assert answered["running"] == [{"job": job["job"], "lane": "snapshot", "started_at": job["started_at"]}]
+        said = [call.args[0] % call.args[1:] for call in backup_log.info.call_args_list]
+        assert "[host_api] @backup status has no running list (older @backup); listing this server's jobs" in said
+
+    def test_running_is_backups_list_entry_for_entry_with_this_servers_job_matched_on_verb(
+        self, door: Any, census: Path
+    ) -> None:
+        full = host_backup.start_run("AIPASS", "all")
+        host_backup.start_run("AIPASS", "snapshot")
+        host_backup.start_run("BAUD", "drive_sync")
+        progress = {"done": 300, "total": 15491, "failed": 0, "bytes_done": 1024, "bytes_total": None}
+        since = "2026-10-16T07:30:00+00:00"
+        entries = [
+            {"verb": "all", "lane": "snapshot", "pid": 4242, "started_at": since, "progress": None},
+            {"verb": "all", "lane": "versioned", "pid": 4242, "started_at": since, "progress": progress},
+            {"verb": "drive_sync", "lane": "drive_sync", "pid": 175450, "started_at": since, "progress": None},
+        ]
+        door.route_command.return_value = _result(json.dumps({**STATUS, "running": entries}))
+
+        answered = host_backup.read_status("AIPASS")
+
+        assert answered["running"] == [
+            {**entries[0], "job": full["job"]},
+            {**entries[1], "job": full["job"]},
+            {**entries[2], "job": None},
+        ]
+
+    def test_an_empty_running_list_stays_empty_even_with_a_job_in_flight(self, door: Any) -> None:
+        host_backup.start_run("AIPASS", "snapshot")
+        door.route_command.return_value = _result(json.dumps({**STATUS, "running": []}))
+
+        assert host_backup.read_status("AIPASS")["running"] == []
+
+    @pytest.mark.parametrize("running", [{"verb": "all"}, None, "snapshot", ["snapshot"]])
+    def test_a_running_that_is_not_a_list_of_objects_is_unavailable(self, door: Any, running: Any) -> None:
+        door.route_command.return_value = _result(json.dumps({**STATUS, "running": running}))
+
+        with pytest.raises(host_backup.VerbUnavailable) as unavailable:
+            host_backup.read_status("AIPASS")
+
+        assert not isinstance(unavailable.value, host_backup.StatusJsonMissing)
+
     @pytest.mark.parametrize("stdout", ["╭─ Backup status ─╮", '{"runs": 1}{"runs": 2}', "[]", ""])
     def test_an_answer_that_is_not_one_json_object_is_status_json_missing(self, door: Any, stdout: str) -> None:
         door.route_command.return_value = _result(stdout)
@@ -391,6 +548,23 @@ class TestReadStatus:
             host_backup.read_status("VERA")
 
         door.route_command.assert_not_called()
+
+
+class TestTheDoorOwnsNoMechanism:
+    """backup.py reaches @backup only through drone: no process, signal or shell machinery of its own."""
+
+    def test_backup_holds_nothing_from_a_process_or_signal_module(self) -> None:
+        owners = set()
+        for value in vars(host_backup).values():
+            if isinstance(value, types.ModuleType):
+                owners.add(value.__name__.split(".")[0])
+            else:
+                owners.add(str(getattr(value, "__module__", None) or type(value).__module__).split(".")[0])
+
+        assert "aipass" in owners
+        # os's process calls report their owner as posix or nt, by platform.
+        banned = {"subprocess", "os", "posix", "nt", "pty", "signal", "multiprocessing", "asyncio", "shutil"}
+        assert owners.isdisjoint(banned)
 
 
 class TestStartWorker:

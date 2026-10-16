@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-14
 # Modified: 2026-10-16
 # =============================================
@@ -94,7 +94,7 @@ Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
                                      headless kill, and theirs is the one door.
     POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never
                                      gated — lock must fire from anywhere.
-    /v1/backup/run (operate, 202), /v1/backup/job, /v1/backup/status (read) - @backup's door, backup_route.py
+    /v1/backup/run (operate, 202), /cancel (operate), /job, /status (read) - @backup's door, backup_route.py
 
 RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
     POST /v1/notify                - Phase 4, content-minimized through the relay

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
 # Modified: 2026-10-16
 # =============================================
@@ -372,7 +372,7 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
 
 @fastapi_required
 class TestTheBackupDoorAnswersThroughTheRealApp:
-    """POST /v1/backup/run, GET /v1/backup/job and GET /v1/backup/status, wired (DPLAN-0411)."""
+    """POST /v1/backup/run and /cancel, GET /v1/backup/job and /status, wired (DPLAN-0411, DPLAN-0412)."""
 
     @pytest.fixture
     def backup(self, store: Path, seated: Path, monkeypatch: Any):
@@ -523,8 +523,95 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
 
         answered = [
             api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "snapshot"}).status_code,
+            api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "snapshot"}).status_code,
             api.get("/v1/backup/job", params={"id": "b7f3c2"}).status_code,
             api.get("/v1/backup/status", params={"project": "AIPASS"}).status_code,
         ]
 
-        assert answered == [401, 401, 401]
+        assert answered == [401, 401, 401, 401]
+
+    def test_cancel_answers_200_with_stops_line_after_routing_stop_with_root_and_lane(
+        self, backup: Any, seated: Path
+    ) -> None:
+        api, _, operate, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=0, stdout="stopped all (pid 4242)\n", stderr="")
+
+        response = api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "all"}, headers=operate)
+
+        assert response.status_code == 200
+        stopped = {"project": "AIPASS", "lane": "all", "stopped": True, "message": "stopped all (pid 4242)"}
+        assert response.json() == stopped
+        target, verb, argv = router.route_command.call_args.args
+        assert (target, verb, len(argv), argv[1]) == ("@backup", "stop", 2, "all")
+        assert Path(argv[0]) == seated.resolve()
+
+    def test_cancel_with_nothing_running_is_404_not_running_in_backups_words(self, backup: Any) -> None:
+        api, _, operate, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=1, stdout="nothing running for AIPass\n", stderr="")
+
+        response = api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "all"}, headers=operate)
+
+        assert response.status_code == 404
+        assert response.json()["error"] == {"code": "not_running", "message": "nothing running for AIPass"}
+
+    def test_cancel_with_backup_unreachable_is_503_with_a_ref(self, backup: Any) -> None:
+        api, _, operate, router, _ = backup
+        router.route_command.side_effect = drone.RoutingError("Branch not found: @backup")
+
+        response = api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "all"}, headers=operate)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert (error["code"], error["message"]) == ("verb_unavailable", host_denials.SENTENCES["verb_unavailable"])
+        assert error["ref"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"project": "AIPASS"},
+            {"project": "AIPASS", "lane": "nightly"},
+            {"lane": "all"},
+            {"project": "VERA", "lane": "all"},
+        ],
+    )
+    def test_cancel_with_a_missing_or_unknown_lane_or_project_is_400_and_asks_nothing(
+        self, backup: Any, body: dict
+    ) -> None:
+        api, _, operate, router, _ = backup
+
+        with patch.object(host_fleet, "list_projects", return_value={"projects": []}):
+            response = api.post("/v1/backup/cancel", json=body, headers=operate)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "verb_refused"
+        router.route_command.assert_not_called()
+
+    def test_a_read_token_is_refused_on_cancel_and_stops_nothing(self, backup: Any) -> None:
+        api, read, _, router, _ = backup
+
+        response = api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "all"}, headers=read)
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "forbidden"
+        router.route_command.assert_not_called()
+
+    def test_status_passes_backups_running_list_through_with_the_job_added(self, backup: Any) -> None:
+        api, read, operate, router, _ = backup
+        job = api.post("/v1/backup/run", json={"project": "AIPASS", "lane": "drive_sync"}, headers=operate).json()
+        entry = {"verb": "drive_sync", "lane": "drive_sync", "pid": 175450, "started_at": "x", "progress": None}
+        router.route_command.return_value = MagicMock(exit_code=0, stdout=json.dumps({"running": [entry]}), stderr="")
+
+        response = api.get("/v1/backup/status", params={"project": "AIPASS"}, headers=read)
+
+        assert response.status_code == 200
+        assert response.json()["running"] == [{**entry, "job": job["job"]}]
+
+    def test_a_running_that_is_not_a_list_is_503_with_the_fixed_sentence(self, backup: Any) -> None:
+        api, read, _, router, _ = backup
+        router.route_command.return_value = MagicMock(exit_code=0, stdout=json.dumps({"running": {}}), stderr="")
+
+        response = api.get("/v1/backup/status", params={"project": "AIPASS"}, headers=read)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert (error["code"], error["message"]) == ("verb_unavailable", host_denials.SENTENCES["verb_unavailable"])

@@ -262,8 +262,8 @@
     {
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
-      "lines": [925, 950, 951, 954],
-      "reason": "925: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 950-954: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry."
+      "lines": [928, 953, 954, 957],
+      "reason": "928: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 953-957: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry, 925/950/951/954 -> 928/953/954/957 with DPLAN-0412's /v1/backup/cancel entry."
     },
     {
       "file": "tests/test_cleanup.py",
