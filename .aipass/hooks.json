@@ -119,6 +119,11 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot",
       "matcher": "Bash"
+    },
+    "settings_backup": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.settings_backup.handle",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
     }
   },
 

@@ -1,8 +1,8 @@
 [<- Back to the README](../README.md)
 
-# The git gate, and the rm gate beside it
+# The git gate, the rm gate, and the settings backup
 
-**Branch** hooks · **Code** `apps/handlers/security/git_gate.py`, `apps/handlers/security/rm_gate.py`, `apps/modules/protected_paths.py`, `apps/modules/shell_reader.py`
+**Branch** hooks · **Code** `apps/handlers/security/git_gate.py`, `apps/handlers/security/rm_gate.py`, `apps/handlers/security/settings_backup.py`, `apps/modules/protected_paths.py`, `apps/modules/shell_reader.py`
 
 ---
 
@@ -143,6 +143,26 @@ This refused attempt is recorded.
 Every refused attempt is one INFO line per deleting clause
 (`DELETE refused | lane=… | branch=… | cwd=… | cmd=…`). Service code that runs `drone rm` as a
 subprocess never passes through a hook.
+
+---
+
+## Settings Backup
+
+`security/settings_backup.py` (FPLAN-0645, the owner's ruling 2026-10-15) runs on Bash, Edit,
+MultiEdit, Write and NotebookEdit, last in the PreToolUse gate set. When a call writes
+`~/.claude/settings*.json` (`~` expanded, relative paths joined to the seat's cwd, symlinks followed
+from either end; a Bash target as `git_gate`'s protected lane reads it), it copies the file into
+`~/.claude/.backup/settings/` (0700, the copy 0600) as `<file>.<YYYY-MM-DDTHH-MM-SS>.<door>`, `-2`,
+`-3` on a same-second collision, and appends one JSON line to `receipts.jsonl` there: time, door
+(`edit-tool`, `write-tool`, `multiedit-tool`, `notebookedit-tool`, `bash`), file, actor (the seat's
+branch, else its cwd), pid, backup, `before_sha256`, `after_sha256: null`, summary. Then it allows.
+A copy or append that fails refuses the call, naming the path and the error. Nothing prunes the folder.
+
+@aipass's Python doors (`doctor --fix`, install, setup.sh) write the same folder in the same shape;
+the two share the contract, never an import. Off the admin seat `git_gate` refuses these writes first,
+so a backup is only taken for a write every other gate allowed. A project's own
+`.claude/settings.json` is out of scope: git keeps its history. Claude Code's own writes (`/model`,
+`/config`) pass no hook; the next backup carries what they left.
 
 ---
 
