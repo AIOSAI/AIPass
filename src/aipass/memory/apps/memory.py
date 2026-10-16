@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-09-16
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -141,7 +141,7 @@ def print_help():
     # table, so the README's hand-typed command list was the only place they
     # appeared — and the README is the layer that goes away (DPLAN-0347). A verb
     # that exists and is not in --help is a verb nobody finds.
-    table.add_row("health [@branch]", "Read-only branch health: rollover state + cap violations")
+    table.add_row("health @branch", "Read-only branch health: rollover state + cap violations")
     table.add_row("roots", "Declared repo roots on this machine: list, init, add, remove, heal")
     table.add_row("fleet", "The fleet definition — who counts as a citizen, answered once")
     table.add_row("limits", "The entry shape, the char caps and the file budgets — one door")
