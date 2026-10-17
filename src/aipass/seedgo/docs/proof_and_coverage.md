@@ -86,20 +86,14 @@ CI shape and read the real number:
 python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.
 ```
 
-**Measurement of record, 2026-09-15** (kept as a dated record, not as a live claim): 62 test
-files; the `def test_` count 3501; pytest expanded to 4241 cases (4188 passed, 53 skipped).
-The 2026-09-05 → 09-07 drop of 57 functions was retirement on evidence (FPLAN-0491): the v4
-`test_quality` sections went with the standard; `tests/test_json_handler.py` moved whole to
-`.archive/` because all six of its tests are carried, parametrised over every shim, by
-`tests/test_json_handler_contract.py`; `test_content_functions.py` merged 37 twin pairs into
-37 single tests, mutation-checked at the merge; and three rows judged DELETE in the
-2026-09-05 contested band came out after a mutation confirmed they pinned nothing.
+The json handler's behaviour is tested once, parametrised over every citizen's shim, in
+`tests/test_json_handler_contract.py`.
 
-**Skips are documented, not silent.** Three in `tests/test_import_dead_cwd.py` are instrument
-self-checks retired under the 2026-09-01 one-fix ruling (owner to rewrite them as
-measurement); one in `tests/test_checkers_batch7.py` needs canary's `paths.py`, which is not
-on this machine; one in `tests/test_trinity_check.py` is a live-state guard with no drifted
-citizen to find.
+**Skips are documented, not silent.** Every skip names its reason in its message: a sibling
+branch's file that is not on this machine (`tests/test_checkers_batch7_json_structure.py`,
+`tests/support_json_handler_contract.py`), a platform that cannot make a directory unlistable
+(`tests/test_audit_tests_core.py`), or a live-state guard in `tests/test_trinity_check.py`
+with no fleet tree, no live observations file or no drifted citizen to find.
 
 **A live-state guard will go red on another branch's write.**
 `TestFleetAcceptanceBar::test_exactly_six_citizens_are_canonical_on_observations` reads the

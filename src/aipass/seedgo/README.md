@@ -67,7 +67,7 @@ Three layers. `apps/seedgo.py` is a thin router: it discovers modules, dispatche
 one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
 business-logic module per verb — audit_tests, bypass, checklist, diagnostics_audit, home_paths
 (the developer-home scan the CI gate runs), inbox_audit, inventory, permissions, proof_query,
-readme_update, seedgo_proof, shadow_cycle, standards_audit, standards_query, test_map and
+ratchet (the weekly execution ratchet), readme_update, seedgo_proof, shadow_cycle, standards_audit, standards_query, test_map and
 tests_lane — and two doors, door_audit (the audit, bypass rules and context ratchets, for the
 CI audit script) and door_trinity (the .trinity/ check, for @memory). A door is the one modules
 file another branch may import: a re-export of this branch's handlers and nothing else
@@ -115,7 +115,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 ---
 [<- Back to AIPass](../../../README.md)

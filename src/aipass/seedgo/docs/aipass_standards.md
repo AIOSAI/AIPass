@@ -14,28 +14,25 @@
 ELIGIBLE, default `everywhere`. Two different axes; `applicability.py` is where they meet.
 
 Both columns are read from the checker sources, not maintained by hand. The row count is
-verified against `discover_checkers()` on every regeneration rather than carried forward:
-the 2026-08-25 pass wrote a row count that matched by accident while the table silently
-omitted `trinity`. If this table and the directory disagree, the directory is right.
+verified against `discover_checkers()` on every regeneration, never carried forward: a
+count can match by accident while a row is missing. If this table and the directory
+disagree, the directory is right.
 
-**The corpus is `apps/` plus `tests/`** as of 2026-09-21 (owner ruling 21:20) — `test_*.py`
-and `conftest.py`, under the same exclusions `apps/` gets. Until then it was `apps/` only,
-36 of these checkers declared no `APPLIES_TO` at all, and the four written for test files
-had no files to score. Every checker declares one now, and the four are real rows.
-`everywhere` is still the default for a checker that forgets, because forgetting should
-cost noise and never a missed bug.
+**The corpus is `apps/` plus `tests/`** — `test_*.py` and `conftest.py`, under the same
+exclusions `apps/` gets. Every checker declares an `APPLIES_TO`; `everywhere` is the default
+for a checker that forgets, because forgetting should cost noise and never a missed bug.
 
-The rows whose `Applies to` is `tests` live on two pages of their own, moved there whole when
-this page passed the docs-page size cap (fleet green leg 15):
+The rows whose `Applies to` is `tests` live on two pages of their own, because with them this
+page would exceed the docs-page size cap:
 [aipass_standards_tests_1.md](aipass_standards_tests_1.md) (calendar_bound to literal_path) and
 [aipass_standards_tests_2.md](aipass_standards_tests_2.md) (module_scope_side_effect to weak_oracle).
 The table below carries every other row.
 
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
-| accepted_and_never_used_parameter *(production only)* | all_files | production | A product function accepts a parameter and no path in its body reads it — crack class M from the 2026-09-22 review of @backup's tests. `cleanup_deleted_files(..., should_ignore, ...)` documents the callable and never calls it, while `copy/snapshot.py:93` builds a lambda to pass in; ONE defect, two lines, and the verdict lands on the ACCEPTING side where the cure lives. HOW A PROTOCOL IS TOLD APART, four shapes that all say somebody else owns this signature: the branch never calls the function (`pytest_runtest_logfinish` is pytest's hookspec — whether it should exist at all is `unused_function`'s verdict, not this one's); the name is handed off as a VALUE, a bare mention that is not a call, not its own `def` line and NOT an import (counting an import as a hand-off acquitted the specimen itself); the def sits inside an `except ImportError` handler, so it is a shim that must match the real module; the name is defined more than once in the branch. Ordinary exemptions: `self`/`cls`, `*args`/`**kwargs`, dunders, decorated, a stub body, and any `_`-prefixed parameter. The corpus is stripped of strings and comments with the tokenizer — this checker's own docstring names `pytest_runtest_logfinish` and that one sentence convicted both of its parameters until it was. Fleet: 38 files, 49 hits over 1,203 product files, 2,841 parameters acquitted by shape |
+| accepted_and_never_used_parameter *(production only)* | all_files | production | A product function accepts a parameter and no path in its body reads it. `cleanup_deleted_files(..., should_ignore, ...)` documents the callable and never calls it, while `copy/snapshot.py:93` builds a lambda to pass in; ONE defect, two lines, and the verdict lands on the ACCEPTING side where the cure lives. HOW A PROTOCOL IS TOLD APART, four shapes that all say somebody else owns this signature: the branch never calls the function (`pytest_runtest_logfinish` is pytest's hookspec — whether it should exist at all is `unused_function`'s verdict, not this one's); the name is handed off as a VALUE, a bare mention that is not a call, not its own `def` line and NOT an import (an import is not a hand-off); the def sits inside an `except ImportError` handler, so it is a shim that must match the real module; the name is defined more than once in the branch. Ordinary exemptions: `self`/`cls`, `*args`/`**kwargs`, dunders, decorated, a stub body, and any `_`-prefixed parameter. The corpus is stripped of strings and comments with the tokenizer — so a docstring or comment that names a function never counts as a hand-off |
 | architecture | all_files | production | Module/handler separation, entry point structure; `shared/` beside `apps/` is the library layer |
-| clear_text_secret_logging *(production only)* | all_files | production | CodeQL `py/clear-text-logging-sensitive-data` (PR #774 r7, HIGH, sink prax `logger.py:135`): the CALLER line. A prax logger call whose message (argument, f-string piece, `%`/`.format()`/`+` operand) is a Name/Attribute/Call named as a secret (whole segment: secret(s), token(s), password(s), passwd, api_key, apikey, credential(s), bearer, auth_header, access_key, private_key, trusted, confidential; not untrusted), or a value built in the same file from a secret-named SOURCE: a module-level binding (`SECRETS_BASE = ...`) or an attribute read (`secrets_store.SECRETS_BASE`), a token word seeding neither, or (1.1.0, CodeQL r9) the result of a call on CodeQL's source words secret(s)/trusted/confidential (`secret = _get_secret(bot_id)`), not one holding hash/md5/sha/random/encode/encrypt/public/user/login/logging/clear/redact or a setter verb (set_secret); never a parameter, loop/with target or local. From a source it follows assignments, comprehensions, the wrappers sorted/list/tuple/set/dict/str/repr/join/format/f-strings, same-file returns and parameters, attributes, and the same-file hop (a built argument to a same-file function whose return carries that parameter taints that call's result, per call: `strays = non_secret_keys(secret)`), and (1.2.0, CodeQL r10) reads and adds on a built value: `.get/.pop/.setdefault/.items/.keys/.values` carry the receiver on (`records = stored.get("tokens")`), `.append/.extend/.add/.insert(i, x)` bind the named list or set, a dict literal or `dict(...)` holding a built value is built (str/repr/f-string/`%r` stay rows; `len()`, `type(x).__name__` and a slice of ≤4 chars stay clean); a non_/not_ prefix acquits nothing. Identifiers acquit (token_id, n_tokens, secret_path, TOKEN_SLUG), so do redactions (redact/mask/scrub, `len()`, a slice of ≤4 chars). The cure for a false hit is the rename. Fleet 2026-10-10: 16 rows in 8 files (api 7, drone 1, hooks 7, skills lib 1); the six CodeQL-reachable api warnings (`host/tokens.py` :324/:370/:438, `auth/secrets.py` :62/:187/:216) all convicted. Round nine 1.1.0: the pre-cure @skills telegram `config.py` load_bot_config `strays` warning convicted; fleet 0 rows before and after. Round ten 1.2.0 (2026-10-11): the pre-cure @api `host/tokens.py` `_is_due` `last_used %r` warning (:655) convicted through `get_secret` -> `.get("tokens")` -> loop -> `record.get("last_used")`; :631 (cross-file `token_id`) out of reach; fleet 0 rows before and after, every sub-arm 0 alone. Round eleven 1.3.0 (2026-10-11), arm 3, the one parameter seed: in a file defining a secret lister (`list_secrets(provider)`), inside a secret reader (a get/read/load/fetch segment on the call-seed words, no setter verb, no `list` segment), a required positional parameter the lister does not take (`slug`, never `provider`) in the log call's MESSAGE (first argument or `msg=`: f-string piece, `%`/`+` side, `.format()`, str/repr) is a row; a `%s` argument is not this arm's row. CodeQL's SARIF path (telegram list_secrets -> handler.py loop -> `_get_secret` -> api `get_secret`) ends at the MESSAGE of @api `auth/secrets.py:83` `f"Secret not found: {provider}/{slug}"`: CodeQL's reach is the message only, recorded as its reach, not this rule (arms 1 and 2 still judge arguments). The pre-cure file convicts :83 only (:64 provider and :191/:220 `e` acquit); the cure (provider as a `%s` argument) acquits; fleet 0 rows before and after |
+| clear_text_secret_logging *(production only)* | all_files | production | CodeQL `py/clear-text-logging-sensitive-data` (specimen: PR #774): the CALLER line. A prax logger call whose message (argument, f-string piece, `%`/`.format()`/`+` operand) is a Name/Attribute/Call named as a secret (whole segment: secret(s), token(s), password(s), passwd, api_key, apikey, credential(s), bearer, auth_header, access_key, private_key, trusted, confidential; not untrusted), or a value built in the same file from a secret-named SOURCE: a module-level binding (`SECRETS_BASE = ...`) or an attribute read (`secrets_store.SECRETS_BASE`), a token word seeding neither, or the result of a call on CodeQL's source words secret(s)/trusted/confidential (`secret = _get_secret(bot_id)`), not one holding hash/md5/sha/random/encode/encrypt/public/user/login/logging/clear/redact or a setter verb (set_secret); never a parameter, loop/with target or local. One parameter seed: in a file defining a secret lister (`list_secrets(provider)`), inside a secret reader (a get/read/load/fetch segment on the call-seed words, no setter verb, no `list` segment), a required positional parameter the lister does not take (`slug`, never `provider`) in the log call's MESSAGE (first argument or `msg=`: f-string piece, `%`/`+` side, `.format()`, str/repr) is a row; a `%s` argument is not. That seed judges the message only, which is CodeQL's reach; the other seeds judge arguments too. From a source it follows assignments, comprehensions, the wrappers sorted/list/tuple/set/dict/str/repr/join/format/f-strings, same-file returns and parameters, attributes, and the same-file hop (a built argument to a same-file function whose return carries that parameter taints that call's result, per call: `strays = non_secret_keys(secret)`), and reads and adds on a built value: `.get/.pop/.setdefault/.items/.keys/.values` carry the receiver on (`records = stored.get("tokens")`), `.append/.extend/.add/.insert(i, x)` bind the named list or set, a dict literal or `dict(...)` holding a built value is built (str/repr/f-string/`%r` stay rows; `len()`, `type(x).__name__` and a slice of ≤4 chars stay clean); a non_/not_ prefix acquits nothing. Identifiers acquit (token_id, n_tokens, secret_path, TOKEN_SLUG), so do redactions (redact/mask/scrub, `len()`, a slice of ≤4 chars). A cross-file value (`token_id` from another module) is out of reach. The cure for a false hit is the rename |
 | cli | all_files | production | Rich console usage, no bare print() |
 | cli_flags | entry_point | production | --help, --version flag handling |
 | cli_ux | entry_point | production | CLI navigation + output quality (Nav/Output scoring) |
@@ -43,12 +40,12 @@ The table below carries every other row.
 | dead_code | branch_level | production | Unreachable functions and dead imports; a dotted path in the project's `.aipass/*.json` is a reference |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
-| developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`, any slash) naming a real login in any text file — comments and prose included; `TEXT_FILES = True` lets the checklist judge non-`.py` text, and `drone @seedgo home-paths scan` gates the whole tracked tree in CI (owner 2026-10-04) |
+| developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`, any slash) naming a real login in any text file — comments and prose included; `TEXT_FILES = True` lets the checklist judge non-`.py` text, and `drone @seedgo home-paths scan` gates the whole tracked tree in CI |
 | docs_page | entry_point | production | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | production | Try/except patterns, error propagation |
-| exception_text_in_response *(production only)* | all_files | production | CodeQL `py/stack-trace-exposure` (PR #774 r7): inside an `except`, the bound exception (or an attribute, `str()`/`repr()`, f-string, local carrying it) or `traceback.format_exc()` reaches `HTTPException(detail=)`, a `*Response` content, a `deny`/`refuse`/`error_response`/`respond` helper, or a returned dict/str. Only modules importing fastapi/starlette or defining a route; any other file declines. Logger-only and `type(e).__name__` acquit. CodeQL's own three rows (@api `server.py` 848/974/995) are cross-branch flows through `ReadCache.get` it cannot see (HELD, the `.md` says why). Fleet 2026-10-10: 2 files in scope, 48 rows, all @api `server.py` `_deny` lines |
+| exception_text_in_response *(production only)* | all_files | production | CodeQL `py/stack-trace-exposure` (specimen: PR #774): inside an `except`, the bound exception (or an attribute, `str()`/`repr()`, f-string, local carrying it) or `traceback.format_exc()` reaches `HTTPException(detail=)`, a `*Response` content, a `deny`/`refuse`/`error_response`/`respond` helper, or a returned dict/str. Only modules importing fastapi/starlette or defining a route; any other file declines. Logger-only and `type(e).__name__` acquit. A cross-branch flow (through `ReadCache.get`) is out of its reach; the `.md` says why |
 | gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door |
 | handlers | all_files | production | Handler directory structure + handler independence |
 | hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
@@ -64,11 +61,11 @@ The table below carries every other row.
 | log_level | all_files | production | Correct log level usage |
 | log_structure | all_files | production | Structured log message format |
 | log_visibility | all_files | production | Log output in key operations |
-| logged_fallback *(production only)* | all_files | production | `silent_catch`'s sibling: an `except` that does not raise and ENDS in `return` of a literal default (constant, empty container, or a string built from the exception) in a function whose success path can return the SAME value -- an equal literal (same type: `False` is not `0`) in a return outside every handler, or a name first bound to it. Logging never acquits. Sentinels pass (`None` beside dict returns, `-1` beside counts); raises, generators, `finally` returns, calls/params and assign-and-fall-through are not read. Owner 2026-09-25 12:17 'narrow it then land it'. Fleet: 1,216 product files, 496 hits in 230 files / 16 branches; sample precision 8/22 |
+| logged_fallback *(production only)* | all_files | production | `silent_catch`'s sibling: an `except` that does not raise and ENDS in `return` of a literal default (constant, empty container, or a string built from the exception) in a function whose success path can return the SAME value -- an equal literal (same type: `False` is not `0`) in a return outside every handler, or a name first bound to it. Logging never acquits. Sentinels pass (`None` beside dict returns, `-1` beside counts); raises, generators, `finally` returns, calls/params and assign-and-fall-through are not read. |
 | meta | all_files | production | File header metadata block |
 | modules | all_files | production | Module structure and naming |
 | naming | all_files | everywhere | snake_case, column-0 constants |
-| os_walk_onerror *(production only)* | all_files | production | An `os.walk` call with no `onerror=` (or `onerror=None`) — `scandir` errors are swallowed, so an unreadable subtree drops out and the run reports success. Specimen @backup `scan/walk.py:34`. A third positional arg or `**kwargs` acquits; any named hook passes (a hook that only logs is not a cure, the page says so; the checker cannot see it). `rglob` has no hook: counted, not judged. Fleet 2026-09-25: 1,214 product files, 13 calls, 8 convicted in 8 files / 6 branches |
+| os_walk_onerror *(production only)* | all_files | production | An `os.walk` call with no `onerror=` (or `onerror=None`) — `scandir` errors are swallowed, so an unreadable subtree drops out and the run reports success. Specimen @backup `scan/walk.py:34`. A third positional arg or `**kwargs` acquits; any named hook passes (a hook that only logs is not a cure, the page says so; the checker cannot see it). `rglob` has no hook: counted, not judged |
 | output_routing | all_files | production | Status output via @cli helpers, not raw console.print |
 | permission_flags | all_files | everywhere | No dangerous permission overrides |
 | readme | entry_point | production | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
@@ -116,9 +113,8 @@ Then, in the same change:
    that already scores moves every branch's average, which is why the docs-index lane is a
    `check_branch_info()` info line instead (see `apps/handlers/aipass_standards/readme.md`).
 
-**Landing a checker in one commit reds the fleet.** On 2026-09-13 a renderer change put 17 of
-18 branches below the CI threshold. The ruling since is *advisory, then ratchet*: measure for
-a week, then gate.
+**Landing a checker in one commit reds the fleet.** The rule is *advisory, then ratchet*:
+measure for a week, then gate.
 
 ---
 
@@ -139,10 +135,11 @@ half-standards. Tracked in APLAN-0005.
 
 ## One json handler, fleet-wide
 
-Since DPLAN-0325 (2026-09-04) every citizen ships a byte-identical
-`apps/handlers/json/json_handler.py` — a shim that binds the prax-owned service and resolves
-nothing of its own. The `json_handler` standard accepts a handler **only** if its sha256
-matches that pinned shim; no substring and no marker path is left in the checker.
+Every citizen in the package ships a byte-identical `apps/handlers/json/json_handler.py`
+(DPLAN-0325) — a shim that binds the prax-owned service and resolves nothing of its own. The
+`json_handler` standard accepts a handler **only** if its sha256 matches that pinned shim; no
+substring and no marker path is left in the checker. A registered resident outside the
+package can still carry a pre-migration handler; the contract tests name each one in a skip.
 
 The shim *binds*, never wraps: the service reads its caller at `sys._getframe(2)`, so one
 extra wrapper frame would misroute every log line in the branch. The behaviour is pinned by
@@ -150,17 +147,16 @@ execution over every shim in `tests/test_json_handler_contract.py`.
 
 ---
 
-## `test_quality` (v4) left this pack on 2026-09-07
+## `test_quality` (v4) is retired
 
-It was the pack's only `APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an
-item for finding a substring anywhere under `tests/`. The owner sealed DPLAN-0323 that night —
-the scan manufactured tests instead of measuring them, and one json sweep had to add four
-`test_cli_routing.py` files purely to keep its items covered. Checker, content module and
-`.md` are in `apps/handlers/aipass_standards/.archive/`, and no checker declares
-`APPLIES_TO = tests` any more.
+`test_quality` was a per-branch TEXT scan that awarded an item for finding a substring
+anywhere under `tests/`; a substring scan manufactures tests instead of measuring them
+(DPLAN-0323). Its checker, content module and `.md` are in
+`apps/handlers/aipass_standards/.archive/`, and it is not discovered.
 
-What replaced it is not another gate: [pytest_quality.md](pytest_quality.md) — AST rules that
-score and gate nothing.
+Test files are judged by AST rules instead: this pack's `APPLIES_TO = tests` rows (the two
+pages above), scored per test file, and [pytest_quality.md](pytest_quality.md), a shadow pack
+that scores and gates nothing.
 
 ---
 

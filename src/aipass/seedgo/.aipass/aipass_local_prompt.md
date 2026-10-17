@@ -65,7 +65,7 @@ apps/
     └── tests_lane/              # retire_ops (the .backup move), template_ops (gold + receipts)
 ```
 
-Two lanes, and a finding can exist in one and not the other: the **audit** walks `apps/**/*.py` only (`tests/` is not in its corpus), while the PostToolUse **checklist** hook checks `tests/`. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
+Two lanes: the **audit** walks `apps/`, `shared/` and collectable `tests/` files (`branch_audit.py` `_collect_py_files`), each checker scoring only the files its `APPLIES_TO` names; the PostToolUse **checklist** hook checks one file as it is written. Advisory arms (`check_branch_info`) print lines and never score. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
 
 ## How I Work — Standards Reasoning
 

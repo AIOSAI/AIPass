@@ -19,6 +19,7 @@ this shelf is committed — write it as if it ships.
 | [audit_engine.md](audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [checklist_and_hooks.md](checklist_and_hooks.md) | The per-file checklist lane and the PostToolUse hook that runs it |
 | [proof_and_coverage.md](proof_and_coverage.md) | Proof certification, `test_map`, `test-inventory`, `audit-tests`, the weekly shadow cycle |
+| [test_gold_standard.md](test_gold_standard.md) | What a good test is here, when not to write one, the weak oracles, how a justified pass is declared |
 
 The live inventory of modules, packs and commands is not written down here — it is
 `drone @seedgo` and `drone @seedgo --help`, generated from code.

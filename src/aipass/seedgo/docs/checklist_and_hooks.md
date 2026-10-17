@@ -18,8 +18,9 @@ run here; after the verdicts, behind a blank line, one closing line names the on
 the file (`Not judged here (branch-level, run by ...): ...`), so a clean
 "All N standards passed" is never read as the audit's verdict. It changes no count.
 
-It is not the audit. The audit walks `apps/**/*.py` and reports per branch; the checklist
-takes a path, including a path under `tests/`, which the audit never opens. A bypass rule can
+It is not the audit. The audit walks the branch's corpus (`apps/` plus `tests/`, see
+[audit_engine.md](audit_engine.md)) and reports per branch; the checklist takes whatever one
+path it is handed. A bypass rule can
 be live in one lane and inert in the other, and a standard can pass one while failing the
 other — that difference is real and is not a bug to be smoothed over.
 
@@ -31,28 +32,13 @@ in an ignored file. See [audit_engine.md](audit_engine.md).
 ## Hook architecture — whose is it
 
 The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure: engine, bridge and
-the native handlers. Seedgo audits hooks against standards; it does not own the hook system,
-and it no longer mirrors that branch's roster.
+the native handlers. Seedgo audits hooks against standards; it does not own the hook system
+and does not mirror that branch's roster: a copy of someone else's registry rots quietly; the
+directory does not. Read `src/aipass/hooks/apps/handlers/`, or ask @hooks.
 
-The hand-maintained table this section used to carry in the README listed 14 handlers when 29
-existed, and named one — `prompt.global_loader` — that had already moved to `.archive/`. A
-copy of someone else's registry rots quietly; the directory does not. Read
-`src/aipass/hooks/apps/handlers/`, or ask @hooks.
-
-**Snapshot, 2026-09-07** (`*.py`, excluding `__init__.py`), kept as a record of the shape, not
-as a live count:
-
-| Category | Handlers | Directory |
-|----------|----------|-----------|
-| prompt | 9 | `apps/handlers/prompt/` |
-| lifecycle | 9 | `apps/handlers/lifecycle/` |
-| security | 7 | `apps/handlers/security/` |
-| notification | 5 | `apps/handlers/notification/` |
-| **Total (event handlers)** | **30** | |
-
-Four further directories under the same root are infrastructure rather than event handlers —
-`bridges/` (2), `config/` (3), `json/` (2), `cli/` (1). The count before that one said 29 and
-was taken on 2026-08-25.
+The event handlers sit in category directories under that root (`prompt/`, `lifecycle/`,
+`security/`, `notification/`); `bridges/`, `config/`, `json/` and `cli/` beside them are
+infrastructure rather than event handlers.
 
 ---
 
