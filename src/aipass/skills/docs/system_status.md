@@ -34,7 +34,7 @@ architecture.
 ## machine_vitals() — The Published Read
 
 `lib/system_status/handler.py` publishes `machine_vitals()`: one dict of the
-machine's vitals for in-process callers (decision record: DPLAN-0341). The
+machine's vitals for in-process callers. The
 host API proxies it verbatim on `/v1/machine` and BAUD's phone draws it. The meaning lives here and nowhere downstream — which
 sensor is the CPU, which rows are nonsense, what an absence is called.
 

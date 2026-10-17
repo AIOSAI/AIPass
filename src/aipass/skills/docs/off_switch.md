@@ -2,7 +2,7 @@
 
 # The Off-Switch
 
-A skill can be disconnected from AIPass and reconnected later. Design record: `DPLAN-0306`. The setting
+A skill can be disconnected from AIPass and reconnected later. The setting
 persists across restarts and reboots (`skills_json/switch_state.json`).
 
 ```bash
@@ -35,7 +35,7 @@ switch:
 A skill that declares nothing still toggles; it simply owns no processes to
 stop. If `switch_state.json` is ever unreadable, skills **refuse to run** rather
 than defaulting to on — defaulting to on would restart exactly what someone
-deliberately switched off. Design record: `DPLAN-0306`.
+deliberately switched off.
 
 A door that is imported in-process never passes the runner's gate, so it asks
 the switch itself — `machine_vitals()` in the system_status skill, and the

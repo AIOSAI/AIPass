@@ -5,7 +5,7 @@
 Why `apps/handlers/json/json_handler.py` is a shim and not an implementation.
 
 `apps/handlers/json/json_handler.py` is **not an implementation**. It is the
-fleet's canonical shim (decision record: DPLAN-0325): 1724 bytes,
+fleet's canonical shim: 1724 bytes,
 byte-identical in all eighteen branches, sha256
 `3456b7660698fa9d2a1f9352523f3a0aa75c3d862bcf6222ce4be280513cf0b7`. seedgo
 checks it by hash, so nothing branch-specific may be added to it.
