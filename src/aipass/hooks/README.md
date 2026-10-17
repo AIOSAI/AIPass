@@ -103,7 +103,7 @@ injected blocks and their budgets), `write_ownership` (whose file a write lands 
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
 seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
-the gates), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
+the gates), `comment_scan` and `comments` (the comment budget's counter and its verb), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
 `wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
 platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
@@ -136,6 +136,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning, the test template pointer |
 | [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
+| [docs/comments.md](docs/comments.md) | The comment budget: the metric, the answer an over-budget edit gets, the `comments` verb, what is not counted |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |

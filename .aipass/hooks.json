@@ -139,6 +139,12 @@
       "matcher": "Edit|MultiEdit|Write|NotebookEdit",
       "timeout": 45
     },
+    "comment_budget": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.comment_budget.handle",
+      "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+      "timeout": 10
+    },
     "auto_watchdog": {
       "enabled": false,
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle",
