@@ -145,13 +145,14 @@ before "done", plans for builds — but no code path here calls either.
 
 ### Provides To
 
-Humans, first — the CLI is the product and nothing in the fleet drives it. The
-one exception is `shared/`, which @spawn imports in production code; that
-contract is [shared_contract.md](docs/shared_contract.md).
+Humans, first — the CLI is the product and nothing in the fleet drives it. Two
+exceptions: `shared/`, which @spawn imports in production code, and
+`apps/modules/new_project.py`, which @api's host verbs import for
+`create_project`; both are in [shared_contract.md](docs/shared_contract.md).
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 ---
 
