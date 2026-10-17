@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup_route.py
 # Description: Host API Backup Routes — the backup door's four routes, hung on the app
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # The suppressions cover the optional-dependency placeholders, as in server.py:
@@ -13,7 +13,7 @@
 """
 Host API Backup Routes
 
-The backup door (DPLAN-0411, DPLAN-0412): POST /v1/backup/run, POST
+The backup door: POST /v1/backup/run, POST
 /v1/backup/cancel, GET /v1/backup/job and GET /v1/backup/status. The answers are
 backup.py's; this file is the glue that hangs them on the app. Here and not in
 server.py, which sits at its 1500-line cap.

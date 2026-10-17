@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project_route.py
 # Description: Host API New-Project Route — POST /v1/verbs/new-project, hung on the app
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # The suppressions cover the optional-dependency placeholders, as in machine_route.py.
@@ -11,7 +11,7 @@
 """
 Host API New-Project Route
 
-POST /v1/verbs/new-project (FPLAN-0649): the phone's "+ new project". The logic
+POST /v1/verbs/new-project: the phone's "+ new project". The logic
 is verbs.new_project(); this file hangs it on the app, here and not in server.py,
 which sits at its 1500-line cap.
 

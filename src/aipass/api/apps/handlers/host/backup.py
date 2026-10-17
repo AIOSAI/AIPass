@@ -1,24 +1,24 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Backup Handler
 
-The backup door (DPLAN-0411, DPLAN-0412): the logic behind POST /v1/backup/run,
+The backup door: the logic behind POST /v1/backup/run,
 POST /v1/backup/cancel, GET /v1/backup/job and GET /v1/backup/status. Every
-shape on the wire is the one in devpulse's backup door contract; this module
+shape on the wire is the one in docs/host_surfaces.md; this module
 names none of its own.
 
 THE DOOR OWNS NO MECHANISM
 ------------------------------------------------------------------------
 @backup owns the lanes, `stop` and `status --json`. This module imports no
 subprocess machinery and reaches @backup only through drone.route_command, the
-verb lane's pattern. The argv per lane is the contract's table and nothing
+verb lane's pattern. The argv per lane is the documented table and nothing
 more: snapshot, versioned and all take --quiet, drive_sync has none. A cancel
 is `stop <root> <lane>` on the request thread; @backup sends the signal and
 waits for the lane, and the job closes by itself when the lane exits.
@@ -139,7 +139,7 @@ def _utc_now() -> datetime:
 
 
 def _iso(moment: datetime) -> str:
-    """An instant as the contract writes it, e.g. 2026-10-16T07:30:00+00:00."""
+    """An instant as the wire writes it, e.g. 2026-10-16T07:30:00+00:00."""
     return moment.isoformat(timespec="seconds")
 
 
@@ -325,7 +325,7 @@ def _work(table: JobTable, job_id: str, lane: str, argv: List[str]) -> None:
     try:
         result = drone.route_command(BACKUP, lane, argv, timeout=RUN_TIMEOUT_SECONDS)
     except drone.RoutingError as e:
-        # The door died behind us: a failed job carrying drone's sentence, as the contract says.
+        # The door died behind us: a failed job carrying drone's sentence.
         logger.warning("[host_api] backup %s job %s could not finish: %s", lane, job_id, e)
         table.finish(job_id, None, "", str(e).strip() or type(e).__name__)
         return
