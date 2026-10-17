@@ -143,7 +143,7 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 
 ---
 
-**Last Updated:** 2026-10-16
+**Last Updated:** 2026-10-17
 
 ---
 

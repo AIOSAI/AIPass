@@ -3,8 +3,8 @@
 # The Drive lane
 
 Optional, off by default, and the only part of this branch that leaves the
-machine. Since DPLAN-0411 (2026-10-16) it uploads the **snapshot** store; the
-versioned store never leaves the machine.
+machine. It uploads the **snapshot** store; the versioned store never leaves
+the machine.
 
 ## When it runs
 
@@ -27,26 +27,24 @@ deletes anything already uploaded to Drive.
 
 ## What is verified, and what is not
 
-`drive_check` authenticated through the gateway and returned a live backup-folder
-ID, and `drive_stats` read the tracker, both on 2026-09-05. The **upload** path
-(`drive_sync`, `share`) was deliberately *not* exercised — it publishes files to
-a real Drive account — so it stands **unverified since 2026-08-29**, the last
-recorded `drive_sync` run. The snapshot-store upload (DPLAN-0411) has been
-exercised only against a mocked client; its first live run is devpulse's. A page that claims an upload works because the code
-looks right would be worth less than this sentence.
+`drive_check` (authenticates through the gateway and prints the backup-folder
+ID) and `drive_stats` (reads the tracker and the account quota) upload nothing.
+The **upload** path (`drive_sync`, `share`) publishes files to a real Drive
+account, and the suite exercises it only against a mocked client: no test
+verifies it end to end.
 
 ## What the lane uploads
 
 `drive_sync` walks `<project>/.backup/snapshots/` and uploads each file under
 `AIPass Backups/<project dir name>/snapshot/<path relative to the snapshot
-store>`. What an earlier versioned-era sync put on Drive (directly under
-`AIPass Backups/<project dir name>/`) is left there: this branch never deletes
-anything remote, and the owner removes that tree by hand when he chooses.
+store>`. Anything else under `AIPass Backups/<project dir name>/` (such as what
+a versioned-store sync put directly there) is left alone: this branch never
+deletes anything remote; removing it is a job done by hand.
 
 Before uploading, the store is re-filtered through `load_spec()`, so a store that
 was filled before an ignore rule existed still does not publish the files that
-rule now covers. That is why the pre-rule `*.tmp` copies described in [store
-cleanup](store_cleanup.md) are inert rather than urgent.
+rule now covers. That is why copies taken before a rule existed (see [store
+cleanup](store_cleanup.md)) are inert rather than urgent.
 
 ## The never-leaves floor
 

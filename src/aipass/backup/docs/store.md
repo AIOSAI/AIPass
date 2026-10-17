@@ -14,14 +14,14 @@ Each registered project gets a `.backup/` directory at its root:
 ├── logs/                # Operation logs (eager — created on register)
 ├── timestamps.json      # Per-file mtime index for change detection (lazy)
 ├── changelog.json       # Change history (lazy)
+├── running/             # One <lane>.json per lane in flight, removed when it ends (lazy)
 └── drive_tracker.json   # Drive sync dedup tracker (lazy)
 ```
 
 On `register`, only `snapshots/` and `logs/` are created eagerly (plus
 `config.json` and the project's `.backupignore`). The rest are created lazily on
-first use. Verified live 2026-09-05 by registering a scratch project: the eager
-set was exactly `config.json`, `snapshots/`, `logs/`; `timestamps.json`,
-`changelog.json` and `versioned/` appeared only after the first `versioned` run.
+first use (`handlers/project/setup.py`): `timestamps.json`, `changelog.json`
+and `versioned/` appear with the first `versioned` run.
 
 **`timestamps.json` is not a record of when backups ran.** It maps each relative
 path to the mtime the versioned engine last saw (`handlers/state/timestamps.py`),

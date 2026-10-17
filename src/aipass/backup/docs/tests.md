@@ -19,13 +19,15 @@ parametrised, so case counts run well ahead of function counts there.
 
 ## What the suite is careful about
 
-- **Live files.** The audit trail honours `AIPASS_TEST_LOG_DIR`, so a test run
-  writes its operation trail into a sandbox rather than the branch's own
-  `logs/operations.jsonl`. One live file is still rewritten by a full run, for a
-  reason that is a defect rather than a choice.
-- **Real credentials.** A help-gate test once patched only one lane, so `all`
-  fell through to live OAuth and rewrote the machine's real Google credentials
-  file. The pins that closed it stay in `tests/test_cli_routing.py`.
+- **Live files.** `tests/conftest.py` sets `AIPASS_TEST_LOG_DIR` to a temp
+  directory, and both the audit trail (`handlers/audit/trail.py`) and the
+  run-timestamps map (`handlers/state/backup_timestamps.py`) honour it, so a
+  test run writes into a sandbox rather than the branch's own
+  `logs/operations.jsonl` and `backup_json/backup_timestamps.json`.
+- **Real credentials.** No test may reach live OAuth: a help-gate test that
+  patches only one lane lets `all` fall through to the machine's real Google
+  credentials file. `TestNoWriteEscapesToRealSecrets` in
+  `tests/test_cli_routing.py` pins that the `all` cycle never writes there.
 - **The fence runs in fresh interpreters.** `tests/test_handlers_fence.py`
   copies `tests/support_fence.py` to foreign seats under `tmp_path` and runs it
   in a child process per case, because the fence only fires on a package's
