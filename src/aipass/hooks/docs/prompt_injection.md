@@ -8,7 +8,7 @@ Every grounding block is rendered under a number, and the number is read from it
 
 ---
 
-## Injection caps — every grounding block is rendered under a number (DPLAN-0347)
+## Injection caps — every grounding block is rendered under a number
 
 Each grounding layer has one job and one cap, and the cap is **read, never copied**. The branch prompt is
 capped at **9,000** chars and each `apps/integrations/*/private_prompt.md` at **2,000**
@@ -48,7 +48,7 @@ file is not written (token included), and `should_fire` answers False for every 
 announces on arrival, and an alert's arrival never asks cadence. A notification does not cancel queued
 post-compact re-ground parts.
 
-**Ground once after a compaction (DPLAN-0348).** When the PostToolUse backstop hands out its final part, it
+**Ground once after a compaction.** When the PostToolUse backstop hands out its final part, it
 stamps `aipass-regroup-done-<session>.json`: the window and the transcript size at completion. A degraded or
 partial re-ground stamps nothing. At turn 0, `tier0`/`navmap`/`identity`/`branch` stand down once if the
 stamp's window is the current one, and the prompt sits within `regroup_fresh_bytes` of it: 150,000 in
@@ -58,7 +58,7 @@ would repeat a fresh re-ground and below a long stretch of autonomous work, afte
 grounds. A second compaction opens a new window. A prompt straight after a compaction had no backstop, so
 it grounds through turn 0, which keeps the post-compact dead zone closed.
 
-**A branch can override a loader (DPLAN-0355).** `cadence_config.json` takes a `branches`
+**A branch can override a loader.** `cadence_config.json` takes a `branches`
 map: `{"canary": {"loaders": {"tier0": {"beat": false}}}}`. The branch is the prompt's cwd's branch root
 (`grounding_content.find_branch_root`), by name. Its entry for a loader is merged over the global entry
 for that loader only, so a loader it does not name runs the global entry, and a branch with no entry runs
