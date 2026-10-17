@@ -3,59 +3,14 @@
 # Description: Host API Autostart Handler — the supervisor seam, so the server survives a reboot
 # Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Autostart Handler
 
-What it takes for the tailnet server to come back on its own, and how this
-branch finds out that something else is holding it.
-
-WHY THIS EXISTS
----------------
-On 2026-08-27 @baud's phone face went dark. `host_api_serve.log` showed normal
-traffic, then silence — no traceback, no shutdown line. A detached server dies
-with the machine, and nothing brought it back; the owner ruled that a face which
-waits for a human after every reboot is wrong.
-
-WHY SYSTEMD AND NOT A LOOP OF MY OWN
-------------------------------------
-`lifetime.py` refuses on principle to restart anything, and that refusal is
-still right: the fourteen death-and-restart cycles @baud read out of a pane on
-2026-08-19 came FROM a supervisor — a shell loop somebody typed. Answering a
-missing supervisor with a second home-grown one repeats the mistake with better
-manners. systemd is already running on this host, already owns boot ordering,
-and already knows how to not restart something an operator deliberately stopped.
-
-So this handler supervises nothing. It RENDERS a unit, ANSWERS whether the
-supervisor currently holds the server, and ASKS it to stop. Every actual
-decision about starting, restarting and boot ordering belongs to systemd.
-
-THE TWO THINGS THAT MAKE THIS SAFE RATHER THAN MERELY AUTOMATIC
----------------------------------------------------------------
-`status` must not lie. Today it reads a record file written by `serve_detached`,
-and a unit-managed server writes no such record — so a perfectly healthy server
-would be reported as absent, which is the exact failure that costs an operator
-an hour at 3am. `supervised_pid()` is what closes that.
-
-`stop` must not become a trap. Signalling the pid directly while a restart
-policy watches it is how you get a command that appears to work and undoes
-itself seconds later. When the supervisor owns the process, stop goes THROUGH
-the supervisor, which suppresses the restart policy by definition.
-
-Functions:
-    is_supported()      - Whether this platform has a user-level systemd
-    unit_name()         - The unit's name
-    unit_text()         - Render the unit file from argv, workdir and log path
-    supervised_pid()    - The unit's live main pid, or 0
-    supervised_bind()   - The address the supervised server was actually started on
-    stop_unit()         - Ask the supervisor to stop the unit
-    linger_enabled()    - Whether this account's units survive logout
-    install_commands()  - The exact host-side steps, in order
-    installation_report() - Everything the autostart command has to show
-    install_unit()      - Copy the unit into the user unit dir and reload (or name the steps)
-    enable_unit()       - enable --now, and lingering if off (or name the steps)
+Supervises nothing: renders a systemd user unit, answers whether systemd holds
+the server, and asks it to stop. Reference: docs/host_autostart.md
 """
 
 import shutil
@@ -67,42 +22,26 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 
-# The unit's name is part of the contract with whoever installs it: the reply
-# that carries the install commands and the code that asks "are you holding
-# it?" have to mean the same unit, so it is spelled once.
+# Spelled once: the printed install commands and the "are you holding it?" probe must mean one unit.
 UNIT_NAME = "aipass-host-api.service"
 
-# Where a user unit lives. The autostart COMMAND only prints it; install_unit()
-# writes there, and only when a caller asks it to by name (FPLAN-0642: a stranger
-# running `aipass install` is the operator saying yes).
 USER_UNIT_DIR = "~/.config/systemd/user"
 
 # enable --now starts the server, so it waits for a start, not a probe.
 ENABLE_TIMEOUT_SECONDS = 30.0
 
-# How long any systemctl question may take. A supervisor probe that hangs turns
-# `status` — the command an operator runs precisely when things are strange —
-# into another thing that is not answering.
+# A hung probe would hang `status`, the command run precisely when things are strange.
 PROBE_TIMEOUT_SECONDS = 5.0
 
-# How long to wait for the supervisor to bring the unit down. Longer than
-# lifetime's own stop wait, because systemd runs the graceful shutdown AND the
-# bookkeeping after it.
+# Above TIMEOUT_STOP_SECONDS: systemd runs the graceful shutdown and its bookkeeping.
 STOP_TIMEOUT_SECONDS = 20.0
 
-# Restart policy, and the reasoning is the tailnet address. At boot this server
-# may come up before tailscaled has assigned the address it is configured to
-# bind, and that failure looks exactly like a fatal misconfiguration: it exits
-# non-zero immediately. So the retry window is generous enough to outlast a slow
-# network (60 attempts, 5s apart, inside 10 minutes) and still FINITE, because a
-# genuinely impossible bind should end as a unit in `failed` that says so, not
-# as a process quietly retrying forever into a growing log.
+# Generous enough to outlast tailscaled assigning the bind address at boot, still finite.
 RESTART_SECONDS = 5
 START_LIMIT_INTERVAL_SECONDS = 600
 START_LIMIT_BURST = 60
 
-# systemd's own graceful-stop budget. Above lifetime's ten seconds so the
-# supervisor is never the thing that cuts a shutdown short.
+# Above lifetime's ten seconds, so the supervisor never cuts a shutdown short.
 TIMEOUT_STOP_SECONDS = 15
 
 
@@ -111,33 +50,11 @@ class AutostartUnsupported(Exception):
 
 
 class SupervisorUnreachable(Exception):
-    """
-    There IS a supervisor here and it did not answer.
-
-    Deliberately separate from AutostartUnsupported, because the two look
-    identical at the call site and mean opposite things. No systemd at all is a
-    MEASUREMENT — there is no unit and there cannot be one, so zero is the
-    truth. A systemctl that hangs, times out or cannot be executed on a machine
-    that has one is an ABSENCE of measurement, and reporting that as "no unit is
-    running" is the same defect the status lane was just fixed for: answering
-    absence when the honest answer is I could not ask.
-    """
+    """There IS a supervisor here and it did not answer."""
 
 
 def is_supported() -> bool:
-    """
-    Whether the supervisor lane can work on this platform at all.
-
-    Returns:
-        True when this is Linux and systemctl is on PATH.
-
-    Note:
-        Asked before every probe rather than once at import. A branch that
-        answers "no autostart here" honestly on Windows or macOS is worth more
-        than one that raises FileNotFoundError out of a status command — and
-        seedgo's Windows check exists because `--detach` already shipped one
-        POSIX-only assumption that reported success while doing nothing.
-    """
+    """Whether the supervisor lane can work on this platform at all."""
     if not sys.platform.startswith("linux"):
         return False
 
@@ -145,41 +62,14 @@ def is_supported() -> bool:
 
 
 def unit_name() -> str:
-    """
-    The unit this branch installs and asks about.
-
-    Returns:
-        The unit name, including the .service suffix.
-    """
+    """The unit this branch installs and asks about."""
     return UNIT_NAME
 
 
 def unit_text(argv: List[str], workdir: Path, log: Path) -> str:
-    """
-    Render the unit file.
-
-    Args:
-        argv: The exact command that starts the server, already built by the
-            lifetime lane — so the supervised server and a detached one are
-            started by one spelling and cannot drift apart.
-        workdir: The branch root the server runs from.
-        log: The file its output appends to.
-
-    Returns:
-        The unit file's full text.
-
-    Note:
-        StandardOutput=append: is what keeps requirement three — the SAME
-        `host_api_serve.log`, appended, across reboots and restarts. It is the
-        continuity that made this morning's outage diagnosable at all: a log
-        that starts fresh on every restart cannot tell you that traffic stopped
-        rather than that the file is new.
-
-        StartLimit* sit under [Unit] and not [Service]. systemd moved them in
-        v230 and accepts the old spelling by IGNORING it — a rate limit written
-        in the wrong section is not an error, it is an absence, which is the
-        kind of silent no-op this branch has been bitten by before.
-    """
+    """Render the unit file."""
+    # append:, never file: (truncates each start). StartLimit* belong under [Unit]:
+    # since v230 systemd silently IGNORES them under [Service].
     command = " ".join(argv)
 
     return f"""[Unit]
@@ -208,12 +98,7 @@ def _systemctl(arguments: List[str], timeout: float) -> Optional[subprocess.Comp
     """
     Run a `systemctl --user` command.
 
-    Args:
-        arguments: Everything after `--user`.
-        timeout: Seconds to allow.
-
-    Returns:
-        The completed process, or None when systemctl could not be run at all.
+    None means this platform has no systemctl, never that it failed to answer.
     """
     if not is_supported():
         return None
@@ -227,53 +112,14 @@ def _systemctl(arguments: List[str], timeout: float) -> Optional[subprocess.Comp
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        # RAISED, not swallowed into None. This machine HAS a systemctl and it
-        # did not answer — folding that into the same None the no-systemd
-        # platform returns is what turned "I could not ask" into "nothing is
-        # running" one layer up.
         logger.warning("[host_api] the supervisor could not be reached: %s", e)
         raise SupervisorUnreachable(f"systemctl is here but did not answer: {e}") from e
 
 
 def supervised_pid() -> int:
-    """
-    The unit's live main process id.
-
-    Returns:
-        The pid, or 0 when no unit is holding the server — including on a
-        platform that has no systemd at all.
-
-    Raises:
-        SupervisorUnreachable: There is a systemctl here and it did not answer,
-            or answered a MainPID that is not a number.
-
-    Note:
-        THE RULING, asked for by @devpulse 2026-08-27 and split in two because
-        the question has two answers.
-
-        NO SYSTEMD ON THIS PLATFORM ANSWERS ZERO, and that is not a refusal
-        dodged. Zero means "no unit is holding the server", and on a machine
-        that cannot have a unit that is a fact with no uncertainty in it — the
-        strongest answer this probe can give. running() then falls through to
-        the detached record, which is the only kind of server that can exist
-        there, so the caller gets the truth rather than an exception it would
-        have to translate back into the same truth.
-
-        A PROBE THAT FAILED ON A CAPABLE MACHINE DOES NOT ANSWER ZERO. That one
-        does deserve refuse-dont-zero: on the tailnet host the unit is live and
-        writes NO record file, so a swallowed probe would send running() to a
-        record that does not exist and status would print "No server is
-        running" while the server was answering requests. That is the exact
-        defect this lane was built to close, one layer down from where it was
-        found.
-
-        `show -p MainPID` rather than `is-active`. is-active EXITS NON-ZERO for
-        an unknown or inactive unit, so a caller has to read an exit code to
-        tell "no" from "could not ask"; show answers 0 with MainPID=0 in both
-        of those cases and reserves a non-zero exit for a real failure to run.
-        A probe whose absence-answer and error-answer look different is worth
-        the extra parsing.
-    """
+    """The unit's live main process id."""
+    # show, not is-active: is-active exits non-zero for an inactive unit, so "no"
+    # and "could not ask" would look alike; show exits non-zero only on failure.
     result = _systemctl(["show", UNIT_NAME, "-p", "MainPID", "--value"], PROBE_TIMEOUT_SECONDS)
 
     if result is None or result.returncode != 0:
@@ -284,42 +130,19 @@ def supervised_pid() -> int:
     try:
         pid = int(raw)
     except ValueError as e:
-        # An unreadable MainPID is no measurement, so it refuses like a probe that
-        # did not answer; zero would claim no unit holds the server (api, fleet green leg 3).
+        # No measurement, so it refuses: zero would claim no unit holds the server.
         raise SupervisorUnreachable(f"the supervisor reported an unreadable MainPID: {raw!r}") from e
 
     return pid if pid > 0 else 0
 
 
 def supervised_bind() -> Tuple[Optional[str], Optional[int]]:
-    """
-    The address the supervised server was actually started on.
-
-    Returns:
-        A (host, port) pair read from the unit's own ExecStart, or (None, None)
-        when it could not be read.
-
-    Raises:
-        Nothing. An unreadable bind is reported as unknown, never guessed.
-
-    Note:
-        READ FROM THE UNIT, NOT FROM THE STORED CONFIG. The unit pins its bind
-        at install time; `set-config` afterwards changes what the NEXT install
-        would use and nothing about the process currently listening. Reporting
-        the config here would produce a status line that is confidently wrong
-        exactly once — after somebody changes the port and before they reinstall
-        — which is the worst possible time for it.
-    """
-    # Tolerant on purpose, and it is not the same call as the pid probe: this
-    # only decorates a status line that has ALREADY established a live unit, so
-    # an unreachable supervisor here cannot produce a wrong verdict — only a
-    # missing bind, which prints as "unknown".
+    """The address the supervised server was actually started on."""
+    # From the unit, not the stored config: set-config changes the next install, not this process.
     try:
         result = _systemctl(["show", UNIT_NAME, "-p", "ExecStart", "--value"], PROBE_TIMEOUT_SECONDS)
     except SupervisorUnreachable as e:
-        # Swallowed HERE and nowhere else, and it leaves a record saying so. The
-        # verdict was already established by the pid probe; losing the bind only
-        # costs a status line its address, which prints as "unknown".
+        # Swallowed here only: the pid probe already gave the verdict; this costs just the address.
         logger.warning("[host_api] the unit's bind could not be read: %s", e)
         return (None, None)
 
@@ -337,19 +160,7 @@ def supervised_bind() -> Tuple[Optional[str], Optional[int]]:
 
 
 def _flag_in(words: Sequence[str], flag: str) -> Optional[str]:
-    """
-    The value following *flag* in a systemd argv line.
-
-    Args:
-        words: The ExecStart line, already split. A Sequence rather than a List
-            because this only reads it — List is invariant, so a list of string
-            literals is not assignable to List[str] and the checker was right
-            to say so.
-        flag: The flag to find.
-
-    Returns:
-        The value, or None when the flag is absent or ends the line.
-    """
+    """The value following *flag* in a systemd argv line."""
     for name, value in zip(words, words[1:]):
         if name == flag:
             return value
@@ -358,16 +169,7 @@ def _flag_in(words: Sequence[str], flag: str) -> Optional[str]:
 
 
 def _port_in(words: Sequence[str]) -> Optional[int]:
-    """
-    The port the unit was started on.
-
-    Args:
-        words: The ExecStart line, already split.
-
-    Returns:
-        The port, or None when it is absent or unreadable. Never a guess — a
-        status line that invents a port is worse than one saying unknown.
-    """
+    """The port the unit was started on."""
     raw = _flag_in(words, "--port")
 
     if raw is None:
@@ -381,22 +183,7 @@ def _port_in(words: Sequence[str]) -> Optional[int]:
 
 
 def stop_unit() -> bool:
-    """
-    Ask the supervisor to stop the unit.
-
-    Returns:
-        True when systemd accepted the stop.
-
-    Raises:
-        AutostartUnsupported: There is no user-level systemd here.
-
-    Note:
-        THIS IS THE WHOLE REASON `stop` STAYS HONEST. A SIGTERM sent straight to
-        a supervised pid is a stop the restart policy is entitled to undo, and a
-        command that visibly works and reverses itself a few seconds later is
-        worse than one that refuses. `systemctl stop` outranks Restart= by
-        definition, so the server stays down until somebody starts it.
-    """
+    """Ask the supervisor to stop the unit."""
     if not is_supported():
         raise AutostartUnsupported("There is no user-level systemd on this platform")
 
@@ -418,15 +205,7 @@ def linger_enabled() -> Optional[bool]:
     """
     Whether this account's user units run without a login session.
 
-    Returns:
-        True or False, or None when the question could not be asked.
-
-    Note:
-        Without lingering a user unit starts when the user logs IN, which for a
-        headless host that reboots unattended means it does not start at all —
-        the exact failure this build exists to end. It is reported rather than
-        assumed, because it is set outside this tree and can be turned off again
-        by somebody who never reads this file.
+    None means the question could not be asked: a third answer, not a no.
     """
     if not sys.platform.startswith("linux") or shutil.which("loginctl") is None:
         return None
@@ -450,22 +229,9 @@ def linger_enabled() -> Optional[bool]:
 
 
 def install_commands(unit_file: Path) -> List[str]:
-    """
-    The exact host-side steps, in the order they must run.
-
-    Args:
-        unit_file: The rendered unit inside this branch.
-
-    Returns:
-        The commands. NOT run from here — installing a unit means writing under
-        the operator's home and enabling something that outlives every session,
-        which is outside this tree and is theirs to run.
-
-    Note:
-        `enable --now` rather than enable-then-start, so a half-installed unit —
-        enabled for the next boot but not running today — cannot be the state
-        somebody walks away from.
-    """
+    """The exact host-side steps, in the order they must run."""
+    # Positional contract: install_unit takes [:3], enable_unit takes [3:].
+    # enable --now, so enabled-but-not-running cannot be the state left behind.
     return [
         f"mkdir -p {USER_UNIT_DIR}",
         f"cp {unit_file} {USER_UNIT_DIR}/{UNIT_NAME}",
@@ -476,24 +242,7 @@ def install_commands(unit_file: Path) -> List[str]:
 
 
 def installation_report(unit_file: Path) -> dict:
-    """
-    Everything the autostart command has to show, gathered in one place.
-
-    Args:
-        unit_file: The rendered unit inside this branch.
-
-    Returns:
-        The unit path, the ordered steps, and whether lingering is on — with
-        None meaning the question could not be asked, which is a third answer
-        and not a no.
-
-    Note:
-        The MODULE above this only prints. Gathering the steps and probing
-        lingering are decisions about what is true on this host, which is
-        handler work — seedgo refused the first cut for exactly that, and it was
-        right: the same report is what a future `autostart --check` would need,
-        and it would have had to reach into a CLI function to get it.
-    """
+    """Everything the autostart command has to show, gathered in one place."""
     return {
         "unit": unit_file,
         "steps": install_commands(unit_file),
@@ -506,17 +255,7 @@ class _StepFailed(Exception):
 
 
 def _run_steps(steps: List[Tuple[str, Callable[[], str]]], dry_run: bool) -> Dict[str, Any]:
-    """
-    Run named steps in order, stopping at the first that fails.
-
-    Args:
-        steps: (the step as an operator would type it, the callable that does it).
-        dry_run: Name every step and run none.
-
-    Returns:
-        {"dry_run", "ok", "steps": [{"step", "ok", "detail"}]}. In a dry run each
-        step's ok is None: planned, not attempted. A failed step is the last entry.
-    """
+    """Run named steps in order, stopping at the first that fails."""
     if dry_run:
         return {"dry_run": True, "ok": True, "steps": [{"step": name, "ok": None, "detail": ""} for name, _ in steps]}
 
@@ -554,22 +293,7 @@ def _user_unit_dir() -> Path:
 
 
 def install_unit(unit_file: Path, dry_run: bool = False) -> Dict[str, Any]:
-    """
-    Copy the rendered unit into the user unit directory and reload systemd.
-
-    The install_commands() steps up to, not including, the enable: run here
-    rather than printed, for a caller that asked by name (FPLAN-0642).
-
-    Args:
-        unit_file: The rendered unit inside this branch.
-        dry_run: Name the steps and run none.
-
-    Returns:
-        The steps report: {"dry_run", "ok", "steps"}.
-
-    Raises:
-        AutostartUnsupported: There is no user-level systemd here.
-    """
+    """Copy the rendered unit into the user unit directory and reload systemd."""
     if not is_supported():
         raise AutostartUnsupported("Autostart needs a user-level systemd, which this platform does not have")
 
@@ -604,21 +328,7 @@ def install_unit(unit_file: Path, dry_run: bool = False) -> Dict[str, Any]:
 
 
 def enable_unit(dry_run: bool = False) -> Dict[str, Any]:
-    """
-    Enable and start the installed unit, and turn lingering on if it is off.
-
-    Lingering is skipped, not re-asked, when it is already on; when it cannot be
-    read it is asked, because the step is idempotent (install_commands' note).
-
-    Args:
-        dry_run: Name the steps and run none.
-
-    Returns:
-        The steps report: {"dry_run", "ok", "steps"}.
-
-    Raises:
-        AutostartUnsupported: There is no user-level systemd here.
-    """
+    """Enable and start the installed unit, and turn lingering on if it is off."""
     if not is_supported():
         raise AutostartUnsupported("Autostart needs a user-level systemd, which this platform does not have")
 
@@ -626,6 +336,7 @@ def enable_unit(dry_run: bool = False) -> Dict[str, Any]:
     steps: List[Tuple[str, Callable[[], str]]] = [
         (enable_step, lambda: _systemctl_step(["enable", "--now", UNIT_NAME], ENABLE_TIMEOUT_SECONDS)),
     ]
+    # Unreadable lingering (None) still runs the step: enable-linger is idempotent.
     if linger_enabled() is not True:
         steps.append((linger_step, _enable_linger))
     return _run_steps(steps, dry_run)

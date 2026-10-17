@@ -10,19 +10,8 @@
 
 """
 Host API New-Project Route
-
-POST /v1/verbs/new-project: the phone's "+ new project". The logic
-is verbs.new_project(); this file hangs it on the app, here and not in server.py,
-which sits at its 1500-line cap.
-
-Operate scope. A plain def, so the few seconds of git and spawn run in the
-threadpool. Body {name, template?}; template defaults to empty. A refusal whose
-sentence is this server's or the door's own exists sentence is said; any other
-error answers its code's fixed sentence and a ref into this host's log.
-
-Functions:
-    register() - Add POST /v1/verbs/new-project to an app
-"""
+Here and not in server.py, which sits at its 1500-line cap. Reference: docs/host_api.md
+A plain def, so the few seconds of git and spawn run in the threadpool."""
 
 from typing import Any, Callable
 
@@ -44,15 +33,7 @@ def register(
     logged_denial: Callable[..., Any],
     require_scope: Callable[[str], Any],
 ) -> None:
-    """
-    Add POST /v1/verbs/new-project to *app*.
-
-    Args:
-        app: The FastAPI app.
-        deny: server._deny, so every refusal leaves through the one envelope.
-        logged_denial: server._logged_denial, for a refusal whose words go to the log.
-        require_scope: server.require_scope, the bearer dependency at a scope.
-    """
+    """Add POST /v1/verbs/new-project to *app*."""
 
     @app.post("/v1/verbs/new-project")
     def verb_new_project(payload: dict = Body(default={}), record: dict = Depends(require_scope("operate"))) -> dict:

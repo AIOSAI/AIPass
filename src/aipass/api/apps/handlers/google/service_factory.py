@@ -3,41 +3,17 @@
 # Description: Google API service object factory
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 # pyright: reportMissingImports=false, reportOptionalCall=false
 
-"""
-Google API Service Factory
-
-Builds authenticated Google API service objects (Drive, Calendar, etc.).
-Supports both single-threaded and thread-safe modes.
-
-Thread-safe mode loads fresh credentials from disk per call,
-avoiding token refresh races in concurrent operations.
-This pattern was extracted from backup's drive_sync_client.py.
-
-Usage:
-    from aipass.api.apps.handlers.google.service_factory import (
-        build_service, build_thread_safe_service
-    )
-
-    # Single-threaded
-    service = build_service("drive", "v3")
-
-    # Thread-safe (for concurrent workers)
-    service = build_thread_safe_service("drive", "v3")
-"""
+"""Google API Service Factory"""
 
 from typing import Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.google import auth as auth
 from aipass.api.apps.handlers.json import json_handler
-
-# =============================================
-# GOOGLE API AVAILABILITY
-# =============================================
 
 try:
     from googleapiclient.discovery import build
@@ -49,11 +25,6 @@ except ImportError as e:
     build = None  # type: ignore[assignment]
 
 
-# =============================================
-# SERVICE FACTORIES
-# =============================================
-
-
 def build_service(
     service_name: str = "drive",
     version: str = "v3",
@@ -61,21 +32,8 @@ def build_service(
 ) -> Optional[object]:
     """Build an authenticated Google API service object.
 
-    Uses the full auth lifecycle (load → refresh → OAuth flow).
-
-    Args:
-        service_name: Google API service (e.g. "drive", "calendar", "sheets").
-        version: API version (e.g. "v3", "v3").
-        scopes: OAuth2 scopes. Defaults to service-specific defaults from auth module.
-
-    Returns:
-        Authenticated service object, or None when the libraries or the
-        client secret are missing.
-
-    Raises:
-        auth.GoogleAuthUnavailable: authentication or the build failed; the
-        reason travels to get_google_service's callers, @backup's DriveClient
-        among them (api, fleet green leg 10, @backup's answer).
+    None when the libraries or client secret are missing; a failed auth or build raises
+    GoogleAuthUnavailable, whose reason @backup's DriveClient reads.
     """
     if not GOOGLE_BUILD_AVAILABLE or not auth.is_available():
         return None
@@ -99,32 +57,15 @@ def build_thread_safe_service(
 ) -> Optional[object]:
     """Build an isolated service instance for use in a worker thread.
 
-    Loads fresh credentials from disk to avoid sharing credential state
-    (token refresh races) and creates a fully isolated HTTP/SSL connection.
-
-    Args:
-        service_name: Google API service name.
-        version: API version.
-        scopes: OAuth2 scopes.
-
-    Returns:
-        Isolated authenticated service object, or None when the libraries are
-        missing, no credentials are saved, or they are neither valid nor
-        refreshable.
-
-    Raises:
-        auth.GoogleAuthUnavailable: the load, the refresh or the build failed
-        (api, fleet green leg 10, @backup's answer).
+    Fresh credentials from disk per call: shared credential state races on token refresh.
     """
     if not GOOGLE_BUILD_AVAILABLE or not auth.is_available():
         return None
 
-    # Load fresh credentials from disk — no shared state
     creds = auth.load_credentials(scopes=scopes)
     if not creds:
         return None
 
-    # Refresh if expired
     if creds.expired and creds.refresh_token:
         if not auth.refresh_credentials(creds):
             return None

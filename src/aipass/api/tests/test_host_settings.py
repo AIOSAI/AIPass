@@ -3,14 +3,10 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.0.0
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
-
-# The settings lane mirrors @baud's settings.rs, and these tests pin the rules
-# that make the two faces write one truth: surgical three-state patches, the
-# never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — @baud's settings.rs, the other face; @baud's own tests
@@ -27,9 +23,6 @@ import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
 
-# Asked of @hooks' own module in a child process: where WOULD the flag go under
-# the environment this test just built? The answer has to come from there — a
-# copy of the rule computed here would agree with itself and prove nothing.
 WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.MUTE_FLAG)"
 
 
@@ -37,15 +30,7 @@ def _where_the_door_would_write() -> Path:
     """
     Ask @hooks' own module, in a child that inherits this process's environment.
 
-    The answer has to come from THERE. Computing the path here would agree with
-    itself no matter what the environment says, which is precisely the failure
-    this exists to catch: `tempfile.gettempdir()` falls back to the machine's
-    real temp directory when TMPDIR points at a directory that does not exist,
-    silently, so a redirect can look applied and not be.
-
-    Returns:
-        The path the door's own process would write the mute flag to.
-    """
+    Never compute it here: gettempdir silently falls back when TMPDIR does not exist."""
     child = subprocess.run(
         [sys.executable, "-c", WHERE_THE_FLAG_LIVES],
         capture_output=True,
@@ -59,16 +44,7 @@ def _where_the_door_would_write() -> Path:
 
 
 def _fingerprint(path: Path) -> tuple:
-    """
-    Enough of a file to notice it was touched at all.
-
-    Args:
-        path: The operator's real mute flag.
-
-    Returns:
-        (exists, size, mtime_ns) — absent files fingerprint as absent rather
-        than raising, because the flag not existing IS a legitimate state.
-    """
+    """Enough of a file to notice it was touched at all."""
     if not path.exists():
         return (False, None, None)
 
@@ -86,17 +62,7 @@ def _ok() -> subprocess.CompletedProcess:
 def muted_elsewhere(tmp_path, monkeypatch):
     """
     @hooks' flag, relocated into this test's own directory, plus a stand-in for
-    the door that moves it.
-
-    The machine's real flag is the OPERATOR's — muting a sleeping developer's
-    fleet from a test suite is not a side effect anyone signed up for, and this
-    file's tests run on every suite. So the owner's own constant is redirected
-    and the subprocess is replaced by one that does to that file exactly what
-    the real command does to the real one.
-
-    Returns:
-        (flag, calls) — the relocated flag, and every command the lane sent.
-    """
+    the door that moves it."""
     flag = tmp_path / "aipass-hooks-muted"
     calls: list = []
 
@@ -214,45 +180,22 @@ class TestBaudSettings:
         assert "startup_agent" not in result
         assert result["poll_interval_ms"] == 5000
         assert result["bell_sound"] is True
-        # Replaced whole, never merged into — a caller says what a subtree IS.
         assert result["extra"] == {"b": 2}
         assert json.loads(path.read_text(encoding="utf-8")) == result
 
 
 class TestHooksSound:
-    """
-    The mute flag: @hooks' file, @hooks' door, idempotent both ways.
-
-    The CONTRACT here is unchanged from the hand-written version — sounds are
-    active when the flag is absent, and both directions of the flip are no-ops
-    when they are already true, because two faces may race on the same file.
-    Only the mechanism moved: this lane no longer knows where that file lives
-    or how to write it.
-    """
+    """The mute flag: @hooks' file, @hooks' door, idempotent both ways."""
 
     def test_this_module_does_not_know_where_the_mute_flag_lives(self) -> None:
-        """
-        The boundary, stated as a fact about this file's source.
-
-        The owner's ruling: api is api. The flag's location is @hooks' knowledge —
-        it is declared once, at aipass/hooks/apps/sound.py, and a second copy
-        here is a second truth that drifts the first time they move it. This
-        lane had one: a module constant holding the file name and a helper
-        rebuilding the path beside it, both written before the door existed.
-        """
+        """The boundary, stated as a fact about this file's source."""
         source = Path(host_settings.__file__).read_text(encoding="utf-8")
 
         assert "aipass-hooks-muted" not in source
         assert "hooks_mute_flag" not in source
 
     def test_the_flip_goes_through_the_hooks_door(self, muted_elsewhere) -> None:
-        """
-        The WRITE is the registered command, not a touch and an unlink.
-
-        'drone @hooks hooksound on|off' has existed the whole time — this
-        module's own docstring named it while bypassing it. What travels is the
-        command; nothing here opens the file for writing.
-        """
+        """The WRITE is the registered command, not a touch and an unlink."""
         flag, calls = muted_elsewhere
 
         host_settings.hooks_sound_set(False)
@@ -262,10 +205,6 @@ class TestHooksSound:
         assert all(call[:2] == ["drone", "@hooks"] for call in calls)
 
     def test_active_means_no_flag_and_flips_are_idempotent(self, muted_elsewhere) -> None:
-        """
-        The behaviour that was true before and is still true — same assertions,
-        new mechanism underneath.
-        """
         flag, _ = muted_elsewhere
 
         assert host_settings.hooks_sound_get() is True
@@ -280,16 +219,10 @@ class TestHooksSound:
         """
         MEASURED, and the reason this lane re-reads instead of trusting a zero.
 
-        'drone @hooks hooksound sideways' prints 'Unknown command' and exits
-        ZERO. So does a real flip. An exit code is therefore not evidence that
-        anything moved, and a lane that returned success on it would tell a
-        face the sound was muted while the fleet kept ringing. The flag itself
-        is the only witness, so it is read back and disagreement is a refusal.
-        """
+        An unknown hooksound verb exits ZERO too; the flag is the only witness."""
         flag, _ = muted_elsewhere
         host_settings.hooks_sound_set(False)
 
-        # The door answers, exits zero, and does nothing at all.
         with patch.object(host_settings.subprocess, "run", return_value=_ok()):
             with pytest.raises(host_settings.SettingsUnavailable) as refusal:
                 host_settings.hooks_sound_set(True)
@@ -299,9 +232,7 @@ class TestHooksSound:
     def test_a_door_that_cannot_be_reached_refuses_rather_than_writing_the_file(self, muted_elsewhere) -> None:
         """
         No silent fallback to hand-writing. If the door is gone, say so — the
-        one thing this lane must never do is quietly become the thing it
-        replaced.
-        """
+        one thing this lane must never do is quietly become the thing it replaced."""
         flag, _ = muted_elsewhere
 
         with patch.object(host_settings.subprocess, "run", side_effect=FileNotFoundError("drone")):
@@ -314,39 +245,8 @@ class TestHooksSound:
         """
         NOT hermetic, on purpose, and the only test here that is not.
 
-        Every other test in this class mocks the subprocess, which pins what
-        this lane SENDS and nothing about whether anyone is listening. If
-        @hooks renames the verb tomorrow, those tests all still pass and the
-        phone's toggle silently stops working. This one runs the real command.
-
-        KEPT DELIBERATELY, with both of its costs paid rather than argued away.
-
-        COST ONE — it needs a live @hooks, and CI has none. The registry is
-        machine-managed and gitignored, so on a fresh runner drone answers
-        "Branch '@hooks' not found in registry" and exits 1; this test was red
-        on the Windows and ubuntu lanes for exactly that reason. The obvious
-        cure does not work here: a hand-built registry pointing at the real
-        @hooks is silently DROPPED by drone's own _validate_branch_path, which
-        discards any branch whose path escapes the registry file's directory —
-        measured, the branches map comes back empty. A registry in tmp can only
-        point at a tree in tmp, and a tmp tree is not the door this test exists
-        to reach. So it asks the door read-only first and SKIPS when there is
-        nobody home. A skip is honest; a mock would be this test pretending to
-        be the four above it.
-
-        COST TWO — it flips a real switch, so it must flip its own. TMPDIR is
-        redirected and @hooks' own constant with it, and neither is TRUSTED:
-        the redirect is verified in @hooks' own module, in a child process,
-        BEFORE anything is written. That guard is not hypothetical. While
-        investigating this defect I redirected TMPDIR to a directory that did
-        not exist yet, tempfile silently fell back to /tmp, and the probe wrote
-        to the operator's real flag. The verdict was unchanged and the mtime
-        was not, which is precisely what a fingerprint catches and a "did it
-        work" assertion does not.
-        """
-        # @hooks' own declaration, read before it is redirected. Naming the
-        # path here instead would be the second copy of a truth this class
-        # already refuses to keep.
+        The mocks pin what the lane sends, not that @hooks still answers the verb.
+        It skips without a live @hooks (CI: a tmp registry cannot point at the real tree)."""
         operator_flag = Path(str(host_settings.hooks_sound.MUTE_FLAG))
         before = _fingerprint(operator_flag)
 
@@ -367,7 +267,6 @@ class TestHooksSound:
                 f"{(listening.stderr or listening.stdout).strip()[:120]}"
             )
 
-        # Where @hooks' OWN module says it would write, before a byte moves.
         would_write = _where_the_door_would_write()
         assert would_write == flag, (
             "the redirect did not reach the door's own process — refusing to "
@@ -380,33 +279,14 @@ class TestHooksSound:
             assert host_settings.hooks_sound_set(True) is True
             assert not flag.exists()
         finally:
-            # The operator's switch, unmoved — existence, size AND mtime, so a
-            # rewrite that lands on the same state still fails this.
             assert _fingerprint(operator_flag) == before
 
 
 class TestTheGuardsOnTheLiveDoorTest:
-    """
-    Two hermetic tests about the ONE non-hermetic test above it.
-
-    A deliberate live-door pin is only defensible while its isolation is
-    verified rather than assumed, and both of these exist because the assumption
-    failed in practice: while investigating this defect I pointed TMPDIR at a
-    directory I had not created yet, tempfile fell back to the machine's real
-    temp directory, and a probe wrote to the operator's own flag. The verdict was
-    unchanged and the mtime was not.
-    """
+    """Two hermetic tests about the ONE non-hermetic test above it."""
 
     def test_the_redirect_check_asks_the_door_rather_than_computing_the_answer(self, tmp_path, monkeypatch) -> None:
-        """
-        The failure mode, reproduced, with no live @hooks needed.
-
-        TMPDIR points at a directory that does not exist. A guard that COMPUTED
-        the expected path from the environment would answer inside it and be
-        satisfied; the door's own module answers somewhere else entirely,
-        because gettempdir falls back and says nothing. That difference is the
-        guard, so it is asserted here rather than trusted.
-        """
+        """The failure mode, reproduced, with no live @hooks needed."""
         doomed = tmp_path / "never-created"
         monkeypatch.setenv("TMPDIR", str(doomed))
 
@@ -418,19 +298,11 @@ class TestTheGuardsOnTheLiveDoorTest:
         )
 
     def test_the_fingerprint_notices_a_rewrite_that_changed_nothing(self, tmp_path) -> None:
-        """
-        Why the operator's flag is fingerprinted with its mtime and not just its state.
-
-        Muting an already-muted fleet is idempotent: the file is there before and
-        there after, same zero bytes. A check on existence alone would call that
-        untouched. The flag's whole job is to be a marker, so the honest question
-        is whether anything wrote to it at all.
-        """
+        """Why the operator's flag is fingerprinted with its mtime and not just its state."""
         flag = tmp_path / "aipass-hooks-muted"
         flag.touch()
         before = _fingerprint(flag)
 
-        # An idempotent re-write: same path, same (empty) content, later clock.
         flag.touch()
         os.utime(flag, ns=(before[2] + 1_000_000_000, before[2] + 1_000_000_000))
 
@@ -439,15 +311,7 @@ class TestTheGuardsOnTheLiveDoorTest:
 
 
 class TestAnUnreadableFileIsNeverBlank:
-    """
-    The module docstring's own rule, now held all the way down.
-
-    read_object used to answer {} for EVERY OSError. Two very different
-    situations were arriving at the same answer: a branch that has no settings
-    yet, and a settings file this process is not allowed to read. The first is
-    ordinary; the second is a fault, and reading it as blank invites a patch to
-    write a fresh document over settings that were only ever unreadable.
-    """
+    """The module docstring's own rule, now held all the way down."""
 
     def test_a_branch_with_no_settings_still_reads_as_blank(self, tmp_path) -> None:
         """The no-fault case, unchanged: absent means absent."""
@@ -467,24 +331,12 @@ class TestAnUnreadableFileIsNeverBlank:
 
         assert "settings.local.json" in str(refusal.value)
 
-    # Both guards evaluate at COLLECTION time, so neither may touch a
-    # POSIX-only os attribute bare — a bare os.geteuid() here killed this whole
-    # file's collection on the Windows lane (2026-08-18), the same import-time
-    # species as attach.py's os.setsid. The platform skip is not a dodge: chmod
-    # 0o000 does not construct unreadability on Windows (no POSIX mode bits),
-    # so the fixture this test needs cannot exist there.
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason="chmod 0o000 cannot construct an unreadable file here - no POSIX mode bits",
     )
-    # sys.platform FIRST — the machine probe seedgo's self_skip rule asks for —
-    # and the getattr second, which is not defensiveness for its own sake:
-    # test_windows_import.py simulates Windows by HIDING os.geteuid while
-    # os.name stays "posix", so a bare os.geteuid() here raises AttributeError
-    # at COLLECTION time and takes this whole file's tests with it. That guard
-    # caught exactly this change on 2026-09-07 and its docstring already named
-    # the shape. The getattr is what survives the simulation; the sys.platform
-    # is what stops the condition being decided purely by symbol lookup.
+    # Trap: these evaluate at collection. test_windows_import hides os.geteuid with
+    # os.name still "posix", so a bare os.geteuid() takes the whole file down; keep the getattr.
     @pytest.mark.skipif(
         sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
         reason="a file mode only means something to a non-root POSIX process",
@@ -517,8 +369,7 @@ class TestAFailedWriteLeavesNothingBehind:
     def test_a_cleanup_that_itself_fails_is_logged_not_swallowed(self, tmp_path, monkeypatch) -> None:
         """
         Losing the temp file is survivable; losing the FACT is not. The original
-        failure still travels — cleanup never overwrites the reason.
-        """
+        failure still travels — cleanup never overwrites the reason."""
         path = tmp_path / "settings.local.json"
         complaints = []
 
@@ -540,34 +391,16 @@ class TestAFailedWriteLeavesNothingBehind:
 
 
 class TestTheCorpusForcedTwoFixes:
-    """
-    Both ruled by the conformance corpus (FPLAN-0438 R3), both red first.
-
-    @baud measured every divergence between the two settings implementations
-    against real rust, and the strict side wins by doctrine. On these two, rust
-    was the strict side and this lane was the lenient one.
-    """
+    """Both ruled by the conformance corpus (FPLAN-0438 R3), both red first."""
 
     def test_a_parent_that_is_a_file_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
         """
         Divergence 2. A missing directory on the way to the file means nobody
-        has written settings yet. A FILE standing where a directory belongs
-        means the tree is broken, and reading that as 'no settings yet' invites
-        a patch to write a document into a path that cannot hold one.
-
-        Probed, not platform-stringed — the conformance corpus's own doctrine.
-        Where the OS reports a path THROUGH a file as merely missing (Windows
-        says FileNotFoundError, and did, on the lane's third run 2026-08-18),
-        no rule that reads missing-as-blank can tell the two apart, so blank is
-        the contract's own answer there and this test asserts THAT instead.
-        Either way the unit is measured faithfully relaying what its OS can
-        distinguish.
-        """
+        has written settings yet; where the OS reads it as missing (Windows), blank is the answer."""
         blocking = tmp_path / "claude-settings"
         blocking.write_text("I am a file, not a directory", encoding="utf-8")
         target = blocking / "settings.local.json"
 
-        # The blocking file must block; WHICH error it blocks with is the probe.
         with pytest.raises(OSError) as blocked:
             target.read_bytes()
         world_distinguishes_the_fault = not isinstance(blocked.value, FileNotFoundError)
@@ -581,10 +414,7 @@ class TestTheCorpusForcedTwoFixes:
     def test_a_negative_window_reads_as_null_not_as_a_negative(self, tmp_path) -> None:
         """
         Divergence 5, and the one where rust was already right: their as_u64
-        declines a negative outright, while this view checked only that the
-        value was an int. A dial cannot show minus five thousand tokens, and
-        handing it to the face as a number says it can.
-        """
+        declines a negative outright."""
         view = host_settings.agent_settings_view({"autoCompactWindow": -5})
 
         assert view["auto_compact_window"] is None
@@ -592,10 +422,7 @@ class TestTheCorpusForcedTwoFixes:
     def test_a_window_of_zero_still_reads_as_zero(self, tmp_path) -> None:
         """
         The boundary the fix must not overshoot. Zero is a representable u64,
-        so a file containing it reads back honestly — the refusal on zero
-        belongs to the WRITE path, where the value is being created, not to the
-        read that reports what is already there.
-        """
+        so it reads back; the refusal on zero belongs to the WRITE path."""
         view = host_settings.agent_settings_view({"autoCompactWindow": 0})
 
         assert view["auto_compact_window"] == 0

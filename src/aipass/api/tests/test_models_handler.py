@@ -3,14 +3,10 @@
 # Description: Tests for OpenRouter model fetching handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/openrouter/models.py, the OpenRouter model fetch."""
-
-# Tests:
-# - fetch_models_from_api: success, non-200, timeout, network error,
-#   invalid JSON, missing 'data' field
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that models.py parses and imports
@@ -31,17 +27,10 @@ _MODELS_MOD = "aipass.api.apps.handlers.openrouter.models"
 _FAKE_KEY = "FAKE-sk-or-test"
 
 
-# =============================================
-# fetch_models_from_api
-# =============================================
-
-
 class TestFetchModelsFromApi:
-    """Verifies OpenRouter model-list fetching under various conditions.
+    """Verifies OpenRouter model-list fetching under various conditions."""
 
-    Every failure raises ModelsUnavailable with its reason: [] is what a
-    reachable endpoint with no models answers (api, fleet green leg 3).
-    """
+    # Every failure raises ModelsUnavailable with its reason: [] means a reachable endpoint with no models.
 
     @patch(f"{_MODELS_MOD}.requests.get")
     def test_successful_fetch(self, mock_get: MagicMock) -> None:

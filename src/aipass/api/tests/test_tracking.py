@@ -3,18 +3,10 @@
 # Description: Tests for usage tracking handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
-
-# Tests for tracking.py -- usage tracking handler.
-#
-# Tests:
-# - get_generation_metrics() HTTP success, non-200, invalid structure, exception
-# - store_usage_data() new file creation, existing file update, per-caller stats,
-#   daily totals, newest-first ordering, exception handling, the json service's
-#   keys kept on its data leg (with and without a 'data' key)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the live OpenRouter generation endpoint; requests.get is mocked, no network
@@ -35,11 +27,6 @@ from aipass.api.apps.handlers.usage.tracking import (
 )
 
 _TRACKING_MOD = "aipass.api.apps.handlers.usage.tracking"
-
-
-# =============================================
-# get_generation_metrics tests
-# =============================================
 
 
 @patch(f"{_TRACKING_MOD}.requests")
@@ -69,7 +56,6 @@ def test_get_generation_metrics_success(mock_requests: MagicMock):
     assert result["latency"] == 1500
     assert result["provider_name"] == "anthropic"
 
-    # Verify request was made with correct params
     mock_requests.get.assert_called_once()
     call_kwargs = mock_requests.get.call_args
     assert call_kwargs[1]["params"] == {"id": "gen-abc-123"}
@@ -78,13 +64,8 @@ def test_get_generation_metrics_success(mock_requests: MagicMock):
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_non_200(mock_requests: MagicMock):
-    """
-    A non-200 raises MetricsUnavailable naming the status and the generation.
-
-    Every failure here used to return None, so track_usage could only say
-    "Failed to retrieve generation metrics" whichever of five things went
-    wrong (api, fleet green leg 9). The reason now travels in str(exc).
-    """
+    """A non-200 raises MetricsUnavailable naming the status and the generation."""
+    # The reason travels in str(exc) so track_usage can say which of five failures happened.
     mock_response = MagicMock()
     mock_response.status_code = 404
     mock_requests.get.return_value = mock_response
@@ -156,12 +137,7 @@ def test_get_generation_metrics_timeout(mock_requests: MagicMock):
 def test_track_usage_reports_why_the_metrics_were_unavailable(
     mock_requests: MagicMock, mock_store: MagicMock, monkeypatch: pytest.MonkeyPatch
 ):
-    """
-    The caller-facing half: track_usage hands the reason on and stores nothing.
-
-    It used to answer "Failed to retrieve generation metrics" for a 404, a
-    timeout and a malformed body alike (api, fleet green leg 9).
-    """
+    """The caller-facing half: track_usage hands the reason on and stores nothing."""
     monkeypatch.setattr(tracking, "DEFAULT_GENERATION_CHECK_DELAY", 0)
     mock_requests.get.return_value = MagicMock(status_code=404)
 
@@ -188,11 +164,6 @@ def test_get_generation_metrics_defaults_missing_fields(mock_requests: MagicMock
     assert result["generation_time"] == 0
     assert result["latency"] == 0
     assert result["provider_name"] == "unknown"
-
-
-# =============================================
-# store_usage_data tests
-# =============================================
 
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
@@ -228,12 +199,10 @@ def test_store_usage_data_creates_new_file(mock_dir: MagicMock, tmp_path: Path):
     assert wrapper["last_updated"] == today
     data = wrapper["data"]
 
-    # Session totals
     assert data["current_session"]["total_requests"] == 1
     assert data["current_session"]["total_cost"] == 0.005
     assert data["current_session"]["total_tokens"] == 150
 
-    # Per-caller stats
     assert "test_caller" in data["usage_by_caller"]
     caller_data = data["usage_by_caller"]["test_caller"]
     assert caller_data["requests"] == 1
@@ -241,7 +210,6 @@ def test_store_usage_data_creates_new_file(mock_dir: MagicMock, tmp_path: Path):
     assert caller_data["total_tokens"] == 150
     assert caller_data["models_used"]["anthropic/claude-3.5-sonnet"] == 1
 
-    # Generation tracking
     assert "gen-001" in data["generation_tracking"]
     entry = data["generation_tracking"]["gen-001"]
     assert entry["caller"] == "test_caller"
@@ -264,10 +232,8 @@ def test_store_usage_data_updates_existing(mock_dir: MagicMock, tmp_path: Path):
         "provider_name": "openai",
     }
 
-    # First call creates the file
     store_usage_data("caller_a", "openai/gpt-4", "gen-100", metrics)
 
-    # Second call updates
     result = store_usage_data("caller_a", "openai/gpt-4", "gen-101", metrics)
 
     assert result is True
@@ -288,11 +254,7 @@ def test_store_usage_data_updates_existing(mock_dir: MagicMock, tmp_path: Path):
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
 def test_store_usage_data_stores_into_a_data_leg_with_no_data_key(mock_dir: MagicMock, tmp_path: Path):
-    """The file is the json service's data leg and may hold no 'data' key: store into it, keep its keys.
-
-    Shape measured on this box 2026-09-13. The old read took get('data', {}) and died
-    on current_session, so the first generation tracked into it was refused.
-    """
+    """The file is the json service's data leg and may hold no 'data' key: store into it, keep its keys."""
     from datetime import datetime
 
     mock_dir.__truediv__ = lambda self, other: tmp_path / other
@@ -333,11 +295,8 @@ def test_store_usage_data_stores_into_a_data_leg_with_no_data_key(mock_dir: Magi
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
 def test_store_usage_data_writes_back_the_keys_it_does_not_own(mock_dir: MagicMock, tmp_path: Path):
-    """A store after the service bumped the document keeps the bump (FPLAN-0542).
-
-    The old write rebuilt the document from module_name, timestamp and data alone,
-    wiping the lifetime operations_total and last_operation the service keeps there.
-    """
+    """A store after the service bumped the document keeps the bump (FPLAN-0542)."""
+    # The json service keeps lifetime operations_total and last_operation in the same document.
     mock_dir.__truediv__ = lambda self, other: tmp_path / other
     mock_dir.mkdir = MagicMock()
 
@@ -458,7 +417,6 @@ def test_store_usage_data_daily_totals(mock_dir: MagicMock, tmp_path: Path):
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
 def test_store_usage_data_returns_false_on_exception(mock_dir: MagicMock, tmp_path: Path):
     """store_usage_data returns False when an exception occurs."""
-    # Point to a path that will fail (parent is a file, not a dir)
     blocker = tmp_path / "blocker_file"
     blocker.write_text("not a dir", encoding="utf-8")
     mock_dir.__truediv__ = lambda self, other: blocker / other

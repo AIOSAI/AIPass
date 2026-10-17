@@ -3,18 +3,10 @@
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-09
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
-
-# Split out of test_host_read_lane.py along the unit under test (api, the
-# oversize split leg, 2026-10-08): the git-changes lane end to end below the
-# route — @baud's card contract, the single-flight cache, drone-only routing,
-# foreign projects, both grains, git's two-column codes, the door's verdict,
-# and the remembered refusal. The route itself is pinned in
-# test_host_read_lane.py; per-file diffs, history and the remote in
-# test_host_read_lane_history.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — drone's own `git status --json`; subprocess.run is faked, drone tests it
@@ -36,9 +28,7 @@ from aipass.api.apps.handlers.host import git_reads as host_git
 from aipass.api.apps.handlers.host import refusals as host_refusals
 from aipass.api.tests.support_host_read_lane import GIT_STATUS_ALL_STDOUT, GIT_STATUS_STDOUT, status_document
 
-# The patch targets stay this file's own constants rather than conftest's:
-# seedgo's discarded_patch rule reads a target imported from this branch's
-# package as one it judges, and the loggers are silenced on purpose.
+# Own constants, not conftest's: discarded_patch judges a target imported from this package.
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_CACHE_LOGGER = "aipass.api.apps.handlers.host.read_cache.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
@@ -48,17 +38,8 @@ pytestmark = pytest.mark.usefixtures("_clean_git_changes_cache")
 
 
 class TestGitChangesMatchesTheDesktopCard:
-    """
-    @baud's desktop already answers this question, so the phone must not get a
-    second answer to it. Their contract, read from their tree on 2026-08-16:
-
-        GitChanges { files: Vec<String>, count: usize }
-
-    served by `git diff HEAD --relative --name-only -- .` — TRACKED files that
-    differ from HEAD, named relative to the branch directory. Their own comment
-    says why the card is deliberately not the whole-repo question: a card
-    should only ever speak about its own subtree.
-    """
+    """@baud's desktop already answers this question, so the phone must not get a
+    second answer to it: `git diff HEAD --relative --name-only -- .`, TRACKED files, branch-relative."""
 
     def _completed(self, stdout: str = GIT_STATUS_STDOUT, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -76,13 +57,7 @@ class TestGitChangesMatchesTheDesktopCard:
         assert result["count"] == len(result["files"])
 
     def test_untracked_files_are_not_changes_on_a_card(self, fake_repo: dict) -> None:
-        """
-        The desktop asks `diff HEAD`, which cannot see a file git never has.
-
-        Counting the new file here would make the phone's badge disagree with
-        the desktop's on the same branch at the same moment — and the phone
-        would be the one that was wrong, because @baud owns this question.
-        """
+        """The desktop asks `diff HEAD`, which cannot see a file git never has."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -90,13 +65,7 @@ class TestGitChangesMatchesTheDesktopCard:
         assert result["count"] == 3
 
     def test_paths_are_branch_local_not_repo_relative(self, fake_repo: dict) -> None:
-        """
-        Their --relative, reproduced.
-
-        Every src/aipass branch shares one repo, so a repo-relative name on a
-        card would prefix every row with the same nine characters and push the
-        part that differs off a phone screen.
-        """
+        """Their --relative, reproduced."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -105,13 +74,7 @@ class TestGitChangesMatchesTheDesktopCard:
         assert not any(path.startswith("src/") for path in result["files"])
 
     def test_a_rename_is_reported_at_the_name_it_has_now(self, fake_repo: dict) -> None:
-        """
-        Porcelain renders a rename as 'old -> new' on one line.
-
-        Passing that through whole would put an arrow and two paths in a field
-        the desktop fills with one filename, and a phone tapping it would ask
-        for a file whose name contains ' -> '.
-        """
+        """Porcelain renders a rename as 'old -> new' on one line."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -144,17 +107,10 @@ class TestGitChangesMatchesTheDesktopCard:
 
 
 class TestGitChangesCoalescesTheStampede:
-    """
-    The 2026-09-07 cure: one screen's worth of cards costs one exec per
-    distinct question, not one per card.
+    """The 2026-09-07 cure: one screen's worth of cards costs one exec per
+    distinct question, not one per card."""
 
-    The phone asks /v1/git-changes once per branch and fires them together.
-    Every one of those used to reach its own `drone @git status --json`; on
-    2026-09-07 at 12:17:03 thirty-one crossed the 30s timeout in the same
-    second. Measured on that host: one call 0.5s, 31 concurrent 17.9s — N
-    subprocesses fighting over one machine, which is why the cure is the
-    single-flight-plus-TTL fleet.py already proves and NOT a longer timeout.
-    """
+    # N concurrent subprocesses fight over one machine, so the cure is single-flight plus TTL, not a longer timeout.
 
     def _completed(self, stdout: str = GIT_STATUS_STDOUT, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -164,15 +120,8 @@ class TestGitChangesCoalescesTheStampede:
         return result
 
     def test_concurrent_callers_asking_the_same_question_share_one_subprocess(self, fake_repo: dict) -> None:
-        """
-        Thirty-one cards, one exec. The stampede itself, pinned.
-
-        The read is made SLOW rather than synchronised on a barrier: a barrier
-        across all thirty-one can never release here, because only one thread
-        is ever inside the subprocess — which is the property under test. A
-        slow first flight is what gives the other thirty time to arrive, queue
-        on the lock, and be served by the re-check inside it.
-        """
+        """Thirty-one cards, one exec. The stampede itself, pinned."""
+        # SLOW, not a barrier: only one thread is ever inside the subprocess, so a 31-way barrier never releases.
         entered = threading.Event()
 
         def slow(*_args: Any, **_kwargs: Any) -> Any:
@@ -198,12 +147,7 @@ class TestGitChangesCoalescesTheStampede:
         assert mock_run.call_count == 1
 
     def test_an_expired_entry_is_read_again_rather_than_served_stale(self, fake_repo: dict) -> None:
-        """
-        A cache that never expires is a lane that lies about a tree that moved.
-
-        The TTL is aged out directly rather than slept through: a test that
-        waits 1.5s to prove a 1.5s window is a test nobody runs.
-        """
+        """A cache that never expires is a lane that lies about a tree that moved."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             host_git.read_git_changes("demo")
             key = ("demo", "", "branch")
@@ -214,30 +158,13 @@ class TestGitChangesCoalescesTheStampede:
         assert mock_run.call_count == 2
 
     def test_one_callers_edit_to_a_row_does_not_reach_the_next_caller(self, fake_repo: dict) -> None:
-        """
-        A cached answer is handed out as a COPY, and this pin exists because a
-        mutation proved it was not protected.
-
-        The answer carries `rows` — a list of mutable dicts. Returning the
-        stored object lets whoever edits a row edit it for everyone until the
-        TTL runs out: not a crash, just a card quietly showing another card's
-        text. Returning `answer` in place of the deep copy survived the whole
-        suite when it was mutated in, including the five cases above, because
-        every one of them counts execs rather than reading what came back.
-
-        THREE reads, not two, and the number is the whole point. The caller
-        that MISSES is handed the producer's own object while a copy goes into
-        the store, so its edits cannot reach anyone — two reads therefore pass
-        against a cache that copies on the way in and shares on the way out.
-        It is the second HIT that proves the read path: caller two edits what
-        it was given, and caller three is what notices.
-        """
+        """A cached answer is handed out as a COPY, and this pin exists because a
+        mutation proved it was not protected."""
+        # THREE reads: a miss gets the producer's own object, so only the second HIT proves the copy on the way out.
         with patch.object(subprocess, "run", return_value=self._completed()):
             first = host_git.read_git_changes("demo")
             assert first["rows"], "the fixture must produce at least one row to mutate"
 
-            # The way IN: the miss returns the producer's object, so this edit
-            # must not have reached the entry that was stored.
             first["rows"][0]["path"] = "clobbered-on-the-way-in"
 
             second = host_git.read_git_changes("demo")
@@ -245,7 +172,6 @@ class TestGitChangesCoalescesTheStampede:
                 "the answer was stored by reference — the caller that filled the cache can still edit it"
             )
 
-            # The way OUT: this one was served FROM the store.
             second["rows"][0]["path"] = "clobbered-on-the-way-out"
             second["files"].append("clobbered-on-the-way-out")
 
@@ -259,11 +185,8 @@ class TestGitChangesCoalescesTheStampede:
         )
 
     def test_different_branches_are_not_queued_behind_each_other(self, fake_repo: dict) -> None:
-        """
-        The flight lock is PER KEY. A global one would turn the stampede into a
-        queue — every card correct, every card late, which on a phone is the
-        same complaint wearing better manners.
-        """
+        """The flight lock is PER KEY. A global one would turn the stampede into a
+        queue — every card correct, every card late."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             host_git.read_git_changes("demo")
             host_git.read_git_changes("demo", grain="repo")
@@ -271,18 +194,8 @@ class TestGitChangesCoalescesTheStampede:
         assert mock_run.call_count == 2, "branch and repo grain are different questions"
 
     def test_one_branch_name_in_two_projects_is_two_cache_entries(self, fake_repo: dict, tmp_path: Path) -> None:
-        """
-        The PROJECT is part of the key, and this pin exists because a mutation
-        proved it was not protected.
-
-        The brief specified single-flight per (branch, grain). Keying on that
-        literally is wrong: a branch NAME is not unique across projects, so the
-        seat's 'demo' and a foreign project's 'demo' would share one entry and
-        one card would be served the other's change list. Dropping `project`
-        from the key survived the whole suite when it was mutated in — nothing
-        anywhere could tell. That is an unpinned contract, not dead code, so it
-        is pinned here rather than left to the next reader to rediscover.
-        """
+        """The PROJECT is part of the key, and this pin exists because a mutation
+        proved it was not protected: a branch NAME is not unique across projects."""
         foreign = tmp_path / "OtherRepo"
         (foreign / ".git").mkdir(parents=True)
         foreign_root = foreign / "src" / "other" / "demo"
@@ -300,18 +213,9 @@ class TestGitChangesCoalescesTheStampede:
         assert mock_run.call_count == 2, "the same branch name in two projects is two different questions"
 
     def test_a_failed_read_is_never_stored_in_the_cache(self, fake_repo: dict) -> None:
-        """
-        Only a good answer is stored, so no branch is served a remembered
-        failure once its read starts working again.
-
-        This asserts on the CACHE rather than on a second subprocess, and the
-        distinction is real: `refusals.py` keeps its own deliberate memory of
-        an unreadable root to stop a broken tree writing the same sentence to
-        the log on every poll. That mechanism — not this one — is what decides
-        whether a second call re-execs. Pinning a second exec here would be
-        pinning refusals.py's behaviour through this lane by accident, and
-        would go red the day that module tuned its own window.
-        """
+        """Only a good answer is stored, so no branch is served a remembered
+        failure once its read starts working again."""
+        # On the CACHE, not a second exec: refusals.py's own memory decides re-execs, and would be pinned by accident.
         broken = self._completed(stdout="not a json object", returncode=1, stderr="boom")
 
         with patch.object(subprocess, "run", return_value=broken):
@@ -321,16 +225,8 @@ class TestGitChangesCoalescesTheStampede:
         assert host_git._changes._entries == {}, "a failure must never be stored as an answer"
 
     def test_callers_queued_behind_a_failed_flight_share_its_failure(self, fake_repo: dict) -> None:
-        """
-        The half of the promise nothing pinned, measured false 2026-09-25.
-
-        Every caller queued behind a flight that TIMED OUT used to run its own
-        subprocess the moment the lock came free — so under a stall, one card
-        re-polled N times cost N serial 30s execs, each waiter holding a server
-        thread for its own wait plus everyone's ahead of it. A timeout is not
-        remembered by refusals.py, so nothing else stopped it. Queued callers
-        get the flight's own failure; nobody waits out a second 30s for it.
-        """
+        """The half of the promise nothing pinned, measured false 2026-09-25."""
+        # refusals.py does not remember a timeout, so without sharing, N queued callers cost N serial 30s execs.
         callers = 8
         arrivals = []
         all_queued = threading.Event()
@@ -352,8 +248,6 @@ class TestGitChangesCoalescesTheStampede:
                 return self._lock.__exit__(*exc)
 
         def stalled(*_args: Any, **_kwargs: Any) -> Any:
-            # The flight stalls until every other caller is queued behind it —
-            # the stall is the real condition, not a guess at how long it takes.
             all_queued.wait(timeout=10)
             raise subprocess.TimeoutExpired("drone", 30)
 
@@ -370,13 +264,7 @@ class TestGitChangesCoalescesTheStampede:
         assert mock_run.call_count == 1, "eight callers behind one stall must not mean eight stalls"
 
     def test_a_caller_arriving_after_a_failed_flight_reads_again(self, fake_repo: dict) -> None:
-        """
-        Sharing is for the callers who were WAITING, never a remembered refusal.
-
-        A timeout is released with its flight: the next poll after it runs a
-        fresh read, so a stall that has cleared is not refused for a moment
-        longer than it lasted.
-        """
+        """Sharing is for the callers who were WAITING, never a remembered refusal."""
         with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)) as mock_run:
             for _ in range(2):
                 with pytest.raises(host_reads.ReadUnavailable):
@@ -384,8 +272,7 @@ class TestGitChangesCoalescesTheStampede:
 
         assert mock_run.call_count == 2
 
-        # And a key that recovers lets go of its last failure: the exception
-        # and its traceback are not held for the life of the server.
+        # A recovered key lets go of its failure, so no traceback is held for the life of the server.
         with patch.object(subprocess, "run", return_value=self._completed()):
             assert host_git.read_git_changes("demo")["branch"] == "demo"
 
@@ -405,11 +292,8 @@ class TestGitChangesCoalescesTheStampede:
 
 
 class TestGitStaysDroneOnlyOnThisLaneToo:
-    """
-    Git is drone-only in this system, servers included — the same house rule
-    the diff lane above is built on, and not one this route gets to bend
-    because a badge would be easier to fill with a raw subprocess.
-    """
+    """Git is drone-only in this system, servers included — the same house rule
+    the diff lane above is built on."""
 
     def _completed(self, stdout: str = GIT_STATUS_STDOUT, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -445,14 +329,9 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
                 host_git.read_git_changes("demo")
 
     def test_a_timeout_says_which_directory_it_was_reading(self, fake_repo: dict) -> None:
-        """
-        a6a71c2d fired three times in two weeks naming only the lane, so neither
-        occurrence could say WHICH card went dark — every request on this route
-        runs the same command and differs only by the directory it runs in.
-
-        The phone's sentence stays as it was: a refusal that travels to a
-        handset carries no host path, and the log is where a path belongs.
-        """
+        """a6a71c2d fired three times in two weeks naming only the lane, so neither
+        occurrence could say WHICH card went dark."""
+        # The phone's refusal carries no host path; the log is where a path belongs.
         with patch(PATCH_GIT_LOGGER) as log:
             with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)):
                 with pytest.raises(host_reads.ReadUnavailable) as refused:
@@ -463,12 +342,8 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         assert str(fake_repo["branch"].resolve()) not in str(refused.value)
 
     def test_a_failed_status_is_never_read_as_a_clean_tree(self, fake_repo: dict) -> None:
-        """
-        drone learned this one the hard way and says so in their own source: a
-        failed `git status` that exits 0 false-greened scripts into reading an
-        error as a clean tree for months. They now exit 1 and put the reason on
-        stderr, so a zero count here must only ever mean zero.
-        """
+        """drone learned this one the hard way and says so in their own source: a
+        failed `git status` now exits 1 with the reason on stderr, so a zero count must only mean zero."""
         with patch.object(
             subprocess,
             "run",
@@ -480,17 +355,8 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         assert "bad object HEAD" in str(excinfo.value)
 
     def test_a_caller_drone_will_not_verify_is_reported_in_drones_words(self, fake_repo: dict) -> None:
-        """
-        THE measured limit of this lane, and the reason it is not hidden.
-
-        drone verifies its caller by finding a passport in the cwd hierarchy.
-        Foreign projects — projects/baud, anything external — have no AIPass
-        passport at those paths, so drone refuses the command outright with
-        exit 1. This route resolves a foreign branch root perfectly well and
-        then cannot ask git about it, which is a 503 carrying drone's own
-        sentence: inventing an empty change list would paint a foreign branch
-        as clean when nothing was ever measured.
-        """
+        """THE measured limit of this lane, and the reason it is not hidden."""
+        # drone refuses a cwd with no passport; an empty change list would paint the branch clean, unmeasured.
         foreign = Path(fake_repo["branch"]).parent / "projects" / "baud" / "src" / "baud"
         refusal = (
             f"No .trinity/passport.json found in directory hierarchy (caller cwd: {foreign}) — cannot verify caller"
@@ -504,11 +370,8 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
 
 
 class TestGitChangesFollowsTheReadDoctrine:
-    """
-    Same two doors as every other read: the seat resolves through the local
-    citizen registry, a foreign project through @baud's census. Browsing is
-    free — the seat is a default, never a fence.
-    """
+    """Same two doors as every other read: the seat resolves through the local
+    citizen registry, a foreign project through @baud's census."""
 
     def test_an_unknown_branch_never_reaches_a_subprocess(self, fake_repo: dict) -> None:
         """Refused before spawn, exactly like the file and diff lanes."""
@@ -525,27 +388,8 @@ class TestGitChangesFollowsTheReadDoctrine:
 
 
 class TestGitChangesInAForeignProject:
-    """
-    A FOREIGN PROJECT'S ROWS MUST BE BRANCH-LOCAL TOO, and for a while they
-    were not.
-
-    This class exists because of a wrong belief, and it is worth recording
-    which one. On 2026-08-16 I reported that no drone-routed read lane could
-    serve a foreign project at all: drone verifies its caller by finding a
-    passport in the cwd hierarchy, and I had measured a real refusal in
-    projects/baud/src/baud. @baud's live sweep then served five foreign
-    projects with real data, and the reconciliation was that my probe path was
-    never a census-known BRANCH — the registered one sits a level deeper and,
-    like every census branch, carries its own passport. The command measurement
-    was true; the inference from it to the route was not.
-
-    The cost of the wrong belief was this bug: `repo_root()` is the SEAT's
-    root, so a foreign branch fell out of `relative_to` and its paths were left
-    exactly as drone printed them — relative to the FOREIGN repo root, i.e.
-    'src/vera_studio/vera/CLAUDE.md' where @baud's --relative contract says
-    'CLAUDE.md'. Believing the lane could not serve those projects is precisely
-    why nothing looked wrong.
-    """
+    """A FOREIGN PROJECT'S ROWS MUST BE BRANCH-LOCAL TOO: `repo_root()` is the
+    SEAT's root, so stripping against it leaves a foreign branch's rows repo-relative."""
 
     @pytest.fixture
     def foreign_repo(self, fake_repo: dict, tmp_path: Path):
@@ -570,11 +414,8 @@ class TestGitChangesInAForeignProject:
         return result
 
     def test_a_foreign_branchs_rows_are_branch_local(self, fake_repo: dict, foreign_repo: dict) -> None:
-        """
-        drone prints paths relative to the repo it found, which for a foreign
-        branch is not this server's. The prefix to strip is that branch's own
-        repository root, discovered rather than assumed.
-        """
+        """drone prints paths relative to the repo it found; the prefix to strip is
+        that branch's own repository root, discovered rather than assumed."""
         stdout = status_document(
             (
                 (" M", "src/vera_studio/vera/CLAUDE.md"),
@@ -600,21 +441,8 @@ class TestGitChangesInAForeignProject:
     def test_a_nested_repository_inside_the_seat_is_stripped_against_the_inner_one(
         self, fake_repo: dict, tmp_path: Path
     ) -> None:
-        """
-        THE case the seat-first version got wrong, and the one that hid longest.
-
-        projects/baud carries its own .git INSIDE the AIPass tree. So the branch
-        is inside this server's repo — `relative_to(seat)` succeeds and yields
-        'projects/baud/src/baud/baud/' — while the rows drone printed are
-        relative to the INNER repository and start 'src/baud/baud/'. The prefix
-        that resolves cleanly is the wrong one, which is worse than one that
-        fails: nothing raises, and every row silently keeps its prefix.
-
-        Discovery has to win for that reason, not merely by preference — which
-        is why this test exists at all. Two mutations survived the suite before
-        it did: swapping the order back, and requiring the marker to be a
-        directory.
-        """
+        """THE case the seat-first version got wrong: a nested .git inside the seat
+        makes `relative_to(seat)` succeed with the wrong prefix, so discovery must win."""
         tenant = fake_repo["root"] / "projects" / "tenant"
         (tenant / ".git").mkdir(parents=True)
         root = tenant / "src" / "tenant" / "tenant"
@@ -633,13 +461,7 @@ class TestGitChangesInAForeignProject:
         assert result["files"] == ["lib.rs"]
 
     def test_a_worktree_marker_is_a_file_and_still_marks_a_repository(self, fake_repo: dict, tmp_path: Path) -> None:
-        """
-        A worktree and a submodule carry '.git' as a FILE, not a directory.
-
-        Reading those as "not a repository" would fall through to the seat and
-        silently un-strip every row inside them — the same failure as the
-        nested case, reached by a different route.
-        """
+        """A worktree and a submodule carry '.git' as a FILE, not a directory."""
         project = tmp_path / "WorktreeRepo"
         root = project / "src" / "thing" / "br"
         root.mkdir(parents=True)
@@ -658,11 +480,8 @@ class TestGitChangesInAForeignProject:
         assert result["files"] == ["main.py"]
 
     def test_a_branch_in_no_repository_at_all_keeps_drones_names(self, fake_repo: dict, tmp_path: Path) -> None:
-        """
-        No .git anywhere above it — so there is no prefix that could be
-        stripped honestly. drone's names travel untouched rather than being
-        trimmed on a guess, and the case is logged rather than swallowed.
-        """
+        """No .git anywhere above it, so drone's names travel untouched rather than
+        being trimmed on a guess."""
         loose = tmp_path / "Loose" / "src" / "thing" / "br"
         loose.mkdir(parents=True)
 
@@ -679,21 +498,9 @@ class TestGitChangesInAForeignProject:
         assert result["files"] == ["whatever/file.py"]
 
 
-# =============================================
-# THE GIT APP — repo grain, per-file, and history
-# =============================================
-
-
 class TestRepoGrainChanges:
-    """
-    The git APP is per-repo; the agent card's git tile is per-branch. Two
-    grains, both honest — and the answer has to NAME which one it is, because a
-    file list that does not say its own scope is a list a client can silently
-    read at the wrong grain.
-
-    Measured door: `status --all` targets lock_handler's find_repo_root(), so
-    the repo grain already exists on the other side.
-    """
+    """The git APP is per-repo; the agent card's git tile is per-branch, and the
+    answer has to NAME which grain it is so a client cannot read it at the wrong one."""
 
     def _completed(self, stdout: str = GIT_STATUS_ALL_STDOUT, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -727,11 +534,8 @@ class TestRepoGrainChanges:
         assert narrow["grain"] == "branch"
 
     def test_repo_grain_keeps_repo_relative_names(self, fake_repo: dict) -> None:
-        """
-        THE BUG THIS PINS: the card strips a branch prefix to keep rows short.
-        At repo grain the names already ARE repo-relative, so stripping would
-        eat the part that distinguishes one branch's file from another's.
-        """
+        """THE BUG THIS PINS: stripping a branch prefix at repo grain would eat the
+        part that distinguishes one branch's file from another's."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo", grain="repo")
 
@@ -755,11 +559,8 @@ class TestRepoGrainChanges:
         assert not any("brand_new" in name for name in result["files"])
 
     def test_an_unknown_grain_is_refused_naming_both(self, fake_repo: dict) -> None:
-        """
-        A typo'd grain must never quietly fall back to a scope the caller did
-        not ask for — that is how a phone shows one branch's changes while
-        believing it shows a repo's.
-        """
+        """A typo'd grain must never quietly fall back to a scope the caller did
+        not ask for."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused) as caught:
                 host_git.read_git_changes("demo", grain="everything")
@@ -775,9 +576,7 @@ class TestRepoGrainChanges:
         assert mock_run.call_count == 0
 
 
-# Every code the face needs a chip for. The two columns are index-then-worktree,
-# so 'A ' (staged new) and ' M' (modified, unstaged) are DIFFERENT answers that
-# both collapse to one letter if either is stripped.
+# Columns are index-then-worktree: 'A ' and ' M' are DIFFERENT answers that collapse if either is stripped.
 GIT_STATUS_CODES_STDOUT = status_document(
     (
         (" M", "src/aipass/demo/modified.txt"),
@@ -793,17 +592,8 @@ GIT_STATUS_CODES_STDOUT = status_document(
 
 
 class TestStatusPerRow:
-    """
-    @devpulse's rider, 13:48: the face can only build two of its four VS Code
-    chips because this lane read the porcelain code and then THREW IT AWAY, and
-    untracked names never left the server at all. A staged-new file was
-    indistinguishable from a modified one.
-
-    The fix carries git's OWN code per row, verbatim and unstripped. This server
-    owns the pipe and never the meaning: deciding that some code "means" the
-    letter A is the face's call, made once in their buildRows, and a letter
-    invented here would be a second vocabulary for the same fact.
-    """
+    """Each row carries git's OWN code, verbatim and unstripped: mapping a code
+    to a chip letter is the face's call (their buildRows), never this server's."""
 
     def _completed(self, stdout: str = GIT_STATUS_CODES_STDOUT, returncode: int = 0) -> Any:
         result = MagicMock()
@@ -823,11 +613,7 @@ class TestStatusPerRow:
         assert self._rows(result)["modified.txt"] == " M"
 
     def test_a_staged_new_file_is_distinguishable_from_a_modified_one(self, fake_repo: dict) -> None:
-        """
-        THE EXACT GAP THEY MEASURED. Both columns travel, so index-A and
-        worktree-M stay two different answers instead of collapsing to one
-        letter — which is what made a new file look like an edited one.
-        """
+        """THE EXACT GAP THEY MEASURED: index-A and worktree-M stay two answers."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             rows = self._rows(host_git.read_git_changes("demo"))
 
@@ -843,27 +629,15 @@ class TestStatusPerRow:
         assert rows["both.py"] == "MM"
 
     def test_untracked_files_arrive_by_name_not_only_as_a_count(self, fake_repo: dict) -> None:
-        """
-        The other half of the rider: the face could not paint a U chip on a file
-        whose name it had never been told.
-        """
+        """The face cannot paint a U chip on a file whose name it was never told."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
         assert self._rows(result)["untracked.py"] == "??"
 
     def test_the_tracked_list_is_unchanged_by_all_of_this(self, fake_repo: dict) -> None:
-        """
-        THE ADDITIVE PROMISE, pinned. @baud's desktop consumer parses `files`
-        and `count`; untracked must stay OUT of them however many rows exist,
-        or the phone starts disagreeing with the desktop again.
-
-        And matching the desktop must not mean hiding what was measured: a
-        brand-new module is the most interesting change in a tree (@baud's own
-        reasoning), so untracked is reported beside the contract rather than
-        dropped (its own test retired as a duplicate of this one, api, fleet
-        green leg 8).
-        """
+        """THE ADDITIVE PROMISE: @baud's desktop parses `files` and `count`, so
+        untracked stays OUT of them and is reported beside them instead."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -880,10 +654,7 @@ class TestStatusPerRow:
         assert "ignored.log" not in result["files"]
 
     def test_a_rename_row_names_the_file_it_is_now(self, fake_repo: dict) -> None:
-        """
-        Same rule as the card's list: the arrow never reaches a filename, or a
-        phone tapping the row asks for a file that cannot exist.
-        """
+        """The arrow never reaches a filename, or a tapped row asks for no file."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             rows = self._rows(host_git.read_git_changes("demo"))
 
@@ -891,10 +662,7 @@ class TestStatusPerRow:
         assert not any(" -> " in path for path in rows)
 
     def test_rows_and_files_agree_on_the_tracked_paths(self, fake_repo: dict) -> None:
-        """
-        Two views of one measurement, never two measurements. Every tracked file
-        is a row, and every row that is not untracked is a tracked file.
-        """
+        """Two views of one measurement, never two measurements."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -902,10 +670,7 @@ class TestStatusPerRow:
         assert sorted(tracked_rows) == sorted(result["files"])
 
     def test_rows_ride_the_repo_grain_too(self, fake_repo: dict) -> None:
-        """
-        The rider asks for both lanes. Repo grain keeps repo-relative names here
-        as well — one parser, so there is no second place for them to drift.
-        """
+        """Repo grain keeps repo-relative names here too: one parser, no drift."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo", grain="repo")
 
@@ -914,11 +679,7 @@ class TestStatusPerRow:
         assert rows["src/aipass/demo/untracked.py"] == "??"
 
     def test_the_status_is_never_reinterpreted_into_a_letter(self, fake_repo: dict) -> None:
-        """
-        D0: this server owns the pipe and never the meaning. git's codes travel
-        as git wrote them — a one-letter vocabulary invented here would be a
-        second answer to a question git has already answered.
-        """
+        """D0: this server owns the pipe and never the meaning."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
 
@@ -926,30 +687,8 @@ class TestStatusPerRow:
 
 
 class TestStagedAndUnstagedAreDifferentAnswers:
-    """
-    THE BUG THIS ROUND WAS FOR, and it was bigger than the brief said.
-
-    Rows have carried git's two-column code verbatim since they existed, and
-    that contract was right. The DATA was not. drone's rendered status line is
-    built as `f"  {status.strip():>2} {path}"` — their own comment calls it "for
-    the screen only" — which right-aligns a one-letter code into the SECOND
-    column. So every index-only change reached this server already dressed as a
-    worktree one, and no parser could have recovered it:
-
-        git says 'M ' (staged edit)   -> rendered '   M' -> read as ' M'
-        git says ' M' (unstaged edit) -> rendered '   M' -> read as ' M'
-        git says 'A ' (staged new)    -> rendered '   A' -> read as ' A'
-        git says 'D ' (staged delete) -> rendered '   D' -> read as ' D'
-
-    Measured against the shipped parser on 2026-08-18, before the switch: of
-    six codes fed through drone's own renderer, three came back as something
-    git never said, and staged-vs-unstaged modify and staged-vs-unstaged delete
-    were each a single answer. The face could not have built its chips from
-    that, and neither could anything else.
-
-    The document reports index and worktree separately. These tests pin the
-    difference the old path could not express.
-    """
+    """drone's rendered line right-aligns `status.strip()` into the SECOND column,
+    so 'M ' and ' M' render identically; only the JSON document keeps them apart."""
 
     def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -967,11 +706,7 @@ class TestStagedAndUnstagedAreDifferentAnswers:
     )
 
     def test_a_staged_modification_and_an_unstaged_one_are_not_the_same_row(self, fake_repo: dict) -> None:
-        """
-        THE PIN. One file edited and added, one file edited and not — two
-        different facts about a repository, and for as long as this lane read
-        rendered lines they arrived as one.
-        """
+        """THE PIN: one file edited and added, one edited and not, are two rows."""
         document = status_document(self.STAGED_AND_UNSTAGED)
 
         with patch.object(subprocess, "run", return_value=self._completed(document)):
@@ -990,12 +725,7 @@ class TestStagedAndUnstagedAreDifferentAnswers:
         assert rows["unstaged.py"]["status"] == " M"
 
     def test_the_two_columns_arrive_split_as_well_as_whole(self, fake_repo: dict) -> None:
-        """
-        What the four VS Code chips are actually derived from. The verbatim code
-        stays because it is git's own answer; the split rides beside it because
-        every consumer was going to do this slice anyway, and a slice done once
-        here cannot be done differently by two faces.
-        """
+        """The split rides beside the verbatim code so two faces cannot slice it differently."""
         document = status_document(self.STAGED_AND_UNSTAGED)
 
         with patch.object(subprocess, "run", return_value=self._completed(document)):
@@ -1023,11 +753,7 @@ class TestStagedAndUnstagedAreDifferentAnswers:
         assert rows["removed_and_staged.py"]["status"] != rows["removed_only.py"]["status"]
 
     def test_a_file_staged_and_then_edited_again_carries_both_columns(self, fake_repo: dict) -> None:
-        """
-        'MM' is the one code the rendered surface DID survive, because both its
-        columns were already full. It must keep working — the fix must not have
-        traded one collapse for another.
-        """
+        """'MM' is the one code the rendered surface DID survive; it must keep working."""
         document = status_document((("MM", "src/aipass/demo/both.py"),))
 
         with patch.object(subprocess, "run", return_value=self._completed(document)):
@@ -1037,12 +763,7 @@ class TestStagedAndUnstagedAreDifferentAnswers:
         assert rows["both.py"]["worktree"] == "M"
 
     def test_the_split_is_derived_from_the_code_when_the_door_omits_it(self, fake_repo: dict) -> None:
-        """
-        An older drone answers with `status` and no columns. Deriving them from
-        the verbatim code is not a guess — those columns ARE the code, by
-        porcelain's definition — so the lane restates the same fact rather than
-        dropping the field and leaving a face to invent one.
-        """
+        """An older drone answers with `status` and no columns; those columns ARE the code."""
         document = json.dumps(
             {
                 "ok": True,
@@ -1061,14 +782,7 @@ class TestStagedAndUnstagedAreDifferentAnswers:
         assert rows["new.py"]["worktree"] == " "
 
     def test_the_rendered_surface_could_not_have_carried_this(self, fake_repo: dict) -> None:
-        """
-        THE EVIDENCE, KEPT. Not a test of drone — a statement of why this lane
-        must never read their screen output again, written in their own
-        formatting rule so it stays true if anyone is tempted back.
-
-        A reader parsing those two rendered lines gets one answer for two
-        different states, whatever it does with the characters afterwards.
-        """
+        """THE EVIDENCE, KEPT: why this lane must never read drone's screen output again."""
         rendered = ["  %s %s" % (status.strip().rjust(2), path) for status, path in self.STAGED_AND_UNSTAGED]
 
         assert rendered[0][:4] == rendered[1][:4]
@@ -1076,16 +790,8 @@ class TestStagedAndUnstagedAreDifferentAnswers:
 
 
 class TestTheStatusDoorsVerdictIsHonoured:
-    """
-    The refusal split, on the lane a phone hits most.
-
-    A document that says `ok: false` is an ANSWER: drone reached git, git had
-    something to say, and the caller learns a true thing about their
-    repository. That is a 400 in their words. Output that is not a document at
-    all is nobody being able to tell, and that is a 503 — which is exactly the
-    shape drone's caller-verification refusal takes, since it never reaches the
-    door and leaves its sentence on stderr.
-    """
+    """The refusal split: a document saying `ok: false` is an answer (400, their
+    words); output that is not a document at all is a could-not-tell (503)."""
 
     def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -1105,10 +811,7 @@ class TestTheStatusDoorsVerdictIsHonoured:
         assert "not a git repository" in str(caught.value)
 
     def test_a_refusal_with_no_words_still_refuses_and_says_that(self, fake_repo: dict) -> None:
-        """
-        Inventing a reason would be this server deciding a meaning that is not
-        its to decide. Saying they gave none is a fact.
-        """
+        """Inventing a reason is not this server's to do; saying they gave none is a fact."""
         refusal = json.dumps({"ok": False, "files": [], "total": 0})
 
         with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)):
@@ -1118,11 +821,7 @@ class TestTheStatusDoorsVerdictIsHonoured:
         assert "without saying why" in str(caught.value)
 
     def test_a_true_verdict_is_never_read_off_the_exit_code(self, fake_repo: dict) -> None:
-        """
-        THE VERDICT IS THEIRS TO GIVE. A door that answers ok with a non-zero
-        exit is answering; second-guessing it here would be this server
-        deciding for them, which is the thing D0 exists to stop.
-        """
+        """THE VERDICT IS THEIRS TO GIVE: ok with a non-zero exit is still an answer."""
         document = status_document(((" M", "src/aipass/demo/hello.txt"),))
 
         with patch.object(subprocess, "run", return_value=self._completed(document, returncode=1)):
@@ -1131,11 +830,7 @@ class TestTheStatusDoorsVerdictIsHonoured:
         assert result["count"] == 1
 
     def test_a_json_array_is_not_a_document(self, fake_repo: dict) -> None:
-        """
-        One JSON OBJECT or nothing. A list parses cleanly and has no verdict in
-        it at all, so reading one as an answer would mean trusting a shape that
-        never said ok.
-        """
+        """One JSON OBJECT or nothing: a list parses cleanly but carries no verdict."""
         with patch.object(subprocess, "run", return_value=self._completed("[]")):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_git_changes("demo")
@@ -1148,27 +843,10 @@ class TestTheStatusDoorsVerdictIsHonoured:
 
 
 class TestARefusedRootIsNotReAskedEveryFiveSeconds:
-    """
-    The 5-second noise machine, measured by @trigger and reported 2026-08-19.
+    """A phone polls every 5 seconds; a root drone refuses must not spawn and warn on every poll.
 
-    A phone polling the git lane hits it every 5 SECONDS. For a root that
-    cannot authenticate — an external project whose branch carries no
-    `.trinity/passport.json` — drone refuses the CALLER before the door ever
-    runs, so every one of those 720 polls an hour spawns a subprocess that was
-    never going to work and warns in THREE places: this branch's git_reads.log
-    plus @drone's auth.log and git_module.log. Trigger escalated it x10 in an
-    hour (signature d7605b500bbc).
-
-    The refusal is correct and stays. What was wrong was asking again.
-
-    WHAT IS REMEMBERED IS DRONE'S ANSWER, NOT DRONE'S RULE. Checking for a
-    passport file here would be this branch reimplementing another branch's
-    authentication and drifting from it the day they change it — and drifting
-    in the WORST direction, refusing work that would have succeeded. So the
-    door is asked once, its refusal is kept for a short window, and the window
-    expiring is what lets a root that gains a passport start working again with
-    nobody restarting anything.
-    """
+    WHAT IS REMEMBERED IS DRONE'S ANSWER, NOT DRONE'S RULE: checking for a passport here would
+    reimplement drone's auth and drift from it. The refusal is kept for a short window only."""
 
     def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
         result = MagicMock()
@@ -1178,8 +856,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
         return result
 
     def _refused(self) -> Any:
-        """What drone's caller-verification refusal actually looks like: no
-        document at all, and the reason on stderr."""
+        """What drone's caller-verification refusal looks like: no document, reason on stderr."""
         return self._completed("", returncode=1, stderr="No .trinity/passport.json found (caller cwd: /x)")
 
     def test_the_second_poll_does_not_spawn_a_second_subprocess(self, fake_repo: dict) -> None:
@@ -1192,12 +869,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
         assert ran.call_count == 1, f"a minute of polling spawned {ran.call_count} subprocesses"
 
     def test_the_remembered_refusal_still_says_what_drone_said(self, fake_repo: dict) -> None:
-        """A cached refusal that loses the reason is worse than the spam.
-
-        The operator reading the 503 needs the same sentence either way —
-        otherwise the second poll onwards is a mystery, and the reason it is a
-        mystery is the fix.
-        """
+        """A cached refusal that loses the reason is worse than the spam."""
         with patch.object(subprocess, "run", return_value=self._refused()):
             with pytest.raises(host_reads.ReadUnavailable) as first:
                 host_git.read_git_changes("demo")
@@ -1218,13 +890,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
         assert log.warning.call_count == 1, f"12 polls wrote {log.warning.call_count} warnings"
 
     def test_the_root_recovers_on_its_own_when_the_window_passes(self, fake_repo: dict) -> None:
-        """A remembered refusal MUST expire, or a passport arriving is invisible.
-
-        This is why the answer is a short-lived memory rather than a permanent
-        deny-list: nobody should have to restart the server because they ran
-        spawn. Time is driven rather than slept — a real 60s wait in a suite is
-        not a test, it is a delay.
-        """
+        """A remembered refusal MUST expire, or a passport arriving is invisible."""
         clock = [1000.0]
 
         with patch.object(host_refusals.time, "monotonic", lambda: clock[0]):
@@ -1257,15 +923,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
         assert result["count"] == 1
 
     def test_a_refusing_document_is_never_remembered(self, fake_repo: dict) -> None:
-        """
-        The split this must not blur.
-
-        `ok: false` means drone REACHED git and git answered — a live fact
-        about a working repository that can change with the next edit. Caching
-        it would freeze a real answer for a minute and tell a phone its tree is
-        broken after the operator fixed it. Only a no-document failure, where
-        the root could not be read at all, is worth remembering.
-        """
+        """`ok: false` is a live git answer that can change with the next edit, so it is never cached."""
         refusal = status_document((), ok=False, message="git status error: not a git repository")
 
         with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)) as ran:
@@ -1278,11 +936,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
     def test_one_lanes_silence_does_not_mute_another(self, fake_repo: dict) -> None:
         """Memory is per (root, lane), not per root.
 
-        A root refused for the caller check fails every lane, so keying on the
-        root alone would kill the spam too. But a lane that breaks for its OWN
-        reason would then take three working lanes down with it — and telling
-        the two apart means reading drone's refusal TEXT, which this branch
-        does not do to another branch's words.
+        Keyed on root alone, one lane broken for its OWN reason would mute the working lanes.
         """
         with patch.object(subprocess, "run", return_value=self._refused()) as ran:
             with pytest.raises(host_reads.ReadUnavailable):

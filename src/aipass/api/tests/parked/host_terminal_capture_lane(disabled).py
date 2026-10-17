@@ -9,26 +9,8 @@
 """
 Tests for the Terminal Lane
 
-Seam 2 of DPLAN-0300's terminal contract: `GET /v1/room/pane` proxying
-`baud --capture-room`, and `POST /v1/verbs/keys` proxying `baud --send-room`.
-
-BUILT AGAINST THE CONTRACT, NOT THE BINARY. @baud is building Seam 1 in
-parallel and the flags may not exist on disk yet — the same way the verb lane
-was built against their written envelope before their door existed. Nothing
-here launches the real binary.
-
-THE TWO THINGS THIS LANE COULD GET WRONG, and neither is "does it work":
-
-  1. A cap that silently trims. A client that asked for 5000 lines and quietly
-     received 2000 renders a partial screen as the whole screen. Every cap here
-     REFUSES, and each refusal is mutation-checked — stubbed off to watch the
-     test fail — because a guard nobody has seen bite is a guard nobody knows
-     they have.
-
-  2. Typing. `--key` is sent WITHOUT `-l`, so tmux INTERPRETS it: the only path
-     in this lane where a caller's bytes are not literal. That is why the key
-     allowlist is mirrored at this door as well as @baud's, and why `--text`
-     never carrying a newline is pinned rather than assumed.
+`GET /v1/room/pane` proxies `baud --capture-room`, `POST /v1/verbs/keys` proxies
+`baud --send-room`; built against the contract, nothing launches the binary.
 """
 
 from pathlib import Path
@@ -62,8 +44,7 @@ PATCH_SEATED = "aipass.api.apps.handlers.host.verbs.host_reads.seated_project"
 PROJECT = "aipass"
 PROJECT_AS_SENT = "AIPASS"
 
-# A real capture carries escape sequences — that is the whole point of -e, and
-# the phone renders the colour. Anything this lane does to them is a bug.
+# A real capture carries escape sequences (-e); the phone renders the colour.
 PANE_TEXT = "\x1b[32mapi\x1b[0m $ pytest\n  865 passed\n"
 
 CAPTURED = {
@@ -122,18 +103,8 @@ def typist(quiet: Any):
             yield door
 
 
-# ==============================================
-# THE PANE — a read, and it changes nothing
-# ==============================================
-
-
 class TestThePaneIsReturnedExactlyAsCaptured:
-    """
-    A screen read that alters the screen is worse than no screen read.
-
-    Escape sequences, trailing whitespace, blank lines: all of it is what the
-    operator would see at the desk, so all of it survives this lane untouched.
-    """
+    """A screen read that alters the screen is worse than no screen read."""
 
     def test_the_escape_sequences_survive(self, captor: Any) -> None:
         """Colour is data here. Stripping it is a silent change to the answer."""
@@ -159,9 +130,7 @@ class TestThePaneIsReturnedExactlyAsCaptured:
         """
         @baud's rule, and it is the same shape as their kill door.
 
-        An empty pane and a refused capture would both render as a blank
-        terminal, and they are opposite facts: one means the room is quiet, the
-        other means the name is wrong.
+        An empty pane (a quiet room) and a refused capture (a wrong name) both render blank.
         """
         captor.capture_room.return_value = {
             "room": None,
@@ -211,9 +180,7 @@ class TestThePaneTargetsARoomLikeEveryOtherRoomVerb:
         """
         The asymmetry is deliberate and it is about consequence.
 
-        Reading the wrong room shows the wrong screen to someone who is looking
-        at it; typing into the wrong one puts keystrokes somewhere nobody
-        looked. So this matches the fleet lane, not the verb lane.
+        A wrong read shows the wrong screen to someone looking; a wrong type is unseen.
         """
         result = host_verbs.read_pane("api")
 
@@ -234,12 +201,7 @@ class TestThePaneTargetsARoomLikeEveryOtherRoomVerb:
 class TestTheLinesCapRefusesRatherThanTrims:
     """
     The cap the contract left open, decided the way every other cap on this
-    server is decided.
-
-    A client that asked for 5000 lines and silently received 2000 cannot tell it
-    was cut, and would render a partial screen as the whole screen. The one
-    place this server clamps instead is the feed cursor — and there the clamp is
-    reported in a `gap` flag, for exactly this reason.
+    server is decided: a silent trim renders a partial screen as the whole one.
     """
 
     def test_the_cap_is_what_the_contract_says(self) -> None:
@@ -284,18 +246,8 @@ class TestTheLinesCapRefusesRatherThanTrims:
             host_verbs.read_pane("api", lines="lots")  # type: ignore[arg-type]
 
 
-# ==============================================
-# TYPING — the one place bytes get interpreted
-# ==============================================
-
-
 class TestExactlyOneOfTextOrKey:
-    """
-    Both is ambiguous; neither is a no-op wearing an action's clothes.
-
-    @baud refuses this at their end too, which is the point: a bug on either
-    side produces a refusal rather than a surprise keystroke in a live session.
-    """
+    """Both is ambiguous; neither is a no-op wearing an action's clothes."""
 
     def test_neither_is_refused(self, typist: Any) -> None:
         """An empty send is not a send."""
@@ -318,9 +270,7 @@ class TestExactlyOneOfTextOrKey:
 class TestTextIsLiteralAndNeverSubmits:
     """
     @baud's doctrine, carried unchanged: text is inserted WITHOUT a newline, so
-    submitting stays the operator's keystroke and a paste alone can never
-    execute. The defence lives in their code; this lane's job is to not go
-    looking for a way around it.
+    submitting stays the operator's keystroke and a paste alone can never execute.
     """
 
     def test_the_text_travels_unchanged(self, typist: Any) -> None:
@@ -333,9 +283,7 @@ class TestTextIsLiteralAndNeverSubmits:
         """
         The single most important assertion in this file.
 
-        If this lane appended a newline, every paste from the phone would
-        EXECUTE, and the operator's confirm-by-keystroke would be gone without
-        anybody deciding to remove it.
+        An appended newline makes every paste from the phone EXECUTE.
         """
         host_verbs.send_keys("api", PROJECT_AS_SENT, text="rm -rf /")
 
@@ -373,11 +321,7 @@ class TestTheKeyAllowlistIsCheckedAtThisDoorToo:
     `--key` is sent WITHOUT `-l`, so tmux interprets it — the only path in this
     lane where a caller's bytes are not literal.
 
-    Mirroring another branch's enum is something this file otherwise refuses to
-    do. It earns its place here because a stale mirror fails SAFE and LOUD: a
-    key @baud adds and this list has not learned is refused with a sentence
-    naming the mirror. The reverse — an unvalidated string reaching an
-    interpreting send-keys — has no such recovery.
+    A stale mirror of @baud's enum fails safe and loud; an unvalidated key does not.
     """
 
     def test_the_allowlist_is_exactly_the_published_contract(self) -> None:
@@ -415,13 +359,7 @@ class TestTheKeyAllowlistIsCheckedAtThisDoorToo:
         assert not typist.send_room.called
 
     def test_a_shell_fragment_as_a_key_is_refused(self, typist: Any) -> None:
-        """
-        The reason this mirror exists, written as a test.
-
-        Without it, an arbitrary string reaches a send-keys that INTERPRETS its
-        argument. @baud's fence is the real one; this is the one that means a
-        bug in theirs is not automatically a bug in mine.
-        """
+        """The reason this mirror exists, written as a test."""
         for candidate in ("Enter; rm -rf /", "C-c Enter", "$(whoami)", "Enter\nEnter"):
             with pytest.raises(host_verbs.VerbRefused):
                 host_verbs.send_keys("api", PROJECT_AS_SENT, key=candidate)
@@ -439,13 +377,7 @@ class TestTheKeyAllowlistIsCheckedAtThisDoorToo:
         assert "mirror" in str(caught.value).lower()
 
     def test_the_key_name_is_case_sensitive(self, typist: Any) -> None:
-        """
-        Their enum, their casing — 'enter' is not a tmux key name.
-
-        Deliberately unlike `project`, which is compared case-insensitively:
-        that is a name a human types on a phone, this is a constant a client
-        emits from a button.
-        """
+        """Their enum, their casing — 'enter' is not a tmux key name."""
         with pytest.raises(host_verbs.VerbRefused):
             host_verbs.send_keys("api", PROJECT_AS_SENT, key="enter")
 
@@ -496,11 +428,6 @@ class TestTypingTargetsARoomAndTheProjectIsRequired:
 
         with pytest.raises(host_verbs.VerbUnavailable):
             host_verbs.send_keys("api", PROJECT_AS_SENT, key="Enter")
-
-
-# ==============================================
-# THE EXEC — fleet.py owns @baud's binary
-# ==============================================
 
 
 @pytest.fixture
@@ -578,13 +505,7 @@ class TestTheSendInvocation:
     """The typing command line — the one that reaches a live session."""
 
     def test_text_is_passed_as_a_single_argument(self, seated: Path) -> None:
-        """
-        A list, never a shell string.
-
-        subprocess with a list never invokes a shell, so a semicolon in the
-        text is a semicolon in the text. This is why the payload can be
-        forwarded opaquely at all.
-        """
+        """A list, never a shell string."""
         import json
 
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(SENT))) as run:
@@ -626,12 +547,7 @@ class TestTheSendInvocation:
 
 
 class TestThePayloadNeverReachesALog:
-    """
-    A pane is whatever is on the owner's screen; typed text may be a password.
-
-    Logging either would create a second, permanent copy in a place nobody
-    chose — and this server's logs are not where a secret goes to live.
-    """
+    """A pane is whatever is on the owner's screen; typed text may be a password."""
 
     def test_the_pane_text_is_not_logged(self, seated: Path) -> None:
         """Its SIZE is the useful signal; its contents are nobody's business."""
@@ -658,11 +574,6 @@ class TestThePayloadNeverReachesALog:
         assert "text_chars" in recorded
 
 
-# ==============================================
-# ROUTES
-# ==============================================
-
-
 @pytest.fixture
 def client(tmp_path: Path):
     """A test client over a temporary token store."""
@@ -681,11 +592,7 @@ def client(tmp_path: Path):
 class TestTheScopeSplitIsTheWholeUiStory:
     """
     Learning #389, which cost the owner four "broken" features: a scope-refused UI
-    is indistinguishable from breakage.
-
-    The split is what lets @baud render the input row DISABLED with a reason
-    rather than dead: a read token SEES the pane and cannot type into it. Both
-    halves have to be true for that to work, so both are pinned.
+    is indistinguishable from breakage. A read token SEES the pane and cannot type.
     """
 
     def test_a_read_token_can_see_the_pane(self, client: Any) -> None:
@@ -819,16 +726,13 @@ class TestTheTerminalRoutesMapStatusLikeTheVerbLane:
         """
         `room_pane` read back off the app, by name and method.
 
-        It sits at /v1/room/ rather than /v1/verbs/ on purpose: the verb route
-        table has its own test asserting it holds exactly four things, and a
-        read filed under verbs would either break that or quietly widen it.
+        Not under /v1/verbs/: that route table is pinned at exactly four entries.
         """
         app = host_server.create_app()
         routes = {
             route.path: (route.endpoint.__name__, set(route.methods))
             for route in app.routes
-            # The trailing slash matters: "/v1/room" also prefixes "/v1/rooms",
-            # which is the fleet lane's projection and nothing to do with this.
+            # The trailing slash matters: "/v1/room" also prefixes the fleet's "/v1/rooms".
             if getattr(route, "path", "").startswith("/v1/room/")
         }
 

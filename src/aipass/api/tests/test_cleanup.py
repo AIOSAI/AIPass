@@ -3,17 +3,10 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
-
-# Tests for cleanup.py -- usage data retention and cleanup handler.
-#
-# Tests:
-# - _write_json() success, parent dir creation, write failure
-# - cleanup_old_data() no file, does not parse, no old entries, entries cleaned, retention period
-# - which entries are old, through cleanup_old_data: valid, no timestamp, invalid, mixed
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DEFAULT_RETENTION_DAYS's value; the retention tests pass retention_days
@@ -24,12 +17,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pytest
 
-# _write_json stays imported by name: its parent mkdir and its two failure
-# paths (a replace the platform refuses, a dump that cannot encode) cannot be
-# reached through cleanup_old_data, which only writes a store it has just read
-# and parsed. A public writer would be a door for these tests alone, so the
-# through_the_command row stood HELD on it (api, fleet green leg 9) and is
-# now closed by a line bypass carrying this reason (api, fleet green leg 11).
+# _write_json by name: its mkdir and failure paths are unreachable through
+# cleanup_old_data, which only writes a store it has just parsed (line bypass).
 from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
     _write_json,
     cleanup_old_data,
@@ -38,21 +27,8 @@ from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage det
 _CLEANUP_MOD = "aipass.api.apps.handlers.usage.cleanup"
 
 
-# =============================================
-# _write_json tests
-# =============================================
-
-
 class TestWriteJson:
-    """
-    Tests for _write_json().
-
-    TestReadJson's three tests were retired as duplicates once asked through
-    cleanup_old_data (api, fleet green leg 9): a missing store is test_no_file,
-    a store that does not parse is
-    test_a_store_that_does_not_parse_raises_and_is_left_alone, and a store that
-    parses is read by every test that cleans an entry.
-    """
+    """Tests for _write_json()."""
 
     def test_success(self, tmp_path: Path):
         """Returns True and writes valid JSON to file."""
@@ -82,9 +58,7 @@ class TestWriteJson:
     def test_write_failure(self, tmp_path: Path):
         """Raises when the write fails, so no caller reports a cleanup that never landed (api, fleet green leg 3).
 
-        The target is a directory. The store is replaced by a sibling in one step
-        (api, fleet green leg 4), so the platform is asked which error replacing a
-        directory raises, and the sibling must not be left behind.
+        The target is a directory; the platform is asked which error replacing one raises.
         """
         file_path = tmp_path / "fail.json"
         file_path.mkdir()
@@ -98,11 +72,7 @@ class TestWriteJson:
         assert sorted(p.name for p in tmp_path.iterdir()) == ["fail.json", "probe.json"]
 
     def test_a_dump_that_fails_leaves_the_store_whole(self, tmp_path: Path):
-        """The text is built before the store is touched, so a failed dump cuts nothing (api, fleet green leg 4).
-
-        The failure is json's own TypeError on an object it cannot encode, chosen by
-        the test and not by the file system.
-        """
+        """The text is built before the store is touched, so a failed dump cuts nothing (api, fleet green leg 4)."""
         store = tmp_path / "usage.json"
         store.write_text('{"kept": 1}', encoding="utf-8")
 
@@ -111,11 +81,6 @@ class TestWriteJson:
 
         assert store.read_text(encoding="utf-8") == '{"kept": 1}'
         assert sorted(p.name for p in tmp_path.iterdir()) == ["usage.json"]
-
-
-# =============================================
-# cleanup_old_data tests
-# =============================================
 
 
 class TestCleanupOldData:
@@ -178,8 +143,7 @@ class TestCleanupOldData:
         assert result == 1
         with open(file_path, "r", encoding="utf-8") as f:
             updated = json.load(f)
-        # The shape first: a store written without its wrapper dies here, not by a KeyError
-        # (api, fleet green leg 4).
+        # The shape first: a store written without its wrapper dies here, not by a KeyError.
         assert set(updated) == {"data", "timestamp"}
         tracking = updated["data"]["generation_tracking"]
         assert "gen-old" not in tracking
@@ -188,10 +152,7 @@ class TestCleanupOldData:
     def test_a_write_that_fails_inside_cleanup_raises_and_leaves_the_store(self, tmp_path: Path, monkeypatch):
         """The caller's arm of a failed write: cleanup raises and the store is byte-equal after.
 
-        The writer is a stand-in raising the error it is handed; the store under
-        tmp_path is read for real. A mutant of the writer answering False survives
-        here by construction, because the stand-in replaces the writer: the raise of
-        the writer itself is held by test_write_failure (api, fleet green leg 4).
+        The writer's own raise is held by test_write_failure; here it is a stand-in.
         """
         old = (datetime.now() - timedelta(days=60)).isoformat()
         file_path = tmp_path / "usage.json"
@@ -209,11 +170,7 @@ class TestCleanupOldData:
         assert file_path.read_bytes() == before
 
     def test_a_log_that_fails_after_the_write_still_reports_the_cleanup(self, tmp_path: Path, monkeypatch):
-        """The audit line is written after the store; its failure never turns a landed cleanup into a failure.
-
-        Decision (api, fleet green leg 4): the count is returned and the log failure
-        is logged as a warning, because the store on disk is already cleaned.
-        """
+        """The audit line is written after the store; its failure never turns a landed cleanup into a failure."""
         old = (datetime.now() - timedelta(days=60)).isoformat()
         file_path = tmp_path / "usage.json"
         store = {"data": {"generation_tracking": {"gen-old": {"timestamp": old}}}}
@@ -258,11 +215,6 @@ class TestCleanupOldData:
         assert "gen-3d" in tracking
 
 
-# =============================================
-# _identify_old_generations tests
-# =============================================
-
-
 def _cleaned(tmp_path: Path, tracking: dict) -> tuple:
     """Run cleanup_old_data at 30 days over a store holding `tracking`; the count and what is left."""
     store = tmp_path / "usage.json"
@@ -274,13 +226,7 @@ def _cleaned(tmp_path: Path, tracking: dict) -> tuple:
 
 
 class TestIdentifyOldGenerations:
-    """
-    Which entries are old, asked through cleanup_old_data (api, fleet green leg 9).
-
-    These called _identify_old_generations by name with a fixed cutoff; the
-    cutoff is now cleanup's own, now minus 30 days, and the answer is what is
-    left in the store.
-    """
+    """Which entries are old, asked through cleanup_old_data (api, fleet green leg 9)."""
 
     def test_entries_with_valid_timestamps(self, tmp_path: Path):
         """Identifies entries older than cutoff date."""

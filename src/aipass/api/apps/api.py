@@ -3,17 +3,11 @@
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
 # Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""
-api Branch - Main Orchestrator
+"""api Branch - Main Orchestrator"""
 
-Modular architecture with auto-discovered modules.
-Main handles routing, modules implement functionality.
-"""
-
-# INFRASTRUCTURE IMPORT PATTERN
 import os
 import sys
 from pathlib import Path
@@ -25,44 +19,25 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Standard library imports
 import importlib
 from typing import Any, List
 
-# AIPass infrastructure imports
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# CLI services for formatted output
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 from rich.panel import Panel
 from rich.table import Table
 from rich.columns import Columns
 
-# JSON handler for api tracking
 from aipass.api.apps.handlers.json import json_handler
 
-# =============================================================================
-# CONSTANTS & CONFIG
-# =============================================================================
-
-# Module root
 MODULE_ROOT = Path(__file__).parent
 
-# Modules directory
 MODULES_DIR = MODULE_ROOT / "modules"
-
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 
 def discover_modules() -> List[Any]:
-    """
-    Auto-discover modules from modules/ directory
-
-    Returns:
-        List of module objects with handle_command() function
-    """
+    """Auto-discover modules from modules/ directory"""
     modules = []
 
     if not MODULES_DIR.exists():
@@ -72,17 +47,14 @@ def discover_modules() -> List[Any]:
     logger.info(f"[{Path(__file__).stem}] Discovering modules...")
 
     for file_path in MODULES_DIR.glob("*.py"):
-        # Skip __init__.py and private files
         if file_path.name.startswith("_"):
             continue
 
         module_name = file_path.stem
 
         try:
-            # Import module via pip namespace
             module = importlib.import_module(f"aipass.api.apps.modules.{module_name}")
 
-            # Check for required interface
             if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"  [+] {module_name}")
@@ -96,11 +68,6 @@ def discover_modules() -> List[Any]:
     return modules
 
 
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
-
-
 def print_introspection():
     """Display discovered modules and available commands"""
     console.print()
@@ -109,7 +76,6 @@ def print_introspection():
     console.print("[dim]Universal API client and key management[/dim]")
     console.print()
 
-    # Discover modules
     modules = discover_modules()
 
     if not modules:
@@ -127,11 +93,6 @@ def print_introspection():
     console.print()
     console.print("[dim]Run 'drone @api --help' for usage information[/dim]")
     console.print()
-
-
-# =============================================================================
-# DRONE COMPLIANCE - HELP SYSTEM
-# =============================================================================
 
 
 def print_help():
@@ -251,22 +212,9 @@ def print_help():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """
     Route command to appropriate module
-
-    Args:
-        command: Command name (e.g., 'get-key', 'validate')
-        args: Additional command arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
     """
     for module in modules:
         try:
@@ -278,41 +226,29 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-
 def main():
     """Main entry point - routes commands to modules"""
     try:
-        # The failure flag cli's error() sets is process-level, so a previous
-        # command in the same process (or an imported branch that printed an
-        # error while this one was still succeeding) would otherwise be read
-        # as OUR failure. Cleared before anything can set it.
+        # error()'s failure flag is process-level: a prior command or an imported
+        # branch's error would read as ours. Clear it before anything can set it.
         reset_command_state()
 
-        # Parse arguments directly from sys.argv
         args = sys.argv[1:]
 
-        # Show introspection when run without arguments
         if len(args) == 0:
             print_introspection()
             json_handler.log_operation("api_introspection_displayed", {"trigger": "no_args"})
             return 0
 
-        # Show version
         if args[0] in ["--version", "-V"]:
             console.print("API v1.0.0")
             return 0
 
-        # Show help for explicit help flags
         if args[0] in ["--help", "-h", "help"]:
             print_help()
             json_handler.log_operation("api_help_displayed", {"trigger": args[0]})
             return 0
 
-        # Discover modules
         modules = discover_modules()
 
         if not modules:
@@ -320,16 +256,11 @@ def main():
             error("No modules found")
             return 1
 
-        # Extract command and remaining args (matching seedgo pattern)
         command = args[0]
         remaining_args = args[1:] if len(args) > 1 else []
 
-        # Subcommand help guard — a help flag ANYWHERE means "explain this
-        # command", never "run it", and every module receives exactly ["--help"]
-        # so none can be reached with a stray flag still in its args.
-        # Checking only remaining_args[0] let `get-key <provider> --help` reach
-        # the retrieval path and print masked key material, and `cleanup 30
-        # --help` run a real cleanup. Reported by @seedgo (help_flag_safety).
+        # A help flag ANYWHERE means explain, never run: checking only args[0] let
+        # `get-key <provider> --help` print key material and `cleanup 30 --help` clean.
         if any(arg in ("--help", "-h") for arg in remaining_args):
             for module in modules:
                 if module.handle_command(command, ["--help"]):
@@ -337,17 +268,10 @@ def main():
             print_help()
             return 0
 
-        # Log api command attempt
         json_handler.log_operation("api_command_attempted", {"command": command, "modules_discovered": len(modules)})
 
-        # Route command to modules.
-        #
-        # A module returning True means "I recognised this command", NOT "it
-        # worked" — every refusal below (no key, missing argument, bind
-        # refused) is still a handled command, and returning 0 on all of them
-        # is what let `drone @api validate && <next>` proceed on a failure.
-        # resolve_exit reads the flag error() raises: 1 unrecognised,
-        # 2 recognised-and-refused, 0 only when nothing printed an error.
+        # True means "recognised", not "worked"; resolve_exit reads error()'s flag:
+        # 1 unrecognised, 2 recognised-and-refused, 0 only when no error printed.
         handled = route_command(command, remaining_args, modules)
 
         if not handled:

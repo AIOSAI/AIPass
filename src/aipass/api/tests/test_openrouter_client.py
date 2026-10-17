@@ -3,21 +3,10 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
-
-# Tests for openrouter_client.py — OpenRouter client module orchestration.
-#
-# Tests:
-# - handle_command routing for test, call, models, status, unknown
-# - Help gate (--help) and introspection gate (no-args on "call")
-# - log_operation called on every valid command
-# - test_connection success / no-key / API-failure paths
-# - list_models success / no-key / --all limiter
-# - check_status with key / without key, the latter with the OpenAI SDK installed and absent
-# - get_response delegation to client handler
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — OPENROUTER_HEADERS' values; the test compares with the product's constant
@@ -36,17 +25,11 @@ from aipass.api.apps.modules.openrouter_client import handle_command
 from aipass.api.apps.modules.openrouter_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
 
 
-# Base set of patches applied to every test via the module-level prefix
 _MOD = "aipass.api.apps.modules.openrouter_client"
-# The real exception, taken before any test replaces models with an autospec stub,
-# whose class attributes are mocks an except clause cannot match (api, fleet green leg 3).
+# The real exceptions, taken before any test replaces models with an autospec stub,
+# whose class attributes are mocks an except clause cannot match.
 _MODELS_UNAVAILABLE = openrouter_client.models.ModelsUnavailable
 _KEY_UNAVAILABLE = openrouter_client.keys.KeyUnavailable
-
-
-# =============================================
-# handle_command — routing
-# =============================================
 
 
 @patch(f"{_MOD}.json_handler", autospec=True)
@@ -104,11 +87,6 @@ def test_handle_command_routes_call(mock_header, mock_jh, mock_call):
     mock_call.assert_called_once_with(["hello"])
 
 
-# =============================================
-# handle_command — gates
-# =============================================
-
-
 @patch(f"{_MOD}.test_connection")
 @patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
@@ -136,11 +114,6 @@ def test_handle_command_call_no_args_executes(mock_header, mock_jh, mock_error):
     assert "Prompt required" in mock_error.call_args[0][0]
 
 
-# =============================================
-# handle_command — logging
-# =============================================
-
-
 @patch(f"{_MOD}.test_connection")
 @patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
@@ -151,27 +124,13 @@ def test_handle_command_logs_operation(mock_header, mock_jh, mock_test):
     mock_jh.log_operation.assert_called_once_with("openrouter_test", {"command": "test"})
 
 
-# =============================================
-# test_connection
-# =============================================
-
-
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.models", autospec=True)
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_test_connection_success(mock_header, mock_keys, mock_models, mock_success, mock_error):
-    """
-    A successful connection reports the model count AND says nothing else.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band). This file split every happy
-    path into a second not-called twin running identical setup;
-    `test_test_connection_success_no_error` was this call again for one
-    `assert_not_called`. That line came here rather than being deleted with the
-    twin: "success was reported" and "no error was ALSO reported" are two
-    facts, and a path that printed both would have passed the positive half.
-    """
+    """A successful connection reports the model count AND says nothing else."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     mock_models.fetch_models_from_api.return_value = [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
 
@@ -188,12 +147,7 @@ def test_test_connection_success(mock_header, mock_keys, mock_models, mock_succe
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_test_connection_no_key(mock_header, mock_keys, mock_error, mock_success):
-    """
-    A missing key is diagnosed, reported as an error, and never as a success.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
-    `test_test_connection_no_key_no_success`, identical setup for one line.
-    """
+    """A missing key is diagnosed, reported as an error, and never as a success."""
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "No key found in env"
 
@@ -210,13 +164,7 @@ def test_test_connection_no_key(mock_header, mock_keys, mock_error, mock_success
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_test_connection_api_failure(mock_header, mock_keys, mock_models, mock_error, mock_success):
-    """
-    An unreadable endpoint is reported as a failure with its reason, never as a success.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
-    `test_test_connection_api_failure_no_success`, identical setup for one line.
-    The fetch now raises instead of returning an empty list (api, fleet green leg 3).
-    """
+    """An unreadable endpoint is reported as a failure with its reason, never as a success."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
     mock_models.fetch_models_from_api.side_effect = _MODELS_UNAVAILABLE("status 503")
@@ -235,11 +183,7 @@ def test_test_connection_api_failure(mock_header, mock_keys, mock_models, mock_e
 def test_test_connection_an_endpoint_with_no_models_is_a_success(
     mock_header, mock_keys, mock_models, mock_error, mock_success
 ):
-    """An empty model list is an answer: connection successful with 0 models, no error.
-
-    Green from its first run; its proof is the mutant reporting a failure for an
-    empty list (api, fleet green leg 4).
-    """
+    """An empty model list is an answer: connection successful with 0 models, no error."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
     mock_models.fetch_models_from_api.return_value = []
@@ -250,23 +194,13 @@ def test_test_connection_an_endpoint_with_no_models_is_a_success(
     mock_error.assert_not_called()
 
 
-# =============================================
-# list_models
-# =============================================
-
-
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.models", autospec=True)
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_list_models_success(mock_header, mock_keys, mock_models, mock_success, mock_error, capsys):
-    """
-    A successful listing reports the count and rows, and reports no error.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
-    `test_list_models_success_no_error`, the same call again for one line.
-    """
+    """A successful listing reports the count and rows, and reports no error."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     fake_models = [
         {
@@ -283,7 +217,6 @@ def test_list_models_success(mock_header, mock_keys, mock_models, mock_success, 
     out, _err = capsys.readouterr()
     mock_success.assert_called_once()
     assert "3 models" in mock_success.call_args[0][0]
-    # The table the user reads: its header row and one row per model
     assert "$/prompt" in out
     for i in range(3):
         assert f"provider/model-{i}" in out
@@ -295,12 +228,7 @@ def test_list_models_success(mock_header, mock_keys, mock_models, mock_success, 
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_list_models_no_key(mock_header, mock_keys, mock_error, mock_success):
-    """
-    A missing key is reported as an error and never as a success.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
-    `test_list_models_no_key_no_success`, identical setup for one line.
-    """
+    """A missing key is reported as an error and never as a success."""
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "Key not set"
 
@@ -329,12 +257,10 @@ def test_list_models_limits_to_10(mock_header, mock_keys, mock_models, mock_succ
 
     openrouter_client.list_models([])
 
-    # Count data rows: printed lines that carry a model ID
     out, _err = capsys.readouterr()
     data_rows = [line for line in out.splitlines() if "provider/model-" in line]
     assert len(data_rows) == 10
 
-    # Should show "Showing 10 of 25" truncation notice
     assert "Showing 10 of 25" in out
 
 
@@ -363,11 +289,6 @@ def test_list_models_all_flag_shows_everything(mock_header, mock_keys, mock_mode
     assert "Showing 10 of" not in out
 
 
-# =============================================
-# check_status
-# =============================================
-
-
 @patch(f"{_MOD}.client", autospec=True)
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
@@ -379,12 +300,9 @@ def test_check_status_with_key(mock_header, mock_keys, mock_client, capsys):
     openrouter_client.check_status()
 
     out, _err = capsys.readouterr()
-    # Key should be shown as masked: first 8 and last 4 only
     assert "sk-or-v1...5678" in out
     assert "NOTREAL" not in out
-    # "yes" for key configured
     assert "Key configured:  yes" in out
-    # Cache stats shown
     assert "Cached clients: 2/5" in out
 
 
@@ -401,13 +319,8 @@ def test_check_status_with_key(mock_header, mock_keys, mock_client, capsys):
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_check_status_no_key(mock_header, mock_keys, mock_client, mock_logger, sdk, expected_err, capsys, monkeypatch):
-    """
-    When API key is missing, status warns and shows the diagnosis.
-
-    The SDK's presence is set here, not inherited: CI installs no llm extra, so
-    import openai fails there and a second warning follows the key line
-    (DPLAN-0354, PR #774). A stub module is the installed case, None the absent one.
-    """
+    """When API key is missing, status warns and shows the diagnosis."""
+    # The SDK's presence is set, not inherited: CI installs no llm extra, so import openai fails there.
     monkeypatch.setitem(sys.modules, "openai", sdk)
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "OPENROUTER_API_KEY not set"
@@ -416,17 +329,11 @@ def test_check_status_no_key(mock_header, mock_keys, mock_client, mock_logger, s
     openrouter_client.check_status()
 
     out, err = capsys.readouterr()
-    # cli's warning() writes to stderr: pinned there, whole, and absent from stdout
-    # (api, fleet green leg 4 - either stream used to pass).
+    # cli's warning() writes to stderr: pinned there, whole, and absent from stdout.
     assert err.splitlines() == expected_err
     assert "API key not configured" not in out
     assert "Reason:          OPENROUTER_API_KEY not set" in out
     assert "Key configured" not in out
-
-
-# =============================================
-# get_response — delegation
-# =============================================
 
 
 @patch(f"{_MOD}.client", autospec=True)
@@ -464,11 +371,6 @@ def test_get_response_returns_none_on_failure(mock_client):
     result = openrouter_client.get_response("fail prompt", caller="test")
 
     assert result is None
-
-
-# =============================================
-# list_models — context formatting
-# =============================================
 
 
 @patch(f"{_MOD}.success")
@@ -528,11 +430,6 @@ def test_list_models_formats_free_pricing(mock_header, mock_keys, mock_models, m
     assert data_rows[0].split()[2:] == ["free", "free"]
 
 
-# =============================================
-# make_call — stub behaviour
-# =============================================
-
-
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.client", autospec=True)
 @patch(f"{_MOD}.header")
@@ -556,11 +453,6 @@ def test_handle_command_call_no_args_shows_error(mock_header, mock_jh, mock_erro
     assert result is True
     mock_error.assert_called_once()
     assert "Prompt required" in mock_error.call_args[0][0]
-
-
-# =============================================
-# list_models — error on fetch failure
-# =============================================
 
 
 @patch(f"{_MOD}.error")
@@ -587,11 +479,7 @@ def test_list_models_fetch_failure(mock_header, mock_keys, mock_models, mock_err
 def test_list_models_an_endpoint_with_no_models_is_found_zero(
     mock_header, mock_keys, mock_models, mock_error, mock_success
 ):
-    """An empty model list is listed as found 0 models, never as a failure.
-
-    Green from its first run; its proof is the mutant reporting a failure for an
-    empty list (api, fleet green leg 4).
-    """
+    """An empty model list is listed as found 0 models, never as a failure."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
     mock_models.fetch_models_from_api.return_value = []
@@ -600,11 +488,6 @@ def test_list_models_an_endpoint_with_no_models_is_found_zero(
 
     mock_success.assert_called_once_with("Found 0 models")
     mock_error.assert_not_called()
-
-
-# =============================================
-# handle_command — exception propagation
-# =============================================
 
 
 @patch(f"{_MOD}.keys", autospec=True)
@@ -625,10 +508,7 @@ def test_handle_command_propagates_exception(mock_header, mock_jh, mock_keys):
 @patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 def test_an_unreadable_secrets_file_is_named_not_shrugged_at(mock_header, mock_jh, mock_keys, mock_error, command):
-    """test, models and status show KeyUnavailable's reason instead of a diagnosis of "no key".
-
-    (api, fleet green leg 11)
-    """
+    """test, models and status show KeyUnavailable's reason instead of a diagnosis of "no key"."""
     mock_keys.KeyUnavailable = _KEY_UNAVAILABLE
     mock_keys.get_api_key.side_effect = _KEY_UNAVAILABLE("The secrets file could not be read (refused)")
 
@@ -648,10 +528,6 @@ def test_make_call_shows_the_reason_when_the_secrets_file_is_unreadable(mock_hea
 
     mock_error.assert_called_once_with("The secrets file could not be read (refused)")
 
-
-# =============================================
-# create_client() — handler-level tests
-# =============================================
 
 _CLIENT_MOD = "aipass.api.apps.handlers.openrouter.client"
 
@@ -710,10 +586,8 @@ def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
 @patch(f"{_CLIENT_MOD}.OpenAI")
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_raises_with_the_sdk_reason(mock_openai_cls):
-    """create_client raises OpenRouterUnavailable carrying the SDK's reason.
-
-    It used to answer None, which read the same as "no key" (api, fleet green leg 10).
-    """
+    """create_client raises OpenRouterUnavailable carrying the SDK's reason."""
+    # None would read the same as "no key".
     mock_openai_cls.side_effect = RuntimeError("connection refused")
 
     with pytest.raises(openrouter_client.client.OpenRouterUnavailable) as caught:
@@ -734,11 +608,9 @@ def test_make_call_shows_the_reason_when_openrouter_is_unavailable(mock_header, 
 
 
 class TestTrailingHelpDoesNotExecute:
-    """A help flag must explain the command, never run it.
+    """A help flag must explain the command, never run it."""
 
-    Gating on args[0] only let `models --all --help` and `call "..." --help`
-    reach the API-calling paths. Reported by @seedgo via help_flag_safety.
-    """
+    # A gate on args[0] alone lets `models --all --help` and `call "..." --help` reach the API.
 
     def test_models_with_flag_and_trailing_help_shows_help(self):
         """`models --all --help` prints help instead of hitting the API."""

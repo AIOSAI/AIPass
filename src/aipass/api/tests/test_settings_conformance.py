@@ -3,30 +3,13 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
 
-# The python runner for the shared settings conformance corpus (FPLAN-0438 R3).
-#
-# WHY THIS EXISTS. The settings lane is a faithful mirror of @baud's settings.rs,
-# and a mirror drifts. @baud measured six real divergences between the two
-# implementations in one night — not by reading each other's source, by running
-# both — and every one of them was a place where two faces would have written the
-# operator's own config differently while each believed it was correct.
-#
-# Prose cannot hold a mirror straight. Shared DATA can: one set of cases, in
-# plain JSON, that each runtime proves it satisfies in its own test suite. When
-# the two disagree from here on, a case goes red on one side and names the
-# disagreement, instead of an operator finding it.
-#
-# THE CASES ARE THE CONTRACT, not this file. This file only knows how to build a
-# starting state, call a door, and compare an answer. A rust runner walks the same
-# directory with serde and does the same three things — the JSON carries no python
-# in it anywhere, which is the whole point.
-#
-# See tests/conformance/settings/README.md for the case format.
+# The cases are the contract, shared with @baud's rust runner for settings.rs; keep
+# the JSON free of python. Case format: tests/conformance/settings/README.md.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — hooks_sound_get() and hooks_sound_set(), tests/test_host_settings.py
@@ -46,8 +29,6 @@ import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
 
-# The capability probe records what the host answered, so a runner's verdicts
-# can be traced back to the world it measured.
 logger = logging.getLogger(__name__)
 
 CORPUS = Path(__file__).parent / "conformance" / "settings"
@@ -55,15 +36,10 @@ MANIFEST = CORPUS / "manifest.json"
 
 RUNTIME = "python"
 
-# A case is SUPPORTED (must pass here), PENDING (a known divergence the other
-# runtime has not closed yet), or DIVERGENT (a difference ruled deliberate).
 SUPPORTED = "supported"
 PENDING = "pending"
 
-# Named platform capabilities. A case declares which ones it needs; this runner
-# MEASURES each one on the machine it is running on rather than reading
-# sys.platform, because "what does this OS do here" is a question with an
-# answer and a platform string is a guess about it.
+# Measured on the running machine, never read from sys.platform (root, Windows).
 UNREADABLE_FILES = "unreadable_files"
 POSIX_MODE_BITS = "posix_mode_bits"
 PARENT_IS_A_FILE_IS_DISTINGUISHABLE = "parent_is_a_file_is_distinguishable"
@@ -85,38 +61,15 @@ def digest(payload: bytes) -> str:
     """
     The corpus digest rule, in one place because two runtimes implement it.
 
-    CRLF is normalized to LF FIRST. Not a convenience: git rewrites text files
-    to CRLF on a Windows checkout under core.autocrlf, so a byte-for-byte
-    digest measures which OS ran the checkout rather than whether a case
-    changed — and it went red on the Windows lane on 2026-08-18 for exactly
-    that reason. Line endings are not content of a JSON case. A scoped
-    .gitattributes keeps the working tree LF everywhere as well, but the
-    normalization is the CONTRACT, because a vendored copy in another
-    repository carries its own checkout rules and cannot inherit ours.
-
-    Args:
-        payload: The case file's bytes, exactly as read.
-
-    Returns:
-        The lowercase hex sha256 both runtimes must agree on.
+    CRLF normalizes to LF first: autocrlf rewrites a Windows checkout, and a vendored
+    copy cannot inherit our .gitattributes, so the normalization is the contract.
     """
     return hashlib.sha256(payload.replace(b"\r\n", b"\n")).hexdigest()
 
 
 @lru_cache(maxsize=None)
 def platform_capabilities() -> frozenset:
-    """
-    What this machine can actually do, measured once, in a throwaway directory.
-
-    Every probe builds the real thing and looks at what happened. `chmod 000`
-    is a no-op for root and only sets a read-only attribute on Windows; POSIX
-    mode bits do not survive a round trip on Windows at all; and a path through
-    a file may report as merely missing there, which would turn a refusal into
-    a blank read. None of that is knowable from a platform string.
-
-    Returns:
-        The capability names this machine has.
-    """
+    """What this machine can actually do, measured once, in a throwaway directory."""
     found = set()
 
     with tempfile.TemporaryDirectory() as work:
@@ -145,8 +98,6 @@ def platform_capabilities() -> frozenset:
         try:
             (blocker / "child.json").read_bytes()
         except FileNotFoundError as e:
-            # The OS reports the broken tree as a missing file, so no rule that
-            # reads missing-as-blank can tell the two apart.
             logger.debug("probe: a file-as-parent reads as missing here: %s", e)
         except OSError as e:
             logger.debug("probe: a file-as-parent is its own fault here: %s", e)
@@ -171,14 +122,7 @@ CASES = _load_cases()
 
 
 class TestTheCorpusItself:
-    """
-    Guards on the corpus before the corpus guards anything.
-
-    An empty or half-read corpus is the failure mode that matters most here,
-    because it reports as SUCCESS: zero cases run, zero cases fail, the suite is
-    green and nothing was checked. Every assertion in this class exists to make
-    that impossible.
-    """
+    """Guards on the corpus before the corpus guards anything."""
 
     def test_the_corpus_is_not_empty(self) -> None:
         """The silent-success guard. A corpus that finds nothing must fail loudly."""
@@ -189,9 +133,6 @@ class TestTheCorpusItself:
         """
         The pin. Every case file's digest is recorded, so a case edited without
         the manifest being regenerated is caught here rather than trusted.
-
-        This is also what a vendored copy in another repository checks itself
-        against: same digests, same answer, and a stale copy says so out loud.
         """
         manifest = _load_manifest()
         on_disk = {
@@ -200,9 +141,6 @@ class TestTheCorpusItself:
             if path.name != "manifest.json"
         }
 
-        # The failure carries the correction with it. A pin that tells you only
-        # that you are wrong makes the honest move (regenerate) the tedious one,
-        # and the tempting move (delete the pin) the easy one.
         corrected = json.dumps(
             {**manifest, "case_count": len(on_disk), "files": dict(sorted(on_disk.items()))},
             indent=2,
@@ -216,10 +154,6 @@ class TestTheCorpusItself:
 
     def test_every_case_declares_a_verdict_for_this_runtime(self) -> None:
         """A case that forgot to say whether python must satisfy it would skip silently."""
-        # An empty corpus makes every loop in this class vacuous, so the floor
-        # is asserted once, here, where the first of them runs (seedgo
-        # unentered_assert, 2026-09-07). A corpus that failed to load and a
-        # corpus where every case is correct look identical without it.
         assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — not every case was checked"
 
         for entry in CASES:
@@ -232,16 +166,7 @@ class TestTheCorpusItself:
         assert documents == {"agent", "baud"}
 
     def test_a_line_ending_is_not_a_case_change(self) -> None:
-        """
-        The digest rule, pinned rather than trusted.
-
-        A byte digest of a JSON case measures the checkout: git's autocrlf
-        rewrites these files to CRLF on Windows, and the manifest went red
-        there on 2026-08-18 with nothing wrong. This asserts both halves of the
-        rule at once — that a CRLF copy of a real case digests the SAME, and
-        that a raw byte hash of it would not, so a normalization quietly
-        removed from `digest` cannot pass this test.
-        """
+        """The digest rule, pinned rather than trusted."""
         relative, recorded = sorted(_load_manifest()["files"].items())[0]
         as_lf = (CORPUS / relative).read_bytes()
         as_crlf = as_lf.replace(b"\n", b"\r\n")
@@ -255,10 +180,7 @@ class TestTheCorpusItself:
         """
         The guard that keeps `expect_without` from being optional in practice.
 
-        `mode` is the one expectation that cannot hold everywhere — Windows has
-        no 0600 — so a case carrying it MUST say what happens where the bits do
-        not survive. Without this, the fix for one case would leave the next
-        one to be found by CI on a platform nobody runs locally.
+        `mode` cannot hold on Windows, so a case carrying it must say what happens there.
         """
         assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a mode case could be missed"
 
@@ -278,28 +200,12 @@ class TestTheCorpusItself:
                 f"without POSIX mode bits should expect"
             )
 
-        # `mode` is the expectation this guard exists for. A corpus that stopped
-        # carrying it anywhere would leave the loop above entering nothing and
-        # this test green — an absence wearing a pass's clothes.
         assert mode_carrying >= 1, "no case expects a file mode, so this guard measured nothing"
 
     def test_a_case_that_cannot_be_built_here_is_skipped_and_never_passed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """
-        The skip path, exercised on a machine that does not need it.
-
-        Deleting the whole verify-then-skip block survived a mutation pass on
-        this POSIX box, and for an honest reason: every capability is present
-        here, so the block never runs and nothing could notice it gone. The
-        mutation would only bite on Windows or as root — which is to say, on
-        the machines nobody develops on. So the capabilities are taken away by
-        hand and the skip is required to happen.
-
-        SKIPPED, not passed, is the whole point. A case whose starting state
-        could not be constructed has measured the harness, and reporting that
-        as a pass is how a corpus quietly stops being a corpus.
-        """
+        """The skip path, exercised on a machine that does not need it."""
         needy = [entry for entry in CASES if _platform_block(entry).get("requires")]
         assert needy, "no case declares a required capability — this guard watches nothing"
 
@@ -314,34 +220,18 @@ class TestTheCorpusItself:
         assert needy[0]["id"] in str(skipped.value)
         assert "cannot host the case" in str(skipped.value)
 
-    # A MARKER, not two skips in the body: os.name leads the condition (the
-    # machine probe seedgo's self_skip rule asks for) and short-circuits before
-    # the uid is read. The getattr is not belt-and-braces — test_windows_import
-    # simulates Windows by hiding os.geteuid while os.name stays "posix", and a
-    # bare call here is evaluated at COLLECTION time and takes the file with it.
+    # Trap: the getattr is needed. test_windows_import hides os.geteuid with os.name
+    # still "posix", and a bare call here runs at collection and takes the file with it.
     @pytest.mark.skipif(
         os.name != "posix" or getattr(os, "geteuid", lambda: 0)() == 0,
         reason="this guard is about a non-root POSIX machine, where all three capabilities exist",
     )
     def test_a_posix_machine_measures_every_capability(self) -> None:
-        """
-        The counterpart to verify-then-skip, and the reason it is not a hole.
-
-        A capability probe that stops finding things does not fail — it turns
-        cases into skips, which read as green. So on the platform where all
-        three capabilities genuinely exist, their absence is an ERROR here. Root
-        is excluded because root really does read a mode-000 file, which is the
-        capability being absent for a true reason rather than a broken probe.
-        """
+        """The counterpart to verify-then-skip, and the reason it is not a hole."""
         assert platform_capabilities() == frozenset(CAPABILITY_MEANINGS)
 
     def test_every_capability_a_case_names_is_one_this_runner_measures(self) -> None:
-        """
-        A typo in a capability name would otherwise skip a case forever, silently.
-
-        Both directions are checked: what a case REQUIRES and what it declares
-        an expectation for.
-        """
+        """A typo in a capability name would otherwise skip a case forever, silently."""
         assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a capability went unchecked"
 
         for entry in CASES:
@@ -353,17 +243,11 @@ class TestTheCorpusItself:
 
 
 def _build(root: Path, given: Dict[str, Any]) -> Path:
-    """
-    Put the filesystem into the case's starting state and hand back the path.
-
-    Every state here is one a real branch can genuinely be in — this is the
-    half of a conformance case that a prose description always leaves vague.
-    """
+    """Put the filesystem into the case's starting state and hand back the path."""
     target = root / given["path"]
     state = given["state"]
 
     if state == "absent_parent":
-        # Deliberately nothing: not the file, not the directory holding it.
         return target
 
     if state == "parent_is_a_file":
@@ -410,17 +294,8 @@ def _expectation(entry: Dict[str, Any]) -> Dict[str, Any]:
     """
     The case's expectation, with the runtime's and the platform's overrides folded in.
 
-    Order matters and is stated here because it is a contract a second runner
-    has to reproduce: `expect`, then `expect_by_runtime[<runtime>]`, then one
-    `expect_without[<capability>]` block for every capability this machine
-    LACKS. The platform layer goes last because it is the most specific — it
-    describes a machine, not an implementation.
-
-    Args:
-        entry: One case.
-
-    Returns:
-        The expectation to assert here, on this machine.
+    The order is a contract the rust runner reproduces: `expect`, then
+    `expect_by_runtime`, then `expect_without` for each capability this machine lacks.
     """
     expected = dict(entry["expect"])
     expected.update(entry.get("expect_by_runtime", {}).get(RUNTIME, {}))
@@ -447,14 +322,7 @@ def _snapshot(target: Path) -> Any:
 
 @pytest.mark.parametrize("entry", CASES, ids=[entry["id"] for entry in CASES])
 def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp_path: Path) -> None:
-    """
-    One shared case, run against this runtime's doors.
-
-    Hermetic by construction: every case builds its whole world under tmp_path
-    and reads nothing the machine happens to be carrying. That is not a style
-    preference — this fleet spent a night on tests that were green only because
-    of state a fresh runner does not have.
-    """
+    """One shared case, run against this runtime's doors."""
     verdict = entry["runtimes"][RUNTIME]
 
     if verdict == PENDING:
@@ -462,10 +330,6 @@ def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp
 
     missing = sorted(set(_platform_block(entry).get("requires", [])) - platform_capabilities())
     if missing:
-        # Verify-then-skip. The state this case needs cannot be BUILT here, so
-        # running it would prove something about the harness, not the door. It
-        # is never passed silently — the capability is named, and so is what it
-        # would have meant.
         pytest.skip(
             f"{entry['id']}: this machine cannot host the case — "
             + "; ".join(f"{name} ({CAPABILITY_MEANINGS[name]})" for name in missing)
@@ -486,12 +350,7 @@ def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp
         else:
             answer = _run(tmp_path, entry)
 
-            # Every assertion below sits behind an `if`, so a case whose
-            # expectation block names NONE of the four would run the door, check
-            # nothing, and report green — seedgo's unentered_assert rule saw
-            # exactly that on 2026-09-07. The four are counted and the count is
-            # the floor: a case that expects nothing is a corpus defect, and it
-            # fails here rather than padding the pass count.
+            # Every check below is conditional; the count is the floor, so a case expecting nothing fails.
             checked = 0
 
             if "view" in expected:
@@ -505,32 +364,20 @@ def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp
                 assert json.loads(target.read_text(encoding="utf-8")) == expected["file"], entry["id"]
             if "mode" in expected:
                 checked += 1
-                # The platform answers what the mode reads as: a file of the
-                # test's own, set to the expected bits, is what the product's
-                # file must match (fleet green leg 6).
                 probe = tmp_path / "mode_probe"
                 probe.write_text("", encoding="utf-8")
                 probe.chmod(int(expected["mode"], 8))
                 assert target.stat().st_mode == probe.stat().st_mode, entry["id"]
 
-            # Unconditional, and measured before it was written: every one of
-            # the corpus's success cases declares at least one of the four
-            # today. An `or file_unchanged` escape hatch here would be a second
-            # assertion that cannot fail, which is the same defect one layer up.
             assert checked, (
                 f"{entry['id']} succeeded but declares no expectation — the door was run and nothing was checked"
             )
 
         if expected.get("file_unchanged"):
-            # A refusal that already wrote something is not a refusal. This is
-            # the read-then-error-then-write doctrine, asserted in bytes.
+            # A refusal that already wrote something is not a refusal.
             assert _snapshot(target) == before, entry["id"]
         else:
-            # The other case, checked rather than left silent (the pattern
-            # unentered_assert.md itself prescribes). A case that MEANT to claim
-            # the doctrine and misspelled the key would otherwise disable it
-            # with no sign — `.get` reads a typo as False exactly like a real
-            # absence, so the key is checked by name here.
+            # `.get` reads a falsy or misspelled value as absent, so the key is checked by name.
             assert "file_unchanged" not in expected, (
                 f"{entry['id']} carries a falsy file_unchanged — say true or leave it out"
             )

@@ -3,45 +3,13 @@
 # Description: Host API Pairings — one-use, five-minute codes a phone trades for its bearer
 # Version: 1.1.0
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Pairings
 
-The owner signed his phone in by hand on 2026-10-13 and ruled on the result: the
-hop of the token to the phone is the real issue, and a QR is the answer
-(DPLAN-0406). A pairing code is a one-use secret with a five-minute life. The
-machine mints one and shows it as a QR of the face's URL with the code in the
-fragment; the phone posts the code to POST /v1/pair and receives a bearer
-minted for that code's label and scope. The bearer never reaches a screen, a
-file the user moves, or a mail, so "the raw value is never printed" stays
-literally true.
-
-Store: ~/.secrets/aipass/host_api/pairings.json, beside tokens.json, written
-through the token store's own atomic owner-only write and under its lock. Only
-a code's sha256 is stored, as with tokens.
-
-THE ONE ANSWER. Unknown, expired and already used are refused identically: a
-prober learns "no", never "that one was real". The difference goes to the log
-with the caller's address, as the token refusals do.
-
-USED BEFORE MINTED. A redeem marks the row used, releases the lock, and only
-then mints through issue_token(). A failure between the two burns the code
-rather than leaving it live for a second phone.
-
-Classes:
-    PairingError  - A pairing operation was refused (a TokenError)
-    AttemptWindow - The in-process sliding window behind POST /v1/pair's 429
-
-Functions:
-    mint_pairing()   - Mint a one-use code, return it with its URL
-    redeem_pairing() - Trade a live code for a freshly minted bearer, or None
-    answer_pair()    - POST /v1/pair's whole answer, framework-free
-    render_qr()      - The QR of a text as terminal block characters
-    bind_address()   - The stored bind a phone would open, refused when it cannot
-    store_path()     - Where the pairing store lives
-    load_pairings()  - Raw store read; an unreadable store raises
+Reference: docs/host_api.md (Pairing).
 """
 
 import hashlib
@@ -75,18 +43,15 @@ DEFAULT_TTL_SECONDS = 300
 MIN_TTL_SECONDS = 30
 MAX_TTL_SECONDS = 900
 
-# The listener probe before a mint: long enough for a tailnet hop, short enough
-# that a dead server is refused before anyone looks away.
 PROBE_TIMEOUT_SECONDS = 3.0
 
 # The same randomness as a bearer: the code is a bearer for five minutes.
 _CODE_BYTES = 32
 
-# POST /v1/pair: ten attempts per client address per minute.
 ATTEMPT_LIMIT = 10
 ATTEMPT_WINDOW_SECONDS = 60.0
 
-#: The one sentence for unknown, expired and used alike.
+# One sentence for unknown, expired and used alike: a prober never learns a code was real.
 REFUSED = "pairing code unknown, expired or already used"
 TOO_MANY = "Too many pairing attempts from this address; wait a minute and scan a fresh code"
 NO_CODE = 'A pairing code is required: {"code": "<the code>"}'
@@ -102,12 +67,7 @@ class PairingError(host_tokens.TokenError):
 
 
 class AttemptWindow:
-    """
-    Attempts per client address inside a sliding window, in process.
-
-    One per app: a restart forgets it, which costs a prober nothing it did not
-    already have — a code lives five minutes and is 32 random bytes.
-    """
+    """Attempts per client address inside a sliding window, in process."""
 
     def __init__(self, limit: int = ATTEMPT_LIMIT, seconds: float = ATTEMPT_WINDOW_SECONDS) -> None:
         """Hold *limit* attempts per address per *seconds*."""
@@ -117,16 +77,8 @@ class AttemptWindow:
         self._lock = threading.Lock()
 
     def allow(self, peer: str) -> bool:
-        """
-        Count one attempt from *peer*.
-
-        Args:
-            peer: The client address.
-
-        Returns:
-            False when this attempt is over the limit. It is not counted then,
-            so a caller that waits out the window is let back in.
-        """
+        """Count one attempt from *peer*."""
+        # A refused attempt is not counted, so a caller that waits out the window gets back in.
         now = time.monotonic()
         with self._lock:
             for address in [key for key, stamps in self._seen.items() if stamps[-1] <= now - self.seconds]:
@@ -141,18 +93,8 @@ class AttemptWindow:
             return True
 
 
-# ==============================================
-# STORE
-# ==============================================
-
-
 def store_path() -> Path:
-    """
-    Where the pairing store lives.
-
-    Returns:
-        Path to pairings.json, beside tokens.json, whether or not it exists yet.
-    """
+    """Where the pairing store lives."""
     return secrets_store.SECRETS_BASE / host_tokens.TOKEN_PROVIDER / f"{PAIRING_SLUG}.json"
 
 
@@ -160,13 +102,7 @@ def load_pairings() -> List[Dict[str, Any]]:
     """
     Read every pairing row.
 
-    Returns:
-        The rows. An absent store is no rows: nothing was ever minted.
-
-    Raises:
-        PairingError: The store exists and cannot be read or is not the store's
-            shape. Never an empty list: an empty list would refuse a live code
-            as unknown and hide why.
+    A broken store raises, never []: an empty list would refuse a live code as unknown and hide why.
     """
     path = store_path()
     if not path.exists():
@@ -192,13 +128,7 @@ def _save_pairings(rows: List[Dict[str, Any]]) -> None:
 
 
 def _expires(row: Dict[str, Any]) -> Optional[datetime]:
-    """
-    When a row dies.
-
-    Returns:
-        The expiry as an aware datetime, or None when the row's stamp cannot be
-        read. None is dead: a code nobody can date is not honoured.
-    """
+    """When a row dies; None (unreadable stamp) is dead: a code nobody can date is not honoured."""
     try:
         expires = datetime.fromisoformat(str(row.get("expires")))
     except ValueError as e:
@@ -222,26 +152,8 @@ def _hash_code(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-# ==============================================
-# BIND
-# ==============================================
-
-
 def bind_address(allow_loopback: bool = True) -> Tuple[str, int]:
-    """
-    The stored bind, as an address a browser can open.
-
-    Args:
-        allow_loopback: False for the pair verb: a loopback bind serves a
-            desktop browser on this machine and never a phone.
-
-    Returns:
-        (host, port) from the stored config.
-
-    Raises:
-        PairingError: No host is stored, it is not an address, it is a
-            wildcard, or it is loopback where that was refused.
-    """
+    """The stored bind, as an address a browser can open."""
     config = host_config.load_config()
     host = str(config.get("host") or "").strip()
     port = config.get("port")
@@ -281,13 +193,7 @@ def _require_listener(label: str, scope: str) -> None:
     """
     Refuse a code no server is there to redeem: one GET on the bind's face.
 
-    The owner's sandbox, 2026-10-13: the install minted a QR for a server that
-    had died, and the phone said "site can't be reached". A serve record is not
-    the check (it named a dead pid); an HTTP answer is. The refusal's text is
-    the whole fix, pasteable: nobody reads the lines above a failure's last.
-
-    Raises:
-        PairingError: Nothing answers, or the server answers with an error.
+    A serve record is not the check (it can name a dead pid); an HTTP answer is.
     """
     host, port = bind_address()
     try:
@@ -308,30 +214,8 @@ def _require_listener(label: str, scope: str) -> None:
         ) from e
 
 
-# ==============================================
-# MINT / REDEEM
-# ==============================================
-
-
 def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Dict[str, Any]:
-    """
-    Mint a one-use pairing code.
-
-    Args:
-        label: The name the paired token will carry, e.g. "phone".
-        scope: 'read' or 'operate', the paired token's scope.
-        ttl_seconds: The code's life, 30 to 900.
-
-    Returns:
-        {"id", "label", "scope", "code", "expires_at" (ISO 8601, UTC), "url"},
-        url being http://<bind host>:<bind port>/#pair=<code>.
-
-    Raises:
-        PairingError: Empty label, unknown scope, a ttl outside 30..900, a
-            stored bind with no address a phone can open, no server answering
-            on it (the text is the commands that fix it), or a store that
-            cannot be read or written. Nothing is stored when it raises.
-    """
+    """Mint a one-use pairing code."""
     wanted = (label or "").strip()
     if not wanted:
         raise PairingError("A pairing needs a label: the token it mints is revoked by that name")
@@ -364,7 +248,7 @@ def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = DEFAULT_TTL
     except OSError as e:
         raise PairingError(f"The pairing store's lock could not be taken ({type(e).__name__})") from e
 
-    # id, label and scope. The code never reaches a log.
+    # The code never reaches a log.
     logger.info("[host_api] pairing minted: id=%s label=%s scope=%s ttl=%ss", row["id"], wanted, scope, ttl_seconds)
     json_handler.log_operation("host_api_pairing_minted", {"id": row["id"], "scope": scope, "ttl": ttl_seconds})
     return {"id": row["id"], "label": wanted, "scope": scope, "code": code, "expires_at": row["expires"], "url": url}
@@ -374,19 +258,7 @@ def redeem_pairing(raw: str, peer: str = "unknown") -> Optional[Dict[str, Any]]:
     """
     Trade a live code for a bearer minted for its label and scope.
 
-    Args:
-        raw: The code as the phone posted it.
-        peer: The caller's address, for the refusal's log line.
-
-    Returns:
-        {"token", "id", "label", "scope"}: the raw bearer and its record's
-        fields. None when the code is unknown, expired or already used; which
-        of the three goes to the log, never to the caller. No receipt file is
-        written: the phone holds the only copy.
-
-    Raises:
-        PairingError: The store cannot be read, written or locked, or the mint
-            after the code was spent failed. The code is spent either way.
+    Marked used before the mint: a failure between the two burns the code, never leaves it live.
     """
     hashed = _hash_code(raw)
     now = datetime.now(timezone.utc)
@@ -398,8 +270,7 @@ def redeem_pairing(raw: str, peer: str = "unknown") -> Optional[Dict[str, Any]]:
             reason = REASON_UNKNOWN if found is None else _status(found, now)
             if reason is None and found is not None:
                 found["used_at"] = now.isoformat()
-            # The sweep, keeping the row spent just now: a second try of the
-            # same code is then refused as used, not unknown, in the log.
+            # Keep the row spent just now: a second try then logs as used, not unknown.
             _save_pairings([row for row in rows if (row is found and reason is None) or _status(row, now) is None])
     except OSError as e:
         raise PairingError(f"The pairing store's lock could not be taken ({type(e).__name__})") from e
@@ -420,21 +291,7 @@ def redeem_pairing(raw: str, peer: str = "unknown") -> Optional[Dict[str, Any]]:
 
 
 def answer_pair(payload: Any, peer: str, window: AttemptWindow) -> Tuple[int, Dict[str, Any]]:
-    """
-    POST /v1/pair's whole answer, with no web framework in it.
-
-    Args:
-        payload: The parsed JSON body, whatever it turned out to be.
-        peer: The caller's address.
-        window: The app's attempt window.
-
-    Returns:
-        (200, {"token", "id", "label", "scope"}), or (status, {"code", "message"})
-        for 429 too_many_attempts, 400 invalid_request and 401 pairing_refused.
-
-    Raises:
-        PairingError: The store failed (redeem_pairing); the route answers 503.
-    """
+    """POST /v1/pair's whole answer, with no web framework in it."""
     if not window.allow(peer):
         logger.warning("[host_api] pairing refused: rate limited, from %s", peer)
         json_handler.log_operation("host_api_pair_refused", {"reason": "rate_limited", "peer": peer})
@@ -450,25 +307,8 @@ def answer_pair(payload: Any, peer: str, window: AttemptWindow) -> Tuple[int, Di
     return 200, redeemed
 
 
-# ==============================================
-# QR
-# ==============================================
-
-
 def render_qr(text: str) -> str:
-    """
-    The QR of *text* as terminal block characters.
-
-    Args:
-        text: What the code encodes, a pairing URL here.
-
-    Returns:
-        segno's compact rendering with a border of 1, no trailing newline.
-        Pure text: no image, no file, no colour codes.
-
-    Raises:
-        PairingError: The text is empty.
-    """
+    """The QR of *text* as terminal block characters."""
     if not text or not text.strip():
         raise PairingError("Nothing to render: a QR of an empty text opens nothing")
 

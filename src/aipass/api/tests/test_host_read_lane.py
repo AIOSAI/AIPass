@@ -3,76 +3,10 @@
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
 # Version: 1.1.3
 # Created: 2026-08-14
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
-
-# Tests for apps/handlers/host/{feed,reads}.py and their routes.
-#
-# FPLAN-0411 Phase 2 (partial: feed + files + diff; fleet held on C1).
-#
-# The two things that must not be got wrong here are the cursor (a stale one is
-# the TG 10-hour outage species) and the fence (a remote caller choosing what to
-# read). Both carry the most tests.
-#
-# Tests — handlers/host/feed.py (design call D3):
-# - read_feed: no cursor returns the most recent window, newest cursor
-# - read_feed: empty feed returns an empty envelope, no crash
-# - read_feed: missing feed file reads as empty, not an error
-# - read_feed: cursor mid-feed returns everything at or after it
-# - read_feed: boundary event is RE-DELIVERED (at-least-once, dupes over drops)
-# - read_feed: cursor older than the feed flags gap + gap_reason=feed_trimmed
-# - read_feed: cursor ahead of the feed clamps, returns empty, never spins
-# - read_feed: limit caps the window and reports more=True (no silent cap)
-# - read_feed: limit is clamped to MAX_LIMIT
-# - read_feed: malformed lines are skipped, good ones still returned
-# - read_feed: lines without a ts are skipped
-# - read_feed: file order is preserved (never re-sorted)
-# - read_feed: unreadable feed raises FeedUnavailable rather than faking empty
-# - read_feed: a real trim (400->200) leaves an old cursor flagged, not silent
-#
-# Tests — handlers/host/reads.py, git_reads.py and remotes.py (the name fence):
-# - _fence: absolute path refused
-# - _fence: '..' component refused
-# - _fence: nested '..' refused
-# - _fence: symlink escaping the branch refused (post-resolution check)
-# - _fence: empty name refused
-# - _fence: legitimate nested file accepted
-# - _fence: missing file refused
-# - resolve_branch_root: known branch resolves via the registry
-# - resolve_branch_root: email form resolves
-# - resolve_branch_root: unknown branch refused
-# - resolve_branch_root: empty branch refused
-# - resolve_branch_root: unreadable registry raises ReadUnavailable
-# - read_file: returns content and byte count
-# - read_file: over-cap file is REFUSED, never silently truncated
-# - read_file: non-UTF8 file refused
-# - read_file: project mismatch refused
-# - read_diff: routes through drone, never raw git
-# - read_diff: staged flag is passed through
-# - read_diff: drone missing raises ReadUnavailable
-# - read_diff: timeout raises ReadUnavailable
-# - read_diff: non-zero exit raises ReadUnavailable
-# - read_diff: oversized diff is truncated AND reports truncated=True
-#
-# Tests — routes:
-# - GET /v1/feed: 401 without a token
-# - GET /v1/feed: 200 with a read token, returns the envelope
-# - GET /v1/feed: gap surfaces through the route
-# - GET /v1/files: 401 without a token
-# - GET /v1/files: 200 returns file content
-# - GET /v1/files: fence violation is 400 with the error envelope
-# - GET /v1/diff: 200 returns diff text
-# - GET /v1/diff: unknown branch is 400
-#
-# WHERE EACH LIVES since the oversize split (api, 2026-10-08): the feed
-# cursor, the fence, branch roots and the seat listed above are in
-# test_host_read_lane_feed.py; the git-changes lane in
-# test_host_read_lane_changes.py; per-file diffs, commit patches, the log,
-# commit detail and the remote in test_host_read_lane_history.py. This file
-# keeps the file and whole-diff reads and every route. The shared builders
-# are in support_host_read_lane.py, the shared fixtures in conftest.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — drone's own diff output; read_diff's subprocess call is faked, drone tests it
@@ -147,11 +81,7 @@ class TestReadFile:
         with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.read_file("demo", "blob.bin")
 
-        # `assert True` sat here until 2026-09-07 — an assertion that cannot
-        # fail, decorating a raises block that was already the real oracle.
-        # Replaced with the thing the raises block does NOT check: that the
-        # refusal says what was wrong, so a caller is not left guessing whether
-        # the path or the bytes were the problem.
+        # The refusal must say what was wrong: the path or the bytes.
         said = str(exc.value)
 
         assert "Not UTF-8 text" in said, f"the refusal does not say the file was not text: {said}"
@@ -223,11 +153,6 @@ class TestReadDiff:
 
         assert result["truncated"] is True
         assert len(result["diff"]) <= host_git.MAX_DIFF_BYTES
-
-
-# =============================================
-# ROUTES
-# =============================================
 
 
 fastapi_required = pytest.mark.skipif(
@@ -377,12 +302,7 @@ class TestReadLaneRoutes:
                 {"path": "hello.txt", "status": " M", "index": " ", "worktree": "M"},
                 {"path": "brand_new.py", "status": "??", "index": "?", "worktree": "?"},
                 {"path": "nested/deep.txt", "status": " D", "index": " ", "worktree": "D"},
-                # THE BUG, VISIBLE IN THE WIRE PIN. This row read ' R' until
-                # 2026-08-18 — an unstaged rename, which git does not emit. The
-                # rename is STAGED, the code is 'R ', and the old lane could not
-                # have said so: drone's rendered surface had already right-
-                # aligned the letter out of the index column before this server
-                # saw it. The contract was always right; the data now honours it.
+                # A staged rename is 'R ' (index column); git never emits an unstaged ' R'.
                 {"path": "new_name.py", "status": "R ", "index": "R", "worktree": " "},
             ],
         }
@@ -427,9 +347,7 @@ class TestReadLaneRoutes:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "read_unavailable"
-        # seedgo exception_text_in_response, PR #774: the exception's own words
-        # (drone's stderr) must not reach the client — this is the guard against
-        # str(e) returning to the read_unavailable denial.
+        # drone's stderr must not reach the client: guards against str(e) in the denial.
         assert error["message"] == host_denials.SENTENCES["read_unavailable"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "cannot verify caller" not in response.text
@@ -502,7 +420,7 @@ class TestReadLaneRoutes:
         assert response.status_code == 400
         error = response.json()["error"]
         assert error["code"] == "read_refused"
-        # seedgo exception_text_in_response, PR #774: the path stays in the log.
+        # The path stays in the host log, never the response.
         assert error["message"] == host_denials.SENTENCES["read_refused"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "absent.py" not in response.text
@@ -544,7 +462,6 @@ class TestReadLaneRoutes:
         assert response.status_code == 400
         error = response.json()["error"]
         assert error["code"] == "read_refused"
-        # seedgo exception_text_in_response, PR #774.
         assert error["message"] == host_denials.SENTENCES["read_refused"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert f"serves 1 to {host_git.MAX_LOG_COMMITS}" not in response.text
@@ -657,7 +574,6 @@ class TestReadLaneRoutes:
         assert response.status_code == 400
         error = response.json()["error"]
         assert error["code"] == "read_refused"
-        # seedgo exception_text_in_response, PR #774.
         assert error["message"] == host_denials.SENTENCES["read_refused"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "not a repository" not in response.text
@@ -667,18 +583,7 @@ class TestReadsFollowTheFleetLane:
     """
     Browsing is free. The seat is a default, never a fence, on the read lane.
 
-    The owner ruled it on 2026-08-16, his words: "I should be able to open another
-    project via the project tab drop down, and view other agent project files,
-    open any passport and view watch read files. no restriction."
-
-    The contradiction he hit, measured on the live host by @baud: /v1/fleet
-    served project=BAUD and painted the cards, then EVERY file read under those
-    cards refused with "This server is seated in AIPass and does not serve
-    project BAUD" — README, inbox, dashboard, memory, passport. One surface
-    answering two different questions about the same project.
-
-    OPERATE ROUTES ARE UNTOUCHED BY THIS. The terminal still binds to the seat;
-    attach is the only takeover. Reads are reads.
+    Operate routes still bind to the seat; attach is the only takeover.
     """
 
     @pytest.fixture
@@ -692,15 +597,13 @@ class TestReadsFollowTheFleetLane:
         census.FleetUnavailable = host_fleet.FleetUnavailable
         census.resolve_branch.return_value = {"name": "baud", "path": str(root)}
 
-        # Patched on the PACKAGE, not in sys.modules: reads.py imports the
-        # census with `from ...host import fleet`, which reads the attribute off
-        # the already-imported parent package and would sail straight past a
-        # sys.modules entry.
+        # Patched on the PACKAGE, not in sys.modules: reads.py's `from ...host import fleet`
+        # reads the attribute off the parent package and would miss a sys.modules entry.
         with patch(PATCH_HOST_FLEET, census):
             yield {"root": root, "census": census}
 
     def test_a_foreign_project_is_served_not_refused(self, fake_repo: dict, foreign: dict) -> None:
-        """The exact read that refused on the live host tonight."""
+        """A read of a foreign project's branch is served."""
         result = host_reads.read_file("baud", "README.md", project="BAUD")
 
         assert result["content"] == "the other project"

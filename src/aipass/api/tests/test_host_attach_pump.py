@@ -3,20 +3,12 @@
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
 
-# Split out of test_host_attach.py along the unit under test (api, the
-# oversize split leg, 2026-10-08): what a room is and what the pump does with
-# its bytes. The attach route and its seats live in test_host_attach_route.py;
-# the socket's records in test_host_attach.py.
-#
-# REAL PTYs, DELIBERATELY. These tests spawn actual processes — `cat` and `echo`,
-# never tmux and never a room. A mocked PTY would prove the mock's behaviour, and
-# the interesting failures here (EOF on close, SIGHUP not killing a session,
-# TIOCSWINSZ argument order) live precisely in the parts a mock invents.
+# REAL PTYs running `cat`/`echo`, never tmux: EOF on close, SIGHUP and TIOCSWINSZ order live where a mock invents.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
@@ -48,9 +40,7 @@ from aipass.api.tests.support_host_attach import (
     wait_for_log,
 )
 
-# The patch targets stay this file's own constants rather than the support
-# module's: seedgo's discarded_patch rule reads a target imported from this
-# branch's package as one it judges, and these silence loggers on purpose.
+# Own constants, not the support module's: discarded_patch judges a target imported from this package.
 PATCH_SERVER_JSON = "aipass.api.apps.handlers.host.server.json_handler"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
@@ -58,13 +48,8 @@ PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
 
 @pytest.fixture
 def handed_hook(quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> Iterator[Any]:
-    """
-    The preexec_fn open_attach hands Popen, read off a recorder (api, fleet green leg 8).
-
-    The pty is a pipe this fixture owns and Popen records its kwargs, so no PTY,
-    terminal or process exists. _spawn_pty closes the slave end itself; the
-    master belongs to the session and is closed here.
-    """
+    """The preexec_fn open_attach hands Popen, read off a recorder (api, fleet green leg 8)."""
+    # _spawn_pty closes the slave end itself; the master belongs to the session and is closed here.
     master, slave = os.pipe()
     handed: dict = {}
     monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (master, slave)))
@@ -77,13 +62,7 @@ def handed_hook(quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> Iterator[A
 
 @pytest.fixture
 def cat_session(quiet: Any, tmux_preflight: Any):
-    """
-    A real PTY running `cat` — an echo chamber that proves the pump.
-
-    `cat` is the honest stand-in for a room: it is a real process on a real PTY
-    whose behaviour under read, write and hangup is identical to tmux's, and it
-    cannot touch anybody's session if a test goes wrong.
-    """
+    """A real PTY running `cat` — an echo chamber that proves the pump."""
     with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
         session = host_attach.open_attach("api", cwd=None)
         try:
@@ -92,21 +71,8 @@ def cat_session(quiet: Any, tmux_preflight: Any):
             session.hangup()
 
 
-# ==============================================
-# THE COMMAND — mirrored from the desktop
-# ==============================================
-
-
 def _chained(command: list) -> list:
-    """
-    Split a tmux argv into the commands that follow the first `;`.
-
-    Args:
-        command: The full argv.
-
-    Returns:
-        A list of chained commands, each a list of arguments.
-    """
+    """Split a tmux argv into the commands that follow the first `;`."""
     groups: list = []
     for piece in command:
         if piece == ";":
@@ -117,11 +83,8 @@ def _chained(command: list) -> list:
 
 
 class TestTheCommandIsTheDesktopsCommand:
-    """
-    `pty.rs` spawns `tmux new-session -A -t <room>`. This spawns the same thing,
-    because a phone and a desktop that build the room name differently end up in
-    two rooms with one agent's name on them.
-    """
+    """`pty.rs` spawns `tmux new-session -A -t <room>`. This spawns the same thing,
+    or a phone and a desktop end up in two rooms with one agent's name on them."""
 
     def test_the_room_name_uses_bauds_prefix(self) -> None:
         """Mirrored, not invented — their desktop names rooms this way."""
@@ -132,14 +95,8 @@ class TestTheCommandIsTheDesktopsCommand:
         assert host_attach.room_name("@memory") == host_attach.room_name("memory")
 
     def test_external_rooms_carry_the_project_scope(self) -> None:
-        """
-        THE DESKTOP'S OWN TEST VECTORS, copied from `room_names_are_tmux_safe`
-        and `external_rooms_carry_the_project_scope` in @baud's lib.rs. Two
-        implementations of one rule stay honest by sharing examples: anchor
-        rooms keep their historical plain names, an external project marks its
-        rooms so same-named branches can never collide, and '.'/':' (tmux
-        target syntax) flatten to '-' in both name halves.
-        """
+        """THE DESKTOP'S OWN TEST VECTORS, copied from `room_names_are_tmux_safe`
+        and `external_rooms_carry_the_project_scope` in @baud's lib.rs."""
         assert host_attach.room_name("vera", "vera-studio") == "baud-vera-studio-vera"
         assert host_attach.room_name("chess", "chess") == "baud-chess-chess"
         assert host_attach.room_name("x", "a.b:c") == "baud-a-b-c-x"
@@ -147,11 +104,8 @@ class TestTheCommandIsTheDesktopsCommand:
         assert host_attach.room_name("a:b c") == "baud-a-b-c"
 
     def test_a_scoped_command_targets_the_scoped_room_everywhere(self) -> None:
-        """
-        Every `-t` in the chained argv must carry the SCOPED name — a chain
-        that created `baud-baud-baud` but set mouse on `baud-baud` would
-        configure a stranger's room (the exact species of the no-dash-t bug).
-        """
+        """Every `-t` in the chained argv must carry the SCOPED name — a chain
+        that set mouse on `baud-baud` instead would configure a stranger's room."""
         command = host_attach.attach_command("baud", "baud")
 
         assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-baud-baud"]
@@ -160,32 +114,17 @@ class TestTheCommandIsTheDesktopsCommand:
                 assert chained[chained.index("-t") + 1] == "baud-baud-baud"
 
     def test_shell_rooms_live_in_their_own_namespace(self) -> None:
-        """
-        `baud-shell-` is a namespace the fleet scan can never mistake for an
-        agent: the scan matches agent rooms by EXACT name and skips every other
-        'baud-' session, so a shell shows up nowhere as a live claude or an
-        outside room. The project is always in the name — anchor included —
-        because two projects can each have a devpulse, and the shell's name
-        must say which floor it stands on. Same sanitize charset as agent
-        rooms: one rule, two namespaces.
-        """
+        """`baud-shell-` is a namespace the fleet scan can never mistake for an
+        agent; the project is always in the name, since two projects can each have a devpulse."""
         assert host_attach.shell_room_name("AIPass") == "baud-shell-aipass"
         assert host_attach.shell_room_name("aipass", "devpulse") == "baud-shell-aipass-devpulse"
         assert host_attach.shell_room_name("TESTING", "testing") == "baud-shell-testing-testing"
         assert host_attach.shell_room_name("a.b:c", "@x") == "baud-shell-a-b-c-x"
 
     def test_monitor_targets_are_branch_lists_or_commons(self) -> None:
-        """
-        THE DESKTOP'S OWN FENCE VECTORS, copied from
-        `monitor_targets_are_branch_lists_or_commons` and
-        `monitor_target_fence_refuses_command_shapes` in @baud's pty.rs. Two
-        implementations of one charset stay honest by sharing examples.
-
-        The fence still refuses the empty string after the bare watch form landed:
-        absence is asked ABOUT in open_monitor, and folding "" into the fence would
-        have broken the mirror this lane's safety rests on (its own test retired as
-        a duplicate of this one, api, fleet green leg 8).
-        """
+        """THE DESKTOP'S OWN FENCE VECTORS, copied from
+        `monitor_targets_are_branch_lists_or_commons` and `monitor_target_fence_refuses_command_shapes` in pty.rs."""
+        # "" stays refused: open_monitor asks about absence itself, and folding it in would break the mirror.
         assert host_attach.valid_monitor_target("commons")
         assert host_attach.valid_monitor_target("seedgo")
         assert host_attach.valid_monitor_target("seedgo,cli")
@@ -197,23 +136,13 @@ class TestTheCommandIsTheDesktopsCommand:
         assert not host_attach.valid_monitor_target("../etc")
 
     def test_the_watch_command_is_the_desktops_command(self) -> None:
-        """
-        `drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
-        command, minus its login shell: this server was started BY drone, so
-        drone resolves from its own PATH and no shell ever sees the target.
-
-        Also the other half of the bare form in TestGlobalMissionControlIsReachable:
-        a named target still rides last, so that change did not cost the form that
-        worked (its own test retired as a duplicate of this one, api, fleet green leg 8).
-        """
+        """`drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
+        command, minus its login shell: drone resolves from this server's PATH and no shell sees the target."""
         assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
 
     def test_a_shell_command_targets_the_shell_room_everywhere(self) -> None:
-        """
-        The shell lane reuses the agent lane's argv builder, so the mouse and
-        window-size lessons hold there too — pinned against the same
-        no-dash-t species, on the shared builder directly.
-        """
+        """The shell lane reuses the agent lane's argv builder, so the mouse and
+        window-size lessons hold there too."""
         command = host_attach.client_command("baud-shell-aipass")
 
         assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-shell-aipass"]
@@ -222,26 +151,14 @@ class TestTheCommandIsTheDesktopsCommand:
             assert chained[chained.index("-t") + 1] == "baud-shell-aipass"
 
     def test_the_command_is_attach_or_create(self) -> None:
-        """
-        `new-session -A` is the whole lifecycle promise in one flag.
-
-        Without -A a second attach would create a SECOND session; with it, the
-        phone joins the room the desktop is already in.
-        """
+        """`new-session -A` is the whole lifecycle promise in one flag."""
         command = host_attach.attach_command("memory")
 
         assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-memory"]
 
     def test_the_room_gets_mouse_and_smallest_sizing(self) -> None:
-        """
-        A room born through this door must match one born at the desk.
-
-        Without these two, a phone-created room comes up with no scroll lane and
-        the `latest` sizing policy — so the phone-only path would get the worst
-        geometry of the two doors. `smallest` is @baud's measurement against two
-        real clients: it holds the phone through a desk resize and self-heals on
-        detach.
-        """
+        """A room born through this door must match one born at the desk."""
+        # `smallest` is @baud's measurement: it holds the phone through a desk resize and self-heals on detach.
         command = host_attach.attach_command("memory")
 
         assert _chained(command) == [
@@ -250,17 +167,9 @@ class TestTheCommandIsTheDesktopsCommand:
         ]
 
     def test_every_chained_command_carries_its_own_target(self) -> None:
-        """
-        The guard @devpulse asked for by name, and the one that would have
-        caught the bug @baud found in their own `pty.rs`.
-
-        A chained `set-option` with no `-t` resolves against whatever tmux calls
-        the current session. It parses, it exits 0, and whether it reaches the
-        room being opened depends on state this code cannot see. Targeting
-        explicitly removes the question — and a test that reads the argv is the
-        only thing that stops a future edit from dropping one `-t` and leaving a
-        command that still looks correct.
-        """
+        """The guard @devpulse asked for by name, and the one that would have
+        caught the bug @baud found in their own `pty.rs`."""
+        # A chained `set-option` with no `-t` hits whatever tmux calls the current session, and still exits 0.
         room = "baud-memory"
         chained = _chained(host_attach.attach_command("memory"))
 
@@ -270,46 +179,26 @@ class TestTheCommandIsTheDesktopsCommand:
             assert command[command.index("-t") + 1] == room
 
     def test_the_separator_is_its_own_argument(self) -> None:
-        """
-        `;` as a separate argv element is how tmux separates commands with no
-        shell involved. Glued to a neighbour it becomes part of a word, and the
-        second command silently turns into an argument of the first.
-        """
+        """`;` as a separate argv element is how tmux separates commands with no
+        shell involved; glued to a neighbour, the second command becomes an argument of the first."""
         command = host_attach.attach_command("memory")
 
         assert ";" in command
         assert not any(piece != ";" and piece.endswith(";") for piece in command)
 
     def test_the_command_is_a_list_so_it_never_reaches_a_shell(self) -> None:
-        """
-        A list argv cannot be word-split, so a branch name cannot become one.
-
-        The registry already refuses non-citizens, but defence that costs
-        nothing is defence worth keeping. Since the desktop's sanitize was
-        mirrored in (scoped rooms round), the hostile name ALSO flattens to
-        the tmux-safe charset first — same rule the desktop has always
-        applied — so the injection shape is disarmed twice: once by the
-        charset, and structurally by never touching a shell.
-        """
+        """A list argv cannot be word-split, so a branch name cannot become one."""
         command = host_attach.attach_command("memory; rm -rf /")
 
         assert isinstance(command, list)
-        # The flattened name survives as ONE element — including where it is
-        # re-used as the -t target of every chained option.
         assert command[command.index("-s") + 1] == "baud-memory--rm--rf--"
         for chained in _chained(command):
             assert chained[chained.index("-t") + 1] == "baud-memory--rm--rf--"
 
 
 def _evaluated_strings(module: Any) -> list:
-    """
-    Every string a module actually EVALUATES, docstrings excluded.
-
-    A plain `"kill-session" not in source` reads the prose too, so it forbids the
-    comment that explains the design while permitting the argument that breaks
-    it. Parsing instead means the guard fires on the tmux subcommand and stays
-    quiet about the paragraph promising never to send one.
-    """
+    """Every string a module actually EVALUATES, docstrings excluded."""
+    # A text grep would forbid the prose explaining the design while permitting the argument that breaks it.
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
 
     docstrings = set()
@@ -342,42 +231,22 @@ def _identifiers(module: Any) -> set:
 
 
 class TestNoSessionIsEverKilledHere:
-    """
-    The property this whole module is built around: detach is not kill.
-
-    Closing a sheet on a phone must never end an agent mid-task, so this lane
-    has no way to say so. Both guards read the PARSED module rather than its
-    text, because the failure they catch is one word long — and a text grep here
-    would forbid the comment explaining the design while permitting the argument
-    that breaks it.
-    """
+    """The property this whole module is built around: detach is not kill."""
 
     def test_no_string_this_module_evaluates_contains_a_kill(self) -> None:
-        """
-        kill-session, kill-server, kill-pane — a tmux kill is a literal, and
-        this module constructs none.
-        """
+        """kill-session, kill-server, kill-pane — a tmux kill is a literal, and
+        this module constructs none."""
         offenders = [text for text in _evaluated_strings(host_attach) if "kill" in text.lower()]
 
         assert offenders == []
 
     def test_the_module_never_reaches_for_sigkill(self) -> None:
-        """
-        SIGHUP is a detaching terminal. SIGKILL is an execution.
-
-        A client that will not detach is not a reason to escalate — it is a
-        reason to close the descriptor and let tmux notice.
-        """
+        """SIGHUP is a detaching terminal. SIGKILL is an execution."""
         names = _identifiers(host_attach)
 
         assert "SIGKILL" not in names
         assert "SIGTERM" not in names
         assert "SIGHUP" in names
-
-
-# ==============================================
-# THE PTY — real processes, real descriptors
-# ==============================================
 
 
 @pty_required
@@ -396,13 +265,7 @@ class TestThePumpMovesRealBytes:
         assert b"hello room" in received
 
     def test_control_bytes_travel_unchanged(self, cat_session: Any) -> None:
-        """
-        The key bar writes real control bytes — \\x1b[A for Up, and so on.
-
-        Nothing in this lane interprets them, which is why the allowlist the
-        capture design needed evaporated with it: a keyboard does not ask
-        permission to send an escape sequence.
-        """
+        """The key bar writes real control bytes — \\x1b[A for Up, and so on."""
         cat_session.write(b"\x1b[A\x1b[B\r")
 
         received = b""
@@ -413,11 +276,8 @@ class TestThePumpMovesRealBytes:
         assert b"\x1b[A" in received
 
     def test_read_returns_bytes_never_text(self, cat_session: Any) -> None:
-        """
-        Decoding here would corrupt partial UTF-8 across a chunk boundary and
-        mangle escape sequences. The socket carries binary frames for the same
-        reason.
-        """
+        """Decoding here would corrupt partial UTF-8 across a chunk boundary and
+        mangle escape sequences."""
         cat_session.write(b"x\n")
 
         deadline = time.monotonic() + 5
@@ -425,20 +285,12 @@ class TestThePumpMovesRealBytes:
         while not data and time.monotonic() < deadline:
             data = cat_session.read()
 
-        # isinstance alone was true of b"" as well, so a pump that timed out and
-        # returned nothing passed this (seedgo assertion_shape, 2026-09-07). The
-        # loop above already waits for data, so an empty read here is a real
-        # failure and is asserted as one.
+        # isinstance alone holds for b"" too; the loop waited for data, so an empty read is a real failure.
         assert isinstance(data, bytes), f"the pump decoded to text: {type(data).__name__}"
         assert data.startswith(b"x"), f"the pump did not hand back what cat echoed: {data!r}"
 
     def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        EOF is how a PTY reports end-of-life, and the pump reads it as 'stop'.
-
-        Raising instead would turn an ordinary exit into an error the socket
-        handler has to special-case.
-        """
+        """EOF is how a PTY reports end-of-life, and the pump reads it as 'stop'."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["echo", "done"]):
             session = host_attach.open_attach("api")
 
@@ -453,31 +305,13 @@ class TestThePumpMovesRealBytes:
 
 @pty_required
 class TestTheRoomCanActuallyHearAResize:
-    """
-    The bug that made every resize a no-op, and the two halves of its fix.
+    """The bug that made every resize a no-op, and the two halves of its fix."""
 
-    @devpulse traced it on the live server while the owner's phone painted 80
-    columns into a 46-column screen. The evidence chain was: `stty` on the
-    client tty read `0 0` at startup; a resize frame DID land in the kernel
-    (`stty` then read the new size); and `tmux list-clients` stayed at 80x24
-    forever. The resize path worked perfectly and reached nobody.
-
-    TIOCSWINSZ delivers SIGWINCH to the foreground process group of the pty's
-    CONTROLLING terminal. `start_new_session=True` made the child a session
-    leader with NO controlling terminal — inheriting an already-open descriptor
-    never acquires one — so the signal had no destination. The room was deaf.
-
-    Both halves are pinned here, because either one alone still leaves a phone
-    rendering against a geometry the room does not have.
-    """
+    # TIOCSWINSZ signals the foreground group of the CONTROLLING terminal; a child without one never hears a resize.
 
     def test_the_pty_opens_at_the_size_the_docstring_promises(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        openpty hands back 0x0, and a tmux client reads that, calls it invalid
-        and falls back to its OWN 80x24. This lane has always DOCUMENTED 80x24
-        and until the fix it was true only by that accident — two independent
-        defaults agreeing, which is not the same as a contract.
-        """
+        """openpty hands back 0x0, and a tmux client reads that, calls it invalid
+        and falls back to its OWN 80x24 — two defaults agreeing is not a contract."""
         import struct
 
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
@@ -486,8 +320,6 @@ class TestTheRoomCanActuallyHearAResize:
         try:
             packed = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
             rows, cols, _, _ = struct.unpack("HHHH", packed)
-            # The published door itself, on the same real PTY: a later stamp
-            # lands in the kernel rows-first, never transposed.
             host_attach.set_winsize(session.descriptor, 132, 50)
             restamped = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
         finally:
@@ -498,12 +330,8 @@ class TestTheRoomCanActuallyHearAResize:
         assert (cols, rows) != (0, 0)
 
     def test_the_size_is_stamped_before_the_child_exists(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        Order matters: a client started against a 0x0 terminal has ALREADY
-        chosen its fallback by the time a later ioctl arrives. Setting the size
-        after Popen would leave startup wrong and only the first resize would
-        correct it — which is exactly the symptom, one frame later.
-        """
+        """Order matters: a client started against a 0x0 terminal has ALREADY
+        chosen its fallback by the time a later ioctl arrives."""
         calls = []
 
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
@@ -515,13 +343,8 @@ class TestTheRoomCanActuallyHearAResize:
         assert calls == ["winsize", "popen"]
 
     def test_the_child_takes_a_controlling_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        The half that makes SIGWINCH have a destination.
-
-        `start_new_session=True` is the shape that broke it: a session leader
-        with no controlling tty. The preexec_fn does the setsid ITSELF, so the
-        signal isolation is kept and the terminal is gained.
-        """
+        """The half that makes SIGWINCH have a destination."""
+        # `start_new_session=True` leaves a leader with no controlling tty; the preexec_fn does the setsid itself.
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1)
@@ -532,13 +355,7 @@ class TestTheRoomCanActuallyHearAResize:
         assert "start_new_session" not in kwargs
 
     def test_the_child_is_still_isolated_from_our_signals(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        The property `start_new_session` was there for, kept.
-
-        Restarting the host API must never take the operator's room down with
-        it, so the child still has to be in its own session — the fix moves that
-        into the preexec_fn rather than dropping it.
-        """
+        """The property `start_new_session` was there for, kept."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
@@ -551,16 +368,9 @@ class TestTheRoomCanActuallyHearAResize:
             session.hangup()
 
     def test_the_preexec_hook_does_no_lookups_in_the_forked_child(self, handed_hook: Any) -> None:
-        """
-        It runs after fork in a process that HAS threads, where only
-        async-signal-safe work is really allowed.
-
-        Everything it needs is bound as a default argument, so the child does no
-        attribute lookup, no import and no allocation before exec. This asserts
-        the shape rather than the effect, because the effect only shows up as a
-        rare deadlock under load — the kind of bug no test catches after the
-        fact.
-        """
+        """It runs after fork in a process that HAS threads, where only
+        async-signal-safe work is really allowed."""
+        # The shape, not the effect: the effect only shows up as a rare deadlock under load.
         import inspect
 
         signature = inspect.signature(handed_hook)
@@ -570,20 +380,8 @@ class TestTheRoomCanActuallyHearAResize:
             assert parameter.default is not inspect.Parameter.empty
 
     def test_the_pre_3_11_fallback_does_setsid_then_tiocsctty(self, handed_hook: Any) -> None:
-        """
-        The branch that never runs on this interpreter, and would ship untested.
-
-        `os.login_tty` is 3.11+; this project supports 3.10, so on those the
-        fallback is the ONLY path that claims the terminal — and a mutation
-        proved nothing was watching it. Both calls are mocked deliberately: a
-        real `os.setsid()` here would detach the test runner from its own
-        session, and the default-argument shape that makes the hook fork-safe is
-        what makes injecting them possible.
-
-        Order is asserted, not just presence. TIOCSCTTY only grants the terminal
-        to a session LEADER, so an ioctl before the setsid fails with EPERM and
-        leaves the room exactly as deaf as before.
-        """
+        """The branch that never runs on this interpreter, and would ship untested."""
+        # Mocked: a real `os.setsid()` would detach the runner. Order matters: TIOCSCTTY only serves a session leader.
         order = []
         setsid = MagicMock(side_effect=lambda: order.append("setsid"))
         ioctl = MagicMock(side_effect=lambda *a: order.append("ioctl"))
@@ -599,14 +397,8 @@ class TestTheRoomCanActuallyHearAResize:
         ioctl.assert_called_once_with(0, 1234, 0)
 
     def test_the_hook_claims_the_descriptor_subprocess_actually_hands_it(self, handed_hook: Any) -> None:
-        """
-        fd 0, and it has to be 0.
-
-        subprocess dup's the slave onto 0, 1 and 2 BEFORE calling preexec_fn, so
-        by the time this runs the terminal to claim is stdin. Reaching for the
-        original slave descriptor number instead would claim a descriptor that
-        may no longer mean anything in the child.
-        """
+        """fd 0, and it has to be 0."""
+        # subprocess dups the slave onto 0, 1 and 2 BEFORE preexec_fn, so the terminal to claim is stdin.
         ioctl = MagicMock()
 
         handed_hook(
@@ -627,27 +419,9 @@ class TestTheRoomCanActuallyHearAResize:
         login_tty.assert_called_once_with(0)
 
     def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        The property itself, on a real process rather than a mock.
-
-        tcgetpgrp on the master answers with the foreground process group of the
-        terminal's session — and it only HAS one if something claimed the
-        terminal. Before the fix this raised ENOTTY, which is the kernel saying
-        'nobody is listening', and is precisely why SIGWINCH went nowhere.
-
-        BOTH READS HAPPEN WHILE THE CHILD IS ALIVE, and the host that insists on
-        it is manufactured below. macOS run 34707099650 raised
-        ProcessLookupError on the `getpgid` line: the `finally` block had
-        hung up and reaped the child, and macOS answers ESRCH for a pid that is
-        gone. Linux keeps a zombie's pgid readable until its parent reaps it, so
-        a read taken after the subject died was green here for a reason that has
-        nothing to do with the property under test. The stand-in refuses once
-        the session is closed, exactly as the runner does, so moving either read
-        back below the hangup goes red on this box too. The test calls the
-        stand-in by name rather than replacing os.getpgid for the process: the
-        product never reads a pgid, so only this read needs the macOS answer
-        (api, fleet green leg 5).
-        """
+        """The property itself, on a real process rather than a mock."""
+        # Both reads happen while the child lives: macOS answers ESRCH for a reaped pid where Linux keeps a zombie's
+        # pgid, so the stand-in refuses after hangup and moving a read below it goes red here too.
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
@@ -660,8 +434,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         try:
             child_group = macos_getpgid(session.process.pid)
-            # Polled on the real condition: the child's exec claims the
-            # terminal, and until it has the foreground is still ours.
+            # Until the child's exec claims the terminal, the foreground is still ours.
             deadline = time.monotonic() + 5
             foreground = os.tcgetpgrp(session.descriptor)
             while foreground != child_group and time.monotonic() < deadline:
@@ -675,12 +448,7 @@ class TestTheRoomCanActuallyHearAResize:
 
 @pty_required
 class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
-    """
-    struct winsize is (rows, cols, xpixel, ypixel) — ROWS FIRST.
-
-    Getting that pair backwards produces a room drawing at a plausible but wrong
-    shape, which reads as a rendering bug in somebody else's code.
-    """
+    """struct winsize is (rows, cols, xpixel, ypixel) — ROWS FIRST."""
 
     def test_a_resize_reaches_the_terminal(self, cat_session: Any) -> None:
         """Read the size back off the descriptor rather than trusting the call."""
@@ -704,11 +472,7 @@ class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
             cat_session.resize(100, -1)
 
     def test_an_absurd_dimension_is_refused_not_clamped(self, cat_session: Any) -> None:
-        """
-        A geometry silently changed is one the client renders against wrongly.
-
-        Same rule as every other cap on this server: refuse, never trim.
-        """
+        """A geometry silently changed is one the client renders against wrongly."""
         with pytest.raises(host_attach.AttachRefused):
             cat_session.resize(99999, 30)
 
@@ -720,12 +484,7 @@ class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
 
 @pty_required
 class TestHangupDetachesAndNeverKillsTheRoom:
-    """
-    The lifecycle promise, tested against a real process.
-
-    A room outlives its client. That is what makes closing a phone sheet free,
-    and it is the single behaviour a bug here would destroy silently.
-    """
+    """The lifecycle promise, tested against a real process."""
 
     def test_hangup_sends_sighup_and_not_a_kill(self, quiet: Any, tmux_preflight: Any) -> None:
         """The signal itself, captured — a detaching terminal sends SIGHUP."""
@@ -751,18 +510,9 @@ class TestHangupDetachesAndNeverKillsTheRoom:
         assert caught.value.errno == errno.EBADF
 
     def test_a_second_hangup_touches_nothing(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        A socket that errors and then closes calls this twice, and the second
-        call must be a no-op at the SYSCALL level — not merely quiet.
-
-        Asserting 'it does not raise' would have passed with the guard removed:
-        the second close raises EBADF and the handler swallows it. The real
-        hazard is worse and silent. Descriptor numbers are REUSED, so by the
-        time a stale hangup fires, that integer may belong to another operator's
-        attach — and closing it would SUCCEED, killing a session nobody touched.
-        That is why the guard is a flag checked first, not a try/except wrapped
-        around the close.
-        """
+        """A socket that errors and then closes calls this twice, and the second
+        call must be a no-op at the SYSCALL level — not merely quiet."""
+        # Descriptor numbers are REUSED: a stale close could SUCCEED on another operator's attach.
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
@@ -777,15 +527,8 @@ class TestHangupDetachesAndNeverKillsTheRoom:
         assert session.closed is True
 
     def test_the_child_is_in_its_own_session(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        The child LEADS its own session, which is more than another process group.
-
-        A group of its own keeps a signal aimed at this server's group away (the
-        isolation test pins that); leading a session of its own also keeps the
-        hangup of this server's terminal away, so a restart never ends somebody's
-        attached room. Its body read the pgid like the isolation test until
-        fleet green leg 7 (api); the session id is the claim this name makes.
-        """
+        """The child LEADS its own session, which is more than another process group."""
+        # Leading a session also keeps this server's terminal hangup away, so a restart never ends a room.
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
@@ -817,30 +560,13 @@ BAD_CONTROL_FRAMES = [
 
 @fastapi_required
 class TestABadResizeIsDroppedAndTheSessionLivesOn:
-    """
-    The branch @baud could not test from their end, handed back on purpose.
+    """The branch @baud could not test from their end, handed back on purpose."""
 
-    Their client's cols/rows come from FitAddon and are guarded > 0, so it has
-    no path that produces a bad resize — which means my contract's "refused,
-    dropped, never fatal" was untested in both directions. Their words: yours to
-    keep honest.
-
-    The hazard is specific and quiet: an exception escaping the control handler
-    kills the pump, which hangs up the session, which detaches an operator
-    mid-task because a frame had a typo in it. Driven through a REAL socket
-    against the REAL handler — re-implementing the parse here would only prove
-    the test could parse JSON.
-    """
+    # An exception escaping the control handler kills the pump and detaches an operator over a typo.
 
     def test_every_bad_frame_is_dropped_and_the_room_survives_all_of_them(self, store: Any, seated: Any) -> None:
-        """
-        Thirteen malformed frames down one socket, then a good one.
-
-        Three assertions, and the middle one is the sharp one: not a single bad
-        frame reached `write`. A control frame falling through to the write path
-        would type JSON into the operator's shell, and on a room sitting at a
-        prompt that is a command.
-        """
+        """Thirteen malformed frames down one socket, then a good one."""
+        # A control frame falling through to `write` types JSON into the operator's shell.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -855,17 +581,10 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     for frame in BAD_CONTROL_FRAMES:
                         socket.send_text(frame)
 
-                    # A good one last: the socket has to still be carrying
-                    # traffic after all of that, not merely still be open.
                     socket.send_text('{"type": "resize", "cols": 72, "rows": 44}')
                     session.wait_until(lambda: bool(session.resizes))
 
-                    # The hangup is the FIRST line of the pump's finally, not
-                    # the last of the route. Leaving the context before the
-                    # route's own detach line cancels a server still unwinding
-                    # its pump, and the client's exit raises that as a
-                    # CancelledError in 0.7s (CI 38087470864, 3.10). Wait for
-                    # the route's last line, so the exit cancels nothing live.
+                    # The hangup precedes the route's detach line; leaving before that line cancels a live server.
                     detach_and_wait(socket, session)
                     wait_for_log(log, "socket detached from")
 
@@ -874,13 +593,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         assert session.hangups == 1
 
     def test_a_bad_frame_does_not_stop_the_keystrokes_that_follow_it(self, store: Any, seated: Any) -> None:
-        """
-        Recovery on the OTHER channel.
-
-        A session that survives a bad control frame but stops forwarding
-        keystrokes is broken in the way that matters — the operator is looking
-        at a live room that has quietly stopped listening.
-        """
+        """Recovery on the OTHER channel."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -903,22 +616,8 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         assert session.writes == [b"echo still-listening", b"\r"]
 
     def test_a_disconnect_on_a_silent_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
-        """
-        The bug this file found, pinned so it cannot come back.
-
-        The pump used to `gather` both directions, which waits for BOTH. On a
-        quiet room that deadlocks: the phone closes the sheet, `socket_to_room`
-        ends, and `room_to_socket` is still parked in a blocking `os.read` that
-        will not return until the room happens to print something. The detach —
-        and the SIGHUP with it — waited on output that might never come, and the
-        executor thread stayed parked alongside it. One leaked thread and one
-        undetached tmux client per closed sheet, on the most ordinary path there
-        is: closing a sheet on an idle agent.
-
-        The stub's read blocks for ten seconds and produces NOTHING, which is
-        exactly a silent room. If the hangup waited on it, this test would take
-        ten seconds; the timing assertion is the whole point.
-        """
+        """The bug this file found, pinned so it cannot come back."""
+        # Waiting on BOTH directions parks the detach on a silent room's os.read; the stub reads nothing for 10s.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -939,32 +638,16 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         assert elapsed < 5
 
     def test_the_pump_waits_for_the_first_direction_not_both(self) -> None:
-        """
-        The fix, named at the source.
-
-        `gather` is the shape that deadlocked. A future tidy-up that reads
-        `asyncio.wait(..., FIRST_COMPLETED)` as a needlessly complicated gather
-        would reintroduce the hang, and the timing test above would only catch
-        it as a mysterious slow test.
-        """
+        """The fix, named at the source."""
+        # Tidying FIRST_COMPLETED back into a `gather` would reintroduce the deadlock.
         pump = source_of("run_pump")
 
         assert "return_when=asyncio.FIRST_COMPLETED" in pump
-        # hangup comes FIRST in the finally: closing the descriptor is what
-        # breaks the blocked reader out of os.read. Cancelling alone would not —
-        # a thread sitting in a syscall does not notice an asyncio cancellation.
+        # hangup first: closing the descriptor breaks the reader out of os.read; a cancel never reaches a syscall.
         assert pump.index("session.hangup()") < pump.index("task.cancel()")
 
     def test_the_handler_swallows_a_refusal_rather_than_killing_the_pump(self) -> None:
-        """
-        The wiring, read at the source as well as driven.
-
-        An AttachRefused escaping `_handle_control` would propagate out of the
-        socket reader, end the gather, and hang up a live session over a typo in
-        a resize frame. This names the except clause standing between a bad
-        frame and a detached operator, so removing it fails here loudly rather
-        than only through a timing-dependent socket test.
-        """
+        """The wiring, read at the source as well as driven."""
         handler = source_of("_handle_control")
 
         assert "except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError)" in handler
@@ -975,12 +658,7 @@ class TestARoomThatEndsClosesItsSocketWith4000:
     """DPLAN-0414 C-C: the phone tells "room ended" from "server hung up" by the close code alone."""
 
     def test_an_empty_read_closes_the_socket_with_4000_room_ended(self) -> None:
-        """
-        The room's PTY reads empty: the socket is closed 4000 "room ended", the session hung up once.
-
-        Driven through run_pump with a stand-in socket whose client never
-        speaks, so the only way the pump ends is the room ending first.
-        """
+        """The room's PTY reads empty: the socket is closed 4000 "room ended", the session hung up once."""
         session = SimpleNamespace(room="aipass-api", read=lambda: b"", hangups=0)
         session.hangup = lambda: setattr(session, "hangups", session.hangups + 1)
 

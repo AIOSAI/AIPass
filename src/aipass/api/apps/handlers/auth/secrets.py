@@ -3,20 +3,10 @@
 # Description: Secrets Store Handler
 # Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Secrets Store Handler
-
-Reads and writes structured secrets in ~/.secrets/aipass/<provider>/<slug>.
-Supports JSON config files and raw secret files.
-
-Functions:
-    get_secret() - Read a secret by provider/slug
-    set_secret() - Write a secret to the provider store
-    list_secrets() - List available slugs for a provider
-"""
+"""Secrets Store Handler"""
 
 import json
 import os
@@ -28,43 +18,18 @@ from aipass.api.apps.handlers.json import json_handler
 
 SECRETS_BASE = Path.home() / ".secrets" / "aipass"
 
-# Keys to search for when returning a plain (non-JSON) secret value
 _TOKEN_KEYS = ("bot_token", "api_key", "token", "secret", "password", "key")
 
 
-# ==============================================
-# SECRET RETRIEVAL
-# ==============================================
-
-
 def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]:
-    """
-    Get secret value from provider store.
-
-    Source: ~/.secrets/aipass/<provider>/<slug>.json or <slug>
-
-    Args:
-        provider: Provider directory name (e.g., 'telegram', 'discord')
-        slug: Secret file name (without .json extension)
-        as_json: If True, return full parsed dict; otherwise extract primary token
-
-    Returns:
-        Secret value (str or dict) or None if not found
-
-    Example:
-        >>> token = get_secret('telegram', 'bot')
-        >>> if token:
-        ...     print(f"Got token: {token[:10]}...")
-    """
+    """Get secret value from provider store."""
     provider_dir = SECRETS_BASE / provider
 
     if not provider_dir.exists() or not provider_dir.is_dir():
-        # The provider's name, never its directory: a path inside the secrets
-        # base reads as a secret's location (seedgo clear_text_secret_logging).
+        # The provider's name, never its directory: a path in the secrets base reads as a secret's location.
         logger.warning(f"Provider directory not found under the secrets base: {provider}")
         return None
 
-    # Try JSON file first
     json_path = provider_dir / f"{slug}.json"
     if json_path.exists():
         result = _read_json_secret(json_path, as_json)
@@ -72,7 +37,6 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
             json_handler.log_operation("secret_retrieved", {"provider": provider, "slug": slug, "format": "json"})
             return result
 
-    # Fall back to raw file
     raw_path = provider_dir / slug
     if raw_path.exists():
         result = _read_raw_secret(raw_path)
@@ -80,31 +44,14 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
             json_handler.log_operation("secret_retrieved", {"provider": provider, "slug": slug, "format": "raw"})
             return result
 
-    # The provider only, as an argument. The slug is the caller's to name:
-    # callers list slugs out of the store (list_secrets) and hand them back
-    # here, so a slug on this line is a value read out of the secrets store
-    # reaching a log (CodeQL py/clear-text-logging-sensitive-data, PR #774
-    # round eleven: telegram list_bot_configs -> migrate_bot_config ->
-    # _get_secret -> get_secret -> this f-string -> prax logger.py:135).
+    # Never the slug: callers pass slugs read out of the store (list_secrets), which CodeQL flags as
+    # clear-text logging of sensitive data.
     logger.warning("Secret not found under provider %s: no JSON or raw document for the requested slug", provider)
     return None
 
 
 def list_secrets(provider: str) -> List[str]:
-    """
-    List available secret slugs for a provider.
-
-    Args:
-        provider: Provider directory name
-
-    Returns:
-        Sorted list of slug names (JSON extensions stripped)
-
-    Example:
-        >>> slugs = list_secrets('telegram')
-        >>> print(slugs)
-        ['bot', 'webhook']
-    """
+    """List available secret slugs for a provider."""
     provider_dir = SECRETS_BASE / provider
 
     if not provider_dir.exists() or not provider_dir.is_dir():
@@ -125,29 +72,8 @@ def list_secrets(provider: str) -> List[str]:
     return sorted(slugs)
 
 
-# ==============================================
-# SECRET WRITING
-# ==============================================
-
-
 def set_secret(provider: str, slug: str, value: Union[str, dict], *, as_json: bool = False) -> Path:
-    """
-    Write a secret to the provider store.
-
-    Destination: ~/.secrets/aipass/<provider>/<slug>.json
-
-    Args:
-        provider: Provider directory name (e.g., 'telegram')
-        slug: Secret identifier (without .json extension)
-        value: Secret value — string or dict
-        as_json: If True, json.dump the value; else write as plain string
-
-    Returns:
-        Path to the written file
-
-    Raises:
-        OSError: If directory creation or file write fails
-    """
+    """Write a secret to the provider store."""
     provider_dir = SECRETS_BASE / provider
     provider_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(provider_dir, 0o700)
@@ -172,28 +98,13 @@ def set_secret(provider: str, slug: str, value: Union[str, dict], *, as_json: bo
     return target
 
 
-# ==============================================
-# PRIVATE HELPERS
-# ==============================================
-
-
 def _read_json_secret(path: Path, as_json: bool) -> Optional[Any]:
-    """
-    Read and parse a JSON secret file.
-
-    Args:
-        path: Path to JSON file
-        as_json: If True, return full dict; otherwise extract primary token
-
-    Returns:
-        Parsed data or extracted token, or None on error
-    """
+    """Read and parse a JSON secret file."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        # No path: get_secret's "Secret not found: provider/slug" line that
-        # follows names which one, without saying where it lives.
+        # No path: a path inside the secrets base reads as a secret's location.
         logger.warning(f"Error reading a JSON secret file: {e}")
         return None
 
@@ -210,15 +121,7 @@ def _read_json_secret(path: Path, as_json: bool) -> Optional[Any]:
 
 
 def _read_raw_secret(path: Path) -> Optional[str]:
-    """
-    Read a raw (non-JSON) secret file.
-
-    Args:
-        path: Path to raw secret file
-
-    Returns:
-        Stripped file contents or None on error
-    """
+    """Read a raw (non-JSON) secret file."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read().strip()

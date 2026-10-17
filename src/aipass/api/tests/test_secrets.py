@@ -3,49 +3,10 @@
 # Description: Tests for secrets handler and get_secret_cmd orchestrator
 # Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
-
-# Tests — handlers/auth/secrets.py (get_secret, list_secrets):
-# - get_secret: JSON token extraction via _TOKEN_KEYS
-# - get_secret: as_json returns full parsed dict
-# - get_secret: raw file fallback returns stripped content
-# - get_secret: missing provider directory returns None
-# - get_secret: missing slug file returns None
-# - get_secret: malformed JSON returns None
-# - get_secret: unreadable file (OSError) returns None
-# - get_secret: JSON with no matching token key returns json.dumps of dict
-# - list_secrets: returns sorted slug names, strips .json extension
-# - list_secrets: non-existent provider returns empty list
-# - list_secrets: skips dotfiles, __pycache__, directories
-#
-# Tests — handlers/auth/secrets.py (set_secret):
-# - set_secret: writes string value to provider/slug.json
-# - set_secret: as_json writes JSON-serialized dict
-# - set_secret: creates provider directory if missing
-# - set_secret: file has 0o600 permissions (POSIX)
-# - set_secret: provider dir has 0o700 permissions (POSIX)
-# - set_secret: overwrites existing secret
-# - set_secret: round-trip with get_secret returns same value
-# - set_secret: round-trip with get_secret as_json returns same dict
-#
-# Tests — modules/secrets.py (in-process door):
-# - get_secret wraps handler and logs operation
-# - set_secret wraps handler and logs operation
-# - list_secrets wraps handler
-#
-# Tests — api_key.py (get_secret_cmd — hardened, no raw values to stdout):
-# - get_secret_cmd default prints masked summary only
-# - get_secret_cmd --out writes to file with 0o600 perms
-# - get_secret_cmd --out --json writes JSON to file
-# - get_secret_cmd --list prints slug names
-# - get_secret_cmd no args calls error()
-# - get_secret_cmd provider only (no --list) calls error()
-# - get_secret_cmd only flags calls error()
-# - get_secret_cmd not found calls error()
-# - get_secret_cmd --out missing path calls error()
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — SECRETS_BASE's real home location; every test patches it to a temp dir
@@ -74,7 +35,6 @@ from aipass.api.apps.modules.api_key import get_secret_cmd
 from aipass.api.apps.modules import secrets as secrets_module
 
 
-# Patch targets
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_JSON_HANDLER = "aipass.api.apps.handlers.auth.secrets.json_handler"
 PATCH_LOGGER = "aipass.api.apps.handlers.auth.secrets.logger"
@@ -88,11 +48,6 @@ GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--out FILE] [-
 
 PATCH_MOD_HANDLER = "aipass.api.apps.modules.secrets._handler"
 PATCH_MOD_JSON_HANDLER = "aipass.api.apps.modules.secrets.json_handler"
-
-
-# =============================================
-# get_secret
-# =============================================
 
 
 class TestGetSecret:
@@ -114,7 +69,7 @@ class TestGetSecret:
         """Token extraction tries _TOKEN_KEYS in order; first match wins."""
         provider_dir = tmp_path / "discord"
         provider_dir.mkdir()
-        # Has both 'api_key' and 'token'; api_key comes first in _TOKEN_KEYS
+        # api_key precedes token in the handler's _TOKEN_KEYS.
         secret_file = provider_dir / "creds.json"
         secret_file.write_text(json.dumps({"token": "second", "api_key": "first"}), encoding="utf-8")
 
@@ -177,10 +132,8 @@ class TestGetSecret:
         calls = mock_logger.warning.call_args_list
         assert len(calls) == 2
         warnings = [c.args[0] % tuple(c.args[1:]) for c in calls]
-        # Where it lives is on neither line; which slug is the caller's to
-        # name, never this line's: a slug handed in is a name listed out of
-        # the store (seedgo clear_text_secret_logging; CodeQL
-        # py/clear-text-logging-sensitive-data, PR #774 round eleven).
+        # Neither the store path nor the slug may reach the log (seedgo clear_text_secret_logging;
+        # CodeQL py/clear-text-logging-sensitive-data): a slug is a name listed out of the store.
         assert warnings[0].startswith("Error reading a JSON secret file: ")
         assert not any(str(tmp_path) in warning for warning in warnings)
         assert warnings[1] == "Secret not found under provider telegram: no JSON or raw document for the requested slug"
@@ -197,14 +150,12 @@ class TestGetSecret:
         provider_dir.mkdir()
         secret_file = provider_dir / "bot.json"
         secret_file.write_text(json.dumps({"bot_token": "abc"}), encoding="utf-8")
-        # Make unreadable
         secret_file.chmod(0o000)
 
         mock_logger = MagicMock()
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER, mock_logger):
             result = get_secret("telegram", "bot")
 
-        # Restore permissions for cleanup
         secret_file.chmod(0o644)
 
         assert result is None
@@ -254,11 +205,6 @@ class TestGetSecret:
         assert result is None
 
 
-# =============================================
-# list_secrets
-# =============================================
-
-
 class TestListSecrets:
     """Verifies secret listing under various conditions."""
 
@@ -298,7 +244,6 @@ class TestListSecrets:
         """__pycache__ directory is excluded."""
         provider_dir = tmp_path / "provider"
         provider_dir.mkdir()
-        # __pycache__ as a file (the check is name-based, not type-based for this entry)
         pycache = provider_dir / "__pycache__"
         pycache.mkdir()
         (provider_dir / "real.json").write_text("{}", encoding="utf-8")
@@ -328,11 +273,6 @@ class TestListSecrets:
             result = list_secrets("notadir")
 
         assert result == []
-
-
-# =============================================
-# get_secret_cmd
-# =============================================
 
 
 class TestSecretsModule:
@@ -387,11 +327,6 @@ class TestSecretsModule:
 
         assert result == ["bot", "webhook"]
         mock_handler.list_secrets.assert_called_once_with("telegram")
-
-
-# =============================================
-# get_secret_cmd (hardened — no raw values to stdout)
-# =============================================
 
 
 class TestGetSecretCmd:
@@ -517,11 +452,6 @@ class TestGetSecretCmd:
         mock_secrets.list_secrets.assert_called_once_with("empty_provider")
 
 
-# =============================================
-# set_secret (handler)
-# =============================================
-
-
 class TestSetSecret:
     """Verifies secret writing under various conditions."""
 
@@ -610,11 +540,6 @@ class TestSetSecret:
         assert call_args[1]["slug"] == "bot"
 
 
-# =============================================
-# set_secret (module door)
-# =============================================
-
-
 class TestSetSecretModule:
     """Verifies the module-level set_secret wrapper."""
 
@@ -649,11 +574,8 @@ class TestSecretsHandleCommand:
     """The secrets module owns no CLI commands — get-secret routes via api_key."""
 
     def test_no_args_returns_false_and_is_silent(self, capsys: object) -> None:
-        """Claiming a no-arg command would swallow it before api.py can reject it.
-
-        secrets is discovered last, so returning True here makes api.py's
-        "Unknown command" branch unreachable for every unknown command.
-        """
+        """Claiming a no-arg command would swallow it before api.py can reject it."""
+        # secrets is discovered last: True here makes api.py's "Unknown command" branch unreachable.
         assert secrets_module.handle_command("bogus-command", []) is False
         assert capsys.readouterr().out == ""  # type: ignore[union-attr]
 

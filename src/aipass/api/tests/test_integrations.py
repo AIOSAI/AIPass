@@ -3,18 +3,10 @@
 # Description: Tests for bridge, registry, and integrations handlers
 # Version: 1.0.0
 # Created: 2026-04-15
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/bridge.py with the registry walker and integrations_manager's contract calls."""
-
-# Tests for DPLAN-0133 Phase 2: bridge + registry + handlers.
-#
-# Groups:
-#   TestBridge            — contract registration, resolve, list, clear
-#   TestRegistry          — auto-discovery walk, empty dir, missing driver, broken import
-#   TestFetchContracts    — fetch_contracts() happy path and empty
-#   TestCallContract      — call_contract() happy path, unregistered, args forwarding, exception
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — handle_command() and print_help() CLI, tests/test_integrations_manager.py
@@ -26,11 +18,6 @@ from aipass.api.apps.modules import bridge, registry
 from aipass.api.apps.modules.integrations_manager import fetch_contracts, call_contract
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def clean_bridge(monkeypatch):
     """Reset bridge and registry state before and after each test."""
@@ -39,11 +26,6 @@ def clean_bridge(monkeypatch):
     yield
     bridge.clear()
     monkeypatch.setattr(registry, "_loaded", False)
-
-
-# ---------------------------------------------------------------------------
-# TestBridge
-# ---------------------------------------------------------------------------
 
 
 class TestBridge:
@@ -86,11 +68,6 @@ class TestBridge:
         bridge.register("dup", fn1)
         bridge.register("dup", fn2)
         assert bridge.resolve("dup") is fn2
-
-
-# ---------------------------------------------------------------------------
-# TestRegistry
-# ---------------------------------------------------------------------------
 
 
 class TestRegistry:
@@ -154,11 +131,6 @@ class TestRegistry:
         assert count == 1
 
 
-# ---------------------------------------------------------------------------
-# TestFetchContracts
-# ---------------------------------------------------------------------------
-
-
 class TestFetchContracts:
     def test_empty_returns_success(self):
         """fetch_contracts() returns success with empty list when bridge is clear."""
@@ -198,11 +170,6 @@ class TestFetchContracts:
         assert result["success"] is False
         assert result["contracts"] == []
         assert result["count"] == 0
-
-
-# ---------------------------------------------------------------------------
-# TestCallContract
-# ---------------------------------------------------------------------------
 
 
 class TestCallContract:

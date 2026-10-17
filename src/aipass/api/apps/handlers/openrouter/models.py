@@ -3,33 +3,19 @@
 # Description: OpenRouter Model Management
 # Version: 1.0.1
 # Created: 2025-11-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-OpenRouter Model Management Handler
+"""OpenRouter Model Management Handler"""
 
-Business logic for querying OpenRouter models:
-- Fetch all available models from OpenRouter API
-- Parse model data and capabilities
-"""
-
-# Standard library imports
 from typing import Dict, List
 
-# Third-party imports
 import requests
 
-# Logging
 from aipass.prax import logger
 
-# JSON handler
 from aipass.api.apps.handlers.json import json_handler
 
-
-# =============================================
-# CONSTANTS
-# =============================================
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 DEFAULT_TIMEOUT = 10
@@ -39,33 +25,12 @@ MODULE_NAME = "openrouter.models"
 class ModelsUnavailable(Exception):
     """The models endpoint could not be read; the message says why.
 
-    Raised rather than returning [], which a reachable endpoint with no models
-    also answers (api, fleet green leg 3).
+    Raised rather than returning [], which a reachable endpoint with no models also answers.
     """
-
-
-# =============================================
-# CORE FUNCTIONS
-# =============================================
 
 
 def fetch_models_from_api(api_key: str) -> List[Dict]:
-    """
-    Query OpenRouter models endpoint and parse response
-
-    Makes HTTP request to OpenRouter API and extracts model data.
-    Handles authentication, timeouts, and error responses.
-
-    Args:
-        api_key: Valid OpenRouter API key
-
-    Returns:
-        List of model dictionaries; [] only when the endpoint lists no models
-
-    Raises:
-        ModelsUnavailable: the endpoint did not answer, answered non-200, or
-            answered something that is not a model list (api, fleet green leg 3).
-    """
+    """Query OpenRouter models endpoint and parse response"""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     logger.info(f"[{MODULE_NAME}] Requesting models from OpenRouter API")

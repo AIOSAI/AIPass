@@ -3,35 +3,10 @@
 # Description: Tests for the host API attach lane — the pump's shape and the socket's records
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the attach socket's records in apps/handlers/host/server.py and the pump's shape in pump.py."""
-
-# Tests for the Attach Lane
-#
-# DPLAN-0300 Round 18b/18c. `WS /v1/room/attach` runs a PTY hosting a tmux CLIENT
-# into a branch's persistent room — the desktop's window over a different wire.
-#
-# THE THREE THINGS THIS LANE COULD GET WRONG, and none of them is "does it work":
-#
-#   1. **Killing a room it was only supposed to leave.** Detach is a SIGHUP to the
-#      client; the session survives. If this ever became a kill, closing a sheet on
-#      a phone would end an agent mid-task. Pinned by behaviour AND by reading the
-#      module source for kill-session, because the failure is one word long.
-#
-#   2. **Leaking the token into a log.** A WebSocket cannot carry an Authorization
-#      header, and the easy answer — a query parameter — writes the credential into
-#      every access log, proxy log and browser history entry. The bearer rides the
-#      subprotocol, and the ACCEPTED protocol is the sentinel rather than the token.
-#
-#   3. **Spawning a PTY for an unauthenticated caller.** The scope check happens
-#      BEFORE accept, so a refused socket never reaches a shell.
-#
-# WHERE EACH LIVES since the oversize split (api, 2026-10-08): the first in
-# test_host_attach_pump.py, the second and third in test_host_attach_route.py.
-# This file keeps the pump's shape read at the source and the records the
-# socket leaves behind; the helpers the three share are support_host_attach.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
@@ -55,33 +30,16 @@ from aipass.api.tests.support_host_attach import (
     wait_for_log,
 )
 
-# The patch targets stay this file's own constants rather than the support
-# module's: seedgo's discarded_patch rule reads a target imported from this
-# branch's package as one it judges, and these silence loggers on purpose.
+# Own constants, not the support module's: discarded_patch judges a target imported from this package.
 PATCH_SERVER_JSON = "aipass.api.apps.handlers.host.server.json_handler"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
-# The pump carries its own logger since the 2026-08-21 split: attach and
-# detach are logged by the route, control frames by the pump.
 PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
 PATCH_PUMP_JSON = "aipass.api.apps.handlers.host.pump.json_handler"
 
 
 def test_the_session_is_created_once_per_socket_not_per_poll() -> None:
-    """
-    @baud's bug, checked for its SHAPE on this side rather than assumed absent.
-
-    Theirs: the attach effect depended on the branch CARD object, and the fleet
-    re-polls every ten seconds handing down a fresh object — so the effect
-    re-ran per poll, opening a new socket and a new pty and RE-TYPING the launch
-    line into the room every ten seconds. Invisible in the UI, obvious in a byte
-    log. They asked me to check whether anything here keys a session off a value
-    a poll refreshes.
-
-    It does not, and this is what makes that structural: open_attach is called
-    exactly once in this module, inside the socket handler, so a session's
-    lifetime is a connection's lifetime. There is no polling loop on this side
-    to re-fire it.
-    """
+    """@baud's bug, checked for its SHAPE on this side rather than assumed absent."""
+    # A session keyed off a polled value re-types the launch line into the room on every poll.
     source = Path(host_server.__file__).read_text(encoding="utf-8")
 
     assert source.count("host_attach.open_attach(") == 1
@@ -91,26 +49,14 @@ def test_the_session_is_created_once_per_socket_not_per_poll() -> None:
 
 
 def test_the_control_frame_is_json_and_the_verbs_are_resize_and_ping() -> None:
-    """
-    Text frames are CONTROL, binary frames are KEYSTROKES.
-
-    That split is what lets a resize travel on the same socket without a resize
-    message ever being mistaken for something the operator typed — and it is why
-    an unparseable control frame is ignored rather than written to the room.
-
-    TWO verbs now (@baud's FPLAN-0446 r5): `ping` joined `resize` so the browser
-    has a round-trip of its own. The split it rides on is unchanged, and the
-    `session.write` assertion is the one that keeps it that way — a control verb
-    reaching the write path types its own JSON into the operator's shell.
-    """
+    """Text frames are CONTROL, binary frames are KEYSTROKES."""
+    # A control verb reaching the write path types its own JSON into the operator's shell.
     handler = source_of("_handle_control")
 
     assert 'verb == "ping"' in handler
     assert 'verb != "resize"' in handler
     assert "session.write" not in handler
-    # The pong answers on the channel it arrived on. On the binary one it would
-    # be indistinguishable from room output, and would paint itself across the
-    # terminal the operator is reading.
+    # A pong on the binary channel would paint itself across the operator's terminal as room output.
     assert "send_text(" in handler
     assert "send_bytes" not in handler
     assert json.loads(host_pump.PONG_FRAME) == {"type": "pong"}
@@ -119,14 +65,7 @@ def test_the_control_frame_is_json_and_the_verbs_are_resize_and_ping() -> None:
 def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
     """
     The PTY read blocks. On a single-worker uvicorn, a blocking read on the loop
-    freezes every other request this server is serving — which is the whole
-    phone, including the fleet card the operator is looking at.
-
-    WHICH executor it runs on is deliberately not asserted here: it moved from
-    asyncio's default pool to the attach lane's own one (DPLAN-0305 Audit 2 —
-    the default sized itself to 8 threads on this host, and the 9th socket
-    silently never pumped). The property that matters is that the read is
-    handed to SOME executor, never called on the loop.
+    freezes every other request this server is serving.
     """
     pump = source_of("run_pump")
 
@@ -136,21 +75,11 @@ def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
 
 
 def test_the_pump_always_hangs_up() -> None:
-    """
-    A pump that raises must still detach.
-
-    Otherwise the room keeps a client attached to a socket nobody is holding,
-    and the operator's next attach lands in a session with a ghost in it.
-    """
+    """A pump that raises must still detach."""
     pump = source_of("run_pump")
 
     assert "finally:" in pump
     assert "session.hangup()" in pump
-
-
-# ==============================================
-# LIVENESS AND LIFETIME
-# ==============================================
 
 
 class SilentRoom(StubSession):
@@ -163,24 +92,11 @@ class SilentRoom(StubSession):
 
 @fastapi_required
 class TestTheDetachIsWrittenDownToo:
-    """
-    @baud's second r5 finding: ATTACH was logged and DETACH was not.
-
-    Tonight's flap put 13 attaches on one room in three minutes (server.log
-    21:42:26-21:45:28) and the log could say the phone kept ARRIVING without
-    being able to say it kept leaving, how long it stayed, or why it went. Two
-    facts separate a reconnect loop from an operator opening sheets: how long
-    the socket lived, and the code it closed on.
-    """
+    """@baud's second r5 finding: ATTACH was logged and DETACH was not."""
 
     def test_the_detach_line_names_the_room_the_duration_and_the_close_code(self, store: Any, seated: Any) -> None:
-        """
-        All three facts, in the line that actually gets written.
-
-        1001 rather than 1000 on purpose: a hardcoded normal-closure would pass
-        a test that closed normally, and 1001 (going away — a locked screen, a
-        backgrounded tab) is the code the flap is most likely to be made of.
-        """
+        """All three facts, in the line that actually gets written."""
+        # 1001, not 1000: a hardcoded normal-closure would pass a test that closed normally.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -202,13 +118,7 @@ class TestTheDetachIsWrittenDownToo:
         assert re.search(r"after \d+\.\d+s", line), line
 
     def test_the_duration_is_the_socket_s_own_lifetime_not_a_constant(self, store: Any, seated: Any) -> None:
-        """
-        A duration that is always 0.0s measures the logging, not the socket.
-
-        Half a second is enough to separate a real clock from a stamp taken
-        twice in the same breath, and short enough that the suite does not pay
-        for the proof.
-        """
+        """A duration that is always 0.0s measures the logging, not the socket."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -234,14 +144,8 @@ class TestTheDetachIsWrittenDownToo:
         assert float(held) >= 0.5, line
 
     def test_a_room_that_ends_first_says_so_instead_of_printing_none(self, store: Any, seated: Any) -> None:
-        """
-        The detach nobody's client caused.
-
-        When the ROOM goes (tmux killed, the agent exited), the pump ends from
-        the other direction and there is no close code, because the client never
-        sent one. A bare `None` in that field reads as a logging bug — the line
-        has to say which kind of detach this was.
-        """
+        """The detach nobody's client caused."""
+        # A room that ends has no close code; a bare `None` in that field reads as a logging bug.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -257,13 +161,7 @@ class TestTheDetachIsWrittenDownToo:
         assert "None" not in line
 
     def test_every_attach_is_paired_with_a_detach(self, store: Any, seated: Any) -> None:
-        """
-        The property the flap investigation actually needed.
-
-        Counting alone is what made 13 attaches unreadable: without the other
-        half, an arrival count cannot distinguish 13 sockets that came and went
-        from 13 that came and stayed. Three sockets in, three lines each way.
-        """
+        """The property the flap investigation actually needed."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -272,15 +170,12 @@ class TestTheDetachIsWrittenDownToo:
             client = TestClient(host_server.create_app())
             for n in range(3):
                 session = StubSession()
-                # Each socket its own room name, so each wait below finds its
-                # own detach line and not the one before it.
                 session.room = f"baud-api-{n}"
                 with patch.object(host_attach, "open_attach", return_value=session):
                     with client.websocket_connect(
                         "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
                     ) as socket:
-                        # Inside the context: the route's last line before the
-                        # exit, or the exit cancels a server still unwinding.
+                        # Inside the context, or the exit cancels a server still unwinding.
                         detach_and_wait(socket, session)
                         wait_for_log(log, f"socket detached from baud-api-{n} ")
 
@@ -300,28 +195,12 @@ class RefusingSession(StubSession):
 
 @fastapi_required
 class TestTypingIntoAWatchLeavesARecord:
-    """
-    The one socket refusal on this surface that used to leave no structured trace.
+    """The one socket refusal on this surface that used to leave no structured trace."""
 
-    Every refusal BEFORE the socket goes live runs through the route's
-    _audit_socket_refusal — wrong scope, unknown branch, no tmux. This one
-    happens after: the socket is open, authenticated and pumping when a client
-    types into a read-only watch, so it never passes that gate. It logged a
-    warning and closed 1008, and the audit trail said nothing at all.
-
-    Found by the standards checker asking the new pump module why it recorded no
-    operations. The checker was right, and the honest way to satisfy it was to
-    close the gap rather than to log something cheap.
-    """
+    # It happens after the socket is live, so it never passes the route's _audit_socket_refusal.
 
     def test_the_refusal_is_recorded_with_the_room_and_the_reason(self, store: Any, seated: Any) -> None:
-        """
-        A client breaking the contract is exactly what an audit trail is for.
-
-        The room names WHICH watch was typed into and the reason carries the
-        session's own sentence — the two things somebody reading the record
-        afterwards cannot reconstruct from a close code.
-        """
+        """A client breaking the contract is exactly what an audit trail is for."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -347,13 +226,7 @@ class TestTypingIntoAWatchLeavesARecord:
         assert session.hangups == 1
 
     def test_the_detach_line_carries_the_code_the_server_chose(self, store: Any, seated: Any) -> None:
-        """
-        A server-initiated close is a detach too, and it has a code.
-
-        1008 is the policy close the pump sends when a watch is typed into. If
-        only CLIENT codes reached the detach line, every refusal would read as
-        'room ended' and the log would lose which side ended the socket.
-        """
+        """A server-initiated close is a detach too, and it has a code."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")

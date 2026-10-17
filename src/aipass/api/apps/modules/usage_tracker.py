@@ -3,18 +3,10 @@
 # Description: Usage Tracking Module
 # Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Usage Tracking Module
-
-Orchestrates API usage monitoring operations:
-- Track generation usage
-- Display statistics
-- Session summaries
-- Cleanup old data
-"""
+"""Usage Tracking Module"""
 
 import os
 import sys
@@ -102,34 +94,19 @@ def print_help():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle usage tracking commands
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle usage tracking commands"""
     try:
         if command not in ["track", "stats", "session", "caller-usage", "cleanup"]:
             return False
 
-        # Help gate — a help flag ANYWHERE means "explain", never "execute".
-        # api.py's guard only inspects the first arg after the command, so
-        # `cleanup 30 --help` arrives here with args[0] == "30"; parsing that
-        # as a retention window ran a real, data-deleting cleanup.
-        # Bare "help" is only a flag in first position, so it stays usable as
-        # a caller name in `track <id> help`.
+        # A help flag anywhere means explain: api.py checks only the first arg, and `cleanup 30 --help`
+        # would run a real cleanup. Bare "help" counts only first, so it stays a caller name.
         if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 
-        # Log operation
         json_handler.log_operation(f"usage_{command}", {"command": command})
 
-        # Route all commands before introspection gate
         if command == "stats":
             show_stats()
             return True
@@ -146,7 +123,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             cleanup_data(args)
             return True
 
-        # NO-ARGS GATE (seedgo standard) — only for unrecognized subcommands
         if not args:
             print_introspection()
             return True
@@ -207,7 +183,6 @@ def show_session():
     header("Session Summary")
     console.print()
 
-    # Call handler for session data
     summary = aggregation.get_session_summary()
 
     if summary:
@@ -229,7 +204,6 @@ def show_caller_usage(args: List[str]):
     header(f"Usage for Caller: {caller}")
     console.print()
 
-    # Call handler for caller stats
     usage = aggregation.get_caller_usage(caller)
 
     if usage:
@@ -243,21 +217,14 @@ def show_caller_usage(args: List[str]):
 def cleanup_data(args: List[str], data_path: Optional[Path] = None):
     """Orchestrate cleanup workflow.
 
-    Args:
-        args: Optional first item, the retention in days.
-        data_path: The usage store to clean. None, what handle_command
-            passes, is the branch's api_json/usage_tracker_data.json. The
-            seam exists so the tests hand a store under tmp_path instead of
-            replacing pathlib.Path on this module (api, fleet green leg 13).
+    data_path=None is the branch's api_json store; tests pass a tmp_path store instead.
     """
     days = int(args[0]) if args else DEFAULT_RETENTION_DAYS
 
     header(f"Cleanup Old Data (retain {days} days)")
     console.print()
 
-    # Call handler for cleanup
     if data_path is None:
-        # Navigate: usage_tracker.py -> modules/ -> apps/ -> api/
         API_JSON_DIR = Path(__file__).resolve().parent.parent.parent / "api_json"
         data_path = API_JSON_DIR / "usage_tracker_data.json"
 
@@ -270,7 +237,6 @@ def cleanup_data(args: List[str], data_path: Optional[Path] = None):
     if removed > 0:
         success(f"Cleaned up {removed} entries older than {days} days")
 
-        # Fire trigger event
         try:
             from aipass.trigger.apps.modules.core import trigger
 
@@ -285,17 +251,14 @@ if __name__ == "__main__":
     """Standalone execution mode"""
     args = sys.argv[1:]
 
-    # Show introspection when run without arguments
     if len(args) == 0:
         print_introspection()
         sys.exit(0)
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Execute command
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 

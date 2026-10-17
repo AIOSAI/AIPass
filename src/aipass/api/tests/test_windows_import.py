@@ -3,51 +3,17 @@
 # Description: Every api module must IMPORT on a platform it cannot run on
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and every apps/ module, importing without POSIX."""
 
-# Tests that this package imports where POSIX is not
-#
-# WHY THIS FILE EXISTS. On 2026-08-18 the Windows CI lane ran to completion for
-# the first time and reported 22 collection errors. All 22 came from one line:
-# `_setsid: Any = os.setsid` sat in a function signature in `host/attach.py`, a
-# default argument is evaluated when the module is IMPORTED, and `os.setsid` does
-# not exist on win32. `server` imports `attach` and `host_api` imports `server`,
-# so a single AttributeError took down eleven host test files across two workers.
-#
-# The module was already careful. It guards `fcntl`, `pty` and `termios` behind a
-# try/except with a PTY_AVAILABLE flag, and three of the four defaults in that
-# same signature were fetched with `getattr`. The fourth was reached for
-# directly, and the guard forty lines above it never got the chance to run.
-#
-# NOT WORKING AND NOT IMPORTING ARE DIFFERENT FAILURES. Nothing in the PTY lane
-# can work on Windows — a PTY is a Unix object and tmux does not run there. That
-# is a platform truth, guarded, tested and fine. Failing to import is not a
-# platform truth; it is a collection error that hides every unrelated test in the
-# same file.
-#
-# WHY A SUBPROCESS. Hiding `fcntl` and deleting attributes off `os` is a change
-# to the interpreter, not to a fixture. Doing it in-process would leave the
-# runner's own `os` mutilated for every test that follows, in whatever order
-# xdist happened to pick. The child is a real, disposable interpreter.
-#
-# WHY A META_PATH FINDER RATHER THAN A PATCHED __import__. Wrapping
-# `builtins.__import__` puts this file into the import stack, and the fleet's
-# cross-branch import gate reads that stack to decide who is calling. The
-# simulation would then be blocked by the gate instead of measuring anything. A
-# finder leaves the stack alone.
-#
-# THE SPECIES CAME BACK THE SAME DAY, IN A TEST FILE. The lane's second complete
-# run reported test_host_settings.py failing to COLLECT: a class-level
-# `@pytest.mark.skipif(os.geteuid() == 0, ...)` — a decorator argument is
-# evaluated when pytest imports the file, and `os.geteuid` does not exist on
-# win32 either. apps/ was already swept by this pin; tests/ was not, so the
-# defect landed in the one place the pin could not see. The child now also
-# executes every test file top to bottom, which is exactly what pytest
-# collection does — a module-level `pytest.skip` is collection working as
-# designed and is not a failure.
+# Default arguments, decorator arguments and module constants run at import: a
+# POSIX-only name there (os.setsid, os.geteuid) is a win32 collection error that
+# hides every test in the file. The PTY lane not WORKING on Windows is fine.
+# A subprocess, because hiding fcntl and deleting os attributes would maim the
+# runner's own interpreter. A meta_path finder, not a patched __import__: that
+# would put this file in the import stack the cross-branch import gate reads.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — that the PTY lane works on Windows; it cannot, PTY_AVAILABLE guards it
@@ -62,16 +28,11 @@ import pytest
 
 from aipass.api.apps.handlers.host import attach as host_attach
 
-# The branch root, derived from a module that has to import anyway. A written
-# down path would be the one thing this file is not allowed to contain.
 BRANCH_ROOT = Path(host_attach.__file__).parents[3]
 
-# What Windows does not ship. `tty` is here because it imports `termios`.
+# `tty` is here because it imports `termios`.
 ABSENT_MODULES = ("fcntl", "pty", "termios", "grp", "pwd", "resource", "tty")
 
-# What `os` does not carry on win32. Not exhaustive — it is the set a POSIX
-# server is most likely to reach for, and each one is an AttributeError at
-# import time if it appears in a default argument, a decorator or a constant.
 ABSENT_OS_ATTRS = (
     "setsid",
     "fork",
@@ -169,13 +130,7 @@ print("RESULT" + json.dumps({
 
 @pytest.fixture(scope="module")
 def without_posix() -> dict:
-    """
-    Import every module under apps/ in a child that has no POSIX.
-
-    Returns:
-        The child's verdict: whether the hiding took effect, how many modules
-        were imported, and every failure with its reason.
-    """
+    """Import every module under apps/ in a child that has no POSIX."""
     run = subprocess.run(
         [
             sys.executable,
@@ -198,53 +153,24 @@ def without_posix() -> dict:
 
 
 class TestEveryModuleImportsWithoutPosix:
-    """
-    The whole package, not just the module that broke.
-
-    Scoped to every file under apps/ deliberately. The defect was in attach.py
-    this time; the SPECIES is a module-level reference to something a platform
-    may not have, and it can land in any file. A pin that only watches attach
-    would have to be rewritten the day it happens somewhere else.
-    """
+    """The whole package, not just the module that broke."""
 
     def test_the_harness_actually_hides_posix(self, without_posix: dict) -> None:
-        """
-        First, that this file is measuring anything at all.
-
-        A simulation that silently stops simulating passes forever and says
-        nothing. If `os.setsid` still resolves in the child, or `fcntl` still
-        imports there, every other assertion here is vacuous.
-        """
+        """First, that this file is measuring anything at all."""
         assert without_posix["hidden"], "the child still has POSIX — nothing was measured"
 
     def test_nothing_under_apps_fails_to_import(self, without_posix: dict) -> None:
-        """
-        The pin itself, and the sentence a future failure gets to say.
-
-        Verified to bite: restoring `_setsid: Any = os.setsid` reproduces the
-        Windows lane's exact cascade here — attach, then server, then host_api,
-        three failures from one line, which is the same chain that became 22
-        collection errors under xdist.
-        """
+        """The pin itself, and the sentence a future failure gets to say."""
         assert without_posix["failures"] == []
 
     def test_the_sweep_covers_the_package_rather_than_a_file(self, without_posix: dict) -> None:
-        """
-        A guard on the guard: a glob that stops matching reports zero failures.
-
-        The count is not pinned to a number — modules come and go — only to
-        being large enough that the sweep is obviously still finding the tree.
-        """
+        """A guard on the guard: a glob that stops matching reports zero failures."""
         assert without_posix["imported"] > 40
 
     def test_every_test_file_still_collects_without_posix(self, without_posix: dict) -> None:
         """
         The 2026-08-18 second-round species: a POSIX-only attribute evaluated
         at COLLECTION time in a test file.
-
-        Verified to bite: restoring the bare `os.geteuid() == 0` skipif on
-        test_host_settings.py reproduces the lane's exact error here — one
-        decorator, the whole file's tests gone.
         """
         assert without_posix["collection_failures"] == []
 

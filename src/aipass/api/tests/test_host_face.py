@@ -3,25 +3,13 @@
 # Description: Tests for serving @baud's phone face from the host API origin
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/face.py and the face routes apps/handlers/host/server.py mounts."""
 
-# Tests for the Host API Face Lane
-#
-# Option A of @baud's serving question: their bundle is served from THIS origin, so
-# there is no CORS allow-list to publish and nothing to misconfigure.
-#
-# The load-bearing tests here are in TestTheMountCannotEatTheApi.
-#
-# My first cut served the bundle as a catch-all mount at "/", the ordinary way to
-# serve an SPA. The existing scope tests caught it: they register a route on the
-# app AFTER create_app() returns, and a catch-all registered last swallows anything
-# added after it, so they 404'd. The bundle is now served precisely — /assets is a
-# real subdirectory mount and each bundle-root file has its own route — so nothing
-# can be shadowed. The regression test for that is
-# test_a_route_added_after_create_app_still_answers.
+# Trap: a catch-all mount at "/" swallows routes added after create_app(); /assets is
+# a subdirectory mount and each bundle-root file has its own route (TestTheMountCannotEatTheApi).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(duplicate_test) — set_face_dir(), test_host_api_config.py; its config command, test_host_api.py
@@ -62,8 +50,7 @@ def isolated_config(tmp_path: Path):
     """
     Every test here reads the host config, because locating the face does.
 
-    Without this the locating tests would read this machine's real config, and
-    a face_dir stored there for the live server would decide what they see.
+    Without it a face_dir in this machine's real config would decide what they see.
     """
     with patch(PATCH_SECRETS_BASE, tmp_path / "secrets"), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_CONFIG_LOGGER):
@@ -124,12 +111,7 @@ class TestLocatingTheBundle:
         assert host_face.face_location().is_available() is False
 
     def test_entry_is_phone_html_not_index(self, built_face: Path, quiet_face: None) -> None:
-        """
-        Their entry is phone.html.
-
-        Assuming index.html would 404 every navigation while the directory sat
-        there looking correct.
-        """
+        """Their entry is phone.html."""
         assert host_face.entry_file().name == "phone.html"
 
     def test_missing_bundle_names_the_build_command(self, unbuilt_face: Path, quiet_face: None) -> None:
@@ -140,12 +122,7 @@ class TestLocatingTheBundle:
         assert "build:phone" in str(excinfo.value)
 
     def test_root_files_are_enumerated_from_disk(self, built_face: Path, quiet_face: None) -> None:
-        """
-        Listed, not hardcoded.
-
-        An icon @baud adds on their next build is served after a restart with no
-        change here — a hardcoded list would 404 it silently.
-        """
+        """Listed, not hardcoded."""
         assert set(host_face.root_files()) == {"phone.html", "manifest.webmanifest"}
 
     def test_root_files_excludes_directories(self, built_face: Path, quiet_face: None) -> None:
@@ -167,13 +144,7 @@ class TestLocatingTheBundle:
 
 
 class TestWhereTheFaceLives:
-    """
-    FPLAN-0587: a configured face_dir wins, the checkout build is the default.
-
-    An installed AIPass has no checkout, so the bundle @aipass installs has to
-    be nameable. When the named one is unusable the message says it was the
-    CONFIGURED one, because its fixes are not the npm build's.
-    """
+    """FPLAN-0587: a configured face_dir wins, the checkout build is the default."""
 
     def test_the_checkout_build_when_nothing_is_configured(self, built_face: Path, quiet_face: None) -> None:
         """No face_dir stored: what the checkout built, exactly as before."""
@@ -210,9 +181,7 @@ class TestWhereTheFaceLives:
         """
         Valid when it was stored, emptied since: an uninstall, a moved directory.
 
-        The checkout build still sits there, and falling back to it would serve
-        a face nobody chose. The message names the configured dir and ITS fixes,
-        never the npm build, which would not help.
+        Falling back to the checkout build would serve a face nobody chose.
         """
         installed = _bundle(tmp_path / "installed", "INSTALLED")
         host_config.set_face_dir(installed)
@@ -243,13 +212,7 @@ class TestWhereTheFaceLives:
     def test_a_relative_configured_dir_is_never_served(
         self, unbuilt_face: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiet_face: None
     ) -> None:
-        """
-        set_face_dir refuses a relative path; a hand-edited store can still hold one.
-
-        Resolved against the server's working directory, it would serve whatever
-        bundle happened to sit there. So it is unavailable, and still reported as
-        the configured source rather than quietly swapped for the checkout.
-        """
+        """set_face_dir refuses a relative path; a hand-edited store can still hold one."""
         _bundle(tmp_path / "dist-phone", "WORKING-DIRECTORY")
         monkeypatch.chdir(tmp_path)
         host_config.save_config({"face_dir": "dist-phone"})
@@ -299,13 +262,9 @@ class TestServingTheFace:
         """
         Deliberate, and mechanical rather than a preference.
 
-        A browser doing a top-level navigation cannot attach an Authorization
-        header. Gating this would require a second, weaker auth system to guard a
-        public bundle that renders a token door and nothing else.
+        A browser doing a top-level navigation cannot attach an Authorization header.
         """
         response = client.get("/")
-        # The same tokenless client IS walled off from the API, so the root's
-        # 200 is a deliberate exemption and not an auth gate that is simply off.
         gated = client.get("/v1/whoami")
 
         assert response.status_code == 200
@@ -339,8 +298,7 @@ class TestTheMountCannotEatTheApi:
     def test_a_route_added_after_create_app_still_answers(self, built_face: Path, tmp_path: Path) -> None:
         """
         THE regression. A catch-all mount swallowed routes registered after
-        create_app() returned — which is exactly what the scope tests do, and how
-        this was caught. Phase 3's verb lane would have hit it next.
+        create_app() returned.
         """
         from fastapi.testclient import TestClient
 
@@ -374,26 +332,14 @@ class TestTheMountCannotEatTheApi:
         assert response.status_code == 404
 
     def test_the_assets_mount_cannot_escape_the_bundle(self, client) -> None:
-        """
-        Traversal out of the one directory served wholesale.
-
-        Starlette refuses this itself, which is precisely why /assets is a
-        StaticFiles mount rather than a hand-rolled file reader — but a static
-        server pointed at a repo subdirectory deserves the assertion.
-        """
+        """Traversal out of the one directory served wholesale."""
         response = client.get("/assets/../../../../etc/passwd")
 
         assert response.status_code in (403, 404)
         assert "root:" not in response.text
 
     def test_bundle_root_files_are_served_by_name_not_by_path(self, client) -> None:
-        """
-        No caller-supplied path reaches the filesystem here.
-
-        Each bundle-root route is bound to a name from a directory listing at
-        app-creation time, so there is nothing for a request to point at — the
-        same names-not-paths reasoning as /v1/files.
-        """
+        """No caller-supplied path reaches the filesystem here."""
         response = client.get("/phone.html")
 
         assert response.status_code == 200
@@ -405,23 +351,8 @@ class TestTheEntryDocumentIsNeverServedStale:
     """
     A stable name plus no cache-control is a stale bundle waiting to happen.
 
-    @baud measured it and the owner paid for it on 2026-08-19: GET / answered 200
-    with etag and last-modified and NO cache-control, so RFC 9111 4.2.2
-    heuristic freshness applies — a browser may treat the document as fresh for
-    roughly 10% of its age since last-modified and serve location.reload()
-    wholly from cache. The entry is un-hashed and NAMES the content-hashed
-    bundles, so a stale entry faithfully fetches OLD assets. His first reload
-    served a round-3 bundle and cost an acceptance round a false FAIL.
-
-    THE RULE, stated once: a file whose NAME changes when its content changes
-    may be cached; a file served under a STABLE name must revalidate. Every
-    file at the bundle root is stable-named and replaced in place by a build,
-    so they all revalidate. /assets is the hashed lane and keeps its caching —
-    a stale hashed file is impossible by construction, because a new build
-    produces a new name.
-
-    no-cache, deliberately, NOT no-store: the etag still answers 304 and the
-    bytes are still saved. This costs one conditional request, not a download.
+    A stable-named file must revalidate (RFC 9111 heuristic freshness); hashed /assets
+    keep caching. no-cache, not no-store: the etag still answers 304.
     """
 
     def test_the_entry_document_must_revalidate(self, client) -> None:
@@ -433,10 +364,7 @@ class TestTheEntryDocumentIsNeverServedStale:
     def test_the_pwa_start_url_must_revalidate_too(self, client) -> None:
         """The route a phone actually launches, and the one a narrow fix misses.
 
-        @baud's manifest declares start_url /phone.html, so tapping the home
-        screen icon does NOT go to "/" — it goes to the same document served by
-        its own bundle-root route. Fixing only "/" would leave every installed
-        phone on the stale path while the browser-typed URL looked fixed.
+        @baud's manifest declares start_url /phone.html, not "/".
         """
         response = client.get("/phone.html")
 
@@ -451,11 +379,7 @@ class TestTheEntryDocumentIsNeverServedStale:
         assert response.headers.get("cache-control") == "no-cache"
 
     def test_revalidating_still_answers_304_and_sends_no_bytes(self, client) -> None:
-        """no-cache, not no-store — the distinction is the whole cost argument.
-
-        If this ever fails, the fix has started re-downloading the document on
-        every reload, which is a different bug wearing the same fix.
-        """
+        """no-cache, not no-store — the distinction is the whole cost argument."""
         first = client.get("/")
 
         assert "etag" in {key.lower() for key in first.headers}
@@ -466,12 +390,7 @@ class TestTheEntryDocumentIsNeverServedStale:
         assert second.content == b""
 
     def test_hashed_assets_keep_their_caching(self, client) -> None:
-        """The lane that must NOT be touched, pinned so a widening is noticed.
-
-        A hashed name cannot go stale — a new build writes a new name that the
-        (now-revalidated) entry points at. Putting no-cache here would spend a
-        round trip per asset per load to prevent nothing.
-        """
+        """The lane that must NOT be touched, pinned so a widening is noticed."""
         response = client.get("/assets/phone.js")
 
         assert response.status_code == 200
@@ -500,9 +419,7 @@ class TestUnbuiltFace:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "face_unavailable"
-        # The build command is the exception's words: they stay in the host log,
-        # the client gets the code's sentence and a ref (seedgo
-        # exception_text_in_response, PR #774).
+        # The exception's words stay in the host log; the client gets the code's sentence and a ref.
         assert error["message"] == host_denials.SENTENCES["face_unavailable"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "build:phone" not in response.text
@@ -519,10 +436,7 @@ class TestTheServerResolvesTheFaceOnce:
     """
     FPLAN-0587's stated limit, pinned: the face is resolved at create_app().
 
-    A running server serves the bundle it started with; a new face_dir needs a
-    restart. Resolving per request instead would pair a new phone.html with the
-    /assets mount built from the old bundle, an entry naming hashed files that
-    mount does not hold.
+    Per-request resolution would pair a new phone.html with the old /assets mount.
     """
 
     def test_the_origin_serves_a_configured_dir(self, built_face: Path, tmp_path: Path) -> None:
@@ -568,13 +482,7 @@ class TestTheServerResolvesTheFaceOnce:
     def test_an_unservable_configured_dir_is_a_503_named_in_the_log_not_the_checkout(
         self, built_face: Path, tmp_path: Path
     ) -> None:
-        """
-        The checkout build is right there, and is still not served.
-
-        A server that fell back to it would show a face nobody chose while its
-        log read as healthy. The log names the configured dir; the client gets
-        the code's sentence and a ref, never the words that name it.
-        """
+        """The checkout build is right there, and is still not served."""
         from fastapi.testclient import TestClient
 
         installed = _bundle(tmp_path / "installed", "INSTALLED")
@@ -588,7 +496,6 @@ class TestTheServerResolvesTheFaceOnce:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "face_unavailable"
-        # seedgo exception_text_in_response, PR #774: the dir is the operator's.
         assert error["message"] == host_denials.SENTENCES["face_unavailable"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "configured face dir" not in response.text

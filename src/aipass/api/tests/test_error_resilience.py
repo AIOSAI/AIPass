@@ -3,15 +3,10 @@
 # Description: Error Resilience Tests (from seedgo template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
-
-# Error Resilience Tests for API branch.
-#
-# Covers 4 tests:
-#   - missing_file, corrupt_json, empty_file, nonexistent_dir
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the prax json service that json_handler delegates to; @prax's tests
@@ -28,21 +23,13 @@ BRANCH_MODULE = "api"
 
 _JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-# No sys.modules stub here: a file under api/ passes the handlers package's
-# branch guard, and conftest has already settled the package before collection.
+# No sys.modules stub: a file under api/ passes the handlers package's branch guard.
 _mod = importlib.import_module(_JSON_MOD_PATH)
 JSON_HANDLER = _mod
 
 
-#: Isolation goes through the fleet seam, not a module attribute.
-#:
-#: This file used to hunt the handler for API_JSON_DIR / JSON_DIR /
-#: BRANCH_JSON_DIR / _JSON_DIR and, finding none, skip ITSELF at module level.
-#: Since DPLAN-0325 the handler is a shim over the one prax service, which
-#: holds no directory constant at all — so the hunt would have found nothing
-#: and this whole suite would have gone quietly dormant, reporting skipped and
-#: measuring nothing. The service reads AIPASS_TEST_LOG_DIR on every call, so
-#: the redirect is an env var and the suite keeps running.
+# Isolation is the AIPASS_TEST_LOG_DIR env seam: the handler is a shim over the
+# prax service, which holds no directory constant to patch.
 
 
 @pytest.fixture(autouse=True)
@@ -53,18 +40,8 @@ def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _json_dir_as_path(tmp_path: Path) -> Path:
-    """The directory the handler writes into right now.
-
-    MEASURED off the handler rather than spelled out: the one service spells
-    the sandbox <seam>/<branch>/<branch>_json, so a literal here would drift
-    the first time that spelling changes.
-    """
+    """The directory the handler writes into right now."""
     return _mod.get_json_path("probe", "config").parent
-
-
-# ============================================================================
-# Error Resilience Tests
-# ============================================================================
 
 
 def test_missing_file(tmp_path: Path) -> None:
@@ -73,8 +50,6 @@ def test_missing_file(tmp_path: Path) -> None:
     target = json_dir / "ghost_config.json"
     assert not target.exists()
 
-    # api, fleet green leg 3: no FileNotFoundError escape hatch - load_json
-    # creates the missing document, so the test pins that and nothing else.
     result = JSON_HANDLER.load_json("ghost", "config")
 
     assert isinstance(result, dict)
@@ -116,13 +91,7 @@ def test_empty_file(tmp_path: Path) -> None:
 
 
 def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Missing parent directory is handled gracefully.
-
-    Pointed at a seam two levels below anything that exists, so the handler
-    has to build the whole chain. The redirect is monkeypatched, not a bare
-    setattr: the old form assigned the module attribute permanently and left
-    the next test in this process pointing at a deleted tmp_path.
-    """
+    """Missing parent directory is handled gracefully."""
     seam = tmp_path / "does_not_exist" / "nested"
     assert not seam.exists()
 
@@ -130,8 +99,6 @@ def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     json_dir = _json_dir_as_path(tmp_path)
     assert not json_dir.exists()
 
-    # api, fleet green leg 3: no OSError escape hatch - the handler builds the
-    # whole chain, so a raise here is a failure, not a pass.
     result = JSON_HANDLER.ensure_json_exists("nodir", "config")
     assert result is True
     assert json_dir.exists()

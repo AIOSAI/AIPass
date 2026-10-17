@@ -3,15 +3,9 @@
 # Description: Integrations command module — list and call generic contracts
 # Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
-"""
-Integrations Module
-
-Handles `drone @api integrations` subcommands:
-  integrations list              — list all registered contracts
-  integrations call <name> ...   — call a registered contract
-"""
+"""Integrations Module"""
 
 import sys
 from typing import List
@@ -115,21 +109,13 @@ def call_contract(contract_name: str, args: list) -> dict:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle integrations subcommands.
-
-    Returns True if command was handled (including errors), False if not our command.
-    """
+    """Handle integrations subcommands."""
     if command != "integrations":
         return False
 
     try:
-        # Help gate — a help flag ANYWHERE means "explain", never "dispatch".
-        # api.py's guard only inspects the first arg after the command, so
-        # `integrations call publish_devto --help` arrives with args[0] == "call";
-        # dispatching that ran a live publishing driver from a help probe.
-        # Bare "help" is only a flag in first position, so it stays usable as a
-        # contract argument.
+        # A help flag anywhere means explain, never dispatch: api.py checks only the first arg, and
+        # `call <driver> --help` would run a live driver. Bare "help" counts only first, so it stays an argument.
         if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True

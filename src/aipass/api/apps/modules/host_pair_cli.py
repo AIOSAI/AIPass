@@ -3,25 +3,14 @@
 # Description: Host API Pair Module — a one-use pairing QR in the terminal, for the phone's camera
 # Version: 1.0.1
 # Created: 2026-10-13
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Pair Module
 
-`host-api pair <label> [--scope read|operate] [--ttl SECONDS]` (DPLAN-0406). The
-owner's ruling, 2026-10-13: hold the phone up to the terminal and it connects.
-This prints a QR of the face's URL with a one-use, five-minute code in the
-fragment; the phone redeems it at POST /v1/pair and holds the only copy of the
-bearer it gets back. No token value is printed and no receipt is written.
-
-A sub-router like host_config_cli.py: host_api.py offers it every host-api call
-and owns everything it declines.
-
-Functions:
-    handle_command()      - Claim pair, decline everything else
-    print_introspection() - This module's live self-map
-    _cmd_pair()           - Mint a code and print its QR, URL and expiry
+No token value is printed and no receipt is written: the phone holds the only copy of the bearer.
+Reference: docs/host_api.md
 """
 
 import sys
@@ -88,23 +77,11 @@ def _cmd_pair(args: List[str]) -> None:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Claim the pair subcommand of `host-api`.
-
-    Args:
-        command: The routed command name.
-        args: Everything after it, subcommand first.
-
-    Returns:
-        True if this module handled it. False means "not mine".
-    """
-    # Both spellings, matching host_api.py and its other sub-routers.
+    """Claim the pair subcommand of `host-api`."""
     if command not in ("host-api", "host_api"):
         return False
 
-    # NO-ARGS GATE and HELP GATE (seedgo standard), as in host_config_cli.py.
-    # The help gate claims only pair: `host-api --help` is host_api.py's,
-    # whatever order the router discovered the modules in.
+    # The help gate claims only pair: `host-api --help` is host_api.py's, whatever the discovery order.
     if not args:
         print_introspection()
         return True

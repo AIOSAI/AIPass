@@ -3,16 +3,10 @@
 # Description: Tests for Google API retry handler with SSL error detection
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/google/retry.py, the SSL retry logic."""
-
-# Tests:
-# - is_ssl_error: SSLError, BrokenPipeError, ConnectionResetError, ValueError,
-#   keyword-based detection
-# - api_call_with_retry: first-try success, retry success, exhausted retries,
-#   non-SSL immediate raise, rebuild_service_fn invocation
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that retry.py parses and imports
@@ -27,11 +21,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.api.apps.handlers.google.retry import api_call_with_retry, is_ssl_error
-
-
-# =============================================
-# is_ssl_error
-# =============================================
 
 
 class TestIsSSLError:
@@ -70,11 +59,6 @@ class TestIsSSLError:
         assert is_ssl_error(exc) is False
 
 
-# =============================================
-# api_call_with_retry
-# =============================================
-
-
 class TestApiCallWithRetry:
     """Verifies retry logic for Google API calls."""
 
@@ -106,11 +90,7 @@ class TestApiCallWithRetry:
         assert waits == [1]
 
     def test_exhausted_retries_raises(self) -> None:
-        """All retries exhausted re-raises the SSL error, the waits doubling 1, 2, 4.
-
-        The waits are read off the sleep seam rather than a patch of time.sleep,
-        which replaced it for every reader in the process (api, fleet green leg 13).
-        """
+        """All retries exhausted re-raises the SSL error, the waits doubling 1, 2, 4."""
         request = MagicMock()
         request.execute.side_effect = ssl.SSLError("persistent")
         waits: list[float] = []
@@ -118,7 +98,6 @@ class TestApiCallWithRetry:
         with pytest.raises(ssl.SSLError, match="persistent"):
             api_call_with_retry(request, max_retries=3, sleep=waits.append)
 
-        # initial attempt + 3 retries = 4 calls
         assert request.execute.call_count == 4
         assert waits == [1, 2, 4], "the backoff must double, not grow by one"
 
@@ -148,7 +127,5 @@ class TestApiCallWithRetry:
 
         assert result == {"ok": True}
         assert rebuild_fn.call_count == 2
-        # Implied by the result (the third answer comes only from a third call); kept as the
-        # line that shows the unconsumed_side_effect row every queued answer is consumed,
-        # which the checker does not read from a return (api, fleet green leg 4).
+        # Implied by the result, but unconsumed_side_effect reads only this count.
         assert request.execute.call_count == 3

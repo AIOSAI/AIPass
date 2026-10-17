@@ -3,37 +3,13 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
 
-# Tests for the Photo Lane
-#
-# DPLAN-0300 Round 20. `POST /v1/files/upload` writes one image to disk and
-# returns its absolute path — and that path is the entire product of the route,
-# because the phone types it into the open attach socket and @baud's
-# `deliverPaths` does the rest.
-#
-# THE THING THIS LANE COULD GET WRONG IS NOT "does the file arrive":
-#
-#   1. **Letting the caller name the file.** An upload's filename is
-#      attacker-controlled and there is no sanitiser worth trusting against every
-#      form of `../`. So the name is not cleaned — it is never read. These tests
-#      send hostile filenames and assert the bytes land under a generated name
-#      anyway, and that nothing appears outside the upload directory.
-#
-#   2. **Believing the Content-Type.** A header costs nothing to write. The magic
-#      bytes decide both acceptance and extension, so a `.png` on disk can never
-#      hold something that is not a PNG.
-#
-#   3. **Truncating instead of refusing.** A truncated image is not a smaller
-#      image, it is a corrupt one wearing a success response.
-#
-# Real files in a real tmp directory throughout. The interesting failures here are
-# filesystem-shaped — a partial file left behind, a mode set after creation, a
-# collision inside one second — and a mocked filesystem invents its way past all
-# three.
+# Real files in a real tmp directory: the failures here are filesystem-shaped (a partial
+# file left behind, a mode set after creation) and a mocked filesystem invents past them.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — handlers/host/attach.py, where the path goes; tests/test_host_attach.py
@@ -97,19 +73,8 @@ def store(tmp_path: Path):
             yield tmp_path
 
 
-# ==============================================
-# THE FILENAME IS NEVER THE CALLER'S
-# ==============================================
-
-
 class TestTheServerNamesTheFile:
-    """
-    The client's filename is not sanitised, fenced or normalised — it is absent.
-
-    Same ruling as the name fence in reads.py, one step further: there a caller
-    could name a file and the fence refused a path; here a caller cannot name a
-    file at all, and a parameter that does not exist cannot be exploited.
-    """
+    """The client's filename is not sanitised, fenced or normalised — it is absent."""
 
     def test_the_name_is_generated_not_taken(self, landing: Path) -> None:
         """Stamp, random suffix, sniffed extension — none of it from the caller."""
@@ -120,11 +85,7 @@ class TestTheServerNamesTheFile:
         assert name.endswith(".png")
 
     def test_two_uploads_in_the_same_second_are_two_files(self, landing: Path) -> None:
-        """
-        A timestamp alone collides. The random suffix is what makes a burst of
-        uploads a burst of files rather than one file overwritten repeatedly —
-        and O_EXCL means a collision would be a hard error, not a silent loss.
-        """
+        """A timestamp alone collides; the random suffix makes a burst of uploads a burst of files."""
         first = host_uploads.store_image(BytesIO(PNG))
         second = host_uploads.store_image(BytesIO(PNG))
 
@@ -135,10 +96,7 @@ class TestTheServerNamesTheFile:
         """
         A hard error, and ONLY a hard error — never a silent loss either way.
 
-        The O_EXCL create refuses a name already on disk, and the failure path
-        then discarded the destination: on a collision that is the EARLIER
-        upload, not a partial of this one. A write that never created the file
-        has nothing of its own to clean up (todo 13, ruled data loss 09-18).
+        On an O_EXCL collision the destination is the EARLIER upload, so cleanup must not remove it.
         """
         first = host_uploads.store_image(BytesIO(JPEG))
         taken = Path(str(first["path"]))
@@ -153,10 +111,6 @@ class TestTheServerNamesTheFile:
     def test_a_stream_that_fails_mid_write_leaves_no_partial_file(self, landing: Path) -> None:
         """
         The other half of the same line: a file this write DID create is still its mess.
-
-        The body dies after the create (a dropped connection reads as an
-        OSError), so the partial is removed — the collision guard above must
-        not have bought its safety by never cleaning up at all.
         """
 
         class DroppedConnection(BytesIO):
@@ -185,11 +139,7 @@ class TestTheServerNamesTheFile:
         assert landing.is_dir()
 
     def test_the_stored_bytes_are_the_uploaded_bytes(self, landing: Path) -> None:
-        """
-        Including the sniffed head. The first 32 bytes are read off the stream
-        to identify the file, and forgetting to write them back would corrupt
-        every image in a way that only shows up when something opens one.
-        """
+        """Including the sniffed head: the first 32 bytes are read off the stream and must be written back."""
         result = host_uploads.store_image(BytesIO(JPEG))
 
         assert Path(str(result["path"])).read_bytes() == JPEG
@@ -197,9 +147,6 @@ class TestTheServerNamesTheFile:
     def test_a_large_image_survives_chunking_intact(self, landing: Path) -> None:
         """
         Bigger than one chunk, so the loop actually loops.
-
-        A streaming write that drops or duplicates a chunk boundary produces a
-        file of the right length and the wrong contents.
         """
         payload = PNG + os.urandom(200_000)
 
@@ -214,10 +161,6 @@ class TestTheServerNamesTheFile:
 class TestAHostileFilenameGoesNowhere:
     """
     The route is handed real hostile names through a real multipart parser.
-
-    These are the names this lane exists to be indifferent to, and asserting
-    indifference is stronger than asserting a sanitiser produced some expected
-    cleaned string.
     """
 
     def _post(self, client: Any, raw: str, filename: str, data: bytes = PNG) -> Any:
@@ -260,9 +203,6 @@ class TestAHostileFilenameGoesNowhere:
     def test_nothing_is_written_outside_the_upload_directory(self, store: Any, landing: Path) -> None:
         """
         The traversal claim, checked at the destination rather than the input.
-
-        Resolving the stored path and asserting it sits under the landing
-        directory catches an escape no matter which layer produced it.
         """
         from fastapi.testclient import TestClient
 
@@ -275,17 +215,9 @@ class TestAHostileFilenameGoesNowhere:
         assert stored.is_relative_to(landing.resolve())
 
 
-# ==============================================
-# THE BYTES DECIDE, NOT THE HEADER
-# ==============================================
-
-
 class TestTheContentTypeIsNeverBelieved:
     """
     `Content-Type: image/png` costs a caller nothing to write.
-
-    Sniffing means a .png on disk cannot hold something that is not a PNG —
-    which is the property that makes handing the path to an agent safe.
     """
 
     @pytest.mark.parametrize(
@@ -297,11 +229,7 @@ class TestTheContentTypeIsNeverBelieved:
         assert host_uploads.sniff_image(payload) == extension
 
     def test_a_container_brand_is_matched_at_its_offset(self) -> None:
-        """
-        WebP and HEIC put a size field before their brand, so a signature check
-        that only looks at byte zero misses both — and a phone screenshot is
-        very often one of them.
-        """
+        """WebP and HEIC put a size field before their brand; a byte-zero check misses both."""
         assert host_uploads.sniff_image(WEBP) == "webp"
         assert host_uploads.sniff_image(HEIC) == "heic"
 
@@ -311,11 +239,7 @@ class TestTheContentTypeIsNeverBelieved:
             host_uploads.store_image(BytesIO(b"#!/bin/sh\nrm -rf ~\n"))
 
     def test_a_refused_upload_writes_no_file_at_all(self, landing: Path) -> None:
-        """
-        Sniffed BEFORE the directory is touched, so a rejected upload never
-        becomes a file somebody has to clean up — or worse, a path that gets
-        handed out anyway.
-        """
+        """Sniffed BEFORE the directory is touched, so a rejected upload never becomes a file."""
         with pytest.raises(host_uploads.UploadRefused):
             host_uploads.store_image(BytesIO(b"not an image at all"))
 
@@ -332,26 +256,17 @@ class TestTheContentTypeIsNeverBelieved:
         """
         Two bytes of a PNG header is not a PNG.
 
-        Slicing past the end of a short buffer returns a short slice rather
-        than raising, so this is the case where a naive check quietly matches.
+        A slice past a short buffer's end returns short rather than raising, so a naive check matches.
         """
         with pytest.raises(host_uploads.UploadRefused):
             host_uploads.store_image(BytesIO(b"\x89P"))
 
 
 class TestTheCapRefusesAndNeverTruncates:
-    """
-    Same species as every other cap on this server.
-
-    A truncated image arrives looking like a successful upload, which is worse
-    than a refusal because nobody goes looking for the missing half.
-    """
+    """A truncated image is a corrupt one wearing a success response."""
 
     def test_an_oversized_declared_length_is_refused_before_reading(self, landing: Path) -> None:
-        """
-        The cheap gate. Content-Length is a claim, but when the claim is
-        already over the cap there is no reason to read the body to find out.
-        """
+        """The cheap gate: a Content-Length already over the cap needs no body read."""
         never_read = BytesIO(PNG)
 
         with pytest.raises(host_uploads.UploadRefused):
@@ -360,11 +275,7 @@ class TestTheCapRefusesAndNeverTruncates:
         assert never_read.tell() == 0
 
     def test_a_lying_content_length_is_still_caught(self, landing: Path) -> None:
-        """
-        The gate that actually holds. A body claiming to be small and arriving
-        large is exactly what the running total is for — trusting the header
-        alone is how a 25MB cap passes a 200MB body.
-        """
+        """The running total holds: trusting the header alone is how a 25MB cap passes a 200MB body."""
         payload = PNG + b"\x00" * (host_uploads.MAX_UPLOAD_BYTES + 1)
 
         with pytest.raises(host_uploads.UploadRefused) as caught:
@@ -373,11 +284,7 @@ class TestTheCapRefusesAndNeverTruncates:
         assert "cap" in str(caught.value)
 
     def test_an_over_cap_upload_leaves_no_partial_file(self, landing: Path) -> None:
-        """
-        The refusal happens mid-write, so bytes are already on disk when it
-        fires. That partial file is this server's mess and never a delivery —
-        removed here so no path exists that could be handed to anyone.
-        """
+        """The refusal fires mid-write, so the partial already on disk must be removed."""
         payload = PNG + b"\x00" * (host_uploads.MAX_UPLOAD_BYTES + 1)
 
         with pytest.raises(host_uploads.UploadRefused):
@@ -386,11 +293,7 @@ class TestTheCapRefusesAndNeverTruncates:
         assert list(landing.iterdir()) == []
 
     def test_an_upload_at_the_cap_is_stored(self, landing: Path) -> None:
-        """
-        The boundary, from the allowed side. A cap that refuses its own limit
-        is an off-by-one nobody notices until an image is exactly the wrong
-        size.
-        """
+        """The boundary, from the allowed side: a cap that refuses its own limit is an off-by-one."""
         payload = PNG + b"\x00" * (host_uploads.MAX_UPLOAD_BYTES - len(PNG))
 
         result = host_uploads.store_image(BytesIO(payload))
@@ -406,31 +309,20 @@ class TestTheFileOnDisk:
         reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
     )
     def test_it_is_created_private_not_narrowed_afterwards(self, landing: Path) -> None:
-        """
-        0o600 via os.open rather than chmod-after: a file created readable and
-        narrowed a moment later was readable for that moment. Same habit as the
-        token store, and the habit is the point — it holds when the object is
-        less benign than a screenshot.
-        """
+        """0o600 via os.open, not chmod-after: a file narrowed a moment later was readable for that moment."""
         result = host_uploads.store_image(BytesIO(PNG))
 
         mode = stat.S_IMODE(os.stat(str(result["path"])).st_mode)
         assert mode == 0o600
 
     def test_the_response_carries_an_absolute_path(self, landing: Path) -> None:
-        """
-        That path IS the product. A relative one would resolve against whatever
-        directory the receiving agent happens to be standing in.
-        """
+        """That path IS the product; a relative one resolves against the receiving agent's cwd."""
         result = host_uploads.store_image(BytesIO(PNG))
 
         assert Path(str(result["path"])).is_absolute()
 
     def test_a_write_failure_is_ours_not_the_callers(self, landing: Path) -> None:
-        """
-        A full disk is not a bad request. 503-shaped, same split the rest of
-        this server makes.
-        """
+        """A full disk is not a bad request: 503-shaped."""
         with patch.object(host_uploads.os, "open", side_effect=OSError("no space left on device")):
             with pytest.raises(host_uploads.UploadUnavailable):
                 host_uploads.store_image(BytesIO(PNG))
@@ -439,12 +331,7 @@ class TestTheFileOnDisk:
         """
         Same split, one layer up: the directory itself could not be made.
 
-        The assertion names the mkdir failure specifically rather than looking
-        for the word "directory". It used to do the latter, and a mutation
-        exposed it as a false green — with the mkdir guard removed the run still
-        raised UploadUnavailable from the write instead, and its message read
-        "No such file or directory", which contains the word. A substring match
-        can be satisfied by the operating system's own phrasing.
+        Asserts the mkdir sentence, not the word "directory": the OS's "No such file or directory" has it.
         """
         with patch.object(Path, "mkdir", side_effect=OSError("permission denied")):
             with pytest.raises(host_uploads.UploadUnavailable) as caught:
@@ -458,8 +345,7 @@ class TestWhereImagesLand:
     """
     Mirrors the desktop rather than inventing a second home.
 
-    screenshot.rs writes Pictures/BAUD/baud-<stamp>.png. One folder for images
-    delivered to agents beats two, because the operator has one place to look.
+    screenshot.rs writes Pictures/BAUD/baud-<stamp>.png.
     """
 
     def test_the_root_is_the_desktops_own_directory(self, tmp_path: Path) -> None:
@@ -468,17 +354,11 @@ class TestWhereImagesLand:
             assert host_uploads.upload_root() == tmp_path / "Bilder" / "BAUD"
 
     def test_a_relocated_pictures_directory_is_honoured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """
-        Read from the XDG config the way Tauri's picture_dir() does, so a
-        machine with a relocated or non-English Pictures folder does not end up
-        with phone uploads in one place and desktop captures in another.
-        """
+        """Read from the XDG config the way Tauri's picture_dir() does, so both land in one folder."""
         config = tmp_path / ".config"
         config.mkdir()
         (config / "user-dirs.dirs").write_text('XDG_PICTURES_DIR="$HOME/Billeder"\n', encoding="utf-8")
 
-        # A home of our own, the way the host names one: HOME on POSIX,
-        # USERPROFILE on Windows. Nothing in pathlib is replaced.
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
@@ -486,10 +366,7 @@ class TestWhereImagesLand:
         assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
 
     def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """
-        ~/Pictures is also the right answer on Windows and macOS, which is why
-        there is no platform check here to get wrong.
-        """
+        """~/Pictures is also the right answer on Windows and macOS."""
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
@@ -497,10 +374,7 @@ class TestWhereImagesLand:
         assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
 
     def test_reading_the_root_creates_nothing(self, tmp_path: Path) -> None:
-        """
-        A getter with a side effect is a getter somebody calls twice by
-        accident and then wonders where the empty directory came from.
-        """
+        """A getter with a side effect leaves empty directories behind."""
         with patch.dict(os.environ, {"XDG_PICTURES_DIR": str(tmp_path / "Pics")}, clear=False):
             root = host_uploads.upload_root()
 
@@ -509,25 +383,15 @@ class TestWhereImagesLand:
     def test_an_unreadable_xdg_config_falls_back_rather_than_raising(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """
-        Most machines have no such file. That is the normal case, not an error,
-        and an upload lane that refused to work without one would be broken on
-        every fresh install.
-        """
+        """Most machines have no usable XDG config; that is the normal case, not an error."""
         config = tmp_path / ".config"
         config.mkdir()
-        # Not text at all: the read fails on every host the same way.
         (config / "user-dirs.dirs").write_bytes(b"\xff\xfe\xfa not utf-8")
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
         assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
-
-
-# ==============================================
-# THE ROUTE
-# ==============================================
 
 
 @fastapi_required
@@ -555,10 +419,7 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
 
     @multipart_required
     def test_a_read_token_cannot_upload(self, store: Any, landing: Path) -> None:
-        """
-        It writes to disk, so it is operate. A read token that could put files
-        on the operator's machine would make the scope split decorative.
-        """
+        """It writes to disk, so it is operate."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -588,10 +449,7 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
 
     @multipart_required
     def test_a_refused_upload_is_a_400_carrying_the_reason(self, store: Any, landing: Path) -> None:
-        """
-        The caller's fault, named as theirs — the phone renders the sentence,
-        and "not an image" is something the operator can act on.
-        """
+        """The caller's fault, named as theirs — the phone renders the sentence."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -627,12 +485,8 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
 
     def test_a_missing_multipart_library_answers_503_not_404(self, store: Any) -> None:
         """
-        FastAPI raises at ROUTE-REGISTRATION time when a form route exists and
-        python-multipart does not, so an unguarded upload route would take the
-        whole server down for someone who has fastapi but not this.
-
-        Registered either way, because a 404 on a route that should exist reads
-        as "wrong URL" and sends the caller looking in the wrong place.
+        FastAPI raises at ROUTE-REGISTRATION time for a form route without python-multipart,
+        so the route is guarded; registered anyway, because a 404 reads as "wrong URL".
         """
         from fastapi.testclient import TestClient
 
@@ -650,11 +504,6 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
     def _declared(part_headers: dict) -> tuple:
         """
         Upload PNG with `part_headers` on the image part; the status and the length store_image was handed.
-
-        Through the real route and the real store_image (wrapped, so the call is
-        read and the write still lands under `landing`): these asked
-        _declared_length by name with a stand-in upload object (api, fleet green
-        leg 9).
         """
         from fastapi.testclient import TestClient
 
@@ -672,11 +521,7 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
 
     @multipart_required
     def test_the_declared_length_reader_never_raises_on_a_bad_header(self, store: Any, landing: Path) -> None:
-        """
-        A malformed Content-Length is not a size. Falling through to None means
-        the running total does the work, which is where the truth was anyway —
-        and it is the difference between a refused upload and a 500.
-        """
+        """A malformed Content-Length falls through to None and the running total; never a 500."""
         assert self._declared({"content-length": "not-a-number"}) == (200, None)
 
     @multipart_required
@@ -695,28 +540,12 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
     """
     @baud's finding, 2026-08-14 23:57, from the owner's first real photo.
 
-    Everything this server RAISES answers `{"error": {"code", "message"}}`, and
-    that is what the phone parses. But validation fires IN FRONT of every
-    handler and emitted FastAPI's own `{"detail": [...]}` instead — so a client
-    coding to the documented shape lost the sentence on EVERY validation error,
-    on every route. The owner was holding a phone reading "HTTP 422" while that
-    same response body named the exact field and the exact problem.
-
-    Not a bug in one route. A hole in the contract, found because a client
-    finally hit it.
+    Validation fires in front of every handler; it must answer `{"error": ...}`, not FastAPI's `{"detail": [...]}`.
     """
 
     @multipart_required
     def test_the_wrong_field_name_names_the_field(self, store: Any, landing: Path) -> None:
-        """
-        Reproduce the exact failure: the client sent `file`, the server wants
-        `image`. The sentence that reaches the phone must say so.
-
-        Also the claim of test_body_is_dropped_from_the_location, retired as
-        this one's duplicate (api, fleet green leg 9): every field on a POST is
-        in the body, so saying so adds nothing, and 'image: Field required' is
-        the whole useful content of that 422.
-        """
+        """The client sent `file`, the server wants `image`; the phone's sentence must say so."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -737,14 +566,9 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
 
     def test_a_missing_query_parameter_gets_the_same_envelope(self, store: Any) -> None:
         """
-        Every route, not just the one that was hit. The hole was in the layer,
-        so the fix has to be in the layer.
+        Every route, not just the one that was hit: the fix is in the layer.
 
-        `branch` USED TO BE NAMED HERE TOO and no longer is: FPLAN-0443 made it
-        optional because the `home` and `aipass` roots name nothing, so a
-        request that omits it is now refused by the fence in words (400) rather
-        than by validation (422) — pinned in test_host_roots.py. `file` is
-        still required, which is what this test is actually about.
+        `file`, not `branch`: a missing branch is the fence's 400 (test_host_roots.py).
         """
         from fastapi.testclient import TestClient
 
@@ -760,11 +584,7 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         assert "file" in body["error"]["message"]
 
     def test_the_raw_detail_shape_is_gone(self, store: Any) -> None:
-        """
-        A top-level `detail` list is the shape that broke the client. Its
-        absence is the actual fix — normalising into the envelope while leaving
-        the old shape beside it would have kept two contracts alive.
-        """
+        """A top-level `detail` beside the envelope would keep two contracts alive."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -777,14 +597,7 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         assert set(body) == {"error"}
 
     def test_the_structured_original_is_kept_beside_the_sentence(self, store: Any) -> None:
-        """
-        `fields` carries the loc/msg pairs, so this widens the envelope rather
-        than narrowing it — a client that wanted the structure still has it.
-
-        Reads `file` rather than `branch` since FPLAN-0443 made the latter
-        optional; the assertion is about the loc/msg pairs surviving, and any
-        still-required query field proves that.
-        """
+        """`fields` carries the loc/msg pairs: a client that wanted the structure still has it."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -798,13 +611,9 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
 
     def test_the_message_is_never_empty(self) -> None:
         """
-        A 422 whose message is a blank string is the same failure this handler
-        exists to fix, one layer further in.
+        A 422 whose message is a blank string is the same failure, one layer further in.
 
-        By name on purpose: FastAPI never raises a validation error with an
-        empty list, so no request reaches this input, and a public door would
-        exist for this test alone. HELD on through_the_command (api, fleet green
-        leg 9), now a line bypass with this reason (api, fleet green leg 11).
+        By name: FastAPI never raises with an empty list, so no request reaches this input.
         """
         assert host_server._validation_sentence([]) != ""
 
@@ -814,9 +623,6 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
 class TestTheEndToEndPathIsUsable:
     """
     The whole point, proven once: bytes in, a real path out, a real file there.
-
-    Everything else in this file guards one property; this asserts the feature
-    actually works, which no amount of guard tests does on its own.
     """
 
     def test_an_uploaded_screenshot_lands_readable_at_the_returned_path(self, store: Any, landing: Path) -> None:
@@ -841,7 +647,6 @@ class TestTheEndToEndPathIsUsable:
 
         assert stored.read_bytes() == payload
         assert body["bytes"] == len(payload)
-        # Declared jpeg, sniffed png — the bytes won, and the extension follows
-        # them rather than the header or the caller's own filename.
+        # Declared jpeg, sniffed png: the extension follows the bytes.
         assert body["type"] == "png"
         assert stored.suffix == ".png"

@@ -3,19 +3,10 @@
 # Description: Tests for usage tracker module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
-
-# Tests for usage_tracker.py -- API usage monitoring orchestration.
-#
-# Tests:
-# - handle_command routing for all subcommands
-# - Help gate, introspection gate, unknown command
-# - show_stats / show_session with data and without
-# - show_caller_usage with data, no data, and missing args
-# - cleanup_data success/failure, default/custom days
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the aggregation handler's sums; tests/test_aggregation.py
@@ -31,9 +22,6 @@ import pytest
 from aipass.api.apps.modules import usage_tracker
 from aipass.api.apps.modules.usage_tracker import handle_command
 from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
-
-# All external dependencies are patched at the module level so no
-# live I/O or network access is needed.
 
 PATCH_ROOT = "aipass.api.apps.modules.usage_tracker"
 # cleanup_data imports the bus inside the function, so the name it reads is the bus's home.
@@ -56,11 +44,6 @@ def _generations_on_disk(store: Path) -> dict:
     return json.loads(store.read_text(encoding="utf-8"))["data"]["generation_tracking"]
 
 
-# =============================================
-# Helpers
-# =============================================
-
-
 def _base_patches():
     """Return the list of patch targets shared by most tests."""
     return [
@@ -74,11 +57,6 @@ def _base_patches():
         f"{PATCH_ROOT}.aggregation",
         f"{PATCH_ROOT}.cleanup",
     ]
-
-
-# =============================================
-# handle_command -- routing & gates
-# =============================================
 
 
 @patch(f"{PATCH_ROOT}.header")
@@ -155,7 +133,6 @@ def test_handle_command_help_gate(mock_jh, mock_header, mock_help):
 
     assert result is True
     mock_help.assert_called_once()
-    # log_operation should NOT be called when help is shown
     mock_jh.log_operation.assert_not_called()
 
 
@@ -175,8 +152,7 @@ def test_handle_command_track_no_args_executes(mock_jh, mock_header, mock_error)
 @patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_logs_operation(mock_jh, mock_header, tmp_path, monkeypatch, capsys):
     """handle_command should call json_handler.log_operation for valid commands."""
-    # stats reads the usage store; hand it one under tmp_path, never the real api_json (api, fleet green leg 3).
-    # Aggregation's own json_handler is stubbed too, so nothing real is written either.
+    # stats reads the usage store: a tmp_path store and a stubbed json_handler keep real files untouched.
     store = '{"data": {"usage_by_caller": {"tmp_caller": {"requests": 7, "total_tokens": 4321}}}}'
     (tmp_path / usage_tracker.aggregation.DATA_FILE).write_text(store, encoding="utf-8")
     monkeypatch.setattr(usage_tracker.aggregation, "API_JSON_DIR", tmp_path)
@@ -190,11 +166,6 @@ def test_handle_command_logs_operation(mock_jh, mock_header, tmp_path, monkeypat
     out = capsys.readouterr().out
     assert "Total Requests: 7" in out, "stats read the tmp_path store, not the real one"
     assert "Total Tokens: 4321" in out
-
-
-# =============================================
-# show_stats
-# =============================================
 
 
 @patch(f"{PATCH_ROOT}.warning")
@@ -213,7 +184,6 @@ def test_show_stats_with_data(mock_agg, mock_header, mock_warning, capsys):
     usage_tracker.show_stats()
 
     mock_header.assert_called_once_with("Usage Statistics")
-    # Verify the data values appear in console output
     output = capsys.readouterr().out
     assert "42" in output
     assert "9001" in output
@@ -230,15 +200,8 @@ def test_show_stats_no_data(mock_agg, mock_header, mock_warning, capsys):
     usage_tracker.show_stats()
 
     mock_warning.assert_called_once_with("No usage data available")
-    # Verify no stat data was printed to console
-    # Header and warning are stand-ins, so only the spacer after the header reaches stdout (api, fleet green leg 3).
-    # Mutant that reddens it: any row printed on the no-data path.
+    # Header and warning are stand-ins, so only the spacer after the header reaches stdout.
     assert capsys.readouterr() == ("\n", ""), "No stat rows should be printed when data is empty"
-
-
-# =============================================
-# show_session
-# =============================================
 
 
 @patch(f"{PATCH_ROOT}.warning")
@@ -271,13 +234,7 @@ def test_show_session_no_data(mock_agg, mock_header, mock_warning, capsys):
     usage_tracker.show_session()
 
     mock_warning.assert_called_once_with("No session data available")
-    # Verify no session stat data was printed to console
     assert capsys.readouterr() == ("\n", ""), "No session rows should be printed when data is empty"
-
-
-# =============================================
-# show_caller_usage
-# =============================================
 
 
 @patch(f"{PATCH_ROOT}.warning")
@@ -311,7 +268,6 @@ def test_show_caller_usage_no_data(mock_agg, mock_header, mock_warning, capsys):
     usage_tracker.show_caller_usage(["ghost_caller"])
 
     mock_warning.assert_called_once_with("No usage data found for caller: ghost_caller")
-    # Verify no usage data rows were printed to console
     assert capsys.readouterr() == ("\n", ""), "No usage rows should be printed when data is empty"
 
 
@@ -326,21 +282,12 @@ def test_show_caller_usage_no_args(mock_agg, mock_header, mock_error):
     mock_agg.get_caller_usage.assert_not_called()
 
 
-# =============================================
-# cleanup_data
-# =============================================
-
-
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
 @patch(TRIGGER_HOME)
 def test_cleanup_success(mock_trigger, mock_header, mock_success, mock_error, tmp_path):
-    """Through the real cleanup handler: the old entry leaves the store on disk and the count is printed.
-
-    The store is handed through the data_path seam, under tmp_path, where a patch
-    of pathlib.Path on the module used to steer it (api, fleet green leg 13).
-    """
+    """Through the real cleanup handler: the old entry leaves the store on disk and the count is printed."""
     store = _usage_store(tmp_path, {"gen-old": {"timestamp": _LONG_AGO}, "gen-recent": {"timestamp": _FAR_AHEAD}})
 
     usage_tracker.cleanup_data(["45"], data_path=store)
@@ -370,10 +317,7 @@ def test_cleanup_nothing_to_clean(mock_header, mock_success, mock_warning, tmp_p
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
 def test_cleanup_without_a_store_warns_and_writes_nothing(mock_header, mock_success, mock_warning, tmp_path):
-    """Through the real cleanup handler: no store means the warning, no success, no file made.
-
-    (api, fleet green leg 13)
-    """
+    """Through the real cleanup handler: no store means the warning, no success, no file made."""
     store = tmp_path / "usage_tracker_data.json"
 
     usage_tracker.cleanup_data(["30"], data_path=store)
@@ -419,11 +363,6 @@ def test_cleanup_custom_days(mock_trigger, mock_cleanup_handler, mock_header, mo
     mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=90, data_path=str(store))
 
 
-# =============================================
-# handle_command — exception propagation
-# =============================================
-
-
 @patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 @patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 @patch(f"{PATCH_ROOT}.header")
@@ -436,13 +375,9 @@ def test_handle_command_propagates_exception(mock_header, mock_jh, mock_agg):
 
 
 class TestTrailingHelpDoesNotExecute:
-    """A help flag must explain the verb, never run it.
+    """A help flag must explain the verb, never run it."""
 
-    The entry-point guard in api.py only inspects the first arg after the
-    command, so `cleanup 30 --help` reaches this module with args[0] == "30".
-    Before the fix that parsed 30 as a retention window and ran a real,
-    data-deleting cleanup.
-    """
+    # api.py's entry guard reads only the first arg, so `cleanup 30 --help` arrives here and must not delete data.
 
     def test_cleanup_with_days_and_trailing_help_shows_help(self):
         """`cleanup 30 --help` prints help instead of deleting usage data."""
@@ -469,11 +404,7 @@ class TestTrailingHelpDoesNotExecute:
         mock_help.assert_called_once()
 
     def test_bare_help_in_value_position_is_data(self):
-        """`track <id> help` names a caller — only `--help`/`-h` are flags.
-
-        Bare `help` keeps its meaning in the first position (`cleanup help`),
-        so the anywhere-scan is limited to the unambiguous flag spellings.
-        """
+        """`track <id> help` names a caller — only `--help`/`-h` are flags."""
         with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.track_usage") as mock_track:
             assert handle_command("track", ["gen-123", "help"]) is True
 

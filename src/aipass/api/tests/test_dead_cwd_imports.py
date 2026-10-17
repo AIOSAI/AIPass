@@ -3,48 +3,18 @@
 # Description: Windows dead-cwd import defect - every api module imports without a readable cwd
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests that every module under apps/ imports without a readable cwd, and apps/handlers/__init__.py's guard."""
 
-# No api module may read the working directory to be IMPORTED.
-#
-# THE DEFECT (measured on the Windows CI gate 2026-08-31, @memory's finding):
-# ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only for relative
-# paths, the way posixpath does - and Path.resolve() routes through it. So on
-# Windows every Path(__file__).resolve() REACHED AT IMPORT is an import-time
-# working-directory dependency: a process whose cwd has been deleted cannot
-# import the module at all. On POSIX the equivalent raise happens earlier and
-# inside a try inspect already owns, which is why this was invisible on Linux
-# for as long as it existed.
-#
-# The discriminator is REACHED AT IMPORT, not written at module scope, so these
-# pins RUN the imports rather than grepping for spellings. A grep finds
-# spellings; only the run finds reachability.
-#
-# TWO WORLDS, because one cannot convict both species:
-#
-#   World A - wrap os.path.realpath so it reads os.getcwd() first (emulating
-#   ntpath), then deny os.getcwd. Convicts a raw resolve(). It CANNOT convict
-#   inspect.stack: denying getcwd kills abspath, so getmodule dies at
-#   getabsfile INSIDE inspect's own except and stack() completes green for the
-#   wrong reason (@daemon measured this).
-#
-#   World B - deny os.path.realpath directly and leave abspath working.
-#   Convicts inspect.stack via getmodule's unguarded realpath at
-#   inspect.py:1009.
-#
-# MEASURED IN THIS BRANCH: 61/61 modules red in both worlds before the cure.
-# The handlers guard masked everything (apps/__init__ does `from . import
-# handlers`, so every module died there first); curing it left 49/61, and the
-# traceback named ONE remaining line - json_handler.py:43's API_ROOT constant,
-# which nearly every module in this tree imports. 0/61 after both cures.
-#
-# That second site no longer exists: DPLAN-0325 (2026-09-04) replaced the
-# handler with the fleet shim, which derives its root from parents[3] and never
-# resolves. The measurement above is kept as the record of how the branch got
-# to 0/61 - do not grep for API_ROOT expecting to find it.
+# ntpath.realpath calls os.getcwd() unconditionally and Path.resolve() goes
+# through it, so on Windows a resolve() REACHED AT IMPORT fails once the cwd is
+# gone. Reachability, not spelling: these pins run the imports, never grep.
+# Two worlds, because one cannot convict both species:
+#   A - realpath reads getcwd first (as ntpath does), getcwd denied. Convicts a
+#   raw resolve(); inspect.stack dies inside inspect's own except and passes.
+#   B - realpath denied, abspath alive. Convicts inspect.stack via getmodule.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every api module parses; this file measures only the import's cwd
@@ -61,16 +31,12 @@ from pathlib import Path
 
 import pytest
 
-# api/tests/ -> api/
 BRANCH_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = BRANCH_ROOT.parent.parent.parent
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
-# Cross-branch deps api imports at module scope. Preloaded in the HEALTHY world
-# because their cure is their own build - this file measures api only.
-# aipass.trigger is deliberately NOT preloaded: usage_tracker imports it lazily
-# inside a function, so it is never reached at import, and a preload is a claim
-# you stop testing (@flow's rule).
+# Cross-branch deps preloaded in the healthy world: this file measures api only.
+# aipass.trigger is not: usage_tracker imports it lazily, and a preload stops the test.
 PRELOAD = [
     "aipass.prax",
     "aipass.cli",
@@ -176,8 +142,7 @@ def _run_probe(world: str, modules: list[str]) -> dict:
     """Run the probe in a child interpreter under a STRING pseudo-frame.
 
     compile() with an angle-bracket filename, never stdin: linecache caches
-    stdin and a stdin-fed probe reports green for the wrong reason (@hooks'
-    finding).
+    stdin and a stdin-fed probe reports green for the wrong reason.
     """
     env = dict(os.environ)
     env["PROBE_WORLD"] = world
@@ -204,11 +169,7 @@ class TestEveryModuleImportsWithoutAReadableCwd:
 
     @pytest.mark.parametrize("world", ["A", "B"])
     def test_the_injection_is_live_and_can_still_say_no(self, world: str) -> None:
-        """The positive control fires, and it is not firing indiscriminately.
-
-        A CONTROL_LIVE probe that cannot report its own defeat turns every pin
-        below it vacuously green (@spawn's finding, relayed by @memory).
-        """
+        """The positive control fires, and it is not firing indiscriminately."""
         report = _run_probe(world, [])
         assert report["control_live"] is True, f"world {world}: the denial never fired"
         assert report["control_can_say_no"] is True, (
@@ -230,17 +191,9 @@ class TestEveryModuleImportsWithoutAReadableCwd:
         )
 
 
-# --------------------------------------------------------------------------
-# The pin-shape hole: the deleted inspect.stack() walk is UNREACHABLE from any
-# import-shaped test (apps/__init__ always supplied a real-file frame), so
-# restoring the defect leaves every behavioural pin green (@trigger measured
-# this). Only a structural ban convicts it. The v2.1 fence that replaced that
-# guard walks sys._getframe too, and apps/__init__ no longer imports it
-# (api, DPLAN-0404 fence leg); the ban reads the file, so it holds either way.
-#
-# An AST ban, never a string ban: the guard's docstring NAMES inspect.stack
-# while explaining the defect, and a spelling ban convicts the explanation.
-# --------------------------------------------------------------------------
+# An inspect.stack() walk in the guard is unreachable from any import-shaped test
+# (a real-file frame is always there), so only a structural ban convicts it. AST,
+# not a string ban: the guard's docstring names inspect.stack.
 
 
 def _inspect_stack_calls(source: str) -> list[int]:
@@ -284,12 +237,8 @@ class TestTheGuardNeverWalksInspectStack:
         assert _inspect_stack_calls("import numpy\ny = numpy.stack([1, 2])\n") == []
 
 
-# --------------------------------------------------------------------------
-# The runtime species: json_handler's caller auto-detection runs on the
-# log_operation hot path. It must not crash without a cwd - and it must still
-# ANSWER. Returning "unknown" for every caller satisfies a not-crash assertion
-# and destroys the audit trail (@flow's pin shape).
-# --------------------------------------------------------------------------
+# Caller auto-detection runs on the log_operation hot path: it must survive no
+# cwd AND still answer; "unknown" for every caller destroys the audit trail.
 
 _CALLER_PROBE = """
 import importlib, json, os, sys
@@ -332,16 +281,8 @@ class TestCallerDetectionStillAnswersWithoutARealpath:
     """log_operation's auto-detect must survive world B AND still name the caller."""
 
     def test_it_names_the_calling_module_not_unknown(self, tmp_path: Path) -> None:
-        # A REAL file supplies the caller frame, while the probe's own top-level
-        # frame is a string pseudo-frame - the shape the defect actually meets.
-        #
-        # Measured THROUGH log_operation, not by calling the detector: after
-        # DPLAN-0325 there is no detector to call. The handler is a shim that
-        # binds the one prax service and publishes nine names, none of them
-        # private. A direct call would also be one frame short — the service
-        # resolves the caller at _getframe(2), counting on log_operation's own
-        # frame sitting between — so the honest probe is the public one, and
-        # the ANSWER is read off the document it wrote.
+        # A real file supplies the caller frame under a string pseudo-frame. Through
+        # log_operation: the service reads _getframe(2), so a direct call is one short.
         (tmp_path / "deadcwd_named_caller.py").write_text(
             textwrap.dedent(
                 """

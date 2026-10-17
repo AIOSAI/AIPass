@@ -3,19 +3,11 @@
 # Description: OpenRouter Client Module
 # Version: 1.0.3
 # Created: 2025-11-15
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 # pyright: reportMissingImports=false
 
-"""
-OpenRouter Client Module
-
-Orchestrates LLM API client operations:
-- Test connections
-- Make API calls
-- List models
-- Check status
-"""
+"""OpenRouter Client Module"""
 
 import os
 import sys
@@ -96,34 +88,19 @@ def print_help():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle OpenRouter client commands
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle OpenRouter client commands"""
     try:
         if command not in ["test", "call", "models", "status"]:
             return False
 
-        # Help gate — a help flag ANYWHERE means "explain", never "execute".
-        # Modules are also reachable via __main__, which bypasses the router's
-        # normalisation, so the whole-sequence check is needed here too:
-        # `models --all --help` and `call "..." --help` otherwise reached the
-        # API-calling paths. Bare "help" stays a flag only in first position, so
-        # a prompt containing the word "help" is still sent as content.
+        # A help flag anywhere means explain (__main__ bypasses the router's check); bare "help" counts
+        # only first, so a prompt containing "help" is still sent.
         if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 
-        # Log operation
         json_handler.log_operation(f"openrouter_{command}", {"command": command})
 
-        # Route all commands before introspection gate
         if command == "test":
             test_connection()
             return True
@@ -137,7 +114,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             make_call(args)
             return True
 
-        # NO-ARGS GATE (seedgo standard) — only for unrecognized subcommands
         if not args:
             print_introspection()
             return True
@@ -155,7 +131,6 @@ def test_connection():
 
     console.print("[dim]Testing connection...[/dim]")
 
-    # Get API key via handler
     try:
         api_key = keys.get_api_key("openrouter")
     except keys.KeyUnavailable as e:
@@ -167,11 +142,9 @@ def test_connection():
         error(diagnosis)
         return
 
-    # Real API ping — hit /models endpoint
     try:
         model_list = models.fetch_models_from_api(api_key)
     except models.ModelsUnavailable as e:
-        # The reason travels with the failure; an empty list is an answer (api, fleet green leg 3).
         error(f"Connection failed — {e}")
         return
 
@@ -187,7 +160,6 @@ def make_call(args: List[str]):
         error("Prompt required", suggestion='drone @api call "your prompt" --model MODEL')
         return
 
-    # Parse args: first non-flag arg is prompt, --model MODEL is optional
     prompt = None
     model = None
     i = 0
@@ -232,7 +204,6 @@ def list_models(args: List[str] | None = None):
 
     show_all = args and "--all" in args
 
-    # Get API key via handler
     try:
         api_key = keys.get_api_key("openrouter")
     except keys.KeyUnavailable as e:
@@ -246,7 +217,6 @@ def list_models(args: List[str] | None = None):
 
     console.print("[dim]Fetching available models...[/dim]")
 
-    # Call handler to fetch models
     try:
         model_list = models.fetch_models_from_api(api_key)
     except models.ModelsUnavailable as e:
@@ -256,7 +226,6 @@ def list_models(args: List[str] | None = None):
     success(f"Found {len(model_list)} models")
     console.print()
 
-    # Format as table
     display_count = len(model_list) if show_all else min(10, len(model_list))
 
     console.print(f"  {'Model':<50} {'Context':>10} {'$/prompt':>10} {'$/compl':>10}")
@@ -269,7 +238,6 @@ def list_models(args: List[str] | None = None):
         prompt_cost = pricing.get("prompt", "0")
         completion_cost = pricing.get("completion", "0")
 
-        # Format context length
         if context >= 1_000_000:
             ctx_str = f"{context // 1_000_000}M"
         elif context >= 1_000:
@@ -277,7 +245,6 @@ def list_models(args: List[str] | None = None):
         else:
             ctx_str = str(context)
 
-        # Format pricing
         if str(prompt_cost) == "0" and str(completion_cost) == "0":
             p_str = "free"
             c_str = "free"
@@ -297,7 +264,6 @@ def check_status():
     header("OpenRouter Client Status")
     console.print()
 
-    # Key status
     try:
         api_key = keys.get_api_key("openrouter")
     except keys.KeyUnavailable as e:
@@ -316,7 +282,6 @@ def check_status():
     console.print("  [cyan]Provider:[/cyan]        OpenRouter")
     console.print("  [cyan]Base URL:[/cyan]        https://openrouter.ai/api/v1")
 
-    # OpenAI SDK availability
     try:
         import openai  # noqa: F401
 
@@ -325,44 +290,16 @@ def check_status():
         logger.warning("OpenAI SDK not installed")
         warning("OpenAI SDK not installed")
 
-    # Client cache stats
     cache_stats = client.get_cache_stats()
     console.print(f"  [cyan]Cached clients:[/cyan] {cache_stats['cached_clients']}/{cache_stats['max_cache_size']}")
     console.print()
-
-
-# =============================================
-# PUBLIC API - Re-export handler functions
-# =============================================
 
 
 def get_response(prompt: str, caller: str | None = None, model: str | None = None, **kwargs):
     """
     Public API: Get response from OpenRouter
 
-    This is a re-export of the handler function for cross-branch access.
-    Flow and other branches should use this module-level function instead
-    of importing directly from handlers.
-
-    Args:
-        prompt: User prompt text
-        caller: Module making the request (auto-detected if not provided)
-        model: Model to use (required - caller must provide from branch config)
-        **kwargs: Additional OpenAI API parameters
-
-    Returns:
-        Dict with 'content', 'id', 'model' or None on failure
-
-    Raises:
-        client.OpenRouterUnavailable: the SDK refused to build a client or a
-        response could not be read; the reason travels (api, fleet green leg 10)
-        keys.KeyUnavailable: the secrets file could not be read (api, fleet green leg 11)
-
-    Example:
-        >>> from aipass.api.apps.modules.openrouter_client import get_response
-        >>> response = get_response("Hello", caller="flow", model="anthropic/claude-3.5-sonnet")
-        >>> if response:
-        ...     console.print(response['content'])
+    Raises client.OpenRouterUnavailable or keys.KeyUnavailable with the reason.
     """
     return client.get_response(prompt, caller, model, **kwargs)
 
@@ -376,17 +313,14 @@ if __name__ == "__main__":
     """Standalone execution mode"""
     args = sys.argv[1:]
 
-    # Show introspection when run without arguments
     if len(args) == 0:
         print_introspection()
         sys.exit(0)
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Execute command
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 

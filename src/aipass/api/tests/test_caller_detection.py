@@ -3,19 +3,10 @@
 # Description: Tests for caller detection internals (uncovered functions)
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py, its internal detection functions."""
-
-# Tests for openrouter.caller -- internal detection functions.
-#
-# Covers functions NOT tested in test_caller.py:
-# - _detect_flow_caller
-# - _detect_prax_caller
-# - _create_fallback_info
-# - detect_caller_from_stack
-# - get_caller_info (stack inspection)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — MODULE_NAME, MODULE_VERSION and CALLER_PATTERNS' text
@@ -35,20 +26,12 @@ from aipass.api.apps.handlers.openrouter.caller import (
 
 
 class _PartsWhoseIndexFails(tuple):
-    """Path parts whose index() raises and which hold no branch name.
+    """Path parts whose index() raises and which hold no branch name."""
 
-    Only index() fails, as the fallback tests' docstrings say: the fallback then
-    categorises the same path, and detect_caller_category no longer carries a try
-    for parts that raise, an input no caller can make (api, fleet green leg 4).
-    """
+    # Only index() fails: the fallback then categorises the same parts, and that path has no try.
 
     def index(self, *args: object) -> int:
         raise ValueError("bad")
-
-
-# =============================================
-# _detect_flow_caller tests
-# =============================================
 
 
 class TestDetectFlowCaller:
@@ -87,11 +70,6 @@ class TestDetectFlowCaller:
         assert result["detection_method"] == "fallback"
 
 
-# =============================================
-# _detect_prax_caller tests
-# =============================================
-
-
 class TestDetectPraxCaller:
     """Tests for caller._detect_prax_caller()."""
 
@@ -128,11 +106,6 @@ class TestDetectPraxCaller:
         assert result["detection_method"] == "fallback"
 
 
-# =============================================
-# _create_fallback_info tests
-# =============================================
-
-
 class TestCreateFallbackInfo:
     """Tests for caller._create_fallback_info()."""
 
@@ -164,11 +137,6 @@ class TestCreateFallbackInfo:
         assert result["category"] == "unknown"
 
 
-# =============================================
-# detect_caller_from_stack tests
-# =============================================
-
-
 class TestDetectCallerFromStack:
     """Tests for caller.detect_caller_from_stack()."""
 
@@ -195,11 +163,6 @@ class TestDetectCallerFromStack:
 
         assert name is None
         assert folder is None
-
-
-# =============================================
-# get_caller_info tests
-# =============================================
 
 
 class TestGetCallerInfo:

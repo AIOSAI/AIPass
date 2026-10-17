@@ -3,78 +3,13 @@
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
 # Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
 
-# FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
-# are a bind that silently widens and an auth check that honours a revoked token,
-# so those carry the most tests.
-#
-# Tests — handlers/host/config.py (the bind gate, design call D1):
-# - validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
-# - validate_bind: IPv6 wildcard :: refused
-# - validate_bind: hostname refused as ambiguous
-# - validate_bind: empty address refused
-# - validate_bind: address this machine does not hold refused, no fallback
-# - validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
-# - validate_bind: non-loopback message names the review gate
-# - validate_bind: loopback accepted
-# - validate_bind: port out of range refused (0, 65536, non-int, bool)
-# - validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
-# - load_config: defaults when the store is absent
-# - load_config: stored values merge over defaults
-# - load_config: non-dict store falls back to defaults
-# - save_config: round-trips through the store
-#
-# Tests — handlers/host/tokens.py (design call D2):
-# - issue_token: returns a raw value that is NOT in the store
-# - issue_token: store holds a sha256 hash of the raw
-# - issue_token: record carries id, label, scope, created, revoked=False
-# - issue_token: last_used stays null in Phase 1 (reservation, not a write)
-# - issue_token: empty label refused
-# - issue_token: unknown scope refused
-# - issue_token: two tokens are distinct and both verify
-# - verify_token: accepts the issued raw value
-# - verify_token: rejects an unknown value
-# - verify_token: rejects empty and non-string input
-# - verify_token: revoked token rejected with NO restart (store re-read per call)
-# - verify_token: malformed store denies everything rather than admitting one
-# - revoke_token: unknown id returns False
-# - revoke_token: already-revoked id returns False
-# - scope_allows: operate implies read; read does not imply operate
-# - scope_allows: unknown scope allows nothing
-# - store: token file is 0600 (POSIX)
-#
-# Tests — handlers/host/server.py:
-# - create_app: raises with install instructions when the extra is missing
-# - GET /v1/ping: 204, no auth, no body
-# - GET /v1/whoami: 401 with no Authorization header
-# - GET /v1/whoami: 401 with an unknown bearer token
-# - GET /v1/whoami: 200 with a valid read token
-# - GET /v1/whoami: 401 after revocation, same running app
-# - require_scope('operate'): 403 for a read token, 200 for an operate token
-# - errors: every failure carries the {error:{code,message}} envelope
-#
-# Tests — modules/host_api.py:
-# - handle_command: no args prints introspection
-# - handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
-# - handle_command: -h in trailing position explains
-# - handle_command: foreign command passes through
-# - handle_command: unknown subcommand reports, does not raise
-# - issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
-# - issue-token: writes the raw value to a 0600 file
-# - issue-token: missing label refused
-# - serve: BindRefused is reported, server never starts
-# - set_bind door: stores, refuses a wildcard storing nothing, keeps an unchanged bind unwritten
-# - receipt_path door: the token store's receipt, its refusal exported as TokenError
-#
-# WHERE EACH LIVES since the oversize split (api, 2026-10-08): the config,
-# face dir, baud binary and token tests listed above are in
-# test_host_api_config.py; the server's app, auth and routes in
-# test_host_api_routes.py. This file keeps the commands. The shared helpers
-# are in support_host_api.py, the token store fixture in conftest.py.
+# Config and token tests live in test_host_api_config.py, the app and routes in
+# test_host_api_routes.py; helpers in support_host_api.py, the store fixture in conftest.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
@@ -109,13 +44,10 @@ from aipass.api.apps.modules import host_serve as host_serve_module
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
 
 
-# A stand-in the status tests hand to a mocked log_path(). Nothing ever opens
-# it, but it is minted under the platform temp dir rather than written /tmp so
-# the literal reads the same on the Windows runner as it does here.
+# Never opened; under the platform temp dir, not /tmp, so it reads the same on Windows.
 STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.log"
 
 
-# Patch targets
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 
 PATCH_MOD_CONSOLE = "aipass.api.apps.modules.host_api.console"
@@ -126,10 +58,8 @@ PATCH_MOD_WARNING = "aipass.api.apps.modules.host_api.warning"
 PATCH_MOD_JSON = "aipass.api.apps.modules.host_api.json_handler"
 PATCH_MOD_HELP = "aipass.api.apps.modules.host_api.print_help"
 
-# The serve/status/stop commands moved to host_serve.py on 2026-08-19 (host_api
-# hit its size cap). They import console and friends by NAME, so silencing only
-# host_api would leave their output loose in the suite AND leave every
-# assertion about it reading an untouched mock.
+# host_serve.py and host_config_cli.py import console and friends by NAME, so each
+# module is patched on its own or its assertions read an untouched mock.
 PATCH_SRV_CONSOLE = "aipass.api.apps.modules.host_serve.console"
 PATCH_SRV_HEADER = "aipass.api.apps.modules.host_serve.header"
 PATCH_SRV_ERROR = "aipass.api.apps.modules.host_serve.error"
@@ -137,7 +67,6 @@ PATCH_SRV_SUCCESS = "aipass.api.apps.modules.host_serve.success"
 PATCH_SRV_WARNING = "aipass.api.apps.modules.host_serve.warning"
 PATCH_SRV_JSON = "aipass.api.apps.modules.host_serve.json_handler"
 
-# host_config_cli.py — config and set-config, split from host_api.py (FPLAN-0589).
 PATCH_CFG_CONSOLE = "aipass.api.apps.modules.host_config_cli.console"
 PATCH_CFG_HEADER = "aipass.api.apps.modules.host_config_cli.header"
 PATCH_CFG_ERROR = "aipass.api.apps.modules.host_config_cli.error"
@@ -150,9 +79,7 @@ def _printed(*mocks: Any) -> str:
     """
     What the mocked output calls were given, as one plain string.
 
-    Joined from the call arguments, never from the repr of the calls: a repr
-    doubles every backslash, so a Windows path is never found in it (seedgo
-    posix_literal REPR-HAYSTACK, Windows CI run 34882199024).
+    Never the calls' repr: it doubles backslashes, so a Windows path is never found.
     """
     given = (value for mock in mocks for call in mock.call_args_list for value in (*call.args, *call.kwargs.values()))
     return " ".join(str(value) for value in given)
@@ -181,19 +108,12 @@ def quiet_module():
         patch(PATCH_CFG_WARNING, new=mock_warning),
         patch(PATCH_CFG_JSON),
     ):
-        # `console` is handed back so a test can read what was PRINTED, not
-        # just what was refused — the S49 check needs the actual output.
         yield {
             "error": mock_error,
             "success": mock_success,
             "warning": mock_warning,
             "console": mock_console,
         }
-
-
-# =============================================
-# CLI — modules/host_api.py
-# =============================================
 
 
 class TestCommandRouting:
@@ -250,12 +170,7 @@ class TestCommandRouting:
 class TestTheSpellingOurOwnSelfMapAdvertises:
     """
     `drone @api` bare lists MODULE names, so it prints 'host_api' — while the
-    command is 'host-api'. @baud read the self-map, typed what it said, got
-    "unknown command", and reported themselves blocked over one character.
-
-    They filed it against themselves. The trap is ours: a surface that publishes
-    a spelling which does not work is the surface's bug, not the reader's. Both
-    answer now.
+    command is 'host-api'.
     """
 
     def test_the_underscore_spelling_is_accepted(self, quiet_module: dict) -> None:
@@ -328,14 +243,7 @@ class TestTheHelpsNameOnlyRealVerbs:
 
 
 class TestRevokeTokenCommandRefuses:
-    """A revoke that revoked nothing is a refusal, not a note.
-
-    Until 2026-09-08 an unknown id printed a yellow `warning()` and the command
-    exited 0 (canary's fleet sweep, api's single row). An operator scripting
-    `revoke-token <id> && <next>` was told the device was off when it was not
-    — and the sibling refusal four lines above it, "Token id required", was
-    already using `error()`. Two refusals in one function on two channels.
-    """
+    """A revoke that revoked nothing is a refusal, not a note."""
 
     def test_an_unknown_id_refuses_through_the_error_channel(self, store: Path, quiet_module: dict) -> None:
         """error() is what carries the failure to the exit seam; warning() does not."""
@@ -365,16 +273,7 @@ class TestIssueTokenCommand:
     """The CLI's issuance discipline."""
 
     def test_no_out_flag_lands_the_receipt_in_the_secrets_store(self, store: Path, quiet_module: dict) -> None:
-        """--out is OPTIONAL, and the default is where secrets already live.
-
-        This test used to pin the opposite — that --out was mandatory — and the
-        rule it was defending was never "make the caller name a file", it was
-        S49's "never print the raw value". The mandatory flag defended that
-        badly: its own example said `--out ~/pixel.token`, and on 2026-08-19
-        the owner found three raw bearer receipts sitting in his home root
-        because of it. A default that lands beside the hashed store honours S49
-        and takes the home root off the table.
-        """
+        """--out is OPTIONAL, and the default is where secrets already live."""
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         quiet_module["error"].assert_not_called()
@@ -385,14 +284,7 @@ class TestIssueTokenCommand:
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
     def test_the_default_receipt_is_still_0600(self, store: Path, quiet_module: dict) -> None:
-        """
-        The mode is the point of the file, not a property of --out.
-
-        The platform check was an `if` INSIDE the body until 2026-09-07, so on
-        Windows the test ran, asserted nothing and reported green — a pass that
-        means "not measured" is worse than a skip that says so. As a marker the
-        two assertions below always run whenever this test runs at all.
-        """
+        """The mode is the point of the file, not a property of --out."""
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         receipt = store / "host_api" / "pixel-8.token"
@@ -401,12 +293,7 @@ class TestIssueTokenCommand:
         assert stat.S_IMODE(os.stat(receipt.parent).st_mode) == 0o700
 
     def test_the_raw_value_is_still_never_printed(self, store: Path, quiet_module: dict) -> None:
-        """S49, checked against the console rather than assumed from the shape.
-
-        The whole reason --out was mandatory. Making it optional must not have
-        quietly reintroduced the thing it was defending against, so this reads
-        every line the command printed and looks for the secret in it.
-        """
+        """S49, checked against the console rather than assumed from the shape."""
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         raw = (store / "host_api" / "pixel-8.token").read_text(encoding="utf-8")
@@ -416,12 +303,7 @@ class TestIssueTokenCommand:
         assert raw not in printed, "the raw token reached the console"
 
     def test_an_existing_receipt_is_never_overwritten(self, store: Path, quiet_module: dict) -> None:
-        """Its token is still LIVE — truncating the file orphans a credential.
-
-        The failure this prevents is quiet and permanent: the raw value exists
-        exactly once, at mint time, so overwriting the receipt leaves a working
-        token in the store that nobody holds and nobody knows to revoke.
-        """
+        """Its token is still LIVE — truncating the file orphans a credential."""
         handle_command("host-api", ["issue-token", "pixel-8"])
         receipt = store / "host_api" / "pixel-8.token"
         first = receipt.read_text(encoding="utf-8")
@@ -453,11 +335,7 @@ class TestIssueTokenCommand:
         store: Path,
         quiet_module: dict,
     ) -> None:
-        """The label becomes a FILENAME now, so it needs the name fence.
-
-        Nothing validated the label as a path component before, because nothing
-        ever built a path from it. The default receipt does.
-        """
+        """The label becomes a FILENAME now, so it needs the name fence."""
         handle_command("host-api", ["issue-token", "../escaped"])
 
         quiet_module["error"].assert_called_once()
@@ -472,17 +350,7 @@ class TestIssueTokenCommand:
     ) -> None:
         """The existence check is a good sentence; O_EXCL is the guarantee.
 
-        Found while mutating: swapping O_EXCL for O_TRUNC bit NOTHING, because
-        every overwrite test above is refused by the exists() check one screen
-        earlier — which is itself a check-then-act, the same shape as the
-        create race @trigger reported in json_handler on the same day. This
-        opens the window on purpose by creating the file DURING the mint, and
-        asks whether the older receipt survives.
-
-        The other half matters as much: the token was already minted when the
-        write failed, so the caller must be told to revoke it. A "could not
-        write" that reads like nothing happened leaves a live credential in the
-        store that nobody holds.
+        The file appears DURING the mint, past exists(); the minted token must be revoked.
         """
         out = tmp_path / "device.token"
         real_issue = host_tokens.issue_token
@@ -529,16 +397,7 @@ class TestIssueTokenCommand:
 
 
 class TestDetachStatusAndStop:
-    """
-    The CLI half of the serve-flap fix (@baud/@devpulse, 2026-08-19).
-
-    A serve routed through drone is a child of drone's exec timeout, and the
-    tailnet server was dying on a twelve-hour schedule and restarting into a
-    pane whose scrollback then ate a day of access history. `--detach` gives
-    the process its own session and its output a file; `status` and `stop`
-    exist because shipping the first without them would just be a nicer way to
-    create orphans.
-    """
+    """The CLI half of the serve-flap fix (@baud/@devpulse, 2026-08-19)."""
 
     @pytest.fixture
     def detachable(self):
@@ -613,12 +472,7 @@ class TestDetachStatusAndStop:
     ) -> None:
         """D1 across the detach seam.
 
-        A refusal that happens inside a detached child is a refusal the
-        operator reads about in a log file, if at all — so it surfaces here.
-
-        It also leaves non-zero, for the same reason the foreground path does:
-        the launcher is what the caller's exit code comes from, so a launcher
-        that refuses and reports success is a launcher nothing can detect.
+        It surfaces here, not in the child's log, and leaves non-zero like the foreground.
         """
         detachable.serve_detached.side_effect = host_config.BindRefused("wildcards are refused")
 
@@ -635,10 +489,7 @@ class TestDetachStatusAndStop:
     ) -> None:
         """The delegation must not swallow anything.
 
-        host_api offers every host-api call to host_serve first. A router that
-        returned True for things it does not implement would turn every typo
-        into a silent success — so it declines, and this is what notices if it
-        ever stops.
+        host_api offers every host-api call to host_serve first; it must decline the rest.
         """
         handle_command("host-api", ["serv"])
 
@@ -654,10 +505,7 @@ class TestDetachStatusAndStop:
     def test_a_help_flag_anywhere_explains_rather_than_serves(self, quiet_module: dict) -> None:
         """`serve --help` must never start a server.
 
-        host_api's own gate catches this first today. The pin is on THIS
-        router because a sub-router that is only safe given its current caller
-        is a trap for the next one — and the failure mode here is starting a
-        long-running process somebody was asking a question about.
+        host_api's gate catches it first today; this router must not rely on its caller.
         """
         with patch.object(host_serve_module, "cmd_serve") as served:
             assert host_serve_module.handle_command("host-api", ["serve", "--help"]) is True
@@ -670,16 +518,7 @@ class TestDetachStatusAndStop:
         quiet_module: dict,
         detachable,
     ) -> None:
-        """A dead server stays dead and SAYS SO — no restart, and no silence.
-
-        The log path is the useful half: the operator's next question is always
-        why it went, and the answer is in a file they should not have to find
-        by reading this source.
-        """
-        # server_state(), not running(): status gained a THIRD answer on
-        # 2026-08-27 ("cannot tell"), so it asks the handler for a state rather
-        # than deciding from a record. This test found the move by failing
-        # loudly, which is the good version of that.
+        """A dead server stays dead and SAYS SO — no restart, and no silence."""
         detachable.server_state.return_value = {"state": "none", "record": None, "reason": ""}
         detachable.log_path.return_value = STANDIN_LOG
 
@@ -715,14 +554,7 @@ class TestDetachStatusAndStop:
     def test_status_says_it_cannot_tell_rather_than_inventing_an_absence(
         self, store: Path, quiet_module: dict, detachable
     ) -> None:
-        """
-        The 2026-08-27 ruling, at the surface an operator reads.
-
-        This host runs the server under a unit that writes NO record file, so
-        reporting an unanswered probe as "no server is running" would be a
-        confident lie about a server answering requests. It must reach `error`,
-        not the not-running branch.
-        """
+        """The 2026-08-27 ruling, at the surface an operator reads."""
         detachable.server_state.return_value = {
             "state": "unknown",
             "record": None,
@@ -768,14 +600,7 @@ def extra_present():
     """
     Pin the [host] extra as installed.
 
-    These tests are about the CLI's OWN gates — the bind rule and the port parse
-    — not about whether FastAPI is importable. `_cmd_serve` returns early with an
-    install hint when the extra is missing, so inheriting availability from the
-    environment made these tests measure the machine instead of the code.
-
-    That cost a red CI run (bd082878) and, worse, hid a false pass: the port test
-    was green on runners because the install-hint return fired before the check
-    it claims to exercise ever ran.
+    `_cmd_serve` returns early without it, so a gate test would pass without running.
     """
     with patch.object(host_server, "is_available", return_value=True):
         yield
@@ -808,17 +633,7 @@ class TestServeCommand:
         """
         The exit CODE, not just the message — this one is load-bearing.
 
-        The unit runs `Restart=on-failure` with a 60-attempt, 5s-apart window
-        put there for one case: at boot this server can come up before
-        tailscaled has assigned the tailnet address it binds. Exiting 0 makes
-        systemd read SUCCESS and decline to restart, which silently disarms all
-        sixty attempts — measured 2026-09-07, the unit gave up at 12:19:16 and
-        the address arrived at 12:19:22, six seconds later, with nothing to
-        retry. Two of the last six boots died that way.
-
-        So the message assertion above is not enough. A refusal that prints
-        perfectly and exits 0 is exactly the shape that made this survive: the
-        README claimed the process exited non-zero, so nobody checked.
+        At boot the tailnet address can arrive after the server; exit 0 disarms Restart=on-failure.
         """
         with patch.object(host_server, "serve", side_effect=host_config.BindRefused("nope")):
             with pytest.raises(SystemExit) as exit_info:
@@ -848,9 +663,7 @@ class TestServeCommand:
         """
         The regression guard for the false pass above.
 
-        A valid --port must REACH serve. If this ever fails alongside the test
-        above passing, the early return has come back and 'refused before
-        serving' means 'never got there at all'.
+        A valid --port must REACH serve, or 'refused before serving' proves nothing.
         """
         with patch.object(host_server, "serve") as mock_serve:
             handle_command("host-api", ["serve", "--port", "8790"])
@@ -970,12 +783,7 @@ class TestSetConfigCommand:
     def test_face_dir_alone_does_not_revalidate_a_stored_bind(
         self, store: Path, quiet_module: dict, tmp_path: Path
     ) -> None:
-        """
-        The installer points the face while the stored address may be down.
-
-        A face_dir write that re-ran the bind check would refuse for a reason
-        its caller never touched.
-        """
+        """The installer points the face while the stored address may be down."""
         bundle = _face_bundle(tmp_path / "face")
 
         with patch(PATCH_CONFIG_LOGGER):
@@ -989,8 +797,7 @@ class TestSetConfigCommand:
         """
         The caller gets the path back; the log line names the store in words.
 
-        The path is the result of a secret-named call, which CodeQL follows into
-        a log as clear-text secret data (PR #774 r10).
+        CodeQL follows the secret-named call's path into a log as clear-text secret data.
         """
         with patch(PATCH_CONFIG_LOGGER) as log:
             written = host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
@@ -1050,12 +857,7 @@ class TestSetConfigCommand:
     def test_a_refused_baud_bin_stores_no_face_dir_either(
         self, store: Path, quiet_module: dict, tmp_path: Path
     ) -> None:
-        """
-        Every path is validated before any is stored.
-
-        The face dir is written first when both pass, so storing as each one
-        validated would leave the face dir behind a refused binary.
-        """
+        """Every path is validated before any is stored."""
         bundle = _face_bundle(tmp_path / "face")
 
         with patch(PATCH_CONFIG_LOGGER):
@@ -1095,13 +897,7 @@ class TestIntrospection:
     """The module's self-map stays honest about the phase gate."""
 
     def test_introspection_names_the_serve_verb(self, store: Path) -> None:
-        """
-        Bare `drone @api host-api` prints a self-map that names its verbs.
-
-        This was a bare call with no assertion. A self-map is a map, so what
-        is worth pinning is that it still names something it routes — an
-        introspection that had lost its body ran perfectly well.
-        """
+        """Bare `drone @api host-api` prints a self-map that names its verbs."""
         with patch(PATCH_MOD_CONSOLE) as mock_console, patch(PATCH_MOD_HEADER), patch(PATCH_CONFIG_LOGGER):
             host_api_module.print_introspection()
 
@@ -1109,14 +905,7 @@ class TestIntrospection:
         assert "serve" in printed
 
     def test_help_names_every_subcommand_it_routes(self) -> None:
-        """
-        Help output is Rich markup and must name the four verbs.
-
-        Also a bare call before 2026-09-07. SUBCOMMANDS is the set host_serve
-        actually claims, so the help is checked against it rather than against
-        a list written twice — a verb added to the router and forgotten in the
-        help is exactly the drift this catches.
-        """
+        """Help output is Rich markup and must name the four verbs."""
         with patch(PATCH_MOD_CONSOLE) as mock_console:
             host_api_module.print_help()
 
@@ -1136,9 +925,7 @@ class TestIntrospection:
     def test_help_does_not_claim_loopback_only_while_the_gate_is_open(self) -> None:
         """
         It did until 2026-09-13: 'Phase 1 is loopback-only' a month after the
-        gate opened, found by @baud checking their SECURITY.md against it. The
-        sentence is read from LOOPBACK_ONLY now, so it cannot outlive the flag.
-        """
+        gate opened. The sentence is read from LOOPBACK_ONLY now."""
         with patch(PATCH_MOD_CONSOLE) as mock_console, patch.object(host_config, "LOOPBACK_ONLY", False):
             host_api_module.print_help()
 
@@ -1293,11 +1080,7 @@ class TestCrossBranchApi:
         mock_serve.assert_called_once_with(host="127.0.0.1", port=9000)
 
     def test_the_path_settings_door_stores_and_clears_through_the_handler(self, store: Path, tmp_path: Path) -> None:
-        """
-        @aipass sets the face dir and the baud binary through the module, not the handler.
-
-        Same validation, same store: what the door writes, the handler reads back.
-        """
+        """@aipass sets the face dir and the baud binary through the module, not the handler."""
         bundle = _face_bundle(tmp_path / "face")
         binary = _baud_binary(tmp_path / "bin" / "baud-cli")
 

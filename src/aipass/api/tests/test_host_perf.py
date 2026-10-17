@@ -8,44 +8,7 @@
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
 
-# Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
-#
-# The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
-# this branch, none of them exotic — the server was doing blocking work in the one
-# place that must never block, re-walking the filesystem for a registry it already
-# knew, and paying for the same 90ms process spawn twice per screen refresh.
-#
-# THREE PROPERTIES ARE PINNED HERE, AND EACH IS PINNED SO IT CAN GO RED:
-#
-# 1. A read route runs OFF the event loop. A handler declared `async def` runs ON
-#    the loop, so a 90ms exec inside it means the whole server answers nothing for
-#    90ms — including /v1/ping. Declared `def`, FastAPI runs it in the anyio
-#    threadpool. The structural test is DERIVED from the app's routing table, not
-#    from a list written down here, so a new read route added as async goes red
-#    without anyone remembering this file exists.
-#
-# 2. The blocking probe below can actually SEE a blocked loop. A test that starts
-#    a slow request and then checks a fast one answers is worthless if the harness
-#    gives each request its own event loop — it would pass against a fully async
-#    server too. So the probe carries a vacuity floor: the same measurement is run
-#    against a deliberately-async blocking route and MUST fail there.
-#
-# 3. The snapshot exec is coalesced. Within the TTL the answer is remembered, and
-#    concurrent callers asking the same question share ONE exec rather than each
-#    spawning their own. Both halves are counted, never timed.
-#
-# 4. The socket pump's threads are its OWN and its cap is a sentence. Eight was
-#    never a decision — it is what asyncio's default executor happens to be on a
-#    4-CPU host, and the ninth terminal connected, authenticated, and then never
-#    pumped a byte. A cap the operator cannot see is the worst kind.
-#
-# 5. The audit trail's caller detection fetches ONE frame. It used to build a
-#    FrameInfo for the whole stack, which is cheap in a script and 1.77ms deep
-#    inside a request. The fast path and the old walk must give the same answer —
-#    a faster audit trail that names the wrong module is not a win.
-#
-# NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py) —
-# every exec is a counted fake.
+# NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py): every exec is a counted fake.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that server.py parses and imports
@@ -84,27 +47,12 @@ PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 
 SERVER_SOURCE = Path(host_server.__file__)
 
-# The two GET routes that may stay on the loop, and why. Both return values the
-# server already holds — no file, no exec, no registry — so there is nothing to
-# move off the loop. Every OTHER read route must be sync.
+# GETs that may stay on the loop: both return values the server already holds (no file, exec or registry).
 LOOP_SAFE_GETS = {"/v1/ping", "/v1/whoami"}
 
-# The one POST that is NOT held on the loop, and why it is the exception rather
-# than the start of a trend: it blocks for the whole of an image body, and it
-# has nothing to serialize — every upload writes a NEW file under a name it
-# makes itself (a timestamp plus token_hex), so two concurrent uploads cannot
-# be racing over one document the way every other write route can.
-# /v1/pair (DPLAN-0406) is the second, and for the reason the pin below asks
-# for: it writes through the token store's file lock, and its attempt window
-# holds a threading lock, so the threadpool cannot lose one of its writes.
-# /v1/backup/run (DPLAN-0411) is the third: its one write is the job table,
-# and every read and write of that table holds the table's threading lock.
-# /v1/backup/cancel (DPLAN-0412) is the fourth: it writes nothing of this
-# server's (no job table, no file), so the loop has nothing of it to serialize,
-# and @backup's stop can wait 30 s for a lane, which must not hold the loop.
-# /v1/verbs/new-project (FPLAN-0649) is the fifth: it writes nothing of this
-# server's; @aipass's create_project owns its directory and its own cleanup,
-# and its git and spawn take seconds that must not hold the loop.
+# POSTs off the loop, each with nothing the loop must serialize: upload writes a fresh uniquely named file;
+# pair writes under the token store's file lock and a threading lock; backup/run's job table holds its own lock;
+# backup/cancel and verbs/new-project write nothing of this server's and wait seconds that must not hold the loop.
 LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run", "/v1/backup/cancel", "/v1/verbs/new-project"}
 
 fastapi_required = pytest.mark.skipif(
@@ -124,7 +72,6 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> MagicMock
 
 ENVELOPE = {
     "project": "AIPASS",
-    # Data @baud would print, never opened: the paths only have to look like paths.
     "root": "/srv/aipass",
     "generated_at": "2026-08-18T09:00:00Z",
     "error": None,
@@ -159,26 +106,11 @@ def counted_exec(monkeypatch: pytest.MonkeyPatch, seated: None) -> list:
     return calls
 
 
-# ==============================================
-# 1. THE THREADPOOL DOCTRINE, DERIVED FROM THE APP
-# ==============================================
-
-
 @fastapi_required
 class TestReadRoutesRunOffTheEventLoop:
-    """
-    The rule: a route whose body blocks must not be declared async.
+    """The rule: a route whose body blocks must not be declared async."""
 
-    Measured before the change (DPLAN-0305 Audit 2): 34 of this server's route
-    handlers were `async def` and 34 of them never awaited anything. Every one
-    of them held the single uvicorn worker's event loop for the whole of its
-    blocking work — a `baud --snapshot` at 60-90ms, a registry walk, a git
-    exec — while /v1/ping and every other request queued behind it.
-
-    Derived from the app's own routing table on purpose. A written-down list
-    of routes drifts silently; this branch has already been bitten by exactly
-    that (the create_app roll-call named 18 doors out of nearly forty).
-    """
+    # Derived from the app's own routing table: a written-down list of routes drifts silently.
 
     def _v1_routes(self) -> list:
         """Every /v1 route the app registers, with its endpoint and methods."""
@@ -219,22 +151,14 @@ class TestReadRoutesRunOffTheEventLoop:
         with patch(PATCH_SERVER_LOGGER):
             rows = {path: endpoint for path, _methods, endpoint in self._v1_routes()}
 
-        # The floor first: an empty LOOP_SAFE_GETS makes the loop body never
-        # run and this test pass while measuring nothing (seedgo
-        # unentered_assert, 2026-09-07). The exemption list emptying itself is
-        # exactly the change that must not go unnoticed.
+        # The floor first: an empty LOOP_SAFE_GETS would never enter the loop and pass measuring nothing.
         assert LOOP_SAFE_GETS, "the loop-safe exemption list is empty — nothing was checked"
 
         for path in LOOP_SAFE_GETS:
             assert inspect.iscoroutinefunction(rows[path]), f"{path} is in LOOP_SAFE_GETS but no longer async"
 
     def test_the_loop_safe_gets_reach_no_handler_module(self) -> None:
-        """Their claim, checked: ping and whoami call into nothing that blocks.
-
-        This is what makes LOOP_SAFE_GETS a fact rather than an exemption. If
-        someone gives whoami a registry lookup, its body starts naming a
-        handler module and this goes red — the exemption has to be re-earned.
-        """
+        """Their claim, checked: ping and whoami call into nothing that blocks."""
         import ast
 
         tree = ast.parse(SERVER_SOURCE.read_text(encoding="utf-8"))
@@ -249,14 +173,8 @@ class TestReadRoutesRunOffTheEventLoop:
             assert "host_" not in dumped, f"{name} now calls a handler module — it can no longer stay on the loop"
 
     def test_write_routes_are_async_on_purpose(self) -> None:
-        """A decision pin, not an accident.
-
-        The POST routes stay on the loop DELIBERATELY: settings and memory
-        config do read-modify-write with no in-process lock, so the single
-        event loop is currently their only serialization. Moving them into the
-        threadpool without a lock would turn a slow write into a lost one.
-        Flip this only together with that lock (todo: AXIS 2).
-        """
+        """A decision pin, not an accident."""
+        # Settings and memory config read-modify-write with no lock; the event loop is their only serialization.
         import inspect
 
         with patch(PATCH_SERVER_LOGGER):
@@ -269,15 +187,7 @@ class TestReadRoutesRunOffTheEventLoop:
         assert loose == [], f"these write routes left the loop without a lock landing: {loose}"
 
     def test_the_upload_route_is_the_named_exception(self) -> None:
-        """It writes a file of its own, so it has no shared document to lose.
-
-        Named here rather than left to a reader's inference: the reason the
-        upload may leave the loop is NOT that it is fast (it is the slowest
-        write on the server) but that its answer is a file nobody else is
-        writing. Registered as async when python-multipart is missing, and
-        that stand-in does nothing but refuse — so this only asserts when the
-        real route is the one registered.
-        """
+        """It writes a file of its own, so it has no shared document to lose."""
         import inspect
 
         with patch(PATCH_SERVER_LOGGER):
@@ -292,30 +202,13 @@ class TestReadRoutesRunOffTheEventLoop:
 
 @fastapi_required
 class TestASlowReadDoesNotFreezeTheServer:
-    """
-    The behavioural half, counted by events rather than timed by a clock.
-
-    A wall-clock assertion on a threadpool is a flake generator. So the slow
-    route parks on a threading.Event, the fast route is asked while it is
-    parked, and the answer is asserted to have arrived BEFORE the event was
-    released. Nothing is measured in milliseconds.
-    """
+    """The behavioural half, counted by events rather than timed by a clock."""
 
     @contextlib.contextmanager
     def _client(self, tmp_path: Path):
-        """A TestClient in a CONTEXT — one shared event loop across requests.
-
-        This matters more than it looks. Outside a `with`, starlette's
-        TestClient starts a fresh blocking portal (a fresh event loop) per
-        request, and a blocked loop in one request could never be observed
-        from another. Entered, both requests share the server's single loop —
-        which is the thing under test.
-
-        The isolated token store has to stay patched for the REQUESTS too, not
-        just for issuing the token: the auth dependency reads the store on
-        every call, and a client built inside a `with` and then used outside it
-        gets a 401 from the real store. Found by this test failing that way.
-        """
+        """A TestClient in a CONTEXT — one shared event loop across requests."""
+        # Outside a `with`, each request gets a fresh loop and a blocked one is never observed.
+        # The store stays patched for the REQUESTS too: auth re-reads it per call.
         from fastapi.testclient import TestClient
 
         store = tmp_path / "secrets"
@@ -359,12 +252,7 @@ class TestASlowReadDoesNotFreezeTheServer:
                 try:
                     assert entered.wait(timeout=10), "the slow read never reached its handler"
 
-                    # The ping goes on its OWN thread and is waited for with a
-                    # bound. Asking for it inline cannot detect the failure at
-                    # all: on a blocked loop the call simply does not return
-                    # until the slow read lets go, and then answers 204 — which
-                    # is why the first version of this test passed against an
-                    # async /v1/fleet. Proven by mutation.
+                    # Its OWN thread, bounded: inline, a blocked loop just answers 204 late and passes.
                     asker.start()
 
                     assert answered.wait(timeout=5.0), (
@@ -378,19 +266,8 @@ class TestASlowReadDoesNotFreezeTheServer:
 
             assert [answer.status_code for answer in answers] == [204, 200]
 
-            # Order matters and is the claim: the ping (204) landed FIRST,
-            # while the fleet read (200) was still parked in its handler. A 401
-            # on either would have made this a test of the auth refusal path,
-            # which never reaches a handler at all.
-
     def test_the_probe_can_see_a_loop_that_really_is_blocked(self, tmp_path: Path) -> None:
-        """Vacuity floor: the same measurement against a deliberately async block.
-
-        Without this, the test above would pass on a server where every route
-        was async — it would only be proving that the harness runs requests on
-        separate loops. Here the blocking route IS async, so ping cannot be
-        answered until it lets go, and the probe must notice.
-        """
+        """Vacuity floor: the same measurement against a deliberately async block."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -425,7 +302,6 @@ class TestASlowReadDoesNotFreezeTheServer:
 
                 asker.start()
 
-                # The loop is held by the async route, so /fast cannot land.
                 assert not answered_at_ready.wait(timeout=1.0), (
                     "an async blocking route did NOT freeze the loop — this probe cannot detect blocking, "
                     "so the test above proves nothing"
@@ -436,21 +312,9 @@ class TestASlowReadDoesNotFreezeTheServer:
                 asker.join(timeout=10)
 
 
-# ==============================================
-# 2. THE SNAPSHOT IS COALESCED, NOT REPEATED
-# ==============================================
-
-
 @fastapi_required
 class TestTheSnapshotIsCoalesced:
-    """
-    One exec per question per TTL, and one exec per stampede.
-
-    Measured cost of the thing being avoided: `baud --snapshot` spawns a
-    process that walks a 17-branch census off disk, 60-90ms. /v1/fleet and
-    /v1/rooms are the SAME read — rooms is a projection of the fleet envelope —
-    so one screen refresh showing both cards used to pay for it twice.
-    """
+    """One exec per question per TTL, and one exec per stampede."""
 
     def test_a_second_read_inside_the_ttl_does_not_exec(self, counted_exec: list) -> None:
         """The TTL half."""
@@ -471,22 +335,9 @@ class TestTheSnapshotIsCoalesced:
         counted_exec: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The TTL expires — against a clock this test drives, not one it hopes for.
-
-        The first version shrank the TTL to 0.0 and slept 10ms, and went red on
-        Windows only: time.monotonic there advances in ~15.6ms steps, so the
-        two reads can land on the SAME tick, and `0.0 > 0.0` is false — the
-        entry was still fresh by its own arithmetic. Nothing was flaky about
-        it; the test was measuring the platform's timer instead of the rule.
-
-        Driving monotonic makes the real comparison run against a real elapsed
-        time, deterministically, on every platform and with no sleep at all.
-        """
-        # fleet's OWN `time` name, not the real module's attribute: patching
-        # time.monotonic globally would hand this fixed clock to pytest-timeout
-        # and to anything else running during the test. fleet reads monotonic
-        # and nothing else from it, so a two-field stand-in is the whole module
-        # it actually uses.
+        """The TTL expires — against a clock this test drives, not one it hopes for."""
+        # Windows' monotonic ticks in ~15.6ms steps, so a sleep can land on the same tick.
+        # fleet's OWN `time` name: a global time.monotonic patch would freeze pytest-timeout's clock too.
         clock = [1000.0]
         monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
@@ -501,11 +352,7 @@ class TestTheSnapshotIsCoalesced:
         counted_exec: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The other side of the same boundary, on the same driven clock.
-
-        Without this the test above passes against a cache that expires
-        instantly, which is no cache at all.
-        """
+        """The other side of the same boundary, on the same driven clock."""
         clock = [1000.0]
         monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
@@ -527,12 +374,7 @@ class TestTheSnapshotIsCoalesced:
         monkeypatch: pytest.MonkeyPatch,
         seated: None,
     ) -> None:
-        """Single flight: eight callers arriving together spawn ONE process.
-
-        The TTL alone cannot do this — with an empty cache, eight simultaneous
-        callers all miss, and all exec. The fake below is deliberately slow
-        enough that they overlap.
-        """
+        """Single flight: eight callers arriving together spawn ONE process."""
         calls: list = []
         started = threading.Barrier(8, timeout=15)
 
@@ -572,12 +414,7 @@ class TestTheSnapshotIsCoalesced:
         monkeypatch: pytest.MonkeyPatch,
         seated: None,
     ) -> None:
-        """A binary that comes back works on the NEXT request, not in 1.5s.
-
-        Caching the refusal would be cheaper and wrong: it converts a
-        momentary failure into a guaranteed window of refusals, during which
-        the server reports a fleet outage that has already ended.
-        """
+        """A binary that comes back works on the NEXT request, not in 1.5s."""
         outcomes = [_completed(2, "", "nope"), _completed(0, json.dumps(ENVELOPE))]
         monkeypatch.setattr(host_fleet.subprocess, "run", lambda *a, **k: outcomes.pop(0))
 
@@ -587,12 +424,7 @@ class TestTheSnapshotIsCoalesced:
         assert host_fleet.read_snapshot() == ENVELOPE
 
     def test_editing_the_first_answer_does_not_poison_the_cache(self, counted_exec: list) -> None:
-        """The caller who MISSED gets their own object, so the store is safe.
-
-        Without this, the first caller to annotate their envelope would have
-        annotated every caller's for the remainder of the TTL — silently, and
-        only ever under load.
-        """
+        """The caller who MISSED gets their own object, so the store is safe."""
         first = host_fleet.read_snapshot()
         first["branches"][0]["name"] = "TAMPERED"
         first["injected"] = True
@@ -603,13 +435,7 @@ class TestTheSnapshotIsCoalesced:
         assert "injected" not in second
 
     def test_editing_a_cached_answer_does_not_poison_the_cache_either(self, counted_exec: list) -> None:
-        """And so does the caller who HIT — the other half of the same defence.
-
-        Two separate copies stand between a caller and the stored envelope: one
-        when it is put in, one when it is handed out. A test that only mutates
-        the first answer exercises the store-side copy and passes with the
-        hand-out copy deleted — measured, which is why this second test exists.
-        """
+        """And so does the caller who HIT — the other half of the same defence."""
         host_fleet.read_snapshot()
         second = host_fleet.read_snapshot()
         second["branches"][0]["name"] = "TAMPERED"
@@ -650,36 +476,15 @@ class TestTheSnapshotIsCoalesced:
         assert len(counted_exec) == 2
 
 
-# ==============================================
-# 3. THE REGISTRY IS RESOLVED ONCE, AT BOOT
-# ==============================================
-
-
 class TestTheRegistryIsPinnedAtBoot:
-    """
-    drone re-resolves the registry per lookup; a long-lived server pays it.
-
-    Measured 2026-08-18: the walk (up from cwd, glob each parent, credential-
-    check every candidate against the nearest passport) costs 0.73ms, against
-    0.003ms for the env var and ~0 for an explicit pin. Small per call, and
-    this server does it on most read routes.
-
-    ON THE RECORD, because the audit named this as the fix and it is only part
-    of one: the other ~10ms of a drone get_branch_info is an audit-log write
-    and a full registry re-read with a per-branch path resolve, both inside
-    @drone's own tree. Reported to them, not reached into from here.
-    """
+    """drone re-resolves the registry per lookup; a long-lived server pays it."""
 
     def test_pinning_hands_drone_the_path_it_found(self, tmp_path: Path) -> None:
         """The pin is drone's own public door, not an env var we hope is read."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
 
-        # Patched on the module, NOT swapped in sys.modules: `import aipass.drone
-        # as drone` binds through the already-imported parent package's
-        # attribute, so a sys.modules entry is simply not consulted and the
-        # test silently exercises the real registry. Found by this test failing
-        # with the machine's own path in the assertion.
+        # On the module, NOT in sys.modules: `import aipass.drone as drone` binds through the parent package.
         with patch("aipass.drone.get_registry_path", return_value=str(registry)):
             with patch("aipass.drone.set_registry_path") as pin, patch(PATCH_CONFIG_LOGGER):
                 pinned = host_config.pin_registry()
@@ -688,12 +493,7 @@ class TestTheRegistryIsPinnedAtBoot:
         pin.assert_called_once_with(registry)
 
     def test_a_registry_that_is_not_there_pins_nothing(self, tmp_path: Path) -> None:
-        """Never pin a path that does not exist — that freezes a broken answer.
-
-        drone's own resolution has fallbacks (AIPASS_HOME, the package walk).
-        Pinning a missing file would take all of them away for the life of the
-        process, and turn a recoverable miss into a permanent one.
-        """
+        """Never pin a path that does not exist — that freezes a broken answer."""
         with patch("aipass.drone.get_registry_path", return_value=str(tmp_path / "gone.json")):
             with patch("aipass.drone.set_registry_path") as pin, patch(PATCH_CONFIG_LOGGER):
                 pinned = host_config.pin_registry()
@@ -703,12 +503,7 @@ class TestTheRegistryIsPinnedAtBoot:
 
     @fastapi_required
     def test_building_an_app_never_pins(self) -> None:
-        """The isolation rule: create_app is called constantly by this suite.
-
-        Pinning there would mutate the real drone module underneath every other
-        test in the run — a test-order-dependent failure of exactly the kind
-        that takes a day to find. The pin belongs to serve(), which runs once.
-        """
+        """The isolation rule: create_app is called constantly by this suite."""
         with patch("aipass.drone.set_registry_path") as pin, patch(PATCH_SERVER_LOGGER):
             host_server.create_app()
 
@@ -749,28 +544,7 @@ class TestTheRegistryIsPinnedAtBoot:
         assert calls == ["pinned", {"host": "127.0.0.1", "port": 8787, "access_log": False}]
 
 
-# ==============================================
-# 4. (RETIRED 2026-09-04) THE AUDIT TRAIL FETCHES ONE FRAME, NOT THE STACK
-# ==============================================
-#
-# Section 4 tested api's own _get_caller_module_name. DPLAN-0325 replaced this
-# branch's handler with the fleet shim, so there is no detector here to test
-# and no module `sys` on the shim to patch. The comparison three of its cases
-# made - one-frame fetch versus inspect.stack() walk - has no subject at all
-# any more: the one service never had the walk.
-#
-# The claims did not evaporate. Depth and pseudo-frames are pinned in
-# prax/tests/test_repo_root.py; the two that lived only here - a private
-# caller is "unknown", a frame that cannot be fetched is "unknown" and not a
-# crash - moved to seedgo's fleet contract, which runs them against the one
-# implementation instead of against eighteen copies of it. Disposal copy with
-# the full reasoning: tests/.archive/deleted_2026-09-04_test_host_perf_caller_detection.py
-
-
-# hangup() sends SIGHUP, which POSIX has and Windows does not. The attach lane
-# is POSIX-only by construction (open_attach refuses on PTY_AVAILABLE first),
-# so this is an honest platform skip and not a hole: there is no Windows
-# behaviour here being left untested, because there is no Windows behaviour.
+# An honest skip: the attach lane is POSIX-only (open_attach refuses on PTY_AVAILABLE first).
 sighup_required = pytest.mark.skipif(
     not hasattr(signal, "SIGHUP"),
     reason="hangup detaches with SIGHUP, which this platform does not have",
@@ -779,11 +553,7 @@ sighup_required = pytest.mark.skipif(
 
 @pytest.fixture
 def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
-    """A cap of one, already taken, on a host open_attach would otherwise serve.
-
-    The PTY, the winsize stamp and Popen are recorders, so a spawn the cap
-    failed to stop is a list entry and never a real process. Returns that list.
-    """
+    """A cap of one, already taken, on a host open_attach would otherwise serve."""
     slots = threading.BoundedSemaphore(1)
     slots.acquire()
     spawned: list = []
@@ -796,29 +566,13 @@ def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
     return spawned
 
 
-# ==============================================
-# 5. THE PUMP'S THREADS ARE ITS OWN, AND ITS CAP SPEAKS
-# ==============================================
-
-
 class TestThePumpPoolIsBoundedOutLoud:
-    """
-    The silent failure this replaces (DPLAN-0305 Audit 2, finding 9).
+    """The silent failure this replaces (DPLAN-0305 Audit 2, finding 9)."""
 
-    Every live socket parks one thread in a blocking os.read for the whole life
-    of the attach. Those reads went to asyncio's DEFAULT executor, which sizes
-    itself to min(32, cpu_count + 4) — eight threads on this host. The ninth
-    socket completed its handshake, passed auth, was accepted, and then sat
-    with its read queued behind eight threads that never return: a blank
-    terminal and no error anywhere. Nobody chose eight.
-    """
+    # Each socket parks a thread in os.read for life; asyncio's default pool filled and the next socket hung blank.
 
     def test_the_pool_is_the_lanes_own_and_named(self) -> None:
-        """Not asyncio's default: these threads never come back.
-
-        A pool this lane permanently consumes is a pool nothing else can
-        safely borrow, so it does not share one.
-        """
+        """Not asyncio's default: these threads never come back."""
         pool = host_attach.pump_executor()
 
         assert pool is host_attach.pump_executor(), "a new pool per call would uncap the whole thing"
@@ -827,7 +581,6 @@ class TestThePumpPoolIsBoundedOutLoud:
 
     def test_the_pump_hands_its_read_to_that_pool(self) -> None:
         """The pool exists to be used — the read must actually reach it."""
-        # pump.py since 2026-08-21 — the read moved out of server.py with it.
         pump = Path(host_pump.__file__).read_text(encoding="utf-8")
 
         assert "run_in_executor(host_attach.pump_executor(), session.read)" in pump
@@ -841,12 +594,7 @@ class TestThePumpPoolIsBoundedOutLoud:
         assert "baud-api" in str(refusal.value)
 
     def test_the_refusal_does_not_wait_for_a_slot(self, full_pump: list) -> None:
-        """Waiting IS the silent hang, wearing a different hat.
-
-        A blocking acquire would leave the socket accepted and empty until some
-        other operator happened to close a terminal — the same blank screen the
-        default executor gave, with a nicer implementation behind it.
-        """
+        """Waiting IS the silent hang, wearing a different hat."""
         refused = threading.Event()
 
         def _try() -> None:
@@ -862,14 +610,8 @@ class TestThePumpPoolIsBoundedOutLoud:
             waiter.join(timeout=5)
 
     def test_the_cap_is_reserved_before_anything_is_spawned(self, full_pump: list) -> None:
-        """Refused, not opened. A PTY spawned only to be refused is waste.
-
-        Also the ordering that makes the cap real under concurrency: reserving
-        after the spawn would let two sockets arriving together both pass a cap
-        with room for one. full_pump replaces the module-level NAME pty, not an
-        attribute on the real pty module: pty is None on Windows, and the
-        subject here is the bound, not the terminal.
-        """
+        """Refused, not opened. A PTY spawned only to be refused is waste."""
+        # Reserving after the spawn would let two concurrent sockets both pass a cap with room for one.
         with pytest.raises(host_attach.AttachUnavailable):
             host_attach.open_attach("", room="baud-api")
 
@@ -877,22 +619,10 @@ class TestThePumpPoolIsBoundedOutLoud:
 
     @sighup_required
     def test_a_hangup_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Otherwise the server refuses terminals while pumping none.
-
-        Hung up TWICE on purpose — a socket that errors and then closes does
-        exactly that, and a second release would over-credit the pool.
-
-        Skipped where SIGHUP does not exist rather than mocked into working:
-        hangup's whole meaning is the signal a detaching terminal sends, and a
-        platform without it cannot reach this code at all — open_attach refuses
-        on PTY_AVAILABLE long before a session exists to hang up. A mocked
-        signal module would make this pass on Windows while proving nothing
-        about Windows.
-        """
+        """Otherwise the server refuses terminals while pumping none."""
+        # Hung up TWICE: a socket that errors then closes does that, and a second release would over-credit.
         slots = threading.BoundedSemaphore(1)
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
-        # The slot open_attach would have taken for this session, taken by hand
-        # because the session is built by hand.
         slots.acquire()
 
         session = host_attach.AttachSession(MagicMock(), -1, "api", "baud-api")
@@ -900,24 +630,12 @@ class TestThePumpPoolIsBoundedOutLoud:
             session.hangup()
             session.hangup()
 
-        # The slot is back: a fresh reservation succeeds where the cap is one.
-        #
-        # The oracle is the CONTRAST, and it has to be, because a successful
-        # reservation returns None — refusal is a raise. A bare call proved
-        # nothing (seedgo's no_oracle rule, 2026-09-07): a hangup that released
-        # NOTHING and a hangup that released TWICE both left that line silent.
-        # So the cap is exercised in both directions: one reservation fits, and
-        # the next does not, read on the semaphore the module was handed.
+        # The CONTRAST is the oracle: one reservation fits and the next does not, catching zero and double releases.
         assert slots.acquire(blocking=False) is True
         assert slots.acquire(blocking=False) is False
 
     def test_a_failed_spawn_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """No session will be built to own that reservation.
-
-        Without the release, a machine that fails to spawn PUMP_WORKERS times
-        refuses every terminal from then on while pumping precisely none — a
-        leak that only ever shows up on the worst day.
-        """
+        """No session will be built to own that reservation."""
         sized: list = []
         closed: list = []
         slots = threading.BoundedSemaphore(1)
@@ -930,29 +648,14 @@ class TestThePumpPoolIsBoundedOutLoud:
             with pytest.raises(host_attach.AttachUnavailable):
                 host_attach._spawn_pty(["true"], None, "baud-api", close_fd=closed.append)
 
-        # The stand-in descriptors are observed, not discarded (api, fleet green
-        # leg 4): the master was sized, and each end was handed back exactly
-        # once. A list in the order of the closes, not a set: a set hid the
-        # slave's second close in the finally (api, fleet green leg 5).
+        # A list in close order, not a set: a set hides a second close of the same end.
         assert sized == [(-7, host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)]
         assert closed == [-7, -8]
-        # The slot came back: a fresh reservation succeeds where the cap is one.
         assert slots.acquire(blocking=False) is True
 
     def test_an_over_release_is_loud_not_silent_capacity(self) -> None:
-        """A slot handed back twice is an accounting bug, and says so.
-
-        Clamping would be the quiet option and the wrong one: it invents a
-        thread the pool does not have, and the seventeenth socket lands in the
-        same silent hang this whole change exists to delete.
-        """
-        # The MODULE's own semaphore, not a stand-in: a stand-in built here
-        # would be bounded no matter what the module chose, and the pin would
-        # pass with the module downgraded to a plain Semaphore. Proven by
-        # mutation — it survived exactly that way first. Safe to use directly:
-        # a bounded semaphore refuses the over-release rather than performing
-        # it, so this leaves the count where it found it, and the conftest
-        # fixture rebuilds it regardless.
+        """A slot handed back twice is an accounting bug, and says so."""
+        # The MODULE's own semaphore: a stand-in is bounded whatever the module chose, so a downgrade would pass.
         host_attach._reserve_session("baud-api")
         host_attach._release_session()
 

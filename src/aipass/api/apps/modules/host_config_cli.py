@@ -3,28 +3,13 @@
 # Description: Host API Config Module — showing and setting what the server binds, serves and execs
 # Version: 1.0.1
 # Created: 2026-09-14
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Config Module
 
-`host-api config` and `host-api set-config` at the CLI: the bind address, the
-phone face directory and the baud binary the fleet lanes exec.
-
-Split from host_api.py on 2026-09-14, when the baud_bin setting (FPLAN-0589)
-pushed that file past its size cap a second time. The seam is the one
-host_serve.py found: everything here is about STORED SETTINGS, everything left
-there is about tokens, and host_api.py keeps the cross-branch door onto both.
-
-A sub-router like host_serve.py: host_api.py offers it every host-api call and
-owns everything it declines.
-
-Functions:
-    handle_command()      - Claim config/set-config, decline everything else
-    print_introspection() - This module's live self-map
-    _cmd_config()     - Show the effective bind, face and binary
-    _cmd_set_config() - Validate every named setting, then store them
+A sub-router like host_serve.py: host_api.py offers it every host-api call and owns what it declines.
 """
 
 import os
@@ -43,11 +28,6 @@ from aipass.api.apps.modules import host_serve
 SETTING_DEFAULT = "default"
 
 
-# =============================================
-# COMMANDS
-# =============================================
-
-
 def _cmd_config() -> None:
     """Show the effective server configuration."""
     header("Host API Config")
@@ -57,7 +37,6 @@ def _cmd_config() -> None:
     console.print(f"  [cyan]host:[/cyan] {config['host']}")
     console.print(f"  [cyan]port:[/cyan] {config['port']}")
 
-    # The face a server starting now would serve, and which source named it.
     face = host_face.face_location()
     servable = face.has_entry()
     console.print(f"  [cyan]face:[/cyan] {face.root} [dim]({face.source})[/dim]")
@@ -68,7 +47,6 @@ def _cmd_config() -> None:
     console.print("  [dim]A running server serves the face it started with.[/dim]")
     console.print()
 
-    # The binary the next fleet request would exec — resolved per request, so no restart.
     binary = host_fleet.locate_binary()
     runnable = "[green]yes[/green]" if binary.runnable() else "[yellow]no[/yellow]"
     console.print(f"  [cyan]binary:[/cyan] {binary.path or 'not found'} [dim]({binary.source})[/dim]")
@@ -91,14 +69,7 @@ def _cmd_set_config(args: List[str]) -> None:
     """
     Write the server config: the bind address, the face dir, the baud binary.
 
-    Each is a control, so it gets a real command rather than leaving the
-    operator to hand-edit JSON in the secrets store. Every value is validated
-    BEFORE anything is stored — a config that would be refused later is refused
-    at write time, where the person who typed it is still watching.
-
-    One refusal stores nothing. The bind and both paths are all validated first,
-    then the paths are stored, and the bind last, onto a config re-read after
-    them so it cannot overwrite what they wrote.
+    One refusal stores nothing: everything is validated first, then the paths stored, the bind last.
     """
     header("Set Host API Config")
     console.print()
@@ -129,8 +100,7 @@ def _cmd_set_config(args: List[str]) -> None:
             error(f"Port must be a number, got: {port_raw}")
             return
 
-    # Validated only when this command changes the bind: a face dir write must
-    # not be refused over a stored address its caller never touched.
+    # Only when the bind changes: a face dir write is not refused over an address its caller never touched.
     bind_changed = host is not None or port_raw is not None
     if bind_changed:
         try:
@@ -160,35 +130,13 @@ def _cmd_set_config(args: List[str]) -> None:
     console.print()
 
 
-# =============================================
-# PRIVATE HELPERS
-# =============================================
-
-
 def _path_target(raw: str) -> Optional[Path]:
-    """
-    The path a --face-dir or --baud-bin value names.
-
-    Args:
-        raw: A path, "~" expanded here, or SETTING_DEFAULT.
-
-    Returns:
-        The path, or None for SETTING_DEFAULT: clear it, back to automatic.
-    """
+    """The path a --face-dir or --baud-bin value names."""
     return None if raw == SETTING_DEFAULT else Path(os.path.expanduser(raw))
 
 
 def _a_path_setting_is_refused(face_raw: Optional[str], baud_raw: Optional[str]) -> bool:
-    """
-    Validate every path this command names before any of them is stored.
-
-    Args:
-        face_raw: --face-dir's value, or None when it was not given.
-        baud_raw: --baud-bin's value, or None when it was not given.
-
-    Returns:
-        True when one was refused, its error already shown; False when all may be stored.
-    """
+    """Validate every path this command names before any of them is stored."""
     face_target = _path_target(face_raw) if face_raw is not None else None
     baud_target = _path_target(baud_raw) if baud_raw is not None else None
 
@@ -212,15 +160,7 @@ def _a_path_setting_is_refused(face_raw: Optional[str], baud_raw: Optional[str])
 
 
 def _set_baud_bin(raw: str) -> bool:
-    """
-    Store or clear the baud binary named by set-config's --baud-bin.
-
-    Args:
-        raw: An executable file, "~" expanded here, or SETTING_DEFAULT to clear.
-
-    Returns:
-        True when stored or cleared; False when refused, the error already shown.
-    """
+    """Store or clear the baud binary named by set-config's --baud-bin."""
     try:
         stored = host_config.set_baud_bin(_path_target(raw))
     except host_config.BaudBinRefused as e:
@@ -239,15 +179,7 @@ def _set_baud_bin(raw: str) -> bool:
 
 
 def _set_face_dir(raw: str) -> bool:
-    """
-    Store or clear the face dir named by set-config's --face-dir.
-
-    Args:
-        raw: A directory, "~" expanded here, or SETTING_DEFAULT to clear.
-
-    Returns:
-        True when stored or cleared; False when refused, the error already shown.
-    """
+    """Store or clear the face dir named by set-config's --face-dir."""
     try:
         stored = host_config.set_face_dir(_path_target(raw))
     except host_config.FaceDirRefused as e:
@@ -264,33 +196,15 @@ def _set_face_dir(raw: str) -> bool:
     return True
 
 
-# =============================================
-# DRONE ROUTING
-# =============================================
-
-
 SUBCOMMANDS = {"config", "set-config"}
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Claim the stored-settings subcommands of `host-api`.
-
-    Args:
-        command: The routed command name.
-        args: Everything after it, subcommand first.
-
-    Returns:
-        True if this module handled it. False means "not mine" — host_api.py
-        offers every host-api call here and owns everything declined, so an
-        unknown subcommand still reaches its error message.
-    """
-    # Both spellings, matching host_api.py and host_serve.py.
+    """Claim the stored-settings subcommands of `host-api`."""
     if command not in ("host-api", "host_api"):
         return False
 
-    # NO-ARGS GATE and HELP GATE (seedgo standard), as in host_serve.py: the help gate
-    # claims only config and set-config; `host-api --help` is host_api.py's.
+    # The help gate claims only config and set-config; `host-api --help` is host_api.py's.
     if not args:
         print_introspection()
         return True
