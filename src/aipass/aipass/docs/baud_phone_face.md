@@ -5,7 +5,7 @@
 *How the phone bundle and `baud-cli` get onto a machine, and what refuses an install.*
 
 @api's host server serves @baud's phone bundle. A source checkout builds it with
-node; everyone else gets it from a baud release (FPLAN-0587). AIPass never
+node; everyone else gets it from a baud release. AIPass never
 vendors the bundle, so the two licences stay apart.
 
 - **Fetch.** The public release download first. `latest` resolves the tag before
@@ -26,7 +26,7 @@ vendors the bundle, so the two licences stay apart.
   `phone` -> `phone.prev`, staging -> `phone`, prev dropped. If the swap fails,
   the previous install goes back. A non-empty destination without the marker is
   refused: it is not an install this command made.
-- **baud-cli** (FPLAN-0589). The headless binary, `baud-cli-<tag>-linux-x86_64`,
+- **baud-cli**. The headless binary, `baud-cli-<tag>-linux-x86_64`,
   from the same release and the same door. It is verified against the same
   `SHA256SUMS.txt` BEFORE the face is placed, so a bad binary refuses the whole
   install. It lands at `bin/baud-cli` beside the face's directory: bytes copied

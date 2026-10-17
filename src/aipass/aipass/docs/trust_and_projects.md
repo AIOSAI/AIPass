@@ -24,7 +24,7 @@ re-enrols after it writes, because the file it just rewrote has a new hash.
 
 The registry module itself belongs to @hooks
 (`aipass.hooks.apps.handlers.config.trust_registry`, a frozen interface by
-DPLAN-0244 design) — this branch is a consumer of it, which is why the
+design) — this branch is a consumer of it, which is why the
 cross-branch import is a written bypass rule rather than an accident.
 
 | Command | What it does |
