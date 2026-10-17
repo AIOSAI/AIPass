@@ -2,10 +2,10 @@
 
 # Rollover limit config verbs
 
-**Branch** memory · **Code** `apps/modules/rollover.py` (the config verbs), `apps/handlers/json/config_loader.py`, `apps/handlers/json/budget.py`, `apps/handlers/cli/json_flag.py`
+**Branch** memory · **Code** `apps/modules/rollover.py` (routes `config`), `apps/modules/rollover_config.py` (the config verbs), `apps/modules/rollover_json.py` (the `--json` writer), `apps/handlers/json/config_loader.py`, `apps/handlers/json/budget.py`, `apps/handlers/cli/json_flag.py`
 
 `drone @memory config` is the verb surface over the rollover entry-count limits in
-`memory.config.json`, so nothing hand-edits that file (DPLAN-0302). @api execs these verbs to serve
+`memory.config.json`, so nothing hand-edits that file. @api execs these verbs to serve
 the BAUD settings panels, which makes **the CLI output and the refusal sentences the API contract** —
 change them and something downstream breaks.
 
@@ -31,9 +31,8 @@ same: `config get` shows it (`read_only: true` under `--json`), and `set` / `set
 `'todos' is display-only in v1: config get shows its count, config set cannot change it`.
 
 **Bounds:** `1 <= count <= 100`. Zero would roll over every entry immediately; past 100 rollover
-stops being rollover. Unknown branches are refused against the registry — registry is truth. That
-flat bound is no longer the whole story: a count also has to fit its FILE, which is the ceiling
-below and is always the lower of the two.
+stops being rollover. Unknown branches are refused against the registry — registry is truth. A count
+also has to fit its FILE, which is the ceiling below and is always the lower of the two.
 
 **Effective limits resolve per FILE KEY, not per leaf key** — `config get` mirrors
 `monitor/detector.py` `_should_rollover` exactly. If `per_branch[branch]["local"]` exists at all,
@@ -47,34 +46,29 @@ the two together with the engine as the oracle.
 every branch an override — pure noise. A value is an override when it differs from the
 corresponding default.
 
-*Live state, measured 2026-08-25:* `per_branch` is **empty** in both `rollover` and `entry_limits`,
-so every branch resolves from `defaults` and `config get @branch` reports
-`source: "defaults"`. The registry carries **18** active branches, which is the number
-`rollover push` materializes and reports.
-
 **`set-default` does not touch `per_branch`.** It changes `defaults` only — which means already
 materialized branches keep their old numbers and start reporting as `[OVERRIDE]`. `rollover push`
-remains the one explicit fleet-wide reset that brings every branch back to the defaults; its
-semantics are unchanged. Writes go through `config_loader._write_config_file` (atomic tmp +
+is the one explicit fleet-wide reset that brings every branch back to the defaults. Writes go through `config_loader._write_config_file` (atomic tmp +
 `os.replace`) and inherit the no-clobber contract: a config that exists but cannot be read is
 refused, never rewritten.
 
 **Apply timing:** limits take effect on the next rollover run (daemon tick) — there is no
-immediate-kick verb in v1. The `*_meta` tab strings in `.trinity/` files are likewise re-rendered by
-the next `rollover run` that touches the branch (scoped to what it rolled) or by the next
-`drone @memory push`, so a freshly changed limit is live in the engine before it is visible in the tab
-text. `rollover report-lines` does not re-render them — it writes nothing.
+immediate-kick verb in v1. The `*_meta` tab strings follow the write: a `config` limit write
+re-renders the meta lines of every registry branch whose enforced count moved
+(`tab_renderer.refresh_moved_limits`, both configs resolved through `config_loader.resolve_limits`,
+so a branch holding its own count keeps its file untouched); a line left stale is printed as a
+warning. `rollover report-lines` does not re-render them — it writes nothing.
 
 ---
 
 ## The keep-count ceiling — a count has to fit its file
 
-Landed 2026-09-15 (FPLAN-0593 Phase 1). The caps in `entry_limits` bound a single ENTRY. The budgets
-in `entry_limits.file_budgets` bound a whole FILE. Nothing in between bounded the NUMBER of entries,
-so a keep-count was free to multiply a legal entry until the file it sits in was illegal — every
-entry inside its cap, the document over budget, and no surface able to say which number was wrong.
+The caps in `entry_limits` bound a single ENTRY. The budgets in `entry_limits.file_budgets` bound a
+whole FILE. The ceiling bounds the NUMBER of entries in between: without it a keep-count could
+multiply a legal entry until the file it sits in is illegal — every entry inside its cap, the
+document over budget, and no surface able to say which number is wrong.
 
-The missing arithmetic lives in `handlers/json/budget.py`. It is per file, because that is the unit a
+The arithmetic lives in `handlers/json/budget.py`. It is per file, because that is the unit a
 budget names, and it needs co-tenants, because a `.trinity` file is shared:
 
 ```
@@ -116,11 +110,10 @@ what the engine will do, and a warning names the count, the ceiling, the worst c
 the co-tenants. The count snapshot is taken **before any clamp**, so every ceiling is measured
 against the same co-tenants and clamping one type cannot silently buy room for the next one in
 iteration order. `_clamp_to_budget` also re-decides `is_override` against the clamped value.
-A caller holding only the rollover section gets the pre-1.5.0 behaviour, unclamped, which is why the
-accessors all pass `entry_limits` through.
+A caller holding only the rollover section gets unclamped counts, which is why the accessors all pass
+`entry_limits` through.
 
-**The ceilings as they stand.** Measured 2026-09-15 against the shipped defaults (sessions 15,
-key_learnings 15, todos 10, observations 15):
+**The ceilings at the shipped defaults** (sessions 15, key_learnings 15, todos 10, observations 15):
 
 | Type | Ceiling | File | Budget | Co-tenants it was measured against |
 |---|---|---|---|---|
@@ -138,12 +131,12 @@ read, and the BOUNDS block of `config --help` prints the live numbers rather tha
 ## `--json` — the machine surface
 
 `config get`, `config get @branch`, `config set`, `config set-default` and `rollover push` all take
-`--json`. It exists because @api serves BAUD's memory-settings screens from these verbs and was
-**reading the rendered human output** — every wording change was a silent breakage waiting to happen.
+`--json`. It exists because @api serves BAUD's memory-settings screens from these verbs, and a caller
+reading the rendered human output breaks silently on every wording change.
 
-**`ok` is the machine success signal.** Refusals exit 0 branch-wide (that ruling is not this arc's to
-change), so an exit code tells a caller nothing and the old alternative was inferring failure from
-output *shape*. Every payload carries `ok` and `verb`; a refusal is `ok: false` plus `error` and
+**`ok` is the machine success signal.** Under `--json` a refusal is emitted as a payload and exits 0
+(the human path exits 2), so the exit code tells a machine caller nothing and failure is never
+inferred from output *shape*. Every payload carries `ok` and `verb`; a refusal is `ok: false` plus `error` and
 `suggestion` — **the exact sentences the human path prints**, because those are the published
 contract. `suggestion` is always present, `null` where the refusal genuinely has no remedy line
 (the unreadable-config refusal is the one such case).
@@ -151,22 +144,24 @@ contract. `suggestion` is always present, `null` where the refusal genuinely has
 **The flag rides in any slot** and is stripped before positional parsing, so
 `config set @memory sessions 25 --json` parses identically to the same line without it.
 **`--help` still outranks `--json`**: `config set @memory sessions 25 --help --json` prints help and
-writes neither the config nor a payload — same rule that stopped `rollover push --help` from
-performing the fleet-wide reset it was being asked to describe.
+writes neither the config nor a payload, the same rule that keeps `rollover push --help` from
+performing the fleet-wide reset it is being asked to describe.
 
 **Exactly one JSON document reaches stdout** — no panels, no banners, nothing else, and stderr stays
-silent. The payload never travels through Rich: the shared console is width-80 with
-`is_terminal=False`, so it hard-wraps a long document and a wrap landing inside a string value
-inserts a newline *into* the value; it also parses markup, so a `[...]` token inside a string is
-eaten as a style name. Both corruptions are invisible to a test that asserts on the string handed to
-the printer, so `rollover._emit()` writes through `sys.stdout` and the tests assert on what reached
-the pipe.
+silent. `rollover_json._emit()` writes through the shared console with Rich's three text
+behaviours turned off (`soft_wrap=True`, `markup=False`, `highlight=False`): the console is width-80
+with `is_terminal=False`, so by default it hard-wraps a long document and a wrap landing inside a
+string value inserts a newline *into* the value; markup would eat a `[...]` token inside a string as
+a style name; and the highlighter would inject ANSI styling on a terminal. All three corruptions are
+invisible to a test that asserts on the string handed to the printer, so the tests assert on what
+reached the pipe.
 
 ```jsonc
 // config get --json
 {"ok": true, "verb": "config get",
  "defaults": {"sessions": {"count": 15, "auto_compact_cap": 3},
-              "key_learnings": {"count": 15}, "observations": {"count": 15}},
+              "key_learnings": {"count": 15}, "observations": {"count": 15},
+              "todos": {"count": 10, "read_only": true}},
  "overrides": {"devpulse": {"sessions": {"count": 25, "default_count": 15,
                                          "is_override": true, "source": "per_branch"}}}}
 
@@ -201,9 +196,9 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 `set-default` reaches **no** branch — `rollover push` is what delivers it. It is reported by
 `config_loader`, not synthesized in the module, so the payload cannot drift from what the writer did.
 
-*Note: the `count: 25` payloads above are the shipped examples and predate the ceiling. A real
-`config set @memory sessions 25` is refused today — 25 is over the sessions ceiling of 16 — and
-answers with the `ok: false` shape.*
+*Note: the `count: 25` payloads above show the success shape. At the shipped defaults a real
+`config set @memory sessions 25` is refused (25 is over the sessions ceiling of 16) and answers with
+the `ok: false` shape.*
 
 ---
 

@@ -20,7 +20,7 @@ libraries. Python interpreter resolved via `_get_memory_python()` (env var `AIPA
 
 ## `vectorize_and_store` — text in, this branch owns the model
 
-Shipped in 1.4.0 on 2026-08-23. `chroma_subprocess.py` gained a **text-in** operation so another
+`chroma_subprocess.py` has a **text-in** operation so another
 branch can archive its own content without ever choosing an embedding model:
 
 ```
@@ -31,27 +31,25 @@ vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None)
     → timeout max(30, len(texts) * 3)s; always returns an explicit success flag
 ```
 
-Caller today: `@ai_mail`'s `handlers/email/purge.py` — it sends sent/deleted mail as text before
-deleting the originals (`ai_mail_email_sent`, `ai_mail_email_deleted`). The model choice stays here
-because consistency across a collection is this branch's job, not the caller's.
+Callers: `@ai_mail`'s `handlers/email/purge.py`, which sends sent/deleted mail as text before
+deleting the originals (`ai_mail_email_sent`, `ai_mail_email_deleted`), and this branch's own trinity
+push (`handlers/templates/push_store.vectorize_and_store_subprocess`). The model choice stays here
+because consistency across a collection is this branch's job, not the caller's: two callers encoding
+with two models would put unsearchable vectors in one collection.
 
-**Why it exists.** From its creation in March 2026 until the fix on 2026-08-24 — more than five
-months — `purge.py` called an operation that did not exist. The handler
-answered `success: false` on stdout and **exited 0**; the caller checked only the return code, so
-purge reported mail vectorized and deleted it. 55 purges across 11 branches into a collection that
-had never been created. An unknown operation that exits 0 is a lie — the operation now exists, and
-the caller reads the payload.
+**Read the payload, not the exit code.** An operation the handler does not know answers
+`{"success": false, "error": "Unknown operation: <name>"}` on stdout and exits 0; only an exception
+inside an operation exits 1. A caller that checks only the return code reads a refusal as a store.
 
 ---
 
 ## Anchored plan-ID matching
 
-From 1.3.0. `_source_matches()` backs `drone @memory verify`. A plain `label in source_file` had no
-boundary check, so `DPLAN-0012` matched inside `TDPLAN-0012` — `verify DPLAN-0012` reported 27 chunks
-live that all belonged to a different plan. A hit now counts only at the string start or after a
+`_source_matches()` backs `drone @memory verify`. A plain substring test has no boundary check, so
+`DPLAN-0012` would match inside `TDPLAN-0012`. A hit counts only at the string start or after a
 non-alphanumeric boundary, and scanning continues past a rejected hit so a real match later in the
 same string (`TDPLAN-0012_supersedes_DPLAN-0012`) is still found. The same predicate is shared by
-`_delete_by_source`, which **deletes** — that call site was the reason to fix it at the source.
+`_delete_by_source`, which **deletes**, which is why the boundary lives in the shared predicate.
 
 ---
 

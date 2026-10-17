@@ -4,7 +4,7 @@
 
 **Branch** memory · **Code** `apps/modules/todo.py`, `apps/handlers/rollover/todo_roll.py`, `apps/handlers/rollover/todo_report.py`
 
-The v2 pad and backlog landed 2026-09-15 (DPLAN-0345). A todo is a sticky note: one line of what to
+A todo is a sticky note: one line of what to
 do — "Check on seedgo's errors in logs", "fix drone help". The pad holds a few; the ones that roll
 off wait in a plain file.
 
@@ -46,11 +46,11 @@ lane: where a todo goes, when, and what refuses.
 
 ## The verbs, and what they print
 
-Measured on this machine 2026-09-15. `drone @memory todo` run from `src/aipass/memory` answers with
-the pad and backlog counts:
+`drone @memory todo` run from `src/aipass/memory` answers with the pad and backlog counts:
 
 ```
-memory: pad 6 of 10 · backlog 0 (no backlog yet: .backup/todo/memory/backlog.json)
+memory: pad N of 10 · backlog M (.backup/todo/memory/backlog.json)
+memory: pad N of 10 · backlog 0 (no backlog yet: .backup/todo/memory/backlog.json)
 ```
 
 The same verb from the repo root resolves no branch, and says which argument fixes it:
@@ -66,15 +66,15 @@ memory: no backlog - .backup/todo/memory/backlog.json does not exist. Nothing ha
 ```
 
 A backlog with records prints a header, then one line per record — original number · date · priority
-(when set) · rolled · reason · task (from the scratch proof below):
+(when set) · rolled · reason · task:
 
 ```
-memory backlog: 3 record(s), oldest roll first (.backup/todo/memory/backlog.json)
-  #2 · 2026-09-15 · priority medium · rolled 2026-09-15T02:32:49-07:00 · overflow · fix drone help
+memory backlog: N record(s), oldest roll first (.backup/todo/memory/backlog.json)
+  #<number> · <date> · priority <p> · rolled <iso> · <reason> · <task>
 ```
 
-`status` is never printed: the records the first push moves carry the old `status` text verbatim —
-about 65k characters of it on devpulse's pad alone (DPLAN-0345).
+`status` is never printed: a record moved for being non-canonical keeps any `status` it carried,
+verbatim, and that text can be long.
 
 ---
 
@@ -92,14 +92,13 @@ about 65k characters of it on devpulse's pad alone (DPLAN-0345).
   refuses the restore, nothing written). The pad is written and read back first; only then is the record removed from
   the backlog. It re-numbers because an emptied pad restarts at 1 while the backlog already holds 1..N,
   and a restored todo keeping its low number would be the first to roll again.
-- **A NON-CANONICAL todo cannot be restored** — since the closed field shape landed (FPLAN-0593
-  Phase 1, 2026-09-15) the pad write is refused by the write gate. `memory_files.write_memory_file`
+- **A NON-CANONICAL todo cannot be restored**: the pad write is refused by the write gate. `memory_files.write_memory_file`
   judges a write by what it AUTHORS, and a restored record is authored by that write, so a legacy
   `status` key, a task over its cap, an unknown key or a wrong type is measured by
   `entry_limits.check_fields` and refused. `restore_todo` surfaces the writer's sentence under
   `NOTHING RESTORED`, and **both files are left exactly as found** — the pad is not written, the
   backlog record is not removed. That is the intended end state: the machine will not reshape
-  someone's open work to make it fit. `drone @memory todo backlog` is still the way to read the text,
+  someone's open work to make it fit. `drone @memory todo backlog` is the way to read the text,
   and re-adding it by hand in the canonical shape is the way back onto the pad.
 - **Numbers are never re-issued on purpose.** The next number is one past the highest of: the pad, the
   backlog's original numbers, the backlog's `document_metadata.high_water`, and N − 1 from the `next #N`
@@ -112,16 +111,6 @@ about 65k characters of it on devpulse's pad alone (DPLAN-0345).
 - **Every refusal exits non-zero** (2: routed, refused); a refused argument also names the valid forms.
   There is no `--json` on these verbs — nothing reads them by machine — and the flag is refused like
   any other unknown argument rather than silently ignored.
-
----
-
-## The scratch proof
-
-**Measured on a copy** of this branch's `local.json` (2026-09-15, scratch paths, the real file's sha256
-unchanged, no `.backup/todo/` created): 12 canonical todos → roll → pad 10, backlog #1, #2; restore on
-the full pad refused `pad is full (10/10)`, both files byte-identical; #7 deleted, restore #1 → **#13**
-with task, date and priority identical, backlog down to #2; #14 and #15 added, re-roll → pad 10,
-backlog #2, #3, #4.
 
 ---
 
