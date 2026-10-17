@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_state_leak_check.py
 # Description: state_leak_check — test template v1 item 18, no test leaks state into the next
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/state_leak_check.py."""
@@ -413,3 +413,196 @@ class TestThroughTheChecklistCommand:
         out = capsys.readouterr().out
         assert "✓ state_leak" in out
         assert "[FAIL] — state_leak" not in out
+
+
+#: @backup's stop_flag.py as PR 792 shipped it: a module-level dict, writers, and its own public reset.
+STOP_FLAG = """import signal
+from contextlib import contextmanager
+
+_STATE = {"requested": False, "stopped": False, "depth": 0}
+
+
+def _on_sigterm(signum, frame):
+    _STATE["requested"] = True
+
+
+def stop_requested():
+    return _STATE["requested"]
+
+
+def reset_stop_state():
+    _STATE["requested"] = False
+    _STATE["stopped"] = False
+
+
+@contextmanager
+def catch_sigterm():
+    if _STATE["depth"] == 0:
+        reset_stop_state()
+    _STATE["depth"] += 1
+    previous = signal.signal(signal.SIGTERM, _on_sigterm)
+    try:
+        yield
+    finally:
+        _STATE["depth"] -= 1
+        signal.signal(signal.SIGTERM, previous)
+
+
+def stopped_line(done, total):
+    return f"stopped by request: {done} of {total} files"
+"""
+
+#: test_stop.py's lane case before the cure: a real handler call inside catch_sigterm, no reset after.
+STOP_TEST = """import signal
+
+from aipass.backup.apps.handlers.state import stop_flag
+
+
+def test_upload_batch_stopped_part_way():
+    with stop_flag.catch_sigterm():
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+    assert stop_flag.stop_requested()
+"""
+
+#: backup's conftest before the cure: the template's display reset, nothing for the stop flag.
+PRE_CURE_CONFTEST = """import pytest
+
+from aipass.cli.apps.modules import display
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state():
+    yield
+    display.reset_command_state()
+"""
+
+CURE = """
+
+@pytest.fixture(autouse=True)
+def clean_stop_state():
+    stop_flag.reset_stop_state()
+    yield
+    stop_flag.reset_stop_state()
+"""
+
+
+def _branch(tmp_path, test_source, conftest=PRE_CURE_CONFTEST, product=STOP_FLAG):
+    """A repo under tmp_path: the product module, the branch's conftest, one test file; returns the test file."""
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    state = tmp_path / "src" / "aipass" / "backup" / "apps" / "handlers" / "state"
+    state.mkdir(parents=True)
+    (state / "stop_flag.py").write_text(product, encoding="utf-8")
+    tests_dir = tmp_path / "src" / "aipass" / "backup" / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "conftest.py").write_text(conftest, encoding="utf-8")
+    path = tests_dir / "test_stop.py"
+    path.write_text(test_source, encoding="utf-8")
+    return path
+
+
+def _resets(path):
+    """The shape (d) hits for one test file on disk."""
+    return state_leak_check.scan_product_resets(path, path.read_text(encoding="utf-8"))
+
+
+def _lines_of(hits):
+    """Just the lines of scan_product_resets' hits."""
+    return [line for line, _what, _cure in hits]
+
+
+class TestAProductsOwnResetThatNoFixtureCalls:
+    """Shape (d), PR 792's miss 1: the write goes through the product's API, so only its declared reset undoes it."""
+
+    def test_the_pre_cure_stop_test_is_convicted_at_the_catch_sigterm_line(self, tmp_path):
+        path = _branch(tmp_path, STOP_TEST)
+
+        assert _resets(path) == [
+            (
+                7,
+                "stop_flag.catch_sigterm() writes the product's own state and nothing calls reset_stop_state()",
+                "an autouse fixture in conftest.py calling reset_stop_state()",
+            )
+        ]
+
+    def test_check_module_scores_the_pre_cure_file_zero_and_names_the_reset(self, tmp_path):
+        result = state_leak_check.check_module(str(_branch(tmp_path, STOP_TEST)))
+
+        assert result["score"] == 0
+        assert "test_stop.py:7 stop_flag.catch_sigterm()" in result["checks"][0]["message"]
+
+    def test_backups_conftest_cure_acquits_it(self, tmp_path):
+        cured = PRE_CURE_CONFTEST.replace(
+            "display\n", "display\nfrom aipass.backup.apps.handlers.state import stop_flag\n"
+        )
+        path = _branch(tmp_path, STOP_TEST, conftest=cured + CURE)
+
+        assert _resets(path) == []
+        assert state_leak_check.check_module(str(path))["score"] == 100
+
+    def test_the_same_fixture_in_the_test_file_acquits_it(self, tmp_path):
+        path = _branch(tmp_path, STOP_TEST.replace("import signal\n", "import signal\nimport pytest\n") + CURE)
+
+        assert _resets(path) == []
+
+    def test_a_named_conftest_fixture_acquits_only_the_test_that_requests_it(self, tmp_path):
+        named = PRE_CURE_CONFTEST + CURE.replace("(autouse=True)", "")
+        source = (
+            "from aipass.backup.apps.handlers.state import stop_flag\n\n\n"
+            "def test_asks(clean_stop_state):\n    with stop_flag.catch_sigterm():\n        pass\n\n\n"
+            "def test_does_not_ask():\n    with stop_flag.catch_sigterm():\n        pass\n"
+        )
+
+        assert _lines_of(_resets(_branch(tmp_path, source, conftest=named))) == [10]
+
+    def test_a_fixture_named_in_usefixtures_counts_as_requested(self, tmp_path):
+        named = PRE_CURE_CONFTEST + CURE.replace("(autouse=True)", "")
+        source = STOP_TEST.replace("import signal\n", "import signal\nimport pytest\n").replace(
+            "def test_upload", '@pytest.mark.usefixtures("clean_stop_state")\ndef test_upload'
+        )
+
+        assert _resets(_branch(tmp_path, source, conftest=named)) == []
+
+    def test_a_reset_in_the_tests_own_finally_acquits_it(self, tmp_path):
+        source = STOP_TEST.replace(
+            "    with stop_flag.catch_sigterm():\n        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)\n",
+            "    try:\n        with stop_flag.catch_sigterm():\n            pass\n    finally:\n"
+            "        stop_flag.reset_stop_state()\n",
+        )
+
+        assert _resets(_branch(tmp_path, source)) == []
+
+    def test_a_writer_imported_by_name_is_convicted_too(self, tmp_path):
+        source = "from aipass.backup.apps.handlers.state.stop_flag import catch_sigterm\n\n\ndef test_x():\n"
+        source += "    with catch_sigterm():\n        pass\n"
+
+        assert [what for _l, what, _c in _resets(_branch(tmp_path, source))] == [
+            "catch_sigterm() writes the product's own state and nothing calls reset_stop_state()"
+        ]
+
+    def test_a_writer_reached_through_a_same_module_call_is_convicted(self, tmp_path):
+        """display.error() is the fleet's case: it writes _CMD_STATE only through mark_command_failed()."""
+        product = STOP_FLAG + "\n\ndef abort():\n    _on_sigterm(15, None)\n"
+        source = "from aipass.backup.apps.handlers.state import stop_flag\n\n\ndef test_x():\n    stop_flag.abort()\n"
+
+        assert _lines_of(_resets(_branch(tmp_path, source, product=product))) == [5]
+
+    def test_a_test_that_only_reads_the_flag_is_a_known_miss(self, tmp_path):
+        """test_versioned_engine.py's side: the reader needs a call graph, so it is never convicted."""
+        source = "from aipass.backup.apps.handlers.state import stop_flag\n\n\ndef test_x():\n"
+        source += "    assert not stop_flag.stop_requested()\n    assert stop_flag.stopped_line(1, 2)\n"
+
+        assert _resets(_branch(tmp_path, source)) == []
+
+    def test_a_product_global_with_no_declared_reset_is_never_charged(self, tmp_path):
+        product = STOP_FLAG.replace("def reset_stop_state():", "def _clear():").replace(
+            "reset_stop_state()", "_clear()"
+        )
+
+        assert _resets(_branch(tmp_path, STOP_TEST, product=product)) == []
+
+    def test_a_reset_that_writes_no_module_container_declares_nothing(self, tmp_path):
+        product = STOP_FLAG.replace(
+            '_STATE = {"requested": False, "stopped": False, "depth": 0}', "_STATE = make_state()"
+        )
+
+        assert _resets(_branch(tmp_path, STOP_TEST, product=product)) == []

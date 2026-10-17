@@ -9,6 +9,14 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **state_leak gains a fourth shape: a product's own reset that no fixture calls** (@seedgo, `aipass_standards/state_leak_check.py` 1.2.0, `state_leak_content.py` 1.1.0, `state_leak.md` v1.2, `windows_compat.md` v1.1, `docs/aipass_standards_tests_2.md`, `tests/test_state_leak_check.py` 1.2.0; the two misses behind PR #792's red, CI 38999228669 and 38999228656). The product declares its own undo: a module-level dict, list or set plus a public `reset*` that writes it. A test calling a function that writes that container, imported at file top, is convicted when nothing calls the reset: no autouse fixture in the file or any conftest up the tree, no requested or `usefixtures` fixture, no reset in the test's own `finally`. Backup's pre-cure `test_stop.py` convicts at the `catch_sigterm` line; the fleet's 940 test files score 0 hits, and with the reset credit off there are 82 real writer sites each already cured by a conftest fixture, so the arm gates. Stated limits: the reader side (a test that only reads the leaked global needs a call graph), function-local imports, writers reached through another module. The macOS tmp-prefix miss is HELD for a checker: the prefix is the host's, not the test's, so `windows_compat.md` now carries a path-length section (macOS's ~150-character tmp path, the 64-character name at ~280 there and ~230 on Linux, short fixture names or an assertion that spells the math). 12 red-first tests, 10 mutants red; suite 6062; the full gate green with the arm on.
+
+---
+
 ## [2026-10-16] — v2.8.19: the comment budget, a project's manager edits its own project's files, the phone's loose ends (BAUD w3-w7 host side), drone @git release list, seedgo's windows-compat third arm
 
 ### Added

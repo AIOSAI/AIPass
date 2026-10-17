@@ -1,6 +1,6 @@
 # State Leak Standards
-**Status:** v1
-**Date:** 2026-09-22
+**Status:** v1.2
+**Date:** 2026-10-16
 
 ---
 
@@ -62,8 +62,9 @@ The leak was cured anyway, in the same dispatch — see below.
 
 ## The rule
 
-A write to shared state, **at test time**, with nothing to put it back. Three shapes,
-measured 2026-09-22 over the fleet's 580 test files:
+A write to shared state, **at test time**, with nothing to put it back. Four shapes: the
+three below, measured 2026-09-22 over the fleet's 580 test files, and shape (d), a product's
+own reset that no fixture calls, measured 2026-10-16 (its own section below):
 
 | shape | hits | spelling |
 |---|---|---|
@@ -97,6 +98,58 @@ names the reason rather than the shape:
 ```
 conftest.py:12 patch(...).start() holds no patcher, so nothing can stop it - stop() in teardown, or addCleanup(p.stop)
 ```
+
+### Shape (d): a product's own reset that no fixture calls
+
+The three shapes above see a write the TEST spells. Shape (d) sees one the product makes on
+the test's behalf, through its own API, when the product itself declares the undo:
+
+- the **product module** binds a dict, list or set at its top level, writes it inside its
+  functions (a subscript store, an in-place verb, a `global` rebind), and has a **public
+  `reset*` function** that writes the same container;
+- a **test** imports that module, or one of its writers by name, at the top of the file and
+  calls a function that writes the container, directly or through a same-module call;
+- **nothing calls the reset**: no autouse fixture in the file or in any `conftest.py` from the
+  test's directory up to the project root (`pyproject.toml` or `.git`), no fixture the test
+  requests that calls it, no call to it in the test's own `finally`.
+
+```
+test_stop.py:259 stop_flag.catch_sigterm() writes the product's own state and nothing calls reset_stop_state() - an autouse fixture in conftest.py calling reset_stop_state()
+```
+
+The specimen is PR 792's CI red (Linux run 38999228669, macOS run 38999228656):
+`backup/apps/handlers/state/stop_flag.py` keeps `_STATE` and declares `reset_stop_state()`;
+`test_stop.py` fires the installed SIGTERM handler inside `catch_sigterm` and nothing lowers the
+flag, so under `xdist --dist loadscope` the next versioned class on that worker copies nothing.
+The file at `fdc1b4a2~1` is convicted at line 259; with the `clean_stop_state` autouse fixture
+`fdc1b4a2` added to `tests/conftest.py`, it is acquitted.
+
+| shape | verdict | pin |
+|---|---|---|
+| a writer called, reset in no fixture (`fdc1b4a2~1`) | convicted | `test_the_pre_cure_stop_test_is_convicted_at_the_catch_sigterm_line` |
+| a writer imported by name (`from ...stop_flag import catch_sigterm`) | convicted | `test_a_writer_imported_by_name_is_convicted_too` |
+| a writer reached through a same-module call (`display.error()` → `mark_command_failed()`) | convicted | `test_a_writer_reached_through_a_same_module_call_is_convicted` |
+| an autouse fixture in `conftest.py` calls the reset (`fdc1b4a2`) | acquitted | `test_backups_conftest_cure_acquits_it` |
+| the same fixture in the test file | acquitted | `test_the_same_fixture_in_the_test_file_acquits_it` |
+| a named fixture, for the tests that request it only | acquitted / convicted | `test_a_named_conftest_fixture_acquits_only_the_test_that_requests_it` |
+| a fixture named in `@pytest.mark.usefixtures` | acquitted | `test_a_fixture_named_in_usefixtures_counts_as_requested` |
+| the reset in the test's own `finally` | acquitted | `test_a_reset_in_the_tests_own_finally_acquits_it` |
+| a module container with no public `reset*` | never charged | `test_a_product_global_with_no_declared_reset_is_never_charged` |
+| a `reset*` that writes no module-level container | never charged | `test_a_reset_that_writes_no_module_container_declares_nothing` |
+| a test that only READS the state (`test_versioned_engine.py`) | **known miss** | `test_a_test_that_only_reads_the_flag_is_a_known_miss` |
+
+**Fleet standing, 2026-10-16, 940 test files: 0 hits.** Three product modules declare a reset:
+`backup/.../state/stop_flag.py` (`reset_stop_state`), `cli/apps/modules/display.py`
+(`reset_command_state`) and `api/apps/handlers/host/fleet.py` (`reset_snapshot_cache`). 82 test
+sites call one of their writers (api 51 in 3 files, cli 28 in 2, commons 2 in 1, backup 1 in 1,
+counted with the reset credit switched off); every one is acquitted by an autouse fixture in its
+branch's `conftest.py` that calls the reset. Shape (d) is scored with the other three.
+
+**The reader side is a known miss.** `test_versioned_engine.py` is the file that went red, and it
+calls `copy_versioned`, which reads `stop_requested()` from another module. Seeing it needs a
+call graph across modules; the rule convicts the writer only. Imports inside a function, and a
+writer reached from another module (`entry.main()` → a lane → `catch_sigterm`), are missed for
+the same reason.
 
 ### Depth ONE, and that restriction is the rule
 
@@ -185,14 +238,17 @@ writes anything. Item 18's rule cannot see a test that only reads.
 
 ## Known limits
 
-**A fixture in the file's `conftest.py` is invisible.** One pass reads one file, so a
-restoring fixture next door cannot be credited. Nothing in the fleet currently relies on one
-for these families; a future one would be a false positive, and an obvious one.
+**For shapes (a) to (c), a fixture in the file's `conftest.py` is invisible.** That pass reads
+one file, so a restoring fixture next door cannot be credited. Nothing in the fleet relies on
+one for these families; a future one would be a false positive, and an obvious one. Shape (d)
+reads every `conftest.py` up to the project root, because the cure it names lives there.
 
 **A helper that writes on the test's behalf is missed.** Same one-file boundary as
 `mock_console`'s cross-file console factory.
 
-**Runtime.** 8.5s over the corpus against a bare `ast.parse`'s 2.4s. The first cut measured
+**Runtime.** Shape (d) costs 1.5s over the 940-file corpus (12.2s to 13.7s, measured
+2026-10-16): a product module is parsed once per source text, and the test file's tree is
+shared with the other passes. Shapes (a) to (c): 8.5s over the corpus against a bare `ast.parse`'s 2.4s. The first cut measured
 **19.3s**, 14.1s of which was `_functions` doing a fresh `ast.walk` per function — every
 node re-walked once for each function above it. One descent that carries the enclosing
 function down and collects each function's nodes on the way, plus one materialised
