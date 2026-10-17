@@ -8,8 +8,8 @@ How daemon's shared argument gate refuses unknown commands and flags, and what t
 
 ## Unknown arguments are refused
 
-The owner's standing ruling (2026-09-07, FPLAN-0492 wave 2b): **an unknown command or argument fails with a non-zero exit and a
-message naming the token.** Never default, never silently ignore.
+**An unknown command or argument fails with a non-zero exit and a message naming the token.**
+Never default, never silently ignore.
 
 Every verb below routes its arguments through one shared gate,
 `apps/handlers/cli/arg_gate.py`. An unexpected positional or an unrecognised flag is refused by
@@ -44,17 +44,12 @@ router in `apps/daemon.py` renders it once — one message shape for twelve verb
 not import a handler (seedgo *encapsulation*), so the exception is re-exported through
 `apps/modules/__init__.py`; the router talks to the modules layer, the modules layer talks to the
 handler. `gate()` is called **outside** each module's `try`, because a module that catches its own
-refusal turns exit 1 back into exit 0 — `update` did exactly that before this was fixed.
-
-**No test suite in this branch is parked.** Every `tests/test_*.py` file runs in CI; the only
-disabled files under `apps/` are archived, carry a `(disabled)` marker, and are not tests. If a
-suite ever has to be parked, the rule is: say so here, name the file, name the reason, and name
-what has to be true to un-park it — a silently skipped suite reads as coverage that does not exist.
+refusal turns exit 1 back into exit 0.
 
 ---
 
-`schedule` and `actions` are still routable, but only as retirement notices — they ignore every
-argument and print the same migration text pointing at `.daemon/schedule.json`. There is no
-`schedule list`, `schedule create`, `schedule run-due`, `actions list`, `actions set` or
-`actions <id> on/off`; those subcommands were documented here long after the modules were retired.
-Use `run`, `queue` and per-branch `.daemon/schedule.json` instead.
+`schedule` and `actions` are still routable, but only as retirement notices pointing at
+`.daemon/schedule.json`: bare, they print the notice and exit 0; with any argument, the gate
+refuses it by name and exits 1, as above. There is no `schedule list`, `schedule create`,
+`schedule run-due`, `actions list`, `actions set` or `actions <id> on/off`. Use `run`, `queue`
+and per-branch `.daemon/schedule.json` instead.

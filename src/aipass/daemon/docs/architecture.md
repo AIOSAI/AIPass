@@ -35,14 +35,14 @@ per-directory notes that the tree points at.
 | `.archive/` | scheduler_cron (archived — superseded by run.py) |
 | `extensions/` | Extension point for additional capabilities |
 | `integrations/` | Private branch-local wrappers — gitignored except its README |
-| `.archive/` | json_templates (no readers, archived 2026-09-07) |
+| `.archive/` | json_templates (archived; nothing reads them) |
 
 ### apps/modules/
 
 | Path | What it does |
 |---|---|
 | `update.py` | Status digest module — summarizes DAEMON activity |
-| `run.py` | Scheduler tick — discover .daemon/ jobs, fire due ones (570 lines) |
+| `run.py` | Scheduler tick — discover .daemon/ jobs, fire due ones |
 | `queue.py` | Unified job queue view (Rich table / --json) |
 | `activity_report.py` | Branch activity report generator |
 | `inbox_sweep.py` | Fleet unread-mail backstop — wakes stale-mail owners |
@@ -63,7 +63,7 @@ per-directory notes that the tree points at.
 
 | Path | What it does |
 |---|---|
-| `json_handler.py` | The fleet's one json shim — binds prax's service (DPLAN-0325) |
+| `json_handler.py` | The fleet's one json shim — binds prax's service |
 
 ### apps/handlers/monitoring/
 
@@ -94,7 +94,7 @@ per-directory notes that the tree points at.
 
 | Path | What it does |
 |---|---|
-| *(this directory)* | ARCHIVED — moving to skills system |
+| *(this directory)* | Retired with telegram fleet-wide: an empty package, out of the audit and of test collection |
 | `.archive/` | assistant_chat (archived) |
 
 ### apps/handlers/update/
@@ -125,5 +125,5 @@ per-directory notes that the tree points at.
 | `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones — a wake, or a drone subprocess for a command job | Operational |
-| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job since 2026-09-10)* |
-| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` ON since 2026-09-10: 05:00, opus, one citizen a night)* |
+| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job)* |
+| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` enabled: 05:00, opus, one citizen a night)* |

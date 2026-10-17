@@ -9,10 +9,9 @@ How a scheduled job runs a drone command instead of waking an agent, and the rul
 ## Command jobs
 
 A job can run a drone command instead of waking an agent. It runs as a subprocess of the tick, so
-it uses no seat, no session and no tokens. The owner asked for this on 2026-09-11 because a
-housekeeping sweep should not cost a Claude session: *"if it runs there's a log, if it passed or
-failed there's a log, we can change the 10 days to 5 days by one character change."* The first
-one is @prax's weekly sweep of stale staging temps (DPLAN-0338 wave 2a):
+it uses no seat, no session and no tokens: a housekeeping sweep should not cost a Claude session.
+Every run is logged, pass or fail, and changing what it does is editing one string. @prax's weekly
+sweep of stale staging temps is one:
 
 ```json
 {
@@ -80,8 +79,8 @@ The mail goes out as a `drone @ai_mail email` subprocess from daemon's own direc
 signed `@daemon`. It is not sent through an in-process ai_mail import, for two reasons: ai_mail has
 no public send function that takes an explicit sender, and the tick runs from the repo root, so an
 in-process send would sign the mail as the project. A mail that fails is logged as a WARNING and
-never changes the fire's answer. Each mail costs about 5 to 7 seconds of tick time (measured
-on the proof). That is fine for a weekly job and a reason not to set `notify.email` on a job that
+never changes the fire's answer. Each mail costs several seconds of tick time (one drone
+call). That is fine for a weekly job and a reason not to set `notify.email` on a job that
 runs every few minutes.
 
 **How the subprocess runs.** It uses `Popen`, not `subprocess.run(capture_output=True)`, for two
@@ -90,8 +89,7 @@ measured reasons:
 - **Output goes to an anonymous temp file, not a pipe.** A pipe only reaches EOF when every
   holder of its write end has closed it. A drone verb that starts anything in the background hands
   that process the pipe, so a command that exited 0 in a second would be reported as a 600-second
-  timeout. Mutation-proved: swapping in the pipe form turns
-  `test_a_background_child_holding_the_output_is_not_a_timeout` red. `TemporaryFile` is unlinked
+  timeout; `test_a_background_child_holding_the_output_is_not_a_timeout` pins it. `TemporaryFile` is unlinked
   the moment it is created, so it leaves no `.tmp` litter behind.
 - **A timeout stops the whole process tree.** Drone runs every `@branch` verb in a child of its own
   (`drone/apps/handlers/executor.py`), so killing drone alone would orphan exactly the work that
@@ -108,10 +106,4 @@ stdin is `/dev/null`: a scheduled command has no human to answer a prompt.
 ten minutes makes the next four or five timer fires step aside (`Another scheduler instance is
 running`). A windowed job still has its ±15 minutes, and the 600 s default stays well under the
 30-minute gap threshold. It is still a reason to keep command jobs short.
-
-**Proof on the real clock (2026-09-11).** A `once` job running `drone @daemon --help`, with
-`notify.email` set to `@daemon`, went into daemon's own schedule. The live timer fired it at
-13:03:45: FIRE, then DONE `exit 0, 1.5s`, a runstate row with `last_status: success` and
-`completed` set, and both mails in the inbox (13:03:50 started, 13:03:59 passed). The job was then
-removed.
 
