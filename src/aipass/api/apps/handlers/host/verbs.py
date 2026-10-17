@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -384,6 +384,7 @@ def lock_screen() -> Dict[str, Any]:
 PROJECT_NAME_RULE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 PROJECT_NAME_SENTENCE = "A project name is a letter, then up to 63 more letters, digits, underscores or hyphens"
 PROJECT_EXISTS_PREFIX = "Project already exists"
+REGISTRY_SUFFIX = "_REGISTRY.json"
 SEAM_MISSING = "aipass.aipass.apps.modules.new_project publishes no create_project and TEMPLATES"
 
 
@@ -433,7 +434,8 @@ def new_project(name: str, template: str = "empty") -> Dict[str, Any]:
         template: One of the door's TEMPLATES.
 
     Returns:
-        Dict with ok, name, target, template, agent, agent_home and detail.
+        Dict with ok, name, project (the census name the switcher keys on),
+        target, template, agent, agent_home and detail.
 
     Raises:
         ProjectRefused: A refusal; ProjectNameRefused, TemplateRefused and
@@ -467,6 +469,7 @@ def new_project(name: str, template: str = "empty") -> Dict[str, Any]:
     return {
         "ok": True,
         "name": name,
+        "project": result["registry_file"][: -len(REGISTRY_SUFFIX)],
         "target": result["target"],
         "template": result["template"],
         "agent": result["spawn_result"]["branch_name"],

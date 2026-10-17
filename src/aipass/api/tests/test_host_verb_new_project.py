@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_verb_new_project.py
 # Description: Tests for POST /v1/verbs/new-project, the phone's new-project door (FPLAN-0649)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
 # Modified: 2026-10-17
 # =============================================
@@ -205,6 +205,7 @@ class TestAProjectIsCreatedWithItsManager:
         assert response.json() == {
             "ok": True,
             "name": "probe",
+            "project": "PROBE",
             "target": str(seat / "projects" / "probe"),
             "template": "empty",
             "agent": "probe_manager",
