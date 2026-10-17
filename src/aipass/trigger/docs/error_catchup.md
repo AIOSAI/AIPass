@@ -11,65 +11,47 @@ cursor is held back when a scan does not complete, and what that costs.
 
 The error catch-up scans `system_logs/` for `ERROR` lines that landed while no
 watcher was up, and fires `error_detected` for each one so the registry and Medic
-see it. Two things about it were wrong until 2026-09-12 (DPLAN-0339 step 2), and
-both were found by re-measuring DPLAN-0298's August claims on live code.
+see it.
 
-**It reached the service by accident.** `_run_error_catchup` hangs off the
-`startup` event, and the only thing in the fleet that fired `startup` was prax's
-logger on the first log line of *every* process (`prax/apps/modules/logger.py:132`).
-So `trigger-log-watcher.service` — the one long-lived process that exists to own
-recovery — ran its catch-up as a side effect of its own first log line, exactly
-like a two-second `drone` command did. `log_watcher_service.main()` now calls
-`medic.run_error_catchup(trigger.fire)` itself, once, **after** the watchers are
-up — through the medic *module*, because the service is an entry point and entry
-points import modules, not handlers (seedgo encapsulation rule 3).
-The order is deliberate: an error arriving between the scan and the first watch
-would fall through a gap if the scan ran first, whereas overlap is safe because
-the registry dedupes on fingerprint.
-
-This is the prerequisite for step 3, where prax drops the per-process fire. Until
-then both paths run; the second finds nothing because the scan dedupes on
-persisted hashes.
+**The service runs it, once.** `log_watcher_service.main()` calls
+`medic.run_error_catchup(trigger.fire)` **after** the watchers are up — through the
+medic *module*, because the service is an entry point and entry points import modules,
+not handlers (seedgo encapsulation rule 3). The order is deliberate: an error arriving
+between the scan and the first watch would fall through a gap if the scan ran first,
+whereas overlap is safe because the registry dedupes on fingerprint.
 
 The call is a direct one and deliberately **not** `trigger.fire("startup")`: a
 fire with no registered listener returns `handlers: 0` and reads as success, so
-unwiring the handler would silence recovery without saying so. Trigger has that
-exact failure live elsewhere — prax fires `file_watcher_died` into zero handlers
-— and this path must not join it. Pinned 2026-09-12: `handle_startup` is the **only** listener on
-`startup` anywhere in the fleet, and `logger.py:132` the only production firer —
-every other mention is documentation. A human can still fire it by hand with
-`drone @trigger fire startup`, which is the generic `fire <event>` door and not a
-dependency.
+unwiring the handler would silence recovery without saying so. Prax fires
+`file_watcher_died` into zero handlers today; this path must not join it.
+`handle_startup` is the only listener on `startup`, and no production code fires
+the event. A human can still fire it by hand with `drone @trigger fire startup`,
+which is the generic `fire <event>` door and not a dependency.
 
-**Why that mattered more than tidiness.** `last_scan_timestamp` in
-`error_catchup.json` is ONE value shared by every process in the fleet. At the
-measured 5.1 fires/min, an unrelated hook or `drone` command advanced it seconds
-before the service scanned, so the window the service exists to cover was usually
-already consumed. Measured 2026-09-11: **0 of the last 100 catch-up runs found
-anything.**
+**Why the service owns it.** `last_scan_timestamp` in `error_catchup.json` is ONE
+value shared by every process in the fleet. Any other process that scans advances it,
+and the window the service exists to cover is then already consumed. One owner, one
+scan per service start.
 
-**The cursor now advances only on a completed scan** (row 12 of DPLAN-0298, open
-since August). `_scan_system_logs_for_errors` returns a `ScanOutcome(errors,
-completed, reason)`. `completed` is True only when every candidate file was read
-to its end; any DPLAN-037 limit — the time budget, `MAX_ERRORS_PER_SCAN` — or a
-file skipped for exceeding `MAX_FILE_SIZE_BYTES` makes it False, and
-`last_scan_timestamp` then stays where it was so the next run re-covers the same
-window. It used to advance unconditionally, which silently discarded the window
-an aborted scan never reached: those files fell behind the new cutoff and their
-errors were unrecoverable.
+**The cursor advances only on a completed scan.** `_scan_system_logs_for_errors`
+returns a `ScanOutcome(errors, completed, reason)`. `completed` is True only when every
+candidate file was read to its end; any scan limit — the time budget,
+`MAX_ERRORS_PER_SCAN` — or a file skipped for exceeding `MAX_FILE_SIZE_BYTES` makes it
+False, and `last_scan_timestamp` then stays where it was so the next run re-covers the
+same window. Advancing on an aborted scan would put the unread files behind the new
+cutoff, and their errors would be unrecoverable.
 
 Two properties keep that safe rather than merely cautious:
 
 - **Processed hashes are persisted either way.** They are what stops a re-covered
   window from re-dispatching errors already handled. Holding the cursor back
   while dropping the hashes would turn one abort into a duplicate storm.
-- **The cost of holding it back is bounded by `MAX_LOOKBACK_HOURS`**, so the worst
-  case is a 24-hour window instead of a one-minute one. Measured on this tree,
-  363 files: **181 ms** cold against **161 ms** warm — a 20 ms difference. That
-  bound is why a permanently oversized file can be treated as "not completed"
-  without inventing a softer second verdict for it.
+- **The cost of holding it back is bounded by `MAX_LOOKBACK_HOURS`** (24), so the worst
+  case is a 24-hour window instead of a one-minute one. A full-window scan costs tens of
+  milliseconds more than a short one, which is why a permanently oversized file can be
+  treated as "not completed" without inventing a softer second verdict for it.
 
-The `startup_catchup` record in `trigger_json/startup_log.json` now carries
+The `startup_catchup` record in `trigger_json/startup_log.json` carries
 `completed` and `reason` alongside `errors_found`, and a held cursor also writes
 its reason to `logs/medic_suppressed.jsonl`. Without those, an operator cannot
 tell "found nothing" from "never looked at half the tree" — at `errors_found: 0`

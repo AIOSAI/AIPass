@@ -16,7 +16,7 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 1. **Medic enabled** — global on/off toggle
 2. **Branch not muted** — per-branch suppression
 3. **Count >= 2** — first occurrence suppressed, dispatch on recurrence
-4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string (`error_detected.py:509`); the older `DEV_CENTRAL` name the README used until 2026-09-05 does not appear on the path
+4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string `@devpulse` in `error_detected.py`
 5. **Branch in registry** — target must be a registered citizen
 6. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown
 7. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
@@ -24,17 +24,16 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 Gates 6 and 7 are the Medic v2 path and run only when the error registry is available
 *and* the event carried a fingerprint. When it is not, the handler takes the **legacy
 v1 fallback instead**: per-branch rate limiting, 3 dispatches per 10 minutes. The
-README counted that fallback as "gate 8" until 2026-08-25, which read as a flood guard
-sitting *after* the backoff check. It is not — it is the `else` arm of the same branch
-(`error_detected.py`, `--- Dispatch gating ---`), so the v2 and v1 arms never both run,
-and the healthy path has no rate limit at all. Escalation counting is upstream of every
+fallback is not an eighth gate after the backoff check — it is the `else` arm of the
+same branch (`error_detected.py`, `--- Dispatch gating ---`), so the v2 and v1 arms
+never both run, and the healthy path has no rate limit at all. Escalation counting is upstream of every
 gate here and is not one of them.
 
 On successful dispatch: sends email via `deliver_email_to_branch()` then calls `wake_branch()` to spawn an agent in the target branch immediately.
 
-**The mail names the row and how to close it (2026-09-24).** The `Error ID` line is the registry ID, the one `errors detail|resolve|suppress` accept, and the instructions end with the two closing verbs. An event with no registry row says so plainly and prints the legacy hash as a `Reference`, never as an ID. Before this, @hooks found the mail naming a hash no verb could find, and three cured entries stayed at `new` because nothing said how to close them.
+**The mail names the row and how to close it.** The `Error ID` line is the registry ID, the one `errors detail|resolve|suppress` accept, and the instructions end with the two closing verbs. An event with no registry row says so plainly and prints the legacy hash as a `Reference`, never as an ID.
 
-**Both producers fire with a fingerprint.** The branch log watcher reports each line to the registry first. The startup catch-up (`events/startup.py`) looks the row up first and names it; it reports only an error with no row yet, since reporting an existing row would move `last_seen` to now for a line read off disk. A scanned line no newer than the row's `last_seen` is not fired: the watcher already saw it, and a service restart re-reads that window. Before this, the catch-up fired with no fingerprint, so every catch-up dispatch took the v1 arm. On 2026-09-24 a restart re-dispatched three two-day-old errors whose `last_seen` had not moved.
+**Both producers fire with a fingerprint.** The branch log watcher reports each line to the registry first. The startup catch-up (`events/startup.py`) looks the row up first and names it; it reports only an error with no row yet, since reporting an existing row would move `last_seen` to now for a line read off disk. A scanned line no newer than the row's `last_seen` is not fired: the watcher already saw it, and a service restart re-reads that window. Firing with the fingerprint keeps catch-up dispatches on the v2 arm.
 
 **Suppression is real silence (compass #219).** A fingerprint with status `suppressed` never dispatches while suppressed — no re-wakes, ever. Agents must not be woken forever for a judged-benign error; the cycle ends at wake → investigate → suppress → sleep. Guardrails:
 
@@ -52,9 +51,9 @@ On successful dispatch: sends email via `deliver_email_to_branch()` then calls `
 | CONTENT | `muted_branches` | `error_detected` dispatch | `medic mute @branch` |
 | VOLUME | `volume_muted_branches` | `runaway_log_detected` alerts | `medic volume-mute @branch` |
 
-A content mute means "expect error lines from me while I build" — it says nothing about log volume. Because every dispatch checklist tells agents to medic-mute *before* build/edit work, and build windows are exactly when floods happen, gating runaway alerts on the content mute made that channel structurally dead in its own peak window (31/31 suppressions in `logs/runaway_suppressed.jsonl` were `branch_muted`). Volume mutes must be set deliberately, and CRITICAL runaways bypass even those.
+A content mute means "expect error lines from me while I build" — it says nothing about log volume. Because every dispatch checklist tells agents to medic-mute *before* build/edit work, and build windows are exactly when floods happen, gating runaway alerts on the content mute would leave that channel dead in its own peak window. Volume mutes must be set deliberately, and CRITICAL runaways bypass even those.
 
-Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` and a `reason` field. Since trigger's leg 4 of fleet green (DPLAN-0354, 2026-09-29) every event past the file_path check writes exactly one line, where its outcome is known — four values: `suppressed` (alert dropped; reason `cooldown` or `volume_muted`), `observed` (the observe-only WARNING outcome: recorded, so it is not a suppression; reason `observe_only`, or the gate's `mute_unreadable`), `failed` (a CRITICAL that did not go out; reason `no_callback` when no send callback is set, `send_refused` when the send returned False) and `delivered` (written only after the send returned True; reason `critical`, or the gate's `bypass_critical` or `mute_unreadable`). Entries predating the `outcome` field are all suppressions. Tonight the file holds 37 lines: 31 pre-field `branch_muted`, 5 `suppressed`/`cooldown`, 1 `observed`/`observe_only` (2026-09-05).
+Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` and a `reason` field. Every event past the file_path check writes exactly one line, where its outcome is known — four values: `suppressed` (alert dropped; reason `cooldown` or `volume_muted`), `observed` (the observe-only WARNING outcome: recorded, so it is not a suppression; reason `observe_only`, or the gate's `mute_unreadable`), `failed` (a CRITICAL that did not go out; reason `no_callback` when no send callback is set, `send_refused` when the send returned False) and `delivered` (written only after the send returned True; reason `critical`, or the gate's `bypass_critical` or `mute_unreadable`). Entries with no `outcome` field are suppressions written by the older format (reason `branch_muted`).
 
 **Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Handles SIGTERM/SIGINT for clean shutdown.
 

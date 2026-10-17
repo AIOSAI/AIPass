@@ -100,7 +100,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/event_bus.md](docs/event_bus.md) | `fire`/`on`/`off`, handler isolation, the deferred nested fire, the help-flag rule, `report_error()` |
-| [docs/events.md](docs/events.md) | Every live event and its handler, the deprecated alias, the retired files, the names with nothing behind them |
+| [docs/events.md](docs/events.md) | Every live event and its handler, the rename-alias mechanism, the retired files, the names with nothing behind them |
 | [docs/medic.md](docs/medic.md) | The dispatch pipeline gate by gate, suppression doctrine, the two mute classes, runaway gating |
 | [docs/error_registry.md](docs/error_registry.md) | Fingerprinting, the circuit breaker, per-fingerprint backoff |
 | [docs/escalation.md](docs/escalation.md) | The digest lane, what makes a signature, every operator knob |
@@ -127,7 +127,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)
