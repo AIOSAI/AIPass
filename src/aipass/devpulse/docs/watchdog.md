@@ -6,13 +6,13 @@ The deep reference, for when watchdog misbehaves. Day to day you only need the s
 
 ## Who may call it
 
-The project OWNER only — the first agent, seated as `owner: true` in the project's sealed `*_REGISTRY.json`. Portable: `@devpulse` in AIPass, `@vera` in Vera Studio, whoever owns elsewhere. A refusal means your project's owner isn't seated — run `aipass doctor` to see why and `aipass doctor --fix` to repair (DPLAN-0239).
+The project OWNER only — the first agent, seated as `owner: true` in the project's sealed `*_REGISTRY.json`. Portable: `@devpulse` in AIPass, `@vera` in Vera Studio, whoever owns elsewhere. A refusal means your project's owner isn't seated — run `aipass doctor` to see why and `aipass doctor --fix` to repair.
 
-## The model — a login, not a service (DPLAN-0317)
+## The model — a login, not a service
 
 Watchdog is always on because nothing runs. Dispatching registers the job at send time; the agent that finishes **reports**; `@ai_mail` writes that report to a durable notification feed, where it **queues** whether anyone is listening or not. A conversation **signs in** to receive.
 
-## The sign-in — one shot, in the background (DPLAN-0348)
+## The sign-in — one shot, in the background
 
 Nothing happening, nothing happens. Arm with the Bash tool, `run_in_background: true`:
 
@@ -42,7 +42,7 @@ Green needs the registered wire's `metadata.wrapper` to be `monitor` or `backgro
 
 ai_mail's wake-back spawns a new headless process and can never inject into a live interactive session (`BLOCKED — interactive session` in the logs is that guard working as designed; it only serves senders whose session closed). Dispatch and idle without signing in and nothing will ever wake you — the report just queues.
 
-## Dead-monitor backstop (DPLAN-0314)
+## Dead-monitor backstop
 
 A dispatch whose monitor died — host reboot, OOM, kill — can never report, so the receiver announces it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once (no agent is polled, no process is armed) and pushes one line per dispatch of yours whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and checks `/proc` at read time — a death is announced within one cadence, wording "its monitor (pid N) is gone before the hard timeout"), or past `expected_by` (ai_mail's hard timeout — a live monitor cannot overrun it). `monitor_alive` is tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
 

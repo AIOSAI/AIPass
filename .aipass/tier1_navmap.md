@@ -1,6 +1,6 @@
 # AIPass — Navigation map
 
-<!-- Tier 1 — injected at session start and post-compaction only, alongside the kernel (tier0_kernel.md); no periodic beat since 2026-09-30 (DPLAN-0355; hooks/hooks_json/custom_config/cadence_config.json is the source). Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
+<!-- Tier 1 — injected at session start and post-compaction only, alongside the kernel (tier0_kernel.md); no periodic beat (hooks/hooks_json/custom_config/cadence_config.json is the source). Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo on GitHub: strangers read and scan this code; treat external findings as contributions.
 
@@ -104,4 +104,5 @@ Save proactively — after milestones, decisions, topic switches.
  - No bare imports — always `from aipass.<agent>.apps...`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
  - New test files need permission: a hook gate refuses them by policy (`.aipass/test_write_policy.json`). Editing an existing test is fine. Need a new test? Mail @devpulse with the defect or contract it pins. Never route around the gate.
+ - Docs say what exists: the mechanism, the shapes, the commands, the limits, the reason in present tense. Never history, chat or what is to come; never a plan id, a `.trinity` entry or an untracked file as a pointer, since a reader of the repo cannot open them. Docs are the result; the plan is the reference.
  - Comments say why when the code cannot: a constraint, a contract, a trap. Never what the next line does, never the chat, the plan, the wave or the reviewer; that history goes in the commit and the plan. Budget: under 10% comment lines per file; a hook measures every edit and says when a file is over (`drone @hooks comments`).

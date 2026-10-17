@@ -15,7 +15,7 @@ the same content. We do **not** keep separate prompts per CLI. Only the *deliver
 
 | Runtime | How the same content is delivered |
 |---|---|
-| **Claude Code** | **Tiered by cadence** (FPLAN-0284): `tier0_kernel.md` every turn + `tier1_navmap.md` periodically + post-compaction |
+| **Claude Code** | **Tiered**: `tier0_kernel.md` + `tier1_navmap.md` at every fresh context and post-compaction, no periodic beat |
 | **Codex CLI** | Injected **once at SessionStart** (no per-turn cadence): the same tier content, combined |
 
 > ⚠️ **Migration in progress.** The Codex SessionStart hook

@@ -17,7 +17,7 @@ Goal: signal density over prose. Prompts are injected every turn — every line 
 
 # Writing voice (agent output + memory)
 
-How agents write responses, reports, and memory entries. Validated against Claude Code's own prompt (DPLAN-0213).
+How agents write responses, reports, and memory entries. Validated against Claude Code's own prompt.
 
  - Reference code as `file_path:line_number` — clickable, unambiguous.
  - No colon before a tool call. "Let me read the file." then call it, not "Let me read the file:".
@@ -42,11 +42,11 @@ These can be verified automatically with 4 regex rules against any `.aipass/*.md
  - No `^---$` lines (dividers)
  - No fenced code blocks longer than ~15 lines in body (excluding directory trees)
 
-These are not currently enforced by seedgo — per @seedgo's Track 5 recommendation, prompt format is an editorial convention, not a code quality standard. Enforcement is optional future work as an extension to `readme_check.py`.
+Seedgo does not enforce them: prompt format is an editorial convention, not a code quality standard.
 
 # Reference files
 
- - `.aipass/tier0_kernel.md` + `.aipass/tier1_navmap.md` — the live injected prompts (both on cadence 5 plus every fresh context; `hooks/hooks_json/custom_config/cadence_config.json` is the source); canonical examples of the format
- - `.aipass/aipass_global_prompt.md` — superseded by the tiers (FPLAN-0284), kept as a reference snapshot
+ - `.aipass/tier0_kernel.md` + `.aipass/tier1_navmap.md` — the live injected prompts (every fresh context and post-compaction, no periodic beat; `hooks/hooks_json/custom_config/cadence_config.json` is the source); canonical examples of the format
+ - `.aipass/aipass_global_prompt.md` — superseded by the tiers, kept as a reference snapshot
  - Branch `.aipass/aipass_local_prompt.md` files — should follow the same rules
  - This file — reference for authoring new prompts or auditing existing ones
