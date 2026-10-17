@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-03-02
 # Modified: 2026-10-16
 # =============================================
@@ -326,7 +326,13 @@ def log_wake_result(branch_email: str, sender: str, exit_code: int, result: str,
 
 
 def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, stderr_log: str) -> bool:
-    """Send return-to-sender bounce email via drone."""
+    """Send return-to-sender bounce email via drone.
+
+    Returns:
+        bool: True when drone accepted the mail. False on a non-zero exit or a
+        transport error; the caller logs that one warning and records it in the
+        completion status (_note_undelivered_bounce).
+    """
     subject = f"BOUNCE: Dispatch to {branch_email} failed"
 
     # Read last few lines of stderr log for diagnostics
@@ -351,7 +357,8 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
     try:
         return _send_from_ai_mail(sender, subject, body, Path(lock_file).parent.parent).returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
-        logger.warning("[monitor] Bounce email send failed for %s: %s", branch_email, e)
+        # The caller's warning is the one line for an undelivered bounce; the
+        # transport error rides in the fallback file beside the lock.
         # Fallback: write bounce to a file if email fails
         try:
             bounce_file = Path(lock_file).parent / "last_bounce.json"
@@ -363,6 +370,7 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
                         "sender": sender,
                         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "stderr_tail": stderr_tail,
+                        "error": str(e),
                     },
                     f,
                     indent=2,
@@ -370,6 +378,22 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
         except OSError:
             logger.info("[monitor] Failed to write bounce file fallback")
         return False
+
+
+def _note_undelivered_bounce(delivered: bool, branch_email: str, reason: str, sender: str) -> bool:
+    """Warn once when a bounce did not reach the sender; returns `delivered` for the status.
+
+    Both callers used to drop _send_bounce's bool, so an undelivered bounce left
+    the record saying the sender was told (FPLAN-0647).
+    """
+    if not delivered:
+        logger.warning(
+            "[monitor] BOUNCE NOT DELIVERED for %s to %s: the sender was not told. Reason: %s",
+            branch_email,
+            sender,
+            reason,
+        )
+    return delivered
 
 
 def _read_agent_stderr(stderr_log: str) -> str:
@@ -1138,6 +1162,7 @@ def main():
             stderr_fh.close()
 
     # Handle failure — bounce with all attempt details
+    bounce_delivered = True
     if exit_code != 0:
         # Build reason from all attempts
         attempt_details = []
@@ -1163,7 +1188,9 @@ def main():
         # failure cause instead of just the exit code
         reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log)}"
 
-        _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
+        bounce_delivered = _note_undelivered_bounce(
+            _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
+        )
     elif bg_orphaned:
         # Exit 0 but the CLI killed still-running background tasks — the
         # agent's deferred work (possibly including its reply) never ran
@@ -1176,7 +1203,9 @@ def main():
             f"and no reply may have been sent — re-dispatch if the task is not complete.\n\n"
             f"Result JSON: {_summarize_result_json(stdout_log)}"
         )
-        _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
+        bounce_delivered = _note_undelivered_bounce(
+            _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
+        )
 
     # Log completion to Prax
     branch_name = branch_email.lstrip("@")
@@ -1185,6 +1214,9 @@ def main():
         status = f"INCOMPLETE (bg tasks terminated, {duration}s)"
     if max_turns_hit:
         status = f"MAX TURNS HIT ({duration}s)"
+    # The outcome field the report, the register's close and the feed title share.
+    if not bounce_delivered:
+        status = f"{status}, bounce NOT delivered to {sender}"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
 
     # ─── Wake-back: wake the dispatcher ────────────────────
