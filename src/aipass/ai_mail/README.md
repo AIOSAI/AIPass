@@ -108,8 +108,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 | [docs/dispatch_register_and_feed.md](docs/dispatch_register_and_feed.md) | The append-only register, completion reports, crash coverage and its latency, and the notification feed |
 | [docs/sending_and_delivery.md](docs/sending_and_delivery.md) | Listing rules, what a broadcast costs, repeat signals (`upsert_key`), the two message ids, refused sends and the mail lifecycle |
 | [docs/identity_and_boundaries.md](docs/identity_and_boundaries.md) | Sender identity, the verified-caller rail, cross-project mail and wakes, the import guard and the case-exact registry walk |
-| [docs/cli_contract.md](docs/cli_contract.md) | Help flags that explain instead of executing, the exit codes, output ordering, and why interactive send needs a terminal |
-| [docs/s84_multiline_reply_truncation.md](docs/s84_multiline_reply_truncation.md) | The multiline reply truncation defect and its fix |
+| [docs/cli_contract.md](docs/cli_contract.md) | Help flags that explain instead of executing, how message arguments join into the body, the exit codes, output ordering, and why interactive send needs a terminal |
 
 ---
 
@@ -138,7 +137,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 
 ---
 
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -23,11 +23,8 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
    - **Lock cleanup** — removes `.dispatch.lock` when agent exits
    - **Wake-back** — on agent exit, the original sender is notified. A
      builder-class sender is **woken**; a **manager sender is MAILED, never
-     woken** (`_mail_wake_back()`), because the manager gate is deliberate and
-     stays — telling a manager "you will be woken" was a promise the lane could
-     not keep, and the manager then heard nothing at all — three live cases on
-     2026-08-21 alone, and `skipped_manager` rows across the fleet's
-     `dispatch_wake.log` files from 2026-08-04 on.
+     woken** (`_mail_wake_back()`): the manager gate stays, and the mail is the
+     wake-back, so a manager always hears that its dispatch finished.
      `dispatch` announces which of the two will happen, by reading
      `is_manager(sender)` up front rather than guessing.
      Wake-back sessions carry an empty sender, so chains terminate at the
@@ -36,9 +33,8 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      result tags into `dispatch_wake.log` — `success`, `mailed_manager`,
      `failed_manager_mail`, `blocked_occupied`, `blocked_locked`,
      `blocked_depth`, `skipped_sender`, `skipped_self`, `failed` — so "notified"
-     is never inferred from a bare boolean. It was: the manager gate returns
-     `True` having woken nothing, and trusting that bool logged "woken" for a
-     wake that never happened.
+     is never inferred from a bare boolean (the manager gate returns `True`
+     having woken nothing).
      Library callers such as @daemon's scheduled nudges may pass
      `wake_back=False` to `wake_branch()` (carried to the monitor as the
      `--no-wake-back` argv flag, logged and recorded as `declined` in
@@ -59,7 +55,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 ## Scheduled Lane (`scheduled=True`)
 
 `wake_branch()` takes a keyword-only `scheduled` flag — the opt-in for a wake fired
-by a clock rather than by a person (DPLAN-0287, the 5am maintenance rotation).
+by a clock rather than by a person (the 5am maintenance rotation).
 
 ```python
 from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
@@ -81,35 +77,24 @@ status, ok = wake_branch("@devpulse", custom_message=prompt, sender="@daemon", s
 - **The blocklist is checked before the passport read.** A missing or corrupt
   `passport.json` must never be the reason a blocked target gets spawned. Refusal is a
   named `blocklist` fail step, not a bare `False`.
-- **Default `False` changes nothing.** Manual manager self-wakes stay interactive tmux;
-  inbox-sweep and `@daemon`'s `run.py` don't pass the param, so they are untouched.
+- **Who passes it.** `@daemon`'s scheduled jobs (`run.py`) pass `scheduled=True` on
+  every wake they fire. Every other caller takes the default `False`, and a manual
+  manager self-wake stays interactive tmux.
 - **Reading the outcome** — `status.find_step("scheduled")` is present only for the
   headless lane; the interactive spawn names its tmux session in the `spawn` step.
 
-## Unattended Wakes: Permissions, Model, and Marking
+## Unattended Wakes: Permissions and Marking
 
-Three rulings from the owner on 2026-08-30, all after @vera's first external daemon
-wake. The fire itself worked; the **lane** failed three ways around it.
+The interactive manager lane is reached only from `@daemon`, so *attachable* is not
+*attended*.
 
-**1 — Always bypass permissions.** *"always bypass permissions always, claude alone
-will nvr work."* @vera launched as a bare `claude`, sat in default permission mode,
-and had Bash **denied** mid-playbook with nobody present to approve it — she
-improvised around it with WebFetch, which is not a thing an unattended agent should
-ever have to do. The headless lane had carried `--permission-mode bypassPermissions`
-for months; the interactive manager lane had not. It does now, unconditionally:
-every route into that spawn comes from `@daemon`, so *attachable* was never the same
-thing as *attended*.
+**Permissions are always bypassed.** Both spawn lanes pass
+`--permission-mode bypassPermissions`, unconditionally: an unattended agent in default
+permission mode has tools denied with nobody present to approve them.
 
-**2 — Fable is managers-only.** ***SUPERSEDED 2026-09-08 — see "Fable is granted by
-name" below.*** The 08-30 wording was *"managers are fable thats it, only manager run
-fable"*, and it is recorded here rather than deleted because the rule that replaced it
-was written by watching this one fail: @vera is manager-class, so on 2026-09-08 at
-11:31 she woke on Fable through the daemon's scheduled lane, and nobody had asked her
-to. A rule keyed on a *class* cannot say "this one manager and no other".
-
-**3 — Daemon sessions are marked.** The owner killed @vera's live session mid-run: it
-was not in the dispatch register (the manager-interactive lane bypasses it) and
-`daemon-vera-192848` read as his own leftover tmux. Two markings:
+**Daemon sessions are marked**, so a person deciding whether to kill a window can tell
+daemon work from a leftover session (the manager-interactive lane is not in the dispatch
+register). Two markings:
 
 - **The session name**, `AIPASS-DAEMON-WAKE-<branch>-<HHMMSS>` — guaranteed, because
   tmux either creates the session under that name or `new-session` already failed.
@@ -131,13 +116,12 @@ dispatch are two questions; only one of them has a monitor to close it. The
 routing scheduled manager wakes through it (`scheduled=True`) answers marking and
 supervision together.
 
-## Fable is granted by name (the owner, 2026-09-08)
+## Fable is granted by name
 
-*"only devpulse runs on fable (I carry the admin baggage)."* Every other agent —
-every class, every project, Vera-Studio included — runs `DEFAULT_MODEL` when
-dispatched or scheduled, and lighter models on request. **The owner alone decides who
-may run Fable**, @devpulse included. This supersedes the 2026-08-30 ruling above
-(compass #323 → #350).
+Only the seats in the Fable grant may run Fable (by default @devpulse alone). Every
+other agent — every class, every project — runs `DEFAULT_MODEL` when dispatched or
+scheduled, and lighter models on request. **The owner alone decides who is in the
+grant.**
 
 `resolve_wake_model(target_email, requested)` is the one site that decides, and it
 returns a `ModelDecision(model, refusal)`:
@@ -149,42 +133,39 @@ returns a `ModelDecision(model, refusal)`:
 | not in the grant | any spelling of Fable | `DEFAULT_MODEL`, **and the refusal is returned** |
 | anyone | anything else, or nothing | unchanged: the `wake.model` field, else `DEFAULT_MODEL` |
 
-- **Granted by name, not by class.** `citizen_class` is no longer an input. It still
-  decides the manager *gate* — who is woken at all versus mailed — and that is a
-  different question the same constant used to answer twice.
+- **Granted by name, not by class.** `citizen_class` is not an input: a rule keyed on a
+  class cannot say "this one manager and no other". The class decides only the manager
+  *gate* — who is woken at all versus mailed.
 - **The grant lives where the repo cannot ship it.** `CONFIG_FILE` →
   `.ai_mail.local/safety_config.json` (gitignored), key `fable_allowed`, a list of
   addresses. Absent, unparseable, or not-a-list falls back to `FABLE_GRANT_DEFAULT`
   = `{"@devpulse"}` — **never to empty**, because a grant that collapsed on a typo
   would demote @devpulse silently and the only symptom would be devpulse spawning on
   opus. An **explicit** `[]` is honoured: that is how you revoke Fable fleet-wide,
-  and it is distinguishable from the key being absent. *(That file pointed at the
-  branch root — tracked territory — until this ruling; nothing existed at either
-  path, so `_load_config` had always returned its own defaults.)*
+  and it is distinguishable from the key being absent.
 - **Refused, never silent, never stalling.** The refusal names the target, the model
   requested and the ruling date, and it is rendered as a `warn` step on the `model`
-  label so it reaches the dispatch output the caller actually reads — the superseded
-  version only logged it. The wake proceeds on `DEFAULT_MODEL`: the caller asked for
+  label so it reaches the dispatch output the caller actually reads. The wake proceeds on `DEFAULT_MODEL`: the caller asked for
   a model, not for a veto.
 - **Substring, not equality.** The CLI takes both `fable` and `claude-fable-5`, so a
   check comparing to the bare alias would let the full id walk past the grant.
 - **Addresses normalised** exactly as `is_wake_blocked` normalises them (one leading
   `@`, lowercased), on both sides — a policy keyed on an address is worthless if
   typing it differently promotes *or* demotes a seat.
-- **One resolver, measured.** Three sites in `apps/` name a model:
-  `wake.py:884` (interactive tmux) and `wake.py:1133` (headless `base_args`) both
-  take the value `wake_branch` already resolved, and `daemon.py:423` hardcodes
-  `DEFAULT_MODEL` in a module its own comment documents as dormant. No second path
-  can reach Fable.
+- **One resolver.** Three sites in `apps/` name a model:
+  `wake._spawn_manager_interactive` (interactive tmux) and the headless `base_args` in
+  `wake.wake_branch` both take the value `wake_branch` already resolved, and
+  `daemon.spawn_agent` hardcodes `DEFAULT_MODEL` in a module its own comment documents
+  as dormant. No second path can reach Fable.
 
 ## The recipient's dashboard is refreshed before the spawn
 
 `wake.py` calls `refresh_recipient_dashboard()` (`apps/handlers/dispatch/wake_dashboard.py`)
 for the RECIPIENT branch at the one point past every gate and above all three spawn lanes —
 the tmux manager session, the systemd scope and the detached `Popen`. A woken agent reads
-`DASHBOARD.local.json` as its single status glance, and nothing refreshed it on the way in:
-the card it read was whatever its own last session left behind, reporting no new mail while
-the dispatch that woke it sat in the inbox.
+`DASHBOARD.local.json` as its single status glance; unrefreshed, the card is whatever its
+own last session left behind and reports no new mail while the dispatch that woke it sits
+in the inbox.
 
 - **One branch, never the fleet.** prax's `refresh_all_dashboards` walks every branch; the
   recipient is one of them, and the other cards are nobody's business on this path.
