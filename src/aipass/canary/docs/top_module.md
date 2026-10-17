@@ -6,9 +6,8 @@ A leaderboard reader: `top 3 scores.txt` prints the three highest counts.
 `apps/modules/top.py` routes and prints; `apps/handlers/leaderboard/reader.py`
 reads the file, ranks it, and owns every refusal.
 
-It exists as a test subject, not as a feature. Built to a dispatched contract
-(@devpulse, 2026-09-19) whose interesting half is not the ranking but the two
-things a careless reader gets wrong: seven ways a file or an argument is not a
+It exists as a test subject, not as a feature. Its interesting half is not the
+ranking but the two things a careless reader gets wrong: seven ways a file or an argument is not a
 leaderboard, each exiting 2 with nothing on stdout, and an order that has to be
 the same every run rather than merely stable within one.
 
@@ -104,7 +103,7 @@ payload, and `ensure_ascii` is off, so a name reaches stdout as it was typed:
 
 ## What the tests actually measure
 
-`tests/test_top.py`, 68 cases. The ranking half asserts exact stdout lines —
+`tests/test_top.py`. The ranking half asserts exact stdout lines —
 summing, the tie-break under three write orders, a tie created only by the
 summing, a short file, an empty file, whitespace and blank lines, `0`, `-0`,
 `007`, and a file with no final newline. The refusal half runs eight argument
@@ -114,21 +113,8 @@ empty stdout and the reason on stderr, plus the three file-level refusals
 stdout is `alice 12` or `bob 30` — the help page quotes `alice 12` in an
 example, so a substring check would have passed for the wrong reason.
 
-Twelve mutants were run against the source, all twelve killed: the tie-break
-deleted (3 red), the field count weakened from `==` to `<` (2), the
-negative-count check deleted (4), the ASCII-digit check swapped for
-`str.isdigit` (4), N's lower bound moved from 1 to 0 (4), counts overwritten
-instead of summed (3), `rank` ignoring N (2), a missing file read as an empty
-one (2), `_refuse` logging without raising (38), bad UTF-8 replaced instead of
-refused (1), the too-many-arguments check deleted (2), and a refusal that also
-renders an empty ranking (16).
-
-That last one is worth its own sentence. All sixteen of its kills come from the
-`--json` cases: in the plain form an empty ranking prints nothing, so a refusal
-that also rendered one is invisible there. The JSON form is what makes that
-mutant visible at all, which is the argument for running every refusal case
-twice rather than trusting the plain form to speak for both.
-
-The sources were restored byte-identical afterwards, verified by sha256.
+Every refusal case runs twice, plain and `--json`, because the plain form
+cannot speak for both: an empty ranking prints nothing in the plain form, so a
+refusal that also rendered one is visible only in the `--json` cases.
 
 [<- Back to the branch README](../README.md)

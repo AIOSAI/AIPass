@@ -6,10 +6,9 @@ A duration parser: `span "2d 4h"` prints `187200`. `apps/modules/span.py`
 routes and prints; `apps/handlers/duration/parser.py` does the parsing and
 owns every refusal.
 
-It exists as a test subject, not as a feature. Built to a dispatched contract
-(@devpulse, 2026-09-19) whose interesting half is not the arithmetic but the
-refusals: six ways a text is not a duration, each of them exiting 2 with
-nothing on stdout.
+It exists as a test subject, not as a feature. Its interesting half is not the
+arithmetic but the refusals: every way a text is not a duration, listed below,
+exits 2 with nothing on stdout.
 
 ## The grammar
 
@@ -74,20 +73,12 @@ for the payload, so what a caller reads is what was written.
 
 ## What the tests actually measure
 
-`tests/test_span.py`, 56 cases. Fourteen valid forms assert the exact stdout
+`tests/test_span.py`. Fourteen valid forms assert the exact stdout
 line and an empty stderr; fifteen refusal cases run twice, plain and `--json`,
 asserting exit 2, an empty stdout and the reason on stderr. The 366-day limit
 has a case on each side of the boundary, so an off-by-one cannot pass. Help in
 any position asserts that no line of stdout is a bare number — the help page
 quotes `187200` in an example, so a substring check would have passed for the
 wrong reason.
-
-Nine mutants were run against the source, all nine killed: the repeated-unit
-check deleted (4 red), the limit's `>` weakened to `>=` (2), the ASCII-digit
-check swapped for `str.isdigit` (2), the bare-number check deleted (4), the
-whitespace squeeze weakened to `strip()` (13), `_refuse` logging without
-raising (33), a refusal that also prints `0` to stdout (32), a second key added
-to the JSON payload (2), and an hour worth 360 seconds instead of 3600 (11).
-The source was restored byte-identical afterwards.
 
 [<- Back to the branch README](../README.md)

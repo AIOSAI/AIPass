@@ -6,11 +6,11 @@ A column aligner: `align table.txt` prints a ragged text table with its columns
 lined up. `apps/modules/align.py` routes and prints; `apps/handlers/table/aligner.py`
 reads the file, lays the rows out, and owns every refusal.
 
-It exists as a test subject, not as a feature. Built to a dispatched contract
-(@devpulse, 2026-09-20) whose interesting half is not the padding but what the
-contract did not say: what separates two fields when the file was written with
-tabs, what "width" means when a character is two terminal cells wide, and which
-of two applicable refusals speaks when a row is wrong in more than one way.
+It exists as a test subject, not as a feature. Its interesting half is not the
+padding but what its contract leaves open: what separates two fields when the
+file was written with tabs, what "width" means when a character is two terminal
+cells wide, and which of two applicable refusals speaks when a row is wrong in
+more than one way.
 
 ## The file
 
@@ -43,8 +43,8 @@ carolina  7   g
 
 ## The rulings
 
-The contract left four things open. Each was decided once, written down here
-and in the handler docstring, and pinned by a test.
+The contract leaves four things open. Each ruling is written here and in the
+handler docstring, and pinned by a test.
 
 **A tab separates a column, like a space does.** The contract says spaces, and
 a text table is written with either — `leaderboard/reader.py` already reads
@@ -75,12 +75,11 @@ the same number of characters.
 mismatch.** Both checks apply to a one-field row halfway down a three-column
 file. The field-count check runs first, so the refusal points at what is
 actually wrong with the row rather than at the first check that happened to
-notice. A refusal that fires first hides every check behind it (canary key
-learning 23), so which one speaks is part of the contract and has its own test.
+notice. A refusal that fires first hides every check behind it, so which one
+speaks is part of the contract and has its own test.
 
-A fifth call was made by precedent rather than by argument: **more than one
-FILE is refused as "too many arguments"**, the same reason `top` gives, checked
-before any file is opened.
+A fifth rule follows `top`: **more than one FILE is refused as "too many
+arguments"**, checked before any file is opened.
 
 ## The refusals
 
@@ -138,7 +137,7 @@ fourteen — rather than becoming a style.
 
 ## What the tests actually measure
 
-`tests/test_align.py`, 58 cases. Alignment is asserted as **exact lines**,
+`tests/test_align.py`. Alignment is asserted as **exact lines**,
 never as "contains" — the padding IS the output, so a test that only looked for
 the fields would pass on a formatter that never padded anything. The layout
 half covers the widest value arriving in the last row, five columns, a single
@@ -151,36 +150,17 @@ and encoding refusals, asserting exit 2, an empty stdout and the reason on
 stderr. Two ordering pins: the one-field reason beats the count mismatch, and
 the argument count is checked before a file is opened.
 
-Fifteen mutants were run against the two sources. Thirteen died on the first
-pass: the column gap narrowed to one space (19 red), the padding removed (16),
-the last column padded too (13), width taken from the first row instead of the
-widest (7), `MIN_FIELDS` lowered to 1 (7), the column-count check deleted (4),
-the empty-file refusal deleted (4), the separator widened to `\s+` (1, the
-no-break-space pin), the line no longer stripped (2), `_refuse` raising an
-empty reason (20), the rows sorted (3), the two row checks swapped in order
-(5), and the too-many-arguments check deleted (3).
+`splitlines()` and `split("\n")` agree on CRLF once `strip()` removes the
+trailing `\r`, so the CRLF case alone cannot tell them apart; a carriage return
+alone and a vertical tab are the boundaries only `splitlines()` finds, and each
+has its own case.
 
-Two survived, and both were worth the pass. `splitlines()` swapped for
-`split("\n")` passed all 56 cases as first written — the CRLF test could not
-see it, because `strip()` removes the trailing `\r` on its own. Two pins were
-added for the boundaries only `splitlines()` finds, a carriage return alone and
-a vertical tab, and the mutant then died on both. The second survivor was a bad
-mutant rather than a test gap: it "padded" the JSON payload by rendering each
-row on its own, which pads nothing, so it reproduced the correct output exactly.
-Rewritten to pad against the real column widths, it died on three cases.
-
-Both sources were restored byte-identical afterwards, verified by sha256, and
-the full branch suite re-run: 267 passed.
-
-One more finding came out of writing them. `@cli` renders a refusal through rich,
-which **wraps stderr at the console width** — 80 when stdout is not a terminal.
-A refusal naming a long path is therefore broken across lines at whatever space
-falls near column 80: `has no non-blank lines` arrived as `has\nno non-blank
-lines`, and only in the parametrised cases whose `tmp_path` happened to be long
-enough, so two of six otherwise identical cases failed. The tests now flatten
-stderr whitespace before asserting, which keeps them about the reason rather
-than about path length. The wrapping is the shared console's behaviour, not
-this branch's, and it means any caller grepping stderr for a refusal phrase can
-miss it on a long path.
+`@cli` renders a refusal through rich, which **wraps stderr at the console
+width**: 80 columns when stderr is not a terminal (79 on Windows), or `COLUMNS`
+when exported. A refusal naming a long path is broken across lines at whatever
+space falls near that column, so any caller grepping stderr for a refusal
+phrase can miss it. The tests pin the console width and flatten stderr
+whitespace before asserting, which keeps them about the reason rather than
+about path length.
 
 [<- Back to the branch README](../README.md)

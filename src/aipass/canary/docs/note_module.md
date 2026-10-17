@@ -8,9 +8,8 @@ for an empty store; `--json` on anything but list is refused, exit 2).
 `apps/modules/note.py` routes; `apps/handlers/notes/store.py` does the
 reading and the appending.
 
-It exists as a test subject, not as a feature. It was built blind as an exam for
-the fleet's test standard — the brief never said it was being marked — and it
-stays because the behaviour it pins is worth keeping around.
+It exists as a test subject, not as a feature: the behaviour it pins is worth
+keeping around.
 
 ## The store
 
@@ -52,11 +51,9 @@ time, so "refuses loudly and truncates the store" cannot pass. Each carries a
 valid-store control, so the suite cannot pass vacuously. The missing-store case
 asserts the file was not created.
 
-Mutation-checked before reporting, by hand: mutants for append-mode-to-truncate,
-a deleted terminator guard, and a refusal printed to stdout with exit 0 all died.
-One survived on the first pass — the terminator guard, because both unterminated
-cases broke the JSON anyway once their final byte was dropped. A valid record
-plus a trailing space with no newline convicts it now.
+The terminator guard has its own case: a valid record plus a trailing space
+with no newline. The other unterminated cases break the JSON once their final
+byte is dropped, so they refuse with or without the guard.
 
 The exactly-these-two-keys rule has a case for each half. A missing key is the
 subset half; `extra_key` is the superset half, and it is the only one that

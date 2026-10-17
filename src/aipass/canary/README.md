@@ -111,12 +111,12 @@ Depth lives in [docs/](docs/), one page per subject:
 
 | Page | What it covers |
 |------|----------------|
-| [docs/command_surface.md](docs/command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the forms the help pages had been missing |
+| [docs/command_surface.md](docs/command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the help forms every module accepts |
 | [docs/note_module.md](docs/note_module.md) | The note store: format, the parse refusal, why it avoids the fleet json service, what its tests measure |
-| [docs/span_module.md](docs/span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests and mutants measure |
+| [docs/span_module.md](docs/span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests measure |
 | [docs/top_module.md](docs/top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
-| [docs/align_module.md](docs/align_module.md) | The column aligner: the layout, the four rulings the contract left open, every refusal, what its tests and mutants measure |
-| [docs/kv_module.md](docs/kv_module.md) | The key/value store: the verbs, the file, the six rulings, what guards the write, every refusal, what its tests and mutants measure |
+| [docs/align_module.md](docs/align_module.md) | The column aligner: the layout, the four rulings the contract leaves open, every refusal, what its tests measure |
+| [docs/kv_module.md](docs/kv_module.md) | The key/value store: the verbs, the file, the six rulings, what guards the write, every refusal, what its tests measure |
 | [docs/testing.md](docs/testing.md) | Running the suite, the conftest seam, and what continuous integration actually runs |
 | [docs/branch_data.md](docs/branch_data.md) | Everything written to disk here: the json shim, `canary_json/`, `docs.local/`, `logs/`, the archives |
 
@@ -139,7 +139,7 @@ Depth lives in [docs/](docs/), one page per subject:
 
 ---
 
-**Last Updated:** 2026-10-04
+**Last Updated:** 2026-10-17
 
 ---
 

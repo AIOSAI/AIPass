@@ -18,8 +18,8 @@ on this branch's behalf.
 `apps/handlers/json/json_handler.py` is the byte-identical fleet shim, checked
 by hash across every branch. It imports exactly one thing — the shared json
 service — and binds its public names to a per-branch handle. It imports nothing
-from the old shared handler, which was retired to an archive directory; this
-branch's dead-cwd pins dropped their preload of it in the same sweep.
+from the retired shared handler, which sits in an archive directory, and the
+dead-cwd pins do not preload it.
 
 Path resolution, measured with the test seam unset: a config, data or log
 document for a given name resolves under `canary_json/` as
@@ -44,7 +44,8 @@ for its purpose.
 
 Git-ignored working space. It holds the note store, `notes.jsonl`, the sample
 and deliberately-malformed tally files the `top` module was exercised against by
-hand, and whatever a sub-agent drops during a test.
+hand, whatever a sub-agent drops during a test, and probe scratch kept under
+`docs.local/.archive/`.
 
 ## logs/
 
@@ -52,18 +53,18 @@ Prax log output *and* dispatch transcripts, which is worth knowing before
 reading anything there. `dispatch_stdout.log`, `dispatch_stderr.log`,
 `dispatch_wake.log` and the `.dispatch_env` snapshot are written by the mail
 branch when work arrives here — they are not this branch's own output.
-`note.log`, `span.log` and `top.log` are: each module logs its own refusals and
-I/O failures to a file named for it.
+`note.log`, `span.log`, `top.log`, `align.log` and `kv.log` are: each module
+logs its own refusals and I/O failures to a file named for it.
 
 The entry point's own logger call sites — an import fallback, a module that
 fails to load, a module that raises mid-route, and an unhandled error in
-`main()` — have never fired. No log file named for the entry point exists
+`main()` — have written nothing: no log file named for the entry point exists
 anywhere in the repository, which is a fact about how little goes wrong here,
 not about the wiring.
 
 ## Archives
 
-`apps/handlers/.archive/` and `apps/handlers/json/.archive/` hold the pre-sweep
+`apps/handlers/.archive/` and `apps/handlers/json/.archive/` hold the retired
 path helper and the retired local json handler. `tests/.archive/` holds retired
 suites. Archive directories are untracked by doctrine: present on disk, absent
 from the repository.

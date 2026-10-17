@@ -7,9 +7,8 @@ after it reads the value back. `apps/modules/kv.py` routes, counts arguments and
 prints; `apps/handlers/kv/store.py` reads the file, rewrites it, and owns every
 refusal that is about the store rather than about the command line.
 
-It exists as a test subject, not as a feature. Built to a dispatched contract
-(@devpulse, 2026-09-20) whose interesting half is that this is the first canary
-command that **writes**: the questions worth answering are what a refused call
+It exists as a test subject, not as a feature. Its interesting half is that it
+is the canary command that **writes**: the questions worth answering are what a refused call
 leaves on disk, what happens to a store the command cannot parse, and which of
 the caller's own words are allowed to look like flags.
 
@@ -49,7 +48,7 @@ size	big
 
 ## The rulings
 
-Six places where the contract was silent, each decided once and written where a
+Six places where the contract is silent, each ruling written where a
 reader of the code will hit it. The full reasoning lives in the handler
 docstring; these are the decisions and what each one costs.
 
@@ -97,16 +96,11 @@ nothing and keeps a caller's own word storable.
 
 A help flag is the opposite case. `kv store.txt set --help colour` is somebody
 who does not know the verb yet, and storing a pair in answer to a question is
-exactly the harm @seedgo's `help_flag_safety` standard was written for — it
-exists because `drone @memory rollover push --help` once performed the reset it
-was asked to describe. So `--help` and `-h` explain from any position, like
+exactly the harm @seedgo's `help_flag_safety` standard guards against: a help
+request that performs the action it asked about. So `--help` and `-h` explain from any position, like
 every other module in this branch. *The cost:* a key or a value spelled
 `--help` or `-h` cannot be set or looked up from the command line. The bare word
 `help` stays in first position, because `help` is a plausible value.
-
-This ruling was made the other way first and withdrawn. The first version
-protected caller data everywhere, which reads well until the position being
-protected is on a command that writes.
 
 ## The write
 
@@ -121,8 +115,8 @@ lose data. Three things guard it:
    the other, never half of each. Same directory on purpose: a move across
    filesystems is a copy, and a copy is interruptible.
 3. **The mode is carried over.** An existing store keeps the permissions it had;
-   a new one gets what the umask would have given it. Measured 2026-09-20:
-   without that correction the first store landed `0600`, because that is what
+   a new one gets what the umask would have given it (`0o666 & ~umask`).
+   Without that correction a new store lands `0600`, because that is what
    `tempfile` creates — quietly more private than the caller's own shell makes a
    file.
 
@@ -173,17 +167,16 @@ afterwards.
 
 The contract says the key, **a single tab**, and the value. The shared `@cli`
 console renders through rich, which expands a tab to the next 8-column tab stop:
-`console.print("a\tb")` puts `a` and seven spaces on the line (measured
-2026-09-20). So `list` and `get` write to `sys.stdout` and the JSON form with
+`console.print("a\tb")` puts `a` and seven spaces on the line. So `list` and `get` write to `sys.stdout` and the JSON form with
 them, which keeps all three forms carrying exactly what the store holds.
 Refusals and help keep the shared console, so this branch's error contract is
 unchanged.
 
 ## What the tests actually measure
 
-91 tests in `tests/test_kv.py`, driven through the entry point's `main()` with
-real module discovery, so the exit codes asserted are the ones drone hands a
-caller. Three of them exist because this command writes:
+`tests/test_kv.py` drives the entry point's `main()` with real module
+discovery, so the exit codes asserted are the ones drone hands a caller. Three
+properties are measured because this command writes:
 
 - **The bytes on disk**, not just what comes back out. `set` then `get` would
   pass on a store that kept its pairs in JSON, in reverse, or in memory. The
@@ -194,13 +187,12 @@ caller. Three of them exist because this command writes:
 - **A single tab.** An assertion that only looked for the key and the value
   would pass on the space-padded version.
 
-25 mutants were run against the pair, all 25 killed — including the four worth
-naming, because each one is a real bug that looks like a tidy-up: `splitlines()`
-for `split("\n")` (a value with a vertical tab in it becomes two broken lines),
-`console.print` for the direct write (the tab becomes spaces), treating `--json`
-as a flag wherever it appears (a key named `--json` stops being storable), and
-gating help at the first argument only (`set --help colour` writes instead of
-explaining). The umask correction has a mutant too: pinned to `0600`, the
-created store is measurably more private than the caller's own files.
+Four tidy-ups are real bugs here, and each has a case that fails on it:
+`splitlines()` for `split("\n")` (a value with a vertical tab in it becomes two
+broken lines), `console.print` for the direct write (the tab becomes spaces),
+treating `--json` as a flag wherever it appears (a key named `--json` stops
+being storable), and gating help at the first argument only (`set --help
+colour` writes instead of explaining). The created store's mode has its own
+case, so a store pinned to `0600` fails it.
 
 [<- Back to the branch README](../README.md)
