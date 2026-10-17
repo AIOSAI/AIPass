@@ -17,7 +17,7 @@ The dispatch path from a normalized event to a handler, how a source edit become
 5. First hook returning `{"decision": "block"}` with exit code 2 = bail (block the action)
 6. A hook that fails to import, raises, times out, or exits 2 without JSON: a fail-closed gate is answered with a BLOCK (Gates Fail Closed, below); an injector is logged and skipped, and the next hook runs
 7. Hook stdouts returned to the platform as ONE document (`handlers/config/output_merge.py`). Claude Code parses a hook's stdout as a single document: two JSON objects on two lines are a non-blocking hook error and NEITHER is applied. So:
-   - a single output passes through untouched, and plain-only outputs are newline-joined as before;
+   - a single output passes through untouched, and plain-only outputs are newline-joined;
    - once any handler answers in JSON, the answer is one object: `additionalContext` joined in handler order by a blank line, `systemMessage` joined by a newline, other keys first-handler-wins (a conflict is logged);
    - the merged context stays within Claude Code's 10,000 UTF-16-unit display limit. The post-compact re-ground is placed first, and a context that would cross the limit is dropped with a WARNING naming it — never silently.
 
@@ -48,9 +48,9 @@ Each fail-closed gate also refuses the call it guards when it crashes internally
 
 ## Dynamic Dispatch
 
-Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 59 live non-`__init__` files (61 on disk, two parked as `(disabled)`), and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
+Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used: run unshielded, `dead_code` reports dispatched handlers as unreferenced, which is this indirection and not rot. Shielded, `dead_code` audits 100%.
 
-Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). **30 of the 32 are `enabled: true`** as of 2026-09-07: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` was flipped off when it was retired (FPLAN-0495 item 3). The AIPass root `.aipass/hooks.json` is read with no trust check (since DPLAN-0356), so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
+`hooks.json` wires 37 entries under 36 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact. **35 of the 37 are `enabled: true`**: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` is off because its handler is retired. The AIPass root `.aipass/hooks.json` is read with no trust check, so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. A short window routinely misses the PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and the SessionStart ones (`cadence_reset`, `release_notice`), whose events fire rarely. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
 
 ## Importing Without a Working Directory
 
@@ -59,32 +59,28 @@ Every hooks module must import in a process whose working directory is gone.
 paths, the way `posixpath` does — and `Path.resolve()` routes through it. So on
 Windows every `Path(__file__).resolve()` *reached at import time* is an
 import-time working-directory dependency, and a process whose cwd was deleted
-cannot import the module at all. (Measured on the Windows CI gate 2026-08-31,
-@memory's finding, routed here by @devpulse.)
+cannot import the module at all.
 
 **The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
 It still attempts `.resolve()` — normalising symlinks is why the call exists —
 and falls back to the absolute spelling only in the world where the alternative
 is a dead import. New module-level `__file__` resolution goes through it.
 
-**The count was wrong until the guard was cured.** `apps/handlers/__init__.py`
-runs a cross-branch import guard on *every* hooks import, and it died first, so
-all 68 modules reported that one line and no other site was visible. Curing the
-guard is what made the remaining sites measurable — the honest sequence was
-1 → 5 → 6, each cure unmasking the next. `tests/test_import_dead_cwd.py` pins
-the whole tree, discovered by walk rather than listed.
+**The guard is the first site.** `apps/handlers/__init__.py` runs a
+cross-branch import guard on *every* hooks import, so a dead-cwd failure there
+masks every other site: each module reports that one line. `tests/test_import_dead_cwd.py`
+pins the whole tree, discovered by walk rather than listed.
 
 **Two worlds, because one proves half.** World A emulates ntpath (`realpath`
 reads cwd, `getcwd` denied) and convicts an unguarded `resolve()`; on Linux it
 does NOT convict `inspect.stack()`, because there the raise happens inside
 `getabsfile()` where inspect catches it. World B denies `os.path.realpath`
-outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard now
+outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard
 walks frames with `sys._getframe` and reads the import line with `linecache`.
 
 The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
 caller-is-None branch is unreachable from any import probe, so a regrown call
-there is invisible to the world tests — a mutant proved exactly that, killed
-only by the AST pin. AST and not a string ban because this guard's own
+there is invisible to the world tests and caught only by the AST pin. AST and not a string ban because this guard's own
 docstrings name the defect, and a spelling ban convicts prose while acquitting
 code.
 

@@ -4,6 +4,9 @@
 
 **Branch** hooks · **Code** `apps/handlers/security/git_gate.py`, `apps/handlers/security/rm_gate.py`, `apps/handlers/security/settings_backup.py`, `apps/modules/protected_paths.py`, `apps/modules/shell_reader.py`
 
+How raw git and gh are refused and redirected to drone, how deletes are refused, and how a write to
+`~/.claude/settings*.json` is backed up first.
+
 ---
 
 ## Git Gate
@@ -14,12 +17,12 @@ The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to
 included; git or gh launched from inside a program, the gh credential, and GitHub API writes, for every
 seat too; and writes to the protected files off the admin seat (below).
 
-**If drone cannot do it, it cannot be done (5.0.0, the owner's ruling 2026-10-04).** No seat runs git
+**If drone cannot do it, it cannot be done.** No seat runs git
 or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal (`RAW_GIT_REFUSED`)
 names the caller from its passport (or says it could not be named) and the drone twin of the verb
 (`_GIT_TWINS`), as published in `drone @git --help`: `git status` is `drone @git status`, `git log`
 is `drone @git log [count] [path ...]`, and likewise diff, show, blame, remote, branch, tag and the
-owner verbs. Drone's read twins of 2026-10-04 (5.1.0):
+owner verbs. Drone's read twins:
 
 | Raw git | Its drone twin |
 |---|---|
@@ -38,7 +41,7 @@ runs git as a subprocess (drone itself) never passes through a hook.
 owns gh: the refusal maps `gh issue`, `gh run`, `gh workflow` and `gh pr create` to their
 `drone @git` twins.
 
-**What it reads is the program the shell will run (since DPLAN-0356 phase 3).** Both gates read the
+**What it reads is the program the shell will run.** Both gates read the
 command through `modules/shell_reader.py`, the branch's ONE shell-word reader; there is no second copy.
 It hands back every program the command runs, spelled the way the shell runs it: quotes removed,
 escapes and `$'\x67it'` decoded, braces expanded, a glob in the command word (`/usr/bin/g?t`) resolved
@@ -51,10 +54,10 @@ body a reader only reads (a mail body) is data, not a command.
 What the reader cannot name with confidence — a command word that is an unfolded expansion
 (`$UNSET x`, `$(cat verb)`), a shell fed through a pipe, a script that exists but is unreadable, not
 a regular file, or over 512 KB — is refused off the admin seat (`rm_gate`'s `UNREAD_REFUSED`). A script
-that does not exist yet is allowed and logged at INFO (phase 4, P1): writing a helper and running it in
+that does not exist yet is allowed and logged at INFO: writing a helper and running it in
 one command is everyday work, and there is nothing to read.
 
-**An unknown wrapper is read for what it runs (phase 4, P3).** A command word that is neither a tabled
+**An unknown wrapper is read for what it runs.** A command word that is neither a tabled
 launcher nor a known plain program (`modules/shell_programs.PLAIN_PROGRAMS`: echo, grep, cat, mv, cp,
 pytest, ruff …) has its operands scanned for a delete verb, git or gh, and is read from there as a
 nested command. A plain program's operands are data, so `grep -rn rm .` and `echo git push` pass.
@@ -65,11 +68,11 @@ One refusal per command: the twin named is the first git invocation's.
 all run the program on Windows, so all are read as git or gh (`bash_writes.verb_name()`, the one
 executable-extension list). A file merely NAMED for a program (`git.py`) is nobody's invocation.
 
-**git and gh from inside a program (R5).** For every seat, an interpreter whose program text
+**git and gh from inside a program.** For every seat, an interpreter whose program text
 launches git or gh — `subprocess.run(['git', …])`, `os.system('gh …')`, node `execSync`, perl
 `system`, backticks — is refused (`INTERPRETER_GIT_REFUSED`), inline, in a heredoc or in a script file.
 
-**GitHub without gh (R6).** For every seat, reading the gh credential is refused
+**GitHub without gh.** For every seat, reading the gh credential is refused
 (`CREDENTIAL_REFUSED`: `gh auth token`, `gh auth status --show-token`, `secret-tool`/`keyring`/`security`
 lookups, python `keyring.get_password`, `hosts.yml`, `.git-credentials`), and so is an HTTP client
 sending a non-GET method or a body to `api.github.com` (`GITHUB_HTTP_REFUSED`: curl, wget, httpie, or
@@ -81,22 +84,22 @@ the kernel sandbox ([sandbox.md](sandbox.md)) is the real boundary.
 lane, off the verified admin seat (`PROTECTED_REFUSED`). A change is a write, a delete, a move away, a
 move over, a recursive copy over, or making a hard link to it; a directory deleted or moved whole
 counts when a protected file is inside it. The protected lane decides each on its own, without
-`rm_gate` (R2):
+`rm_gate`:
 
 - any `.aipass/hooks.json` under AIPASS_HOME, the root one included;
 - `~/.aipass/trusted_projects.json`;
 - `.claude/settings*.json`, `.claude/hooks/`, `.git/hooks/`;
 - this branch's promoted copies (`.live-*`): only `drone @hooks promote` writes them;
-- since phase 4: everything under AIPASS_HOME's `.git/`, and every sealed `*_REGISTRY.json` under it.
+- everything under AIPASS_HOME's `.git/`, and every sealed `*_REGISTRY.json` under it.
 
-**Default-deny on the Bash lane (phase 4, P2).** Listing write verbs was permanently incomplete: one
-nobody listed passed every fence. Off the admin seat, a protected path named as an operand is refused
+**Default-deny on the Bash lane.** A list of write verbs is never complete: a verb
+nobody listed would pass every fence. Off the admin seat, a protected path named as an operand is refused
 unless the program is on `shell_programs.READ_ONLY_PROGRAMS` (cat, head, tail, less, grep, rg, jq, wc,
 stat, ls, diff, the checksum tools, `find` without an acting flag, and `drone`, the router) — and a
 redirect into it is refused whatever the program. git and gh answer to this gate's own git lane.
 
 Who may write them is the admin grant alone; there is no name list. Paths are matched with `\` read
-as `/` and case-insensitively, and by FILE as well as by name (R1): an existing file with more than one
+as `/` and case-insensitively, and by FILE as well as by name: an existing file with more than one
 link is compared by (device, inode) against every protected file, so a hard link in a seat's own
 directory is protected under its second name too. An external project's own `hooks.json` is not listed: trust decides
 whether it runs.
@@ -119,7 +122,7 @@ agent how to switch a gate off.
   `shred` and their kin wherever a program runs (shell_reader names it, however it is spelled),
   `find -delete`, and an interpreter's delete (`os.remove`, `shutil.rmtree`, `Path.unlink`; node
   `fs.rmSync`; perl or php `unlink`; ruby `FileUtils.rm_rf`; a shell-out to `rm`) whether its program
-  is inline, a heredoc, or a script file read at decision time (R4).
+  is inline, a heredoc, or a script file read at decision time.
 - **A program the reader cannot read** is refused off the admin seat (`UNREAD_REFUSED`).
 - What is still not seen — a delete through an alias or `getattr`, a script that changes after the
   check — is named in `bash_writes.NOT_CAUGHT`.
@@ -148,7 +151,7 @@ subprocess never passes through a hook.
 
 ## Settings Backup
 
-`security/settings_backup.py` (FPLAN-0645, the owner's ruling 2026-10-15) runs on Bash, Edit,
+`security/settings_backup.py` runs on Bash, Edit,
 MultiEdit, Write and NotebookEdit, last in the PreToolUse gate set. When a call writes
 `~/.claude/settings*.json` (`~` expanded, relative paths joined to the seat's cwd, symlinks followed
 from either end; a Bash target as `git_gate`'s protected lane reads it), it copies the file into

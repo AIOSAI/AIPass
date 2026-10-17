@@ -33,12 +33,8 @@ Bind-mount, not isolation: the sandbox preserves the shared live filesystem. Rea
 The Node helper (`_srt_resolve.mjs`) resolves the globally-installed srt library via `process.execPath` (ESM resolution doesn't walk to global node_modules). The resolver runs with CWD set to `/var/tmp` to prevent srt's mandatory-deny mask files from polluting the branch directory.
 
 @ai_mail's `dispatch_monitor` wires the launch seam with `build_policy` + `build_srt_config` +
-`resolve_bwrap_command` — **not** `sandbox_launch`, which this section previously claimed. Corrected
-2026-08-13 against `ai_mail/apps/handlers/dispatch/dispatch_monitor.py:69`, whose call order is pinned
-by `ai_mail/tests/test_dispatch_monitor.py:1759`. An earlier claim here that the @drone broker
-validates sandbox policy before agent launch could not be substantiated — the broker is a privileged
-delete daemon and no policy validation was found in its tree — so it has been removed rather than
-restated.
+`resolve_bwrap_command` (`ai_mail/apps/handlers/dispatch/dispatch_monitor.py`), not `sandbox_launch`.
+The @drone broker is a privileged delete daemon and does not validate sandbox policy.
 
 ---
 

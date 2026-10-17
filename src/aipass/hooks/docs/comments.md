@@ -2,7 +2,7 @@
 
 # The comment budget
 
-Every edit to a source file is measured: what share of its lines are full-line comments. Over 10%, the agent is told, with the heaviest runs, so old code cleans up as it is touched. The owner's ruling of 2026-10-16; the prompt half is the House rules line in `.aipass/tier1_navmap.md`.
+Every edit to a source file is measured: what share of its lines are full-line comments. Over 10%, the agent is told, with the heaviest runs, so old code cleans up as it is touched. The prompt half is the House rules line in `.aipass/tier1_navmap.md`.
 
 **Branch** hooks · **Code** `apps/modules/comment_scan.py` (the counter), `apps/handlers/lifecycle/comment_budget.py` (PostToolUse), `apps/modules/comments.py` (the verb) · **Ledger** `logs/comments.jsonl`
 
