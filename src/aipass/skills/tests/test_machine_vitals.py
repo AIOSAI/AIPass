@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-12
+# Modified: 2026-10-16
 # Category: skills/tests
 # =============================================
 
@@ -17,6 +17,7 @@ from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import psutil
 import pytest
 
 from aipass.skills.apps.handlers import switch_handler
@@ -1071,3 +1072,194 @@ class TestTheBatteryAction:
         assert result["success"] is True
         assert result["output"].split("\n---\n")[-1].startswith("Battery\n")
         assert "battery" in status.get_actions()
+
+
+MIB = 1024**2
+
+
+class _Proc:
+    """One psutil.Process: the first cpu_percent is the cold zero, the second its real load.
+
+    Any attribute it does not define - cmdline, environ, cwd - is recorded and
+    refused, so the list can only be built from the name and the five numbers.
+    """
+
+    def __init__(self, pid, name, load, mem_pct, rss, user: str | None = "someone", state="running", fails=None):
+        self.pid = pid
+        self._name = name
+        self._load = load
+        self._mem_pct = mem_pct
+        self._rss = rss
+        self._user = user
+        self._state = state
+        self._fails = fails or {}
+        self._cpu_reads = 0
+        self.touched = []
+
+    def _maybe_fail(self, call):
+        if call in self._fails:
+            raise self._fails[call](self.pid)
+
+    def cpu_percent(self, interval=None):
+        self._cpu_reads += 1
+        if self._cpu_reads > 1:
+            self._maybe_fail("second_cpu_read")
+            return self._load
+        return 0.0
+
+    def name(self):
+        self._maybe_fail("name")
+        return self._name
+
+    def memory_percent(self):
+        return self._mem_pct
+
+    def memory_info(self):
+        self._maybe_fail("memory_info")
+        return _Mem(rss=self._rss, vms=self._rss * 2)
+
+    def username(self):
+        if self._user is None:
+            raise psutil.AccessDenied(self.pid)
+        return self._user
+
+    def status(self):
+        return self._state
+
+    def __getattr__(self, name):
+        self.__dict__.setdefault("touched", []).append(name)
+        raise AssertionError(f"Process.{name} was reached - the list reads the name only")
+
+
+_Mem = namedtuple("pmem", ["rss", "vms"])
+
+
+class _BusyMachine(_LinuxMachine):
+    """The Linux stand-in with a process table: pids() and Process(pid) read it."""
+
+    NoSuchProcess = psutil.NoSuchProcess
+    AccessDenied = psutil.AccessDenied
+    ZombieProcess = psutil.ZombieProcess
+
+    def __init__(self, clock, table=(), gone=()):
+        super().__init__(clock)
+        self.table = {proc.pid: proc for proc in table}
+        self.gone = set(gone)
+        # psutil spells its constructor Process; bound here so no method breaks snake_case.
+        self.Process = self._open
+
+    def pids(self):
+        return sorted(set(self.table) | self.gone)
+
+    def _open(self, pid):
+        if pid in self.gone:
+            raise psutil.NoSuchProcess(pid)
+        return self.table[pid]
+
+
+@pytest.fixture()
+def naps(monkeypatch, clock):
+    """The sample's sleep, recorded and spent on the test's clock instead of the wall's."""
+    taken = []
+
+    def nap(seconds):
+        taken.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr(status, "_sleep", nap)
+    return taken
+
+
+def _busy(monkeypatch, clock, table=(), gone=()):
+    stand_in = _BusyMachine(clock, table, gone)
+    monkeypatch.setattr(status, "psutil", stand_in)
+    return stand_in
+
+
+class TestTheProcessList:
+    """machine_processes(limit) - contract C-B (DPLAN-0414 theme 3)."""
+
+    def test_the_list_is_top_by_sampled_cpu_normalised_to_the_machine_with_name_only(
+        self, monkeypatch, clock, sysfs, naps
+    ):
+        table = [
+            _Proc(1, "systemd", load=0.4, mem_pct=0.24, rss=12 * MIB + 7, user="root", state="sleeping"),
+            _Proc(42, "chrome", load=170.0, mem_pct=3.14, rss=512 * MIB),
+            _Proc(4242, "fan_spinner", load=170.0, mem_pct=9.0, rss=2048 * MIB, user=None),
+        ]
+        _busy(monkeypatch, clock, table)
+
+        result = status.machine_processes()
+
+        sampled_at = datetime.fromisoformat(result.pop("sampled_at"))
+        assert sampled_at.utcoffset() == timedelta(0)
+        assert result == {
+            "window_ms": 500,
+            "total": 3,
+            "sort": "cpu",
+            "processes": [
+                {
+                    "pid": 4242,
+                    "name": "fan_spinner",
+                    "cpu_pct": 42.5,
+                    "mem_pct": 9.0,
+                    "mem_mb": 2048,
+                    "user": None,
+                    "state": "running",
+                },
+                {
+                    "pid": 42,
+                    "name": "chrome",
+                    "cpu_pct": 42.5,
+                    "mem_pct": 3.1,
+                    "mem_mb": 512,
+                    "user": "someone",
+                    "state": "running",
+                },
+                {
+                    "pid": 1,
+                    "name": "systemd",
+                    "cpu_pct": 0.1,
+                    "mem_pct": 0.2,
+                    "mem_mb": 12,
+                    "user": "root",
+                    "state": "sleeping",
+                },
+            ],
+        }
+        assert naps == [0.5]
+        assert [proc.touched for proc in table] == [[], [], []]
+
+    @pytest.mark.parametrize(("limit", "listed"), [(-5, 1), (0, 1), (1, 1), (3, 3), (100, 100), (101, 100), (250, 100)])
+    def test_limit_clamps_to_one_through_a_hundred(self, monkeypatch, clock, sysfs, naps, limit, listed):
+        table = [_Proc(pid, f"worker{pid}", load=float(pid), mem_pct=0.1, rss=MIB) for pid in range(1, 121)]
+        _busy(monkeypatch, clock, table)
+
+        result = status.machine_processes(limit)
+
+        assert result["total"] == 120
+        assert [proc["pid"] for proc in result["processes"]] == list(range(120, 120 - listed, -1))
+
+    def test_a_process_that_vanishes_mid_sample_is_skipped_not_an_error(self, monkeypatch, clock, sysfs, naps):
+        table = [
+            _Proc(42, "short_lived", load=300.0, mem_pct=1.0, rss=MIB, fails={"second_cpu_read": psutil.NoSuchProcess}),
+            _Proc(9, "zombie", load=200.0, mem_pct=1.0, rss=MIB, fails={"name": psutil.ZombieProcess}),
+            _Proc(10, "guarded", load=100.0, mem_pct=1.0, rss=MIB, fails={"memory_info": psutil.AccessDenied}),
+            _Proc(11, "steady", load=8.0, mem_pct=1.0, rss=MIB),
+        ]
+        _busy(monkeypatch, clock, table, gone={7})
+
+        result = status.machine_processes()
+
+        assert result["total"] == 5
+        assert [(proc["pid"], proc["name"]) for proc in result["processes"]] == [(11, "steady")]
+
+    def test_a_switched_off_skill_answers_the_vitals_refusal_and_reads_no_process(self, monkeypatch, naps):
+        untouchable = _UntouchableMachine()
+        monkeypatch.setattr(status, "psutil", untouchable)
+        assert switch_handler.set_enabled("system_status", False) is True
+
+        assert status.machine_processes() == status.machine_vitals()
+        assert status.machine_processes()["reason"] == "switched_off"
+        assert untouchable.touched == []
+        assert naps == []

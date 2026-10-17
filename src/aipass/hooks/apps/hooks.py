@@ -55,13 +55,7 @@ def discover_modules() -> list[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        # "(disabled)" in a filename is the fleet's retirement mark, and until
-        # 2026-09-07 it did nothing here: importlib.import_module resolves a
-        # submodule by matching the FILE, not by parsing an identifier, so
-        # "presence(disabled)" imported exactly as happily as "presence" and the
-        # retired module kept answering `drone @hooks presence` with records
-        # frozen since June. Skipped by name, so the convention retires a module
-        # where it is written rather than only where someone remembers to check.
+        # import_module matches the FILE, so "x(disabled).py" would import as happily as "x.py".
         if _DISABLED_MARK in file_path.name:
             logger.info("[HOOKS] Skipping retired module %s", file_path.name)
             continue

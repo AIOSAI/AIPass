@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_health.py
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/health.py -- get_branch_health()."""
@@ -478,3 +478,108 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
         captured = capsys.readouterr()
         assert "health Module" in captured.out
         assert "get_branch_health" in captured.out
+
+
+# ===========================================================================
+# The branch form — `health @name` renders get_branch_health (DPLAN-0414 T7)
+# ===========================================================================
+
+
+def _due_and_oversize_branch(tmp_path: Path, monkeypatch) -> dict[str, str]:
+    """A branch whose local.json is past its sessions trigger and holds one key_learning 5 chars over."""
+    branch_dir = tmp_path / "loud_branch"
+    trinity = branch_dir / ".trinity"
+    trinity.mkdir(parents=True)
+    data = {
+        "document_metadata": {"schema_version": "3.0.0"},
+        "sessions": [{"id": f"s{i}"} for i in range(50)],
+        "key_learnings": {"ok_entry": "fine", "bad_entry": "x" * 15},
+    }
+    (trinity / "local.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    monkeypatch.setattr(
+        _detector.config_loader,
+        "section",
+        lambda name: {"per_branch": {"loud_branch": {"local": {"sessions": {"count": 10}}}}, "defaults": {}},
+    )
+    limits = {
+        "enabled": True,
+        "enforce": False,
+        "entry_types": {
+            "key_learnings": {
+                "file": "local.json",
+                "container": "key_learnings",
+                "kind": "dict",
+                "field": "value",
+                "max_chars": 10,
+            },
+        },
+    }
+    monkeypatch.setattr(_lint_handler, "load_entry_limits", lambda *a, **k: limits)
+    return {"name": "loud_branch", "path": str(branch_dir)}
+
+
+class TestTheBranchFormRendersItsHealth:
+    def test_health_at_a_clean_branch_prints_both_files_and_no_introspection(self, tmp_path: Path, capsys):
+        branch = _make_branch(tmp_path, name="clean_branch")
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[branch]):
+            assert _health.handle_command("health", ["@clean_branch"]) is True
+
+        out, err = capsys.readouterr()
+        assert resolve_exit(True) == 0
+        assert "@clean_branch health" in out
+        assert "local.json: ok" in out
+        assert "observations.json: ok" in out
+        assert "entry size: 0 violations" in out
+        assert "Library module" not in out
+        assert err == ""
+
+    def test_a_due_rollover_and_an_oversize_entry_are_both_named(self, tmp_path: Path, monkeypatch, capsys):
+        branch = _due_and_oversize_branch(tmp_path, monkeypatch)
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[branch]):
+            _health.handle_command("health", ["@LOUD_BRANCH"])
+
+        out, err = capsys.readouterr()
+        assert resolve_exit(True) == 0, "a due rollover and a violation are facts, not a failed command"
+        assert "local.json: rollover due" in out
+        assert "sessions" in out
+        assert "observations.json: not found" in out
+        assert "entry size: 1 violation" in out
+        assert "key_learnings[bad_entry]: 15 chars, cap 10 (over by 5)" in err
+
+    def test_an_unknown_branch_is_refused_and_exits_two(self, tmp_path: Path, capsys):
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[_make_branch(tmp_path)]):
+            _health.handle_command("health", ["@ghost"])
+
+        out, err = capsys.readouterr()
+        assert resolve_exit(True) == 2
+        assert "Unknown branch: ghost" in err
+        assert "@ghost health" not in out
+
+    def test_a_second_argument_is_refused_and_exits_two(self, tmp_path: Path, capsys):
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[_make_branch(tmp_path)]):
+            _health.handle_command("health", ["@test_branch", "extra"])
+
+        out, err = capsys.readouterr()
+        assert resolve_exit(True) == 2
+        assert "extra" in err
+        assert "@test_branch health" not in out
+
+    def test_a_help_flag_after_the_branch_explains_and_renders_nothing(self, tmp_path: Path, capsys):
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[_make_branch(tmp_path)]) as scope:
+            _health.handle_command("health", ["@test_branch", "--help"])
+
+        out, err = capsys.readouterr()
+        assert resolve_exit(True) == 0
+        assert "drone @memory health @branch" in out
+        assert "@test_branch health" not in out
+        assert scope.call_count == 0

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact), naming the compacting branch
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-10-16
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue."""
@@ -22,6 +22,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 READY_PHRASE = "ready for rollover"
 
 
+def _probe_run() -> bool:
+    """True under drone @hooks test: its sandbox has no registry by design, so a missing root is no fault."""
+    return os.environ.get("AIPASS_HOOK_PROBE") == "1"
+
+
 def _find_repo_root() -> Path | None:
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if aipass_home:
@@ -32,6 +37,8 @@ def _find_repo_root() -> Path | None:
     for parent in [cwd, *list(cwd.parents)]:
         if (parent / "AIPASS_REGISTRY.json").exists():
             return parent
+    if _probe_run():
+        return None
     logger.error(
         "[HOOKS] rollover: _find_repo_root failed — no AIPASS_REGISTRY.json found. AIPASS_HOME=%r, cwd=%s",
         aipass_home,
@@ -103,7 +110,8 @@ def handle(hook_data: dict) -> dict:
     """Check memory files for overflow and trigger rollover if needed."""
     repo_root = _find_repo_root()
     if not repo_root:
-        logger.warning("[HOOKS] rollover: no repo root found — cannot check")
+        if not _probe_run():
+            logger.warning("[HOOKS] rollover: no repo root found — cannot check")
         return {"stdout": "", "exit_code": 0}
 
     branch = _compacting_branch(hook_data)
@@ -119,7 +127,7 @@ def handle(hook_data: dict) -> dict:
     # it (measured 2026-09-06: the name appears nowhere in @memory's tree), so
     # the refusal has to live at the call. Info, not warning: under a probe this
     # is the designed path, not a fault.
-    if os.environ.get("AIPASS_HOOK_PROBE") == "1":
+    if _probe_run():
         logger.info("[HOOKS] rollover: probe run — check ran, fleet rollover suppressed")
         return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}
 

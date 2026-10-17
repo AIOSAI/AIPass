@@ -17,7 +17,9 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 3. `dispatch_monitor.py` wraps the claude process with safety features:
    - **Startup health check** — monitors JSONL session files for 90s, kills if no activity
    - **Auto-retry** — 3 strikes: attempt 1+2 resume, attempt 3 fresh (new session)
-   - **Bounce email** — on final failure, sends error report back to sender
+   - **Bounce email** — on final failure, sends error report back to sender. A bounce
+     drone did not deliver logs one `BOUNCE NOT DELIVERED` warning and ends the
+     completion status with `, bounce NOT delivered to @sender` (report, register, feed)
    - **Lock cleanup** — removes `.dispatch.lock` when agent exits
    - **Wake-back** — on agent exit, the original sender is notified. A
      builder-class sender is **woken**; a **manager sender is MAILED, never

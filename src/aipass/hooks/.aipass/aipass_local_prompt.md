@@ -46,6 +46,7 @@ apps/
     diagnostics_state.py hook_test.py wire_verify.py sandbox.py release_notice.py
     context_window.py cc_sessions.py cc_transcripts.py   # CC transcript + session readers
     hookstatus.py hooksound.py feedback.py alert_dismiss.py   # one-verb modules
+    comment_scan.py comments.py   #   Comment budget: the pure counter; the `comments` verb
   handlers/
     module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve
     bridges/
@@ -60,7 +61,7 @@ apps/
       testwrite_gate.py    #   New test files + template pointer
       git_gate.py rm_gate.py registry_gate.py presence_gate.py subagent_gate.py
     lifecycle/             # Session + compaction
-      auto_fix.py auto_process.py compact.py rollover.py pre_compact_prep.py
+      auto_fix.py comment_budget.py auto_process.py compact.py rollover.py pre_compact_prep.py
       post_compact_regrounding.py session_start.py session_boot.py release_notice.py
     notification/          # Sound, mail, Telegram
       announce.py email.py stop_sound.py tool_sound.py telegram_response.py

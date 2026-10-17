@@ -73,16 +73,17 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/roots` | read | Every place the file lane may stand: `home`, every project in @baud's census, this server's own repo. Rows of `{kind, name, label}`. No census, no roster — 503, never a short list |
 | `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
 | `GET /v1/dir?branch=&dir=&project=&root=` | read | One directory level, the phone's file browser. Same optional `root`; `branch` carries the name WITHIN that kind — and a kind that names nothing may name *itself* (`branch=home&root=home`), any other name refused. Answers carry `floor`, and `floor` + an entry's path is that entry's real location |
-| `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB); `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
+| `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB), branch-local at `branch` grain; one the worktree patch lacks comes from the index (`staged: true`). `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
 | `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repository. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name** |
 | `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |
 | `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
-| `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered |
+| `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered. No remote: 200, all three `null` |
 | `GET /v1/fleet?project=` | read | @baud's snapshot envelope, unchanged. `project` is case-sensitive |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
 | `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache — the first read after a server start shows cpu and network `warming`. An absent reading is a **200** with the skill's section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: the code in `error.reason`, its detail in this host's log) or its door failed (`machine_door_failed`). Takes no parameters — any is a 400 |
+| `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A real ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
 | `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`, the skill's code and sentence) is a **200** — the phone draws it unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape (a boolean `ok`, a `locked` key, the two agreeing). Takes no parameters — any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
@@ -91,6 +92,10 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
+| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
+| `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line verbatim. Nothing running: **404** `not_running`, @backup's line |
+| `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
+| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |
 | `GET /v1/agent-settings?branch=` | read | One branch's three owned claude settings — an absent key reads `null` |
 | `POST /v1/agent-settings` | operate | Patch those three. Three-state by JSON's nature: absent touches nothing, `null` removes, a value sets |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
@@ -128,8 +133,7 @@ exit code is still never the verdict here; and `set-default` **changes only the
 default** — until `push` runs, all 17 branches keep their existing values. That
 surprise is @memory's design and is passed through untouched. It is now also
 *reported* rather than remembered: `pushed` comes from their payload, as does
-the `branches` count a push answers with. This lane used to hardcode
-`pushed: false`, which was a fact about their branch pinned in mine.
+the `branches` count a push answers with.
 
 **What is not one parseable object is `503`, never a verdict.** If `--json` ever
 stops being honoured — an older @memory on a fresh clone, a renamed flag, a

@@ -1,22 +1,34 @@
 # =================== AIPass ====================
 # Name: builder.py
 # Description: Destination path builders for snapshot, versioned, and drive modes
-# Version: 2.0.0
+# Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-16
 # =============================================
 
 """Path builder handler.
 
-Computes destination paths for backup modes. All paths are relative to the
-target project's .backup/ directory.
+Computes destination paths for backup modes. Every local path is under the
+target project's .backup/ directory except .backupignore, which sits in the
+project root; build_drive_path names a remote Drive path, not a local one.
 """
 
+import os
 from pathlib import Path
 
 from ..audit import trail
 
 BACKUP_DIR = ".backup"
+
+#: Windows' MAX_PATH. POSIX enforces its own limits (1024 on macOS, 4096 on
+#: Linux): an over-long path there is the OS's OSError, which each lane records,
+#: so a 260 guard on POSIX only kept real files out of the store.
+_MAX_PATH = 260 if os.name == "nt" else None
+
+
+def exceeds_max_path(target: str) -> bool:
+    """True when a store path is longer than this platform lets the lane write."""
+    return _MAX_PATH is not None and len(target) > _MAX_PATH
 
 
 def backup_root(project_root: str) -> Path:
@@ -91,37 +103,38 @@ def build_versioned_file_path(
 
 
 def build_drive_path(project_root: str, file: str) -> Path:
-    """Drive destination for one store-relative file, as a single path.
+    """Drive destination for one snapshot-store-relative file, as a single path.
 
     This is a REMOTE path, not a local one: it names the folder hierarchy the
     Drive lane creates, which the lane itself only ever holds as folder ids.
-    Read off the shipped sync (DPLAN-003 is closed), in the order the ids are
-    resolved:
+    Read off the shipped sync, in the order the ids are resolved:
 
-        drive/client.py:150-227   the root folder, BACKUP_FOLDER_NAME
-        drive/upload.py:67        the project folder, named by the caller;
-                                  drive_sync.py:139-140 defaults that name to
-                                  the project directory's own name
-        drive/upload.py:78-83     rel_path.parent, one nested folder a segment
-        drive/upload.py:122-125   the create body's "name", the file's leaf
+        drive/client.py      the root folder, BACKUP_FOLDER_NAME
+        drive/upload.py      the project folder, named by the caller;
+                             run_drive_sync defaults that name to the
+                             project directory's own name
+        drive/upload.py      the lane folder (drive_sync passes DRIVE_LANE,
+                             "snapshot"), then rel_path.parent, one nested
+                             folder a segment
+        drive/upload.py      the create body's "name", the file's leaf
 
-    Layout:
-        <BACKUP_FOLDER_NAME>/<project dir name>/<rel_path>
+    Layout (DPLAN-0411: only the snapshot store leaves the machine):
+        <BACKUP_FOLDER_NAME>/<project dir name>/snapshot/<rel_path>
 
     Args:
         project_root: Absolute path to the project.
-        file: Path of the file relative to the versioned store -- the same
+        file: Path of the file relative to the snapshot store -- the same
             key drive/tracker.py records it under.
 
     Returns:
         The Drive-side path of the file.
     """
-    # No name shortening here, unlike build_versioned_file_path above: the
-    # store already applied it on the way in, so rel_path arrives carrying the
-    # hashed folder. Nothing under handlers/drive/ hashes a name.
+    # No name shortening here: the snapshot mirror keeps every name as the
+    # project has it, and nothing under handlers/drive/ hashes a name.
     from ..drive.client import BACKUP_FOLDER_NAME
+    from ..drive.tracker import DRIVE_LANE
 
-    return Path(BACKUP_FOLDER_NAME) / Path(project_root).name / file
+    return Path(BACKUP_FOLDER_NAME) / Path(project_root).name / DRIVE_LANE / file
 
 
 # =============================================

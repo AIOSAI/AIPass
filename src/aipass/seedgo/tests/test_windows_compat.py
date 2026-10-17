@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_windows_compat.py
 # Description: Tests for windows_compat_check.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-14
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/windows_compat_check.py."""
@@ -834,9 +834,11 @@ def test_mock_repr_advisory_line_reads_tests_and_never_scores(tmp_path):
     branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
     _advisory_branch(tmp_path, _INCIDENT_REPR, rel="apps/handlers/helper.py")
     _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/.archive/test_old.py")
+    # 2026-10-15 (mock_repr_path 1.2.0): the message names both mechanisms and the cure.
     assert check_branch_info(str(branch)) == [
         "windows_compat mock repr path (advisory): tests/test_lock.py:5 a path is searched for in a mock call's "
-        "repr - repr doubles each Windows backslash, red on Windows"
+        "repr - repr doubles each Windows backslash of a str arg and spells a Path arg WindowsPath('C:/...'), "
+        "red on Windows; compare the arg itself: call_args.args[i] == path, or the message text in args[0]"
     ]
     assert check_module(str(branch / "tests" / "test_lock.py"))["score"] == 100
 
@@ -913,6 +915,33 @@ def test_mock_repr_helper_returns_read_by_kind_not_by_call(tmp_path):
         "    assert str(obj._lock(tmp_path)) in logged\n"
     )
     assert [line for line, _ in _repr_paths(tmp_path, source)] == [18, 20, 24]
+
+
+# CI 38843541023 — api's test_host_lifetime: the home rode as a Path argument, and
+# str(call(...)) spells it WindowsPath('C:/...'), forward slashes, where str(home) has backslashes.
+_PATH_ARG_REPR = (
+    "from unittest.mock import MagicMock\n"
+    "\n"
+    "def test_the_record_log_and_unit_live_in_the_homes_logs(tmp_path):\n"
+    "    log = MagicMock()\n"
+    "    home = tmp_path / 'home'\n"
+    "    assert str(home) in str(log.info.call_args_list[0])\n"
+)
+
+
+def test_mock_repr_path_argument_specimen_flagged_naming_both_mechanisms_and_the_cure(tmp_path):
+    found = _repr_paths(tmp_path, _PATH_ARG_REPR)
+    assert [line for line, _ in found] == [6]
+    assert "doubles each Windows backslash of a str arg" in found[0][1]
+    assert "spells a Path arg WindowsPath('C:/...')" in found[0][1]
+    assert "compare the arg itself: call_args.args[i] == path" in found[0][1]
+
+
+def test_mock_repr_path_argument_cure_comparing_the_arg_itself_is_clean(tmp_path):
+    cured = _PATH_ARG_REPR.replace(
+        "str(home) in str(log.info.call_args_list[0])", "log.info.call_args_list[0].args[1] == home"
+    )
+    assert _repr_paths(tmp_path, cured) == []
 
 
 # ===========================================================================
@@ -1237,3 +1266,153 @@ def test_a_name_rebound_to_a_clean_path_is_not_guessed_at(tmp_path):
         '    door.write_text("x", encoding="utf-8")\n'
     )
     assert _test_file_rows(tmp_path, source) == (True, "No unguarded POSIX-only patterns found")
+
+
+# ===========================================================================
+# ADVISORY: a text-mode fixture with a newline meets a bytes oracle
+# (CI 38843541023 — hooks' settings-backup test: write_text('...\n') then read_bytes() == b'...\n')
+# ===========================================================================
+
+# The hooks specimen as it stood: the fixture writes text, the test reads the backup's bytes.
+_TEXT_FIXTURE_BYTES = (
+    "import pytest\n"
+    "\n"
+    "@pytest.fixture\n"
+    "def claude_home(tmp_path):\n"
+    "    claude = tmp_path / 'home' / '.claude'\n"
+    "    claude.mkdir(parents=True)\n"
+    "    (claude / 'settings.json').write_text('{\"model\": \"before\"}\\n', encoding='utf-8')\n"
+    "    return claude\n"
+    "\n"
+    "def test_an_edit_keeps_the_original_bytes(claude_home):\n"
+    "    backup = claude_home / '.backup' / 'settings.json.1'\n"
+    "    kept = backup.read_bytes()\n"
+    '    assert kept == b\'{"model": "before"}\\n\'\n'
+)
+
+_TEXT_BYTES_LABEL = "windows_compat text fixture bytes oracle (advisory)"
+
+
+def _text_bytes(root, source):
+    return _advisory_findings(root, source, "tests/test_probe.py", _TEXT_BYTES_LABEL)
+
+
+def _bytes_fn(*body, name="test_x"):
+    return f"def {name}(tmp_path):\n    p = tmp_path / 'a.json'\n" + "".join(f"    {line}\n" for line in body)
+
+
+def test_text_bytes_hooks_specimen_through_its_fixture_flagged(tmp_path):
+    found = _text_bytes(tmp_path, _TEXT_FIXTURE_BYTES)
+    assert [line for line, _ in found] == [13]
+    assert "\\n as \\r\\n on Windows" in found[0][1]
+    assert "write_bytes(b'...') or pass newline=''" in found[0][1]
+
+
+def test_text_bytes_hooks_cure_writing_bytes_is_clean(tmp_path):
+    cured = _TEXT_FIXTURE_BYTES.replace(
+        "write_text('{\"model\": \"before\"}\\n', encoding='utf-8')", 'write_bytes(b\'{"model": "before"}\\n\')'
+    )
+    assert _text_bytes(tmp_path, cured) == []
+
+
+def test_text_bytes_specimen_in_one_function_and_through_a_helper_flagged(tmp_path):
+    source = _bytes_fn(
+        "(tmp_path / 'settings.json').write_text('{\"model\": \"before\"}\\n', encoding='utf-8')",
+        "kept = (tmp_path / 'backup.json').read_bytes()",
+        'assert kept == b\'{"model": "before"}\\n\'',
+    ) + (
+        "\ndef _seed(tmp_path):\n"
+        "    (tmp_path / 'a.txt').write_text(f'{1}\\n', encoding='utf-8')\n"
+        "\nclass TestSeeded:\n"
+        "    def test_y(self, tmp_path):\n"
+        "        self._seed(tmp_path)\n"
+        "        assert (tmp_path / 'a.txt').read_bytes() != b'1\\n'\n"
+        "\n    def _seed(self, tmp_path):\n"
+        "        _seed(tmp_path)\n"
+    )
+    assert [line for line, _ in _text_bytes(tmp_path, source)] == [5, 13]
+
+
+def test_text_bytes_digest_and_length_oracles_flagged(tmp_path):
+    source = _bytes_fn(
+        "text = 'a\\nb\\n'",
+        "p.write_text(text, encoding='utf-8')",
+        "assert hashlib.sha256(p.read_bytes()).hexdigest() == 'e3b0c442'",
+        "digest = hashlib.sha256(p.read_bytes()).digest()",
+        "assert digest == hashlib.sha256(b'a\\nb\\n').digest()",
+        "assert len(p.read_bytes()) == 4",
+        "assert len(p.read_bytes()) == len(b'a\\nb\\n')",
+        "assert p.read_bytes() == 'a\\nb\\n'.encode('utf-8')",
+    )
+    assert [line for line, _ in _text_bytes(tmp_path, source)] == [5, 7, 8, 9, 10]
+
+
+def test_text_bytes_text_mode_open_and_write_flagged(tmp_path):
+    source = _bytes_fn(
+        "with open(p, 'w', encoding='utf-8') as f:",
+        "    f.write('a\\n')",
+        "assert p.read_bytes() == b'a\\n'",
+        name="test_with",
+    ) + _bytes_fn(
+        "p.open('a', encoding='utf-8').writelines(['a\\n', 'b'])",
+        "assert p.read_bytes() == b'a\\nb'",
+        name="test_chained",
+    )
+    assert [line for line, _ in _text_bytes(tmp_path, source)] == [5, 9]
+
+
+def test_text_bytes_cures_and_shapes_text_mode_cannot_change_are_clean(tmp_path):
+    source = (
+        _bytes_fn("p.write_bytes(b'a\\n')", "assert p.read_bytes() == b'a\\n'", name="test_bytes_fixture")
+        + _bytes_fn("p.write_text('a\\n', newline='')", "assert p.read_bytes() == b'a\\n'", name="test_newline")
+        + _bytes_fn("open(p, 'w', newline='').write('a\\n')", "assert p.read_bytes() == b'a\\n'", name="test_open_nl")
+        + _bytes_fn("open(p, 'wb').write(b'a\\n')", "assert p.read_bytes() == b'a\\n'", name="test_open_wb")
+        + _bytes_fn("p.write_text('a\\n')", "assert p.read_text() == 'a\\n'", name="test_read_text")
+        + _bytes_fn("p.write_text('one line')", "assert p.read_bytes() == b'one line'", name="test_no_newline")
+        + _bytes_fn("assert p.read_bytes() == b'a\\n'", name="test_no_fixture")
+        + _bytes_fn("p.write_text('a\\n')", "assert p.read_bytes() == q.read_bytes()", name="test_unspelled")
+        + _bytes_fn("p.write_text(json.dumps({}))", "assert p.read_bytes() == b'{}'", name="test_opaque")
+        + _bytes_fn("p.write_text('a\\n')", name="test_writes_only")
+        + _bytes_fn("assert q.read_bytes() == b'a\\n'", name="test_reads_only")
+    )
+    assert _text_bytes(tmp_path, source) == []
+
+
+def test_text_bytes_platform_skips_are_clean(tmp_path):
+    source = (
+        "import os, sys, pytest\n\n"
+        "@pytest.mark.skipif(sys.platform == 'win32', reason='text mode')\n"
+        + _bytes_fn("p.write_text('a\\n')", "assert p.read_bytes() == b'a\\n'")
+        + "\n@pytest.mark.skipif(os.name == 'nt', reason='text mode')\n"
+        "class TestPosix:\n"
+        "    def test_y(self, tmp_path):\n"
+        "        (tmp_path / 'a').write_text('a\\n')\n"
+        "        assert (tmp_path / 'a').read_bytes() == b'a\\n'\n"
+        "\ndef test_z(tmp_path):\n"
+        "    (tmp_path / 'a').write_text('a\\n')\n"
+        "    if sys.platform != 'win32':\n"
+        "        assert (tmp_path / 'a').read_bytes() == b'a\\n'\n"
+    )
+    assert _text_bytes(tmp_path, source) == []
+
+
+def test_text_bytes_advisory_line_reads_tests_and_never_scores(tmp_path):
+    branch = _advisory_branch(tmp_path, _TEXT_FIXTURE_BYTES, rel="tests/test_gate.py")
+    _advisory_branch(tmp_path, _TEXT_FIXTURE_BYTES, rel="apps/handlers/helper.py")
+    _advisory_branch(tmp_path, _TEXT_FIXTURE_BYTES, rel="tests/.archive/test_old.py")
+    assert check_branch_info(str(branch)) == [
+        "windows_compat text fixture bytes oracle (advisory): tests/test_gate.py:13 bytes read off the disk "
+        "compared with a literal, but a fixture here was written in text mode with a newline - write_text / "
+        "open('w') writes each \\n as \\r\\n on Windows, red there; write the fixture with write_bytes(b'...') "
+        "or pass newline=''"
+    ]
+    assert check_module(str(branch / "tests" / "test_gate.py"))["score"] == 100
+
+
+def test_text_bytes_advisory_respects_line_bypass(tmp_path, monkeypatch):
+    branch = _advisory_branch(tmp_path, _TEXT_FIXTURE_BYTES, rel="tests/test_gate.py")
+    rules = MagicMock(
+        return_value=[{"file": "tests/test_gate.py", "standard": "windows_compat", "lines": [13], "reason": "test"}]
+    )
+    monkeypatch.setattr(windows_compat_check, "load_bypass_rules", rules)
+    assert check_branch_info(str(branch)) == []

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-05-10
-# Modified: 2026-10-10
+# Modified: 2026-10-15
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
@@ -16,6 +16,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
 from aipass.seedgo.apps.handlers.aipass_standards.mock_repr_path import find_mock_repr_paths
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.text_fixture_bytes_oracle import find_text_fixture_bytes_oracles
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -875,10 +876,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 # ADVISORY: what a Linux seat cannot observe about Windows, pinned by shape
 # =============================================================================
 #
-# Two arms, one reason: each Windows red this week passed on Linux because the
-# Linux value is a degenerate case -- no delete-pending state for PermissionError
-# to come from, no backslash for repr to double. No Linux run can go red on
-# either, so the shape is read statically.
+# Three arms, one reason: each Windows red passed on Linux because the Linux
+# value is a degenerate case -- no delete-pending state for PermissionError to
+# come from, no backslash for repr to double or Windows separator for a
+# WindowsPath repr to re-render, no \r for text mode to add. No Linux run can go
+# red on any of them, so the shape is read statically.
 #
 # * lock race -- CI 35192484222: api's token store lock caught FileExistsError
 #   only; a create against a lock mid-removal answered PermissionError and the
@@ -889,7 +891,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 #   in " ".join(str(c) for c in mock.call_args_list); repr spelled C:\\Users
 #   where the path said C:\Users. Detector: mock_repr_path.py. A test-side
 #   shape, so its corpus is tests/**/*.py -- a lane the scored audit never
-#   walks, which makes this channel its only home, not a waypoint.
+#   walks, which makes this channel its only home, not a waypoint. CI
+#   38843541023 (api test_host_lifetime) was this arm's second mechanism: a
+#   Path argument renders as WindowsPath('C:/...') in the call repr.
+# * text fixture bytes oracle -- CI 38843541023: hooks' settings-backup test
+#   wrote its fixture with write_text('...\n') and asserted the backup's
+#   read_bytes() == b'...\n'; text mode wrote \r\n on Windows. Detector:
+#   text_fixture_bytes_oracle.py. Test-side, tests/**/*.py, like the repr arm.
 #
 # check_branch_info(), not check_module(): a new scored arm inside a gating
 # standard reds every branch holding a hit on the commit that lands it (the
@@ -903,6 +911,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 _LOCK_RACE_LABEL = "windows_compat lock race (advisory)"
 _MOCK_REPR_LABEL = "windows_compat mock repr path (advisory)"
+_TEXT_BYTES_LABEL = "windows_compat text fixture bytes oracle (advisory)"
 
 
 def _corpus(branch_root: Path, top: str) -> list[Path]:
@@ -952,7 +961,8 @@ def check_branch_info(branch_path: str) -> list[str]:
 
     Returns:
         One "(advisory)" line per offending site -- exclusive creates in apps/,
-        paths asserted against a mock call's repr in tests/; empty when clean.
+        paths asserted against a mock call's repr and bytes oracles over a
+        text-mode newline fixture in tests/; empty when clean.
     """
     branch_root = Path(branch_path)
     apps_corpus = _advisory_corpus(branch_root)
@@ -962,14 +972,16 @@ def check_branch_info(branch_path: str) -> list[str]:
     bypass_rules = load_bypass_rules(branch_path)
     races = _advisory_lines(branch_root, apps_corpus, find_exclusive_create_races, _LOCK_RACE_LABEL, bypass_rules)
     reprs = _advisory_lines(branch_root, tests_corpus, find_mock_repr_paths, _MOCK_REPR_LABEL, bypass_rules)
-    if races or reprs:
+    texts = _advisory_lines(branch_root, tests_corpus, find_text_fixture_bytes_oracles, _TEXT_BYTES_LABEL, bypass_rules)
+    if races or reprs or texts:
         json_handler.log_operation(
             "windows_compat_advisory_lines",
             {
                 "branch": branch_root.name,
                 "lock_race": len(races),
                 "mock_repr": len(reprs),
+                "text_bytes": len(texts),
                 "standard": "windows_compat",
             },
         )
-    return races + reprs
+    return races + reprs + texts

@@ -102,7 +102,7 @@ The PR gate (verified against `.github/workflows/`):
 - [ ] `ci.yml` → **lint**, **test**, **standards** (= seedgo-audit / the README + 100%-floor check, runs `.github/scripts/seedgo_audit.py`), **coverage**
 - [ ] `security.yml` → Security Scan / dependency-scan
 - [ ] `e2e-wheel.yml` → Linux + macOS wheel smoke (path-filtered: fires on `src/**`, `tests/e2e/**`, `pyproject.toml`)
-- [ ] `macos-test.yml` → required check `macos-setup`, runs on every PR (must NEVER be path-filtered or it parks as "Expected/waiting" forever and blocks merge). The Windows lane is retired (DPLAN-0410, 2026-10-15): `windows-test.yml(windows_disabled)` is unread by Actions and `windows-setup` is no longer a required check. Branch protection names checks by JOB id, not workflow name.
+- [ ] `macos-test.yml` → required check `macos-setup`, runs on every PR (must NEVER be path-filtered or it parks as "Expected/waiting" forever and blocks merge). There is no Windows lane: `windows-test.yml(windows_disabled)` is unread by Actions. Branch protection names checks by JOB id, not workflow name.
 - [ ] **Hash-pinned CI deps:** tool installs are pinned from `.github/requirements/*.txt` locks. A new security advisory against a pinned dep (esp. pip-audit's 29-package tree) can red `security.yml` with zero code change on our side. Fix = dependabot lock bump (grouped weekly, label `ci`) or regen via the `pip-compile` command in each `.in` file header — never a code revert.
 - [ ] If "all green but can't merge": it's usually post-push mergeability **lag**. Confirm ground truth via the public API (no gh, no gate):
       - `curl -s https://api.github.com/repos/AIOSAI/AIPass/commits/<sha>/check-runs` → all check-runs success (incl. app checks: codecov, CodeQL)
@@ -124,7 +124,7 @@ The PR gate (verified against `.github/workflows/`):
 - [ ] Dependabot / other PRs targeting main: they go green once main has the fix + bots rebase — check after the push
 - [ ] **Site parity diff (S323) — same-day after merge.** aipass.ai is a **projection of the merged README, never its own source of facts.** Diff the site's claims against the README *as merged*, field by field — **agent count, platform line, install commands, structure snippet, FAQ answers**. Each one matches or gets fixed; "looks about right" is not a verdict, and neither is "nothing user-facing changed" unless you checked the five fields.
       - devpulse edits the content at `projects/aipass-site/index.html` — its own git repo nested in the tree, untracked by the AIPass repo.
-      - ⚠️ **There is currently no `drone @git` write door for the site repo** — the commit/push path is an **open owner ruling**. If you hit that wall, **record the refusal in the Run Summary and stop.** Do not work around it: a workaround invented to get past a gate is precisely what the gate exists to catch.
+      - The site repo is served by the external-repo door (`--repo projects/aipass-site`): `status`, `diff`, `log`, `commit`, `fetch`, `sync`, `merge-upstream`, `push`. Commit is devpulse's call; **push only on the owner's word, per push, never standing**. Diverged → `merge-upstream`; a conflict aborts and is resolved by hand (three-way diff in scratch, ours restored, `drone @git commit <file> --repo` concludes the merge). The site deploys from `main` through GitHub Pages (`CNAME` = aipass.ai), so a push is a deploy. Never work around a refusal: a workaround invented to get past a gate is precisely what the gate exists to catch.
 
 ## 7. Release tag
 

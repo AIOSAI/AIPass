@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
-# Description: Tests for the drive_* command modules, the settings stub and the suite-wide Drive seal
-# Version: 2.0.3
+# Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
+# Version: 2.0.4
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
@@ -14,9 +14,14 @@
 # seedgo: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
 # seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
+import json
+from pathlib import Path
+
 import pytest
 
+from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import client as drive_client
+from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
 
 # What is not pinned here, and where it is. Two run_* verbs reach a REAL Google
@@ -230,29 +235,29 @@ class TestDriveClearRouting:
 
 
 # ---------------------------------------------------------------------------
-# settings — a deferred command that must never look like it worked
+# settings — one live key, and a deferred UI that must never look like it worked
 # ---------------------------------------------------------------------------
 
 
 class TestSettingsStub:
     """`drone @backup settings ...` — the two routes that answer, and what they say."""
 
-    def test_no_args_names_the_module_as_a_stub_rather_than_an_opened_ui(self, capsys) -> None:
-        """No args is introspection: it calls settings a stub awaiting Phase 3, on stdout only."""
+    def test_no_args_names_the_one_live_key_and_the_deferred_ui(self, capsys) -> None:
+        """No args is introspection: drive_sync is live, the UI awaits Phase 3, on stdout only."""
         assert settings.handle_command(settings.PRIMARY_COMMAND, []) is True
 
         out, err = capsys.readouterr()
         assert "settings Module" in out
-        assert "stub scaffold, awaiting Phase 3 implementation" in out
+        assert "drive_sync on|off is live; the settings UI awaits Phase 3" in out
         assert err == ""
 
     def test_a_help_flag_is_answered_rather_than_refused(self, capsys) -> None:
-        """--help prints the planned handlers instead of raising the stub's refusal."""
+        """--help prints the usage line instead of raising the refusal."""
         assert settings.handle_command(settings.PRIMARY_COMMAND, ["--help"]) is True
 
         out, err = capsys.readouterr()
         assert "settings Module" in out
-        assert "Planned handlers: ui/settings_window" in out
+        assert "Usage: settings drive_sync on|off <project_path|@name>" in out
         assert err == ""
 
     def test_introspection_is_not_recorded_as_a_stub_invocation(self, capsys, monkeypatch) -> None:
@@ -264,6 +269,99 @@ class TestSettingsStub:
 
         assert logged == []
         assert "settings Module" in capsys.readouterr().out
+
+
+def _settings(argv: list[str]) -> int:
+    """Run `backup settings ...` through the real entry point."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["backup", "settings", *argv])
+        return entry.main()
+
+
+def _store(root: Path, config: dict | None = None) -> Path:
+    """A project with a .backup/ store and, when given, a config document."""
+    (root / ".backup").mkdir(parents=True)
+    if config is not None:
+        (root / ".backup" / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    return root
+
+
+def _config(root: Path) -> dict:
+    """The project's config document as written on disk."""
+    return json.loads((root / ".backup" / "config.json").read_text(encoding="utf-8"))
+
+
+class TestSettingsDriveSync:
+    """`settings drive_sync on|off <project_path|@name>` writes the one live key."""
+
+    def test_on_writes_true_keeps_the_other_keys_and_prints_the_new_value(self, tmp_path, capsys) -> None:
+        project = _store(tmp_path / "proj", {"max_versions": 3, "drive_sync": False})
+
+        assert _settings(["drive_sync", "on", str(project)]) == 0
+
+        assert _config(project) == {"max_versions": 3, "drive_sync": True}
+        out, err = capsys.readouterr()
+        assert f"drive_sync: on ({project})" in out
+        assert err == ""
+
+    def test_off_through_a_registered_name_writes_false(self, tmp_path, monkeypatch, capsys) -> None:
+        monkeypatch.setattr(registry, "REGISTRY_PATH", tmp_path / "project_registry.json")
+        project = _store(tmp_path / "proj", {"drive_sync": True})
+        registry.register_project("proj", str(project))
+
+        assert _settings(["drive_sync", "off", "@proj"]) == 0
+
+        assert _config(project) == {"drive_sync": False}
+        assert "drive_sync: off" in capsys.readouterr().out
+
+    def test_a_store_with_no_config_gets_only_the_key_not_every_default(self, tmp_path) -> None:
+        project = _store(tmp_path / "proj")
+
+        assert _settings(["drive_sync", "on", str(project)]) == 0
+
+        assert _config(project) == {"drive_sync": True}
+
+    @pytest.mark.parametrize("argv", [["drive_sync", "maybe", "<p>"], ["drive_sync", "on"], ["drive_sync"]])
+    def test_a_malformed_drive_sync_line_is_refused_and_writes_nothing(self, argv, tmp_path, capsys) -> None:
+        project = _store(tmp_path / "proj", {"drive_sync": False})
+        argv = [str(project) if arg == "<p>" else arg for arg in argv]
+
+        assert _settings(argv) == 2
+
+        assert _config(project) == {"drive_sync": False}
+        out, err = capsys.readouterr()
+        assert "Usage: settings drive_sync on|off <project_path|@name>" in err
+        assert "drive_sync: " not in out
+
+    def test_a_project_without_a_store_is_refused_and_no_store_is_created(self, tmp_path, capsys) -> None:
+        project = tmp_path / "bare"
+        project.mkdir()
+
+        assert _settings(["drive_sync", "on", str(project)]) == 2
+
+        assert not (project / ".backup").exists()
+        assert "No backup store" in capsys.readouterr().err
+
+    def test_a_trailing_help_flag_explains_and_writes_nothing(self, tmp_path, capsys) -> None:
+        project = _store(tmp_path / "proj", {"drive_sync": False})
+
+        assert settings.handle_command(settings.PRIMARY_COMMAND, ["drive_sync", "on", str(project), "--help"]) is True
+
+        assert _config(project) == {"drive_sync": False}
+        assert "Usage: settings drive_sync on|off" in capsys.readouterr().out
+
+    def test_an_unresolvable_project_is_refused(self, tmp_path, capsys) -> None:
+        assert _settings(["drive_sync", "on", str(tmp_path / "missing")]) == 2
+
+        assert "Cannot resolve project" in capsys.readouterr().err
+
+    def test_any_other_key_still_fails_honestly(self, tmp_path, capsys) -> None:
+        project = _store(tmp_path / "proj", {"drive_sync": False})
+
+        assert _settings(["max_versions", "5", str(project)]) == 1
+
+        assert _config(project) == {"drive_sync": False}
+        assert "settings failed" in capsys.readouterr().err
 
 
 # =============================================

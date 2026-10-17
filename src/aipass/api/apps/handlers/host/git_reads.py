@@ -1,18 +1,16 @@
 # =================== AIPass ====================
 # Name: git_reads.py
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-17
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """
 Host API Git Read Handler
 
 The repository-shaped half of the phone's read lane: what changed, what a patch
-says, what was committed and by whom. Split out of reads.py, which had absorbed
-the whole surface and crossed the 1500-line cap; the seam is the one @devpulse
-named — repository reads here, file and directory reads there.
+says, what was committed and by whom. File and directory reads live in reads.py.
 
 WHAT MAKES THIS A MODULE AND NOT A SECTION. Every lane in here answers by
 running @drone's own door, so the whole file lives under one discipline: read
@@ -23,15 +21,9 @@ still text, because a patch IS text: its per-file headers and hunk markers are
 git's own machine framing, and those are parsed on structure, never on prose.
 reads.py answers from the filesystem directly and needs none of this.
 
-WHY THE RENDERED SURFACE WAS NOT GOOD ENOUGH, measured 2026-08-18. drone's
-status renderer right-aligns the porcelain code into two columns — their own
-comment calls it "for the screen only" — so every INDEX-only change arrives
-looking like a WORKTREE one: 'A ' as ' A', 'M ' as ' M', 'D ' as ' D'. This
-lane read that and passed it on, which meant a staged file and an unstaged one
-were the same answer here for as long as rows have existed. No amount of
-careful parsing could have recovered it; the columns were gone before this
-process saw them. The document carries index and worktree separately, and that
-is the whole reason this file no longer reads a rendered line anywhere.
+WHY NOT THE RENDERED SURFACE: drone's status renderer right-aligns the porcelain
+code for the screen, so an index-only change ('A ') reads as a worktree one
+(' A'). The document carries index and worktree separately.
 
 GRAIN. Every answer here names its own scope. Branch grain means the seat's own
 subtree; repo grain means the whole repository the branch lives in. A log and a
@@ -367,19 +359,17 @@ def read_diff(
     """
     Read a patch: a branch's working tree, the repository's, or one commit's.
 
-    Everything here routes through drone — the house rule, and not one this
-    server gets to bend because it happens to be a server. The command runs with
-    the branch as its working directory, exactly as an operator would.
+    Everything here routes through drone, servers included, with the branch as
+    its working directory, exactly as an operator would run it.
 
-    THE MEASURED DOORS, 2026-08-17, because the design asked for two things that
-    are not on the other side:
-
-        _handle_diff recognises exactly --staged and --all. There is NO path
-        parameter and NO -U passthrough. So `path` is served by generating the
-        patch and splitting it HERE, on the per-file headers, and the context
-        width is whatever the door generates — three lines, not the one line the
-        design preferred. Asked of @drone; unreachable until then, and saying so
-        is cheaper than a phone quietly rendering a width nobody chose.
+    THE DOOR: drone's diff takes --staged, --all and --stat and has no HEAD
+    flag, so a working-tree patch is the worktree against the index. `path` is
+    cut out of the generated patch HERE, on its repo-relative per-file headers.
+    At branch grain a branch-local path (the change rows' spelling) gains the
+    branch's prefix first; one already carrying it is matched as given. A file
+    the worktree patch does not touch is asked of the index (--staged) before
+    it is refused, so an index-only row (`M `, `A `) opens; an `MM` row shows
+    its unstaged half. `staged` in the answer says which half was served.
 
     Args:
         branch: Branch name, resolved through the registry.
@@ -424,20 +414,17 @@ def read_diff(
         # paint a phantom first file named after the word 'commit'.
         diff = _patch_of(str(_document(["drone", "@git", "show", ref], root, "commit").get(CONTENT_KEY) or ""))
     else:
-        # MEASURED SHUT, 2026-08-18: the diff door has no --json. There is no
-        # document to read a verdict from, so this half still reads the exit
-        # code — and says so rather than pretending the two halves are alike.
-        result = _ran(_patch_command(staged=staged, grain=grain), root, "diff")
-
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            logger.warning("[host_api] diff returned %s for %s: %s", result.returncode, branch, stderr)
-            raise ReadUnavailable(f"Diff failed: {stderr or 'no detail'}")
-
-        diff = result.stdout or ""
+        diff = _working_patch(root, branch, staged, grain)
 
     if path:
-        diff = _one_files_patch(diff, path)
+        prefix = _repo_relative_prefix(root) if grain == GRAIN_BRANCH else ""
+        wanted = path if path.startswith(prefix) else prefix + path
+        block = _one_files_patch(diff, wanted)
+        if block is None and not ref and not staged:
+            staged, block = True, _one_files_patch(_working_patch(root, branch, True, grain), wanted)
+        if block is None:
+            raise ReadRefused(f"No changes to {path} in this patch")
+        diff = block
 
     raw_bytes = len(diff.encode("utf-8"))
     truncated = False
@@ -480,6 +467,32 @@ def read_diff(
     }
 
 
+def _working_patch(root: Path, branch: str, staged: bool, grain: str) -> str:
+    """
+    A working-tree patch. The diff door has no --json, so its exit code is the verdict.
+
+    Args:
+        root: The branch directory.
+        branch: Branch name, for the log line.
+        staged: Whether to ask for the index's half.
+        grain: Which scope, already checked.
+
+    Returns:
+        The patch text, possibly empty.
+
+    Raises:
+        ReadUnavailable: drone could not be run, timed out, or exited non-zero.
+    """
+    result = _ran(_patch_command(staged=staged, grain=grain), root, "diff")
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        logger.warning("[host_api] diff returned %s for %s: %s", result.returncode, branch, stderr)
+        raise ReadUnavailable(f"Diff failed: {stderr or 'no detail'}")
+
+    return result.stdout or ""
+
+
 def _patch_command(staged: bool, grain: str) -> Any:
     """
     The drone command for a working-tree patch — only the flags its door has.
@@ -492,10 +505,8 @@ def _patch_command(staged: bool, grain: str) -> Any:
         The argv list to run.
 
     Note:
-        A commit is NOT built here. It goes through the machine door with the
-        rest of them, and keeping one command builder that sometimes returned
-        a machine command and sometimes a rendered one would hide exactly the
-        distinction this file now turns on.
+        A commit is NOT built here: it goes through the machine door, and one
+        builder returning both kinds would hide the distinction this file turns on.
     """
     command = ["drone", "@git", "diff"]
 
@@ -1009,29 +1020,24 @@ def _per_file_blocks(patch: str) -> Any:
     return [_BLOCK_JOIN(block) for block in blocks]
 
 
-def _one_files_patch(patch: str, path: str) -> str:
+def _one_files_patch(patch: str, path: str) -> Optional[str]:
     """
-    One file's block out of a patch, or a refusal naming the file.
+    One file's block out of a patch, or None when the patch does not touch it.
 
     Args:
         patch: Unified patch text.
-        path: The file asked for, matched EXACTLY against the block's own name —
-            a substring match would answer for other_hello.txt when hello.txt
-            was asked for, and the phone would show a different file's changes.
+        path: The repo-relative file asked for, matched EXACTLY against the
+            block's own name: a substring match would answer for other_hello.txt.
 
     Returns:
-        That file's block.
-
-    Raises:
-        ReadRefused: The patch does not touch that file. An empty string would
-            read as "no changes, rendered fine"; a tap on a stale list is a real
-            event and gets a real sentence.
+        That file's block, or None. The caller refuses in words, since an empty
+        string would read as "no changes, rendered fine".
     """
     for block in _per_file_blocks(patch):
         if _path_of_block(block) == path:
             return block
 
-    raise ReadRefused(f"No changes to {path} in this patch")
+    return None
 
 
 def _path_of_block(block: str) -> str:
@@ -1256,22 +1262,13 @@ def read_git_remote(branch: str, project: str = "") -> Dict[str, Any]:
     """
     The repository's remote — what the phone's link-cards are built from.
 
-    THE DOOR ARRIVED, 2026-08-18, and this lane came home. It used to live in
-    its own module for one reason: there WAS no door. No verb on drone's git
-    surface, nothing on their public Python surface, and the fleet's gate
-    refused both raw readers — so it read the repository's configuration as the
-    INI file it is, and followed worktree pointers by hand to find it. That was
-    the only lane in this package that shelled nothing, and the module existed
-    to keep that boundary visible. `drone @git remote --json` retires all of
-    it, including the pointer-following, because git resolves commondir itself.
-    The old module is archived, not deleted, next to this one.
+    It asks `drone @git remote --json`; git resolves worktrees and commondir
+    itself. A repository with no remote is common and not an error (contract
+    C-D): it answers the same shape with remote, url and web null.
 
-    THE REDACTION DID NOT GO WITH IT. drone redacts credentials on their side
-    too, and this lane redacts again on ours. That is not distrust and not
-    duplication for its own sake: this process is the last one a URL passes
-    through before it crosses a network, and a rule enforced only by somebody
-    else's code is a rule that leaves silently when their code changes. The
-    pins for it assert what THIS surface emits, never what upstream sent.
+    THE REDACTION STAYS ON THIS SIDE though drone redacts too: this process is
+    the last a URL passes through before a network, and the pins assert what
+    THIS surface emits, never what upstream sent.
 
     A REMOTE IS A REPOSITORY FACT, so the grain says repo and the branch names
     WHICH repository — the same vocabulary the log and commit lanes use.
@@ -1283,20 +1280,24 @@ def read_git_remote(branch: str, project: str = "") -> Dict[str, Any]:
         project: Optional project name. Empty means the seat.
 
     Returns:
-        Dict with branch, grain, remote (which one answered), url (any password
-        redacted), web (a browsable form, or None) and redacted.
+        Dict with branch, grain, remote (which one answered, or None when the
+        repository has none), url (any password redacted, or None), web (a
+        browsable form, or None) and redacted.
 
     Raises:
         ReadRefused: Unknown branch, a repository the door refuses to speak
-            for, or a repository with no remote at all — which is not
-            hypothetical, real projects in this tree have none.
+            for, or a remote carrying no URL.
         ReadUnavailable: drone could not be run, timed out, or answered with
             something that was not a document.
     """
     root = resolve_branch_root(branch, project)
-    document = _document(["drone", "@git", "remote"], root, "remote")
+    chosen = _chosen_remote(_document(["drone", "@git", "remote"], root, "remote"))
 
-    name, configured, upstream_redacted = _chosen_remote(document)
+    if chosen is None:
+        json_handler.log_operation("host_api_git_remote_read", {"branch": branch, "remote": None, "redacted": False})
+        return {"branch": branch, "grain": GRAIN_REPO, "remote": None, "url": None, "web": None, "redacted": False}
+
+    name, configured, upstream_redacted = chosen
     url, redacted = _without_credentials(configured)
 
     json_handler.log_operation(
@@ -1330,13 +1331,11 @@ def _chosen_remote(document: Dict[str, Any]) -> Any:
     Returns:
         (name, url, redacted) — the remote's name, its fetch URL (falling back
         to push when a remote is push-only), and whether the door says it
-        already redacted something.
+        already redacted something. None when the repository has no remote.
 
     Raises:
-        ReadRefused: No remote at all, or one carrying no URL to offer. Both
-            are the caller learning a fact about their repository, not this
-            server failing — and an empty string handed to a link-card would
-            render as a link to nowhere.
+        ReadRefused: A remote carrying no URL to offer — an empty string handed
+            to a link-card would render as a link to nowhere.
 
     Note:
         ORIGIN WINS, and otherwise the first one answers AND IS NAMED. The
@@ -1346,7 +1345,7 @@ def _chosen_remote(document: Dict[str, Any]) -> Any:
     remotes = [entry for entry in (document.get(REMOTES_KEY) or []) if isinstance(entry, dict)]
 
     if not remotes:
-        raise ReadRefused("This repository has no remote configured")
+        return None
 
     chosen = remotes[0]
     for entry in remotes:

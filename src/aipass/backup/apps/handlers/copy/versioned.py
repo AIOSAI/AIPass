@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: versioned.py
 # Description: Versioned copy — per-file baseline + diff engine
-# Version: 2.0.0
+# Version: 2.1.1
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-16
 # =============================================
 
 """Versioned copy handler — per-file baseline + unified diff engine.
@@ -24,7 +24,8 @@ from aipass.prax import logger
 
 from ..diff.generator import generate_diff_content, should_create_diff
 from ..audit import trail
-from ..path.builder import build_versioned_file_path
+from ..path.builder import build_versioned_file_path, exceeds_max_path
+from ..state.stop_flag import stop_requested
 
 
 def _make_baseline_name(target: Path) -> str:
@@ -81,10 +82,26 @@ def _copy_changed_file(source: Path, target: Path) -> bool:
     return True
 
 
+def _copy_one(source: Path, target: Path, abs_path: str) -> int:
+    """Copy one file into its file-folder; bytes copied, or -1 when unchanged.
+
+    New: baseline + current. Changed (mtime differs): diff old->new, overwrite
+    current. Unchanged: nothing.
+    """
+    if not target.exists():
+        _copy_new_file(source, target)
+        return os.path.getsize(abs_path)
+    if source.stat().st_mtime != target.stat().st_mtime:
+        _copy_changed_file(source, target)
+        return os.path.getsize(abs_path)
+    return -1
+
+
 def copy_versioned(
     files: list[tuple[str, str]],
     project_root: str,
     on_progress=None,
+    on_file=None,
 ) -> dict:
     """Copy files into the persistent versioned store.
 
@@ -93,59 +110,68 @@ def copy_versioned(
     - Changed (mtime differs): diff old->new, overwrite current
     - Unchanged: skip
 
+    The stop flag (handlers/state/stop_flag.py) is read before each file: a
+    stop lets the file in flight finish and starts no other.
+
     Args:
         files: List of (absolute_path, relative_path) tuples.
         project_root: Project root (used to build store paths).
-        on_progress: Optional callback after each file.
+        on_progress: Optional no-argument callback after each file.
+        on_file: Optional callback after each file with (relative_path,
+            bytes_copied, ok); the running file's writer.
 
     Returns:
-        Dict with files_copied, files_unchanged, bytes_copied, errors.
+        Dict with files_copied, files_unchanged, bytes_copied, errors, and
+        files_done (files gone through) and stopped (True when the stop flag
+        ended the loop early).
     """
     files_copied = 0
     files_unchanged = 0
     bytes_copied = 0
+    files_done = 0
+    stopped = False
     errors: list[str] = []
 
     for abs_path, rel_path in files:
+        if stop_requested():
+            stopped = True
+            break
         source = Path(abs_path)
         target = Path(build_versioned_file_path(project_root, rel_path))
+        copied = -1
+        ok = True
 
-        # Long-path guard
-        if len(str(target)) > 260:
+        if exceeds_max_path(str(target)):
+            # Long-path guard: Windows' MAX_PATH only (path/builder.py)
             logger.warning(f"Path too long (>260), skipping: {rel_path}")
             errors.append(f"{rel_path}: path too long (>260 chars)")
-            if on_progress:
-                on_progress()
-            continue
-
-        try:
-            if not target.exists():
-                # New file: baseline + current
-                _copy_new_file(source, target)
-                bytes_copied += os.path.getsize(abs_path)
-                files_copied += 1
-            else:
-                # Existing: compare mtimes
-                src_mtime = source.stat().st_mtime
-                tgt_mtime = target.stat().st_mtime
-                if src_mtime != tgt_mtime:
-                    _copy_changed_file(source, target)
-                    bytes_copied += os.path.getsize(abs_path)
-                    files_copied += 1
-                else:
-                    files_unchanged += 1
-        except OSError as e:
-            logger.warning(f"Failed to process {rel_path}: {e}")
-            errors.append(f"{rel_path}: {e}")
+            ok = False
+        else:
+            try:
+                copied = _copy_one(source, target, abs_path)
+            except OSError as e:
+                logger.warning(f"Failed to process {rel_path}: {e}")
+                errors.append(f"{rel_path}: {e}")
+                ok = False
+        if copied >= 0:
+            bytes_copied += copied
+            files_copied += 1
+        elif ok:
+            files_unchanged += 1
+        files_done += 1
 
         if on_progress:
             on_progress()
+        if on_file:
+            on_file(rel_path, max(copied, 0), ok)
 
     result = {
         "files_copied": files_copied,
         "files_unchanged": files_unchanged,
         "bytes_copied": bytes_copied,
         "errors": errors,
+        "files_done": files_done,
+        "stopped": stopped,
     }
     trail.log_operation(
         "copy_versioned",
@@ -153,6 +179,7 @@ def copy_versioned(
             "project_root": project_root,
             "files_copied": files_copied,
             "files_unchanged": files_unchanged,
+            "stopped": stopped,
         },
     )
     return result

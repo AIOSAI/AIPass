@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-08-16
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""
@@ -702,3 +702,66 @@ class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
         texts = [args[0] for args in printed if args and isinstance(args[0], str)]
         assert texts[:2] == ["DEFAULTS LINE ONE", "DEFAULTS LINE TWO"]
         assert handed == [verbs.loader.get_default_limits()]
+
+
+# ===========================================================================
+# A limit write re-renders the meta line it changed (DPLAN-0414 T7)
+# ===========================================================================
+
+
+def _seat(verbs, branch: str) -> Path:
+    """A minimal local.json for one minted branch, where the registry says it lives; its path."""
+    local = verbs.detector._REPO_ROOT / "src" / "aipass" / branch / ".trinity" / "local.json"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    data = {"document_metadata": {"document_type": "session_history"}, "todos": [], "key_learnings": [], "sessions": []}
+    local.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return local
+
+
+def _sessions_meta(local: Path) -> str:
+    return json.loads(local.read_text(encoding="utf-8")).get("sessions_meta", "")
+
+
+class TestALimitWriteReRendersTheMetaLine:
+    def test_set_rewrites_the_branch_sessions_meta_to_the_new_keep(self, verbs) -> None:
+        local = _seat(verbs, "memory")
+
+        _run(verbs, "set", "@memory", "sessions", "12")
+
+        assert "· keep 12 ·" in _sessions_meta(local)
+
+    def test_clearing_an_override_back_to_the_default_rewrites_it_again(self, verbs) -> None:
+        """The live canary case: set 3, then set 15, and the file still said keep 3."""
+        local = _seat(verbs, "memory")
+
+        _run(verbs, "set", "@memory", "sessions", "3")
+        _run(verbs, "set", "@memory", "sessions", "15")
+
+        assert "· keep 15 ·" in _sessions_meta(local)
+
+    def test_set_leaves_every_other_branch_file_untouched(self, verbs) -> None:
+        other = _seat(verbs, "devpulse")
+        before = other.read_bytes()
+
+        _run(verbs, "set", "@memory", "sessions", "12")
+
+        assert other.read_bytes() == before
+
+    def test_set_default_rewrites_a_branch_that_follows_the_default(self, verbs) -> None:
+        config = json.loads(verbs.path.read_text(encoding="utf-8"))
+        del config["rollover"]["per_branch"]["daemon"]
+        verbs.path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        follower = _seat(verbs, "daemon")
+
+        _run(verbs, "set-default", "sessions", "12")
+
+        assert "· keep 12 ·" in _sessions_meta(follower)
+
+    def test_set_default_leaves_a_branch_holding_its_own_count_untouched(self, verbs) -> None:
+        """memory's materialized per_branch entry still enforces 15, so its line is still true."""
+        pinned = _seat(verbs, "memory")
+        before = pinned.read_bytes()
+
+        _run(verbs, "set-default", "sessions", "12")
+
+        assert pinned.read_bytes() == before

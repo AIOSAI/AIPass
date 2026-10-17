@@ -9,7 +9,7 @@
 `subprocess.run(..., text=True)` with no `encoding=` decodes the child's stdout and stderr
 (and encodes `input=`) with `locale.getpreferredencoding(False)`. That is UTF-8 on the
 fleet's Linux and macOS hosts and cp1252 on Windows. A child that prints a box character or an
-em dash raises UnicodeDecodeError in the Windows lane. That is a failure of the TEST, not of
+em dash raises UnicodeDecodeError on a Windows host. That is a failure of the TEST, not of
 the product. It is `named_encoding`'s hazard one pipe over, and `named_encoding` does not
 see it: it judges the builtin `open`, `read_text` and `write_text` only.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-10-16
 # =============================================
 
 """BACKUP Branch - Main Orchestrator
@@ -32,7 +32,7 @@ os.environ.setdefault("AIPASS_BRANCH_NAME", "backup")
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, header, reset_command_state, resolve_exit
 
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 MODULE_NAME = "backup"
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -76,16 +76,18 @@ def print_help() -> None:
     console.print()
     console.print("  [green]snapshot[/green]     Full mirror backup of a project")
     console.print("  [green]versioned[/green]    Incremental timestamped backup")
-    console.print("  [green]all[/green]          Run snapshot, versioned, then drive_sync in sequence")
+    console.print("  [green]all[/green]          Run snapshot, versioned, then drive_sync when the project has it on")
     console.print("  [green]register[/green]     Register a project + scaffold its .backup/")
     console.print("  [green]status[/green]       Show backup info and recent history")
+    console.print("  [green]prune[/green]        List stored copies the ignore spec now matches; --apply deletes them")
     console.print("  [green]restore[/green]      List a file's versions, or restore its current version")
-    console.print("  [green]settings[/green]     [dim]Not implemented — settings UI deferred[/dim]")
-    console.print("  [green]drive_sync[/green]   Sync backups to the remote drive")
+    console.print("  [green]settings[/green]     Turn a project's drive_sync on or off (the one live setting)")
+    console.print("  [green]drive_sync[/green]   Upload the snapshot store to the remote drive, whatever the setting")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
     console.print("  [green]drive_stats[/green]  Drive usage statistics")
     console.print("  [green]share[/green]        Upload a single file to Drive + get a shareable link")
     console.print("  [green]drive_clear[/green]  Clear the local Drive tracker (remote files untouched)")
+    console.print("  [green]stop[/green]         Stop a project's running lanes, or one; a stopped lane exits 130")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -93,12 +95,18 @@ def print_help() -> None:
     console.print()
     console.print("  [green]--name <name>[/green]     register: register under a short name, so @name resolves")
     console.print("  [green]--quiet[/green]           all: suppress the panels, the run itself is unchanged")
+    console.print("  [green]--registered[/green]      all: every registered project in turn, a summary line each")
     console.print("  [green]--force[/green]           drive_sync: re-upload tracked files · drive_clear: required")
     console.print("  [green]--project <name>[/green]  drive_sync: sync a registered project by name")
     console.print("  [green]--note <text>[/green]     drive_sync: attach a note to the sync record")
     console.print("  [green]--public[/green]          share: anyone with the link may read the uploaded file")
+    console.print("  [green]--json[/green]            status: one JSON object on stdout, nothing else")
+    console.print("  [green]--sizes[/green]           status --json: add both store sizes (walks the store)")
+    console.print("  [green]--apply[/green]           prune: delete what the listing names (without it, nothing goes)")
     console.print()
     console.print("  [dim]restore takes subcommands, not flags: list <file> and file <file> <out>.[/dim]")
+    console.print("  [dim]settings takes one key: drive_sync on|off <project_path|@name>.[/dim]")
+    console.print("  [dim]stop takes an optional lane word: snapshot, versioned, drive_sync or all.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -109,14 +117,23 @@ def print_help() -> None:
     console.print("    [dim]drone @backup snapshot @myapp[/dim]")
     console.print("    [dim]drone @backup versioned @myapp[/dim]")
     console.print("    [dim]drone @backup all @myapp[/dim]")
+    console.print("    [dim]drone @backup all --registered --quiet[/dim]")
     console.print()
     console.print("  [bold dim]Status & restore:[/bold dim]")
     console.print("    [dim]drone @backup status @myapp[/dim]")
+    console.print("    [dim]drone @backup status @myapp --json --sizes[/dim]")
+    console.print("    [dim]drone @backup stop @myapp[/dim]")
+    console.print("    [dim]drone @backup stop @myapp drive_sync[/dim]")
     console.print("    [dim]drone @backup restore @myapp list src/main.py[/dim]")
     console.print("    [dim]drone @backup restore @myapp file src/main.py ./restored.py[/dim]")
     console.print()
+    console.print("  [bold dim]Store cleanup:[/bold dim]")
+    console.print("    [dim]drone @backup prune @myapp[/dim]")
+    console.print("    [dim]drone @backup prune @myapp --apply[/dim]")
+    console.print()
     console.print("  [bold dim]Drive sync:[/bold dim]")
     console.print("    [dim]drone @backup drive_check run[/dim]")
+    console.print("    [dim]drone @backup settings drive_sync on @myapp[/dim]")
     console.print("    [dim]drone @backup drive_sync @myapp[/dim]")
     console.print("    [dim]drone @backup share report.pdf --public[/dim]")
     console.print()
@@ -187,8 +204,17 @@ def main():
     long-lived process cannot inherit a previous command's failure, and a
     routed command returns ``resolve_exit(True)`` -- 0 when nothing errored,
     2 when a handled command reported an error and used to exit 0 anyway.
+
+    A lane stopped by request (DPLAN-0412) returns normally after saving what
+    it must and printing its stopped line; this function turns the stop mark
+    into STOPPED_EXIT (130), ahead of resolve_exit. A return, not a raised
+    SystemExit: drone's executor passes the child's exit code through as is,
+    and a return keeps every finally on the way out in play.
     """
+    from aipass.backup.apps.modules.stop import STOPPED_EXIT, reset_stop_state, run_was_stopped
+
     reset_command_state()
+    reset_stop_state()
     args = sys.argv[1:]
 
     if args and args[0] in ("--version", "-V"):
@@ -237,7 +263,7 @@ def main():
 
         handled, failure = route_command(mode, remaining, modules)
         if handled:
-            return resolve_exit(True)
+            return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
         if failure:
             error(f"{mode} failed -- {failure}")
             return 1
@@ -257,7 +283,7 @@ def main():
 
     handled, failure = route_command(command, remaining, modules)
     if handled:
-        return resolve_exit(True)
+        return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
 
     if failure:
         error(f"{command} failed -- {failure}")

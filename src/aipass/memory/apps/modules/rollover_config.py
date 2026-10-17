@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover_config.py
 # Description: The `config` verb surface over rollover limits - get / set / set-default
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-15
-# Modified: 2026-09-16
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -48,7 +48,7 @@ from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
@@ -389,10 +389,12 @@ def handle_config_set(args: List[str], ctx: _Json) -> None:
     if count is None:
         return
 
+    before = config_loader.load()
     result = config_loader.set_branch_limit(branch, entry_type, count)
     if not result.get("success"):
         _refuse(ctx, result.get("error", "Unknown error"))
         return
+    rendered = _rerender(entry_type, before)
 
     if ctx.on:
         _emit(
@@ -408,6 +410,8 @@ def handle_config_set(args: List[str], ctx: _Json) -> None:
     else:
         console.print()
         console.print(f"[green]>[/green] @{branch} {entry_type} limit set to {count}")
+        if rendered:
+            console.print(f"[dim]Meta lines re-rendered: {', '.join('@' + name for name in rendered)}[/dim]")
         console.print("[dim]Reset every branch to defaults with: drone @memory rollover push[/dim]")
         console.print()
 
@@ -441,10 +445,12 @@ def handle_config_set_default(args: List[str], ctx: _Json) -> None:
     if count is None:
         return
 
+    before = config_loader.load()
     result = config_loader.set_default_limit(entry_type, count)
     if not result.get("success"):
         _refuse(ctx, result.get("error", "Unknown error"))
         return
+    rendered = _rerender(entry_type, before)
 
     if ctx.on:
         _emit(
@@ -459,10 +465,31 @@ def handle_config_set_default(args: List[str], ctx: _Json) -> None:
     else:
         console.print()
         console.print(f"[green]>[/green] Default {entry_type} limit set to {count}")
+        if rendered:
+            console.print(f"[dim]Meta lines re-rendered: {', '.join('@' + name for name in rendered)}[/dim]")
         console.print("[dim]per_branch untouched — apply fleet-wide with: drone @memory rollover push[/dim]")
         console.print()
 
     json_handler.log_operation("config_set_default", {"entry_type": entry_type, "count": count, "json": ctx.on})
+
+
+# =============================================================================
+# CONFIG VERBS — THE META LINE FOLLOWS THE WRITE (DPLAN-0414 T7)
+# =============================================================================
+
+
+def _rerender(entry_type: str, before: dict) -> List[str]:
+    """Re-render the meta lines the write moved (tab_renderer decides whose); each left stale is a warning."""
+    from aipass.memory.apps.handlers.json import config_loader
+    from aipass.memory.apps.handlers.tracking import tab_renderer
+
+    result = tab_renderer.refresh_moved_limits(entry_type, before, config_loader.load())
+    if result is None:
+        warning("Meta lines not re-rendered: the registry is unreadable (logs/tab_renderer.log)")
+        return []
+    for problem in result["errors"]:
+        warning(f"Meta line not re-rendered: {problem}")
+    return result["branches"]
 
 
 # =============================================================================

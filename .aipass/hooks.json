@@ -139,6 +139,12 @@
       "matcher": "Edit|MultiEdit|Write|NotebookEdit",
       "timeout": 45
     },
+    "comment_budget": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.comment_budget.handle",
+      "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+      "timeout": 10
+    },
     "auto_watchdog": {
       "enabled": false,
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle",
@@ -220,6 +226,12 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle",
       "matcher": ""
+    },
+    "release_notice": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.release_notice.handle",
+      "matcher": "",
+      "timeout": 30
     }
   }
 }

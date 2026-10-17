@@ -104,3 +104,4 @@ Save proactively — after milestones, decisions, topic switches.
  - No bare imports — always `from aipass.<agent>.apps...`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
  - New test files need permission: a hook gate refuses them by policy (`.aipass/test_write_policy.json`). Editing an existing test is fine. Need a new test? Mail @devpulse with the defect or contract it pins. Never route around the gate.
+ - Comments say why when the code cannot: a constraint, a contract, a trap. Never what the next line does, never the chat, the plan, the wave or the reviewer; that history goes in the commit and the plan. Budget: under 10% comment lines per file; a hook measures every edit and says when a file is over (`drone @hooks comments`).

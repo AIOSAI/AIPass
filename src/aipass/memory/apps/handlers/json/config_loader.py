@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-13
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -547,7 +547,16 @@ def _clamp_to_budget(resolved: dict[str, Any], entry_cfg: dict[str, Any], branch
             f"(with {_co_tenant_text(str(file_key), counts, entry_types, entry_type)}). Enforcing {ceiling}."
         )
         row["count"] = ceiling
-        row["is_override"] = ceiling != row["default_count"]
+        row["is_override"] = _is_override(row)
+
+
+def _is_override(row: dict[str, Any]) -> bool:
+    """The one rule: the count in force came from per_branch AND differs from the default.
+
+    ``source`` names where the count came from, so a clamped default stays a
+    default and a per_branch count equal to the default is not an override.
+    """
+    return row["source"] == "per_branch" and row["count"] != row["default_count"]
 
 
 def _resolve_limits(
@@ -627,8 +636,8 @@ def _resolve_limits(
             "default_count": default_count,
             "auto_compact_cap": leaf.get("auto_compact_cap"),
             "source": source,
-            "is_override": count != default_count,
         }
+        resolved[entry_type]["is_override"] = _is_override(resolved[entry_type])
 
     if isinstance(entry_cfg, dict):
         _clamp_to_budget(resolved, entry_cfg, branch)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-04-02
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -28,8 +28,14 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
+import aipass.ai_mail.apps.handlers.notify as notify_mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
-from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail, _run_main
+from aipass.ai_mail.tests.support_dispatch_monitor import (
+    _assert_sent_as_ai_mail,
+    _assert_sent_from,
+    _foreign_project,
+    _run_main,
+)
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -306,6 +312,109 @@ def test_a_bounce_with_no_stderr_log_says_none_was_captured(monkeypatch, main_ar
     sends.assert_called_once()
     body = sends.call_args[0][0][5]  # ["drone", "@ai_mail", "send", sender, subject, body]
     assert "no stderr captured" in body
+
+
+def test_a_bounce_to_a_sender_in_the_targets_other_project_is_sent_from_the_target_home(
+    monkeypatch, main_argv, tmp_path
+):
+    """Shipped defect: sent from ai_mail's AIPass home, the fence refused @vera's bounces (e26abd25)."""
+    argv, lock_file, _ = main_argv
+    _foreign_project(tmp_path, "sender", "branch")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_from(sends, Path(lock_file).parent.parent)
+    assert not (Path(lock_file).parent / "last_bounce.json").exists()
+
+
+def test_a_bounce_to_a_sender_outside_the_targets_project_stays_in_ai_mail_home(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+    _foreign_project(tmp_path, "branch")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_as_ai_mail(sends)
+
+
+def test_a_bounce_inside_ai_mails_own_project_stays_in_ai_mail_home(monkeypatch, main_argv, tmp_path):
+    """tmp_path stands in for AIPass: ai_mail's home is moved into it, beside the target and the sender."""
+    argv, _, _ = main_argv
+    _foreign_project(tmp_path, "sender", "branch", "ai_mail")
+    (tmp_path / "ai_mail").mkdir()
+    monkeypatch.setattr(mod, "_AI_MAIL_DIR", tmp_path / "ai_mail")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    _assert_sent_from(sends, tmp_path / "ai_mail")
+
+
+def _bounce_outcome(monkeypatch, argv, tmp_path, attempt, bounce_exit):
+    """Run main() through three attempts played by `attempt`, the bounce's drone send exiting `bounce_exit`.
+
+    Returns (the monitor's warning lines, the report's status, the feed's dispatch title).
+    """
+    monkeypatch.setattr(mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=bounce_exit, stderr="")))
+    reports = []
+    monkeypatch.setattr(mod.report_mod, "write_report", lambda report: reports.append(report) or None)
+
+    _run_main(monkeypatch, argv, tmp_path, [attempt] * 3)
+
+    warnings = [c.args[0] % c.args[1:] for c in mod.logger.warning.call_args_list]
+    feed = [json.loads(line) for line in notify_mod.FEED_PATH.read_text(encoding="utf-8").splitlines()]
+    [title] = [e["title"] for e in feed if e["kind"] == "dispatch"]
+    [report] = reports
+    return [w for w in warnings if "BOUNCE NOT DELIVERED" in w], report["status"], title
+
+
+def _fails(stdout_log):
+    return 1
+
+
+def test_a_bounce_that_is_not_delivered_is_warned_and_recorded_in_the_status(monkeypatch, main_argv, tmp_path):
+    """Shipped defect: both callers dropped _send_bounce's False, so the record said the sender was told."""
+    argv, _, _ = main_argv
+
+    warnings, status, title = _bounce_outcome(monkeypatch, argv, tmp_path, _fails, bounce_exit=1)
+
+    [line] = warnings
+    assert "@test_branch" in line and "@sender" in line and "All 3 attempts failed" in line
+    assert status == "FAILED (code 1), bounce NOT delivered to @sender"
+    assert title == f"@test_branch {status}"
+
+
+def test_an_incomplete_runs_bounce_not_delivered_is_warned_and_recorded_too(monkeypatch, main_argv, tmp_path):
+    argv, _, stderr_log = main_argv
+
+    def orphans_its_background_tasks(stdout_log):
+        with open(stderr_log, "a", encoding="utf-8") as f:
+            f.write(f"{BG_TASKS_MARKER} after 600s; terminating.\n")
+        return 0
+
+    warnings, status, _ = _bounce_outcome(monkeypatch, argv, tmp_path, orphans_its_background_tasks, bounce_exit=1)
+
+    [line] = warnings
+    assert "@test_branch" in line and "@sender" in line and "background tasks were still running" in line
+    assert status.startswith("INCOMPLETE (bg tasks terminated, ")
+    assert status.endswith("), bounce NOT delivered to @sender")
+
+
+def test_a_delivered_bounce_leaves_the_status_and_the_log_as_they_were(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+
+    warnings, status, title = _bounce_outcome(monkeypatch, argv, tmp_path, _fails, bounce_exit=0)
+
+    assert warnings == []
+    assert status == "FAILED (code 1)"
+    assert title == "@test_branch FAILED (code 1)"
 
 
 # --- Notification naming test ------------------------------------------

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.6.1
+# Version: 1.7.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -451,6 +451,27 @@ class TestScriptedLaneDoesNotOverreach:
         writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
         assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
         assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 2
+
+    def test_a_projects_manager_writes_its_unrowed_files_from_a_shell(self, registered_projects: dict):
+        root = (registered_projects["vera"] / "README.md").as_posix()
+        app = (registered_projects["baud"] / "app" / "src" / "x.tsx").as_posix()
+        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {root}")["exit_code"] == 0
+        assert _run(registered_projects["baud_seat"], command=f"echo x > {app}")["exit_code"] == 0
+        assert _run(registered_projects["writer"], command=f"sed -i s/a/b/ {root}")["exit_code"] == 2
+
+    def test_an_aipass_update_dry_run_is_a_read_and_the_update_is_a_write(self, registered_projects: dict):
+        root = registered_projects["vera"].as_posix()
+        assert _run(registered_projects["writer"], command=f"aipass init update {root} --dry-run")["exit_code"] == 0
+        assert _run(registered_projects["writer"], command=f"aipass init update --dry-run {root}")["exit_code"] == 0
+        assert _run(registered_projects["writer"], command=f"aipass init update {root}")["exit_code"] == 2
+        assert _run(registered_projects["writer"], command=f"aipass init run {root} --dry-run")["exit_code"] == 2
+
+    def test_a_shells_syntax_check_is_a_read_and_running_the_script_is_not(self, registered_projects: dict):
+        script = (registered_projects["aipass"] / "setup.sh").as_posix()
+        Path(script).write_text("echo hi\n", encoding="utf-8")
+        assert _run(registered_projects["hooks"], command=f"bash -n {script}")["exit_code"] == 0
+        for command in (f"bash {script}", f"bash {script} -n"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 2, command
 
     def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
         own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()

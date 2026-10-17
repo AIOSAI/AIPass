@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -48,6 +48,7 @@ if sys.platform == "win32":
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 # Handler import (same package family — json handlers)
 from aipass.memory.apps.handlers.json.lint_handler import run_lint
@@ -191,14 +192,17 @@ def print_introspection() -> None:
     console.print("[bold cyan]health Module[/bold cyan]")
     console.print("Read-only branch health — entry-count (rollover) + entry-size (cap violations)")
     console.print()
+    console.print("[yellow]Command:[/yellow]")
+    console.print("  drone @memory health @branch")
+    console.print()
     console.print("[yellow]Public API:[/yellow]")
     console.print("  get_branch_health(branch_name)")
     console.print()
-    console.print("[dim]Library module — import from: aipass.memory.apps.modules.health[/dim]")
+    console.print("[dim]Also importable: aipass.memory.apps.modules.health[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Entry point for drone module discovery — health has no CLI surface."""
+    """Entry point for drone module discovery: ``health @branch`` renders that branch's health."""
     if command != "health":
         return False
 
@@ -208,12 +212,53 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # A help flag ANYWHERE wins: `health @x --help` is a question, never a render.
+    if wants_help(args, allow_bare_word=True):
         print_introspection()
         return True
 
     from aipass.cli.apps.modules import error
 
-    error(f"health: unknown subcommand '{args[0]}'")
-    print_introspection()
+    if not (args[0].startswith("@") and len(args[0]) > 1):
+        error(f"health: unknown subcommand '{args[0]}'")
+        print_introspection()
+        return True
+
+    if len(args) > 1:
+        error(f"health: unknown argument '{args[1]}' - usage: drone @memory health @branch")
+        return True
+
+    _print_health(get_branch_health(args[0][1:]))
     return True
+
+
+def _print_health(result: dict) -> None:
+    """Render one ``get_branch_health`` answer: a refusal through ``error()``, else the facts.
+
+    Severity follows the module docstring: a due rollover is information on the
+    console, an entry-size violation is a ``warning()``. Neither fails the command;
+    only a refusal (unknown branch, unreadable registry) does.
+    """
+    from aipass.cli.apps.modules import console, error, warning
+
+    if not result.get("success"):
+        error(f"health: {result.get('error')}")
+        return
+
+    console.print()
+    console.print(f"[bold cyan]@{result['branch']} health[/bold cyan]")
+    for memory_type, row in result["entry_count"].items():
+        if row is None:
+            console.print(f"  {memory_type}.json: not found")
+        elif row["should_rollover"]:
+            console.print(f"  {memory_type}.json: rollover due - {row['reason']}")
+        else:
+            console.print(f"  {memory_type}.json: ok ({row['current_lines']} lines)")
+
+    total = result["entry_size"]["total_violations"]
+    console.print(f"  entry size: {total} violation{'' if total == 1 else 's'}")
+    for v in result["entry_size"]["violations"]:
+        warning(
+            f"{v['file']} {v['container']}[{v['key']}]: {v['length']} chars, cap {v['cap']} (over by {v['over_by']})"
+        )
+    console.print()

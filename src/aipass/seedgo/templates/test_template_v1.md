@@ -36,7 +36,7 @@ Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is eith
 
 ## Cross-OS, from day one
 
-OWNER 23:04 "We need to test and make sure the proposed template is cross os from day one." Each item below was proven on Linux by emulating the difference (page `test_template_cross_os_2026-09-20.md`); a real Windows and macOS run needs a runner, the owner's call.
+Cross-OS from day one: each item below is proven on Linux by emulating the difference; macOS also runs in CI, and Windows has no runner.
 
 20. **`conftest.py` pins the console width once**, session scope, on every console the product exports (`display.CONSOLE`, `display.err_console`), through Rich's public setter. Unpinned, Rich wraps at 80 on POSIX and 79 on Windows under pytest's capture, at the terminal's width under `-s`, at `COLUMNS` when exported. Measured: 4 of the trial's 31 tests flip at width 40, none with the pin. The same conftest calls `display.reset_command_state()` after every test, so `error()`'s process flag never leaks (item 18).
 21. **Every file read or write in a test names `encoding="utf-8"`.** Windows' default for `open()` is not UTF-8 on Python 3.12, and the product's output is not ASCII (tree glyphs, the warning prefix). Proven under an ASCII locale, stricter than Windows' cp1252: 31 green.

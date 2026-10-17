@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.2.1
+# Version: 5.3.0
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -881,6 +881,15 @@ class TestGitFromInsideAProgramIsRawGit:
 
     def test_a_program_that_only_prints_the_word_is_allowed(self, tmp_path):
         _assert_allowed(_canary_bash("python3 -c \"print('git push')\"", _seat(tmp_path, "canary")))
+
+    def test_a_shells_syntax_check_runs_nothing_and_the_script_still_does(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        script = (tmp_path / "release.sh").as_posix()
+        Path(script).write_text("git push\n", encoding="utf-8")
+        for command in (f"bash -n {script}", f"sh -n {script}", f"bash -nx {script}"):
+            _assert_allowed(_canary_bash(command, seat))
+        for command in (f"bash {script}", f"bash {script} -n", f"bash +n {script}"):
+            _assert_blocked(_canary_bash(command, seat))
 
 
 class TestGitHubWritesWithoutGh:

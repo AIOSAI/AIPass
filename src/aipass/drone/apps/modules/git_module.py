@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-03-17
 # Modified: 2026-10-15
 # =============================================
@@ -32,6 +32,7 @@ from aipass.drone.apps.handlers.git import (
     log_handler,
     tracked_handler,
     untrack_handler,
+    release_handler,
     export_handler,
     show_handler,
     blame_handler,
@@ -70,6 +71,7 @@ _COMMANDS = (
     "issue",
     "run",
     "workflow",
+    "release",
     "commit",
     "untrack",
     "checkout",
@@ -203,10 +205,10 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     # admin grant", and a flag aimed at another repo must never fall through and
     # run the verb in the standing one. On the gh passthroughs --repo OWNER/NAME
     # is gh's own flag and reaches gh untouched, as ever; only `run` with a value
-    # naming a directory is the door's (its read side, 2026-10-13).
+    # naming a directory is the door's (its read side, 2026-10-13). release's --repo is OWNER/NAME too.
     repo_flag = repo_door.extract_repo_flag(args)
     if repo_flag.present and (
-        command not in _GH_PASSTHROUGH_COMMANDS
+        command not in (*_GH_PASSTHROUGH_COMMANDS, "release")
         or (command == "run" and repo_door.run_aims_at_door(repo_flag, lock_handler.find_repo_root()))
     ):
         return _handle_repo_door(command, repo_flag)
@@ -253,6 +255,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_blame(args)
     if command == "tracked":
         return _handle_tracked(args)
+    if command == "release":
+        return release_handler.release_command(args)
     if command == "export":
         return _handle_export(args)
     if command == "remote":
@@ -380,6 +384,10 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return _handle_log(args, repo_root=repo_root)
     if command == "commit":
         return _handle_commit(args, repo_root=repo_root)
+    if command == "tracked":
+        return _handle_tracked(args, repo_root=repo_root)
+    if command == "untrack":
+        return _handle_untrack(args, repo_root=repo_root)
     if command == "tag":
         return _handle_tag(args, repo_root=repo_root)
     if command in ("fetch", "sync", "merge-upstream") and args:
@@ -1117,18 +1125,20 @@ def _handle_blame(args: list[str]) -> dict:
     return {"stdout": "\n".join(result["lines"]), "stderr": "", "exit_code": 0}
 
 
-def _handle_tracked(args: list[str]) -> dict:
+def _handle_tracked(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the tracked subcommand (global tier): `tracked <path ...>`, one row per path.
 
     The twin of `git ls-files` plus `git check-ignore`. Each path is read
     against the caller's directory, then the repo root, as log reads them.
+    *repo_root* is set only by the external-repo door: paths are then repo-relative.
     """
     if not args:
         return {"stdout": "", "stderr": "Usage: drone @git tracked <path ...>", "exit_code": 1}
     flag = next((arg for arg in args if arg.startswith("-")), None)
     if flag is not None:
         return {"stdout": "", "stderr": f"Unknown argument for 'tracked': {flag}", "exit_code": 1}
-    result = tracked_handler.classify(lock_handler.find_repo_root(), caller_cwd(), args)
+    root, cwd = (repo_root, None) if repo_root is not None else (lock_handler.find_repo_root(), caller_cwd())
+    result = tracked_handler.classify(root, cwd, args)
     if not result["ok"]:
         return {"stdout": "", "stderr": result["message"], "exit_code": 1}
     rows = [f"{state:<10} {path}" for state, path in result["rows"]]
@@ -1226,12 +1236,13 @@ def _handle_commit(args: list[str], repo_root: Path | None = None) -> dict:
     return commit_handler.commit_changes(message, all_files=all_files, files=files, repo_root=repo_root)
 
 
-def _handle_untrack(args: list[str]) -> dict:
+def _handle_untrack(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the untrack subcommand (owner tier): `untrack [--recursive] <path ...>`, out of the index only.
 
     The twin of `git rm --cached`. Paths are read as `tracked` reads them; the
     working tree is untouched and nothing is committed. Exit 1 when any path was
-    refused, after the accepted ones left the index.
+    refused, after the accepted ones left the index. *repo_root* is set only by
+    the external-repo door: paths are then repo-relative.
     """
     recursive = "--recursive" in args
     paths = [arg for arg in args if arg != "--recursive"]
@@ -1240,7 +1251,8 @@ def _handle_untrack(args: list[str]) -> dict:
         return {"stdout": "", "stderr": f"Unknown argument for 'untrack': {flag}", "exit_code": 1}
     if not paths:
         return {"stdout": "", "stderr": "Usage: drone @git untrack [--recursive] <path ...>", "exit_code": 1}
-    result = untrack_handler.untrack(lock_handler.find_repo_root(), caller_cwd(), paths, recursive=recursive)
+    root, cwd = (repo_root, None) if repo_root is not None else (lock_handler.find_repo_root(), caller_cwd())
+    result = untrack_handler.untrack(root, cwd, paths, recursive=recursive)
     if not result["ok"]:
         return {"stdout": "", "stderr": result["message"], "exit_code": 1}
     lines = [f"left the index  {path}" for path in result["removed"]]
@@ -1376,7 +1388,7 @@ def get_introspective() -> str:
         "Connected Handlers:\n"
         "  handlers/git/\n"
         "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
-        "    - tracked_handler.py, untrack_handler.py, export_handler.py\n"
+        "    - tracked_handler.py, untrack_handler.py, export_handler.py, release_handler.py\n"
         "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - merge_main_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
@@ -1386,7 +1398,7 @@ def get_introspective() -> str:
         "  gh passthrough: issue, run, workflow\n"
         "Machine surface: --json on status, log, show, remote\n"
         "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
-        "issue,run,workflow)"
+        "issue,run,workflow,release)"
         " | owner (pr,commit,untrack,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
         "unlock,merge,smart-sync,fix,tag)\n"
     )
@@ -1439,7 +1451,7 @@ def print_introspection() -> None:
     c.print("    - [cyan]commit_handler.py[/cyan], [cyan]checkout_handler.py[/cyan], [cyan]sync_handler.py[/cyan]")
     c.print(
         "    - [cyan]merge_main_handler.py[/cyan], [cyan]tracked_handler.py[/cyan],"
-        " [cyan]untrack_handler.py[/cyan], [cyan]export_handler.py[/cyan]"
+        " [cyan]untrack_handler.py[/cyan], [cyan]export_handler.py[/cyan], [cyan]release_handler.py[/cyan]"
     )
     c.print(
         "    - [cyan]dev_pr_handler.py[/cyan], [cyan]branches_handler.py[/cyan],"

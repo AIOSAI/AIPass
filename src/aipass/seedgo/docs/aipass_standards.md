@@ -84,7 +84,7 @@ The table below carries every other row.
 | trigger | all_files | production | Trigger integration patterns |
 | trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, freshness |
 | unused_function | branch_level | production | No unreferenced public functions |
-| windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
+| windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs); advisory info lines, never scored: lock race (apps/), mock repr path and text fixture bytes oracle (tests/) |
 
 The audit consults one entry more than this table has rows: `diagnostics` (pyright) has no
 `_check.py` of its own. `.github/scripts/seedgo_audit.py` pins that consulted total in

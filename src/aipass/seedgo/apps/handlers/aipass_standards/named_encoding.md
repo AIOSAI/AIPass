@@ -21,7 +21,7 @@ Neither call says what encoding it means, so both take whatever the host's local
 
 `open()`, `Path.read_text()` and `Path.write_text()` fall back to `locale.getpreferredencoding(False)`. On this fleet's Linux and macOS hosts that is UTF-8 and the omission is invisible. On Windows, through Python 3.12, it is **cp1252**.
 
-The product's output is not ASCII. The audit prints box-drawing characters, plan templates carry em dashes, @commons posts carry whatever a citizen typed. A test that writes such a fixture without naming utf-8 passes on the machine it was written on and raises `UnicodeDecodeError` in the Windows CI lane — which is a failure of the **test**, not of the product it was meant to measure. PR#774's Windows leg is where this rule comes from.
+The product's output is not ASCII. The audit prints box-drawing characters, plan templates carry em dashes, @commons posts carry whatever a citizen typed. A test that writes such a fixture without naming utf-8 passes on the machine it was written on and raises `UnicodeDecodeError` on a Windows host — which is a failure of the **test**, not of the product it was meant to measure.
 
 Measured 2026-09-21 across 553 fleet test files (`test_*.py` and `conftest.py` under each branch's `tests/`):
 

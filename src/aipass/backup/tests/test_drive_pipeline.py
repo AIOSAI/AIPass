@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.5
+# Version: 3.1.0
 # Created: 2026-06-12
-# Modified: 2026-10-04
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -19,7 +19,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import DEFAULT, MagicMock, call
 
 import pytest
 
@@ -76,11 +76,18 @@ def _install_offline_client(
     authenticated: bool = True,
     last_error: str | None = None,
 ) -> MagicMock:
-    """Put a DriveClient that talks to nobody where the late import looks for one."""
+    """Put a DriveClient that talks to nobody where the late import looks for one.
+
+    Its about.get answers with 15 GiB free, so drive_sync's headroom check passes;
+    test_drive_snapshot_lane.py pins the headroom itself.
+    """
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = authenticated
     instance.last_error = last_error
     instance.file_tracker = {}
+    roomy = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
+    about_request = instance.drive_service.about.return_value.get.return_value
+    instance._api_call.side_effect = lambda request, *args, **kwargs: roomy if request is about_request else DEFAULT
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance
 
@@ -565,11 +572,11 @@ class TestDriveTracker:
         assert drive_tracker.load_tracker(str(tmp_path / "unseeded")) == {}
 
     def test_save_tracker_writes_json_under_the_projects_backup_dir(self, tmp_path: Path) -> None:
-        """The tracker lands on disk as JSON, under the project's .backup/."""
+        """The tracker lands on disk as JSON, under the project's .backup/, stamped with its lane."""
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
         written = tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME
-        assert json.loads(written.read_text(encoding="utf-8")) == {"file.txt": {"drive_id": "abc"}}
+        assert json.loads(written.read_text(encoding="utf-8")) == {"_lane": "snapshot", "file.txt": {"drive_id": "abc"}}
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +687,37 @@ class TestDriveUpload:
         assert result["uploaded"] == 3 and result["failed"] == 0
         assert sorted(tracker) == ["file_0.txt", "file_1.txt", "file_2.txt"]
 
+    def test_upload_batch_saves_the_tracker_to_disk_every_50_files_so_a_failing_run_keeps_its_uploads(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        drive_api: MagicMock,
+    ) -> None:
+        # DPLAN-0412 item 5: the periodic save was gated on a client attribute nothing set, so it never fired.
+        service = MagicMock(name="drive_service")
+        monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=service))
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        client.get_or_create_project_folder = MagicMock(return_value="proj_folder")
+        project = tmp_path / "project"
+        store = project / ".backup" / "snapshots"
+        store.mkdir(parents=True)
+        files = []
+        for index in range(120):
+            path = store / f"file_{index:03d}.txt"
+            path.write_text("x", encoding="utf-8")
+            files.append(path)
+        answers = iter([{"id": f"id_{n}"} for n in range(60)])
+        drive_api.side_effect = lambda request, max_retries=3: next(answers, None)
+
+        result = drive_upload.upload_batch(client, files, "proj", store, {}, max_workers=1, project_root=str(project))
+
+        assert result["uploaded"] == 60 and result["failed"] == 60
+        saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
+        uploaded = {f"file_{index:03d}.txt" for index in range(60)}
+        tracked = set(saved) - {drive_tracker.LANE_KEY}
+        assert len(tracked) >= 50 and tracked <= uploaded
+
     def test_upload_single_file_without_media_upload_fails_and_tracks_nothing(
         self,
         tmp_path: Path,
@@ -703,42 +741,41 @@ class TestDriveUpload:
 
 
 class TestDriveDestinationPath:
-    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/<store-relative path>, pure computation."""
+    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/snapshot/<store-relative path>, pure computation."""
 
-    def test_drive_path_opens_with_the_root_and_project_folders_the_lane_creates(self, tmp_path: Path) -> None:
-        """A store-root file lands under <root folder>/<project dir name>/, not at the Drive root."""
+    def test_drive_path_opens_with_the_root_project_and_lane_folders_the_lane_creates(self, tmp_path: Path) -> None:
+        """A store-root file lands under <root folder>/<project dir name>/snapshot/, not at the project folder."""
         project = tmp_path / "myproject"
 
         result = path_builder.build_drive_path(str(project), "notes.txt")
 
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "notes.txt"
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "notes.txt"
 
     def test_drive_path_keeps_the_relative_files_parent_folders_instead_of_flattening(self, tmp_path: Path) -> None:
         """A nested store-relative file keeps every parent segment -- upload creates one folder each."""
-        # The shape is the versioned store's own: <parent>/<name-folder>/<name>
-        # (builder.build_versioned_file_path), which is what drive_sync hands the
-        # engine as backup_root-relative. Flattening to the bare leaf is exactly
-        # upload.py:75-76's not-relative fallback, and it is NOT this path.
+        # The shape is the snapshot store's own, a mirror of the project, which is
+        # what drive_sync hands the engine as store-relative. Flattening to the
+        # bare leaf is upload_single_file's not-relative fallback, and it is NOT
+        # this path.
         project = tmp_path / "myproject"
 
-        result = path_builder.build_drive_path(str(project), "src/app.py/app.py")
+        result = path_builder.build_drive_path(str(project), "src/pkg/app.py")
 
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "src" / "app.py" / "app.py"
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "src" / "pkg" / "app.py"
 
     def test_drive_path_does_not_re_hash_a_long_name_the_store_already_hashed(self, tmp_path: Path) -> None:
         """A >50-char name passes through untouched: the Drive lane has no hashing step."""
-        # build_versioned_file_path applies name[:30]_md5[:8] on the way INTO the
-        # store, so the store-relative path already carries the shortened folder.
-        # Nothing in handlers/drive/ hashes anything; borrowing the local twin's
-        # recipe here would rename the file a second time, and the upload would
-        # then publish under a name no tracker key or restore lookup matches.
+        # The snapshot mirror keeps every name as the project has it, and nothing
+        # in handlers/drive/ hashes anything. Borrowing build_versioned_file_path's
+        # name[:30]_md5[:8] recipe here would publish under a name no tracker key
+        # matches.
         project = tmp_path / "myproject"
         long_name = "a" * 51 + ".txt"
 
         result = path_builder.build_drive_path(str(project), f"docs/{long_name}")
 
         assert result.name == long_name
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "docs" / long_name
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "docs" / long_name
 
 
 # ---------------------------------------------------------------------------
@@ -809,9 +846,9 @@ class TestDriveSync:
 
     @staticmethod
     def _store(tmp_path: Path) -> tuple[Path, Path]:
-        """A project with an empty versioned store where the real builder looks for it."""
+        """A project with an empty snapshot store where the real builder looks for it."""
         project = tmp_path / "project"
-        store = project / ".backup" / "versioned"
+        store = project / ".backup" / "snapshots"
         store.mkdir(parents=True)
         return project, store
 
@@ -849,22 +886,22 @@ class TestDriveSync:
         assert result["error"] == "No creds"
         assert uploads == []
 
-    def test_run_drive_sync_names_a_missing_versioned_store_and_uploads_nothing(
+    def test_run_drive_sync_names_a_missing_snapshot_store_and_uploads_nothing(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
-        """A missing versioned store is named back, and nothing is uploaded."""
+        """A missing snapshot store is named back, and nothing is uploaded."""
         project = tmp_path / "project"
         project.mkdir()
-        missing = project / ".backup" / "versioned"
+        missing = project / ".backup" / "snapshots"
         _install_offline_client(monkeypatch)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
         assert result["success"] is False
-        assert result["error"] == f"Versioned store not found: {missing}"
+        assert result["error"] == f"Snapshot store not found: {missing}"
         assert uploads == []
 
     def test_run_drive_sync_hands_every_untracked_file_to_one_upload_batch(
@@ -895,9 +932,9 @@ class TestDriveSync:
         """Files matching .backupignore are excluded from the upload list."""
         project, store = self._store(tmp_path)
         for rel in (
-            "src/app.py/app.py",
-            "node_modules/pkg/index.js/index.js",
-            "node_modules/other/lib.js/lib.js",
+            "src/app.py",
+            "node_modules/pkg/index.js",
+            "node_modules/other/lib.js",
         ):
             (store / rel).parent.mkdir(parents=True, exist_ok=True)
             (store / rel).write_text("code", encoding="utf-8")
@@ -915,16 +952,15 @@ class TestDriveSync:
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
-        """Temps a pre-rule versioned run stored never go to Drive (DPLAN-0338)."""
+        """Temps a pre-rule snapshot run stored never go to Drive (DPLAN-0338)."""
         # The store is re-filtered through load_spec, so the built-in *.tmp floor
         # reaches copies made before it existed -- for a .backupignore that never
         # names *.tmp, which is every one seeded before the rule.
         project, store = self._store(tmp_path)
         for rel in (
-            "data_json/state.json/state.json",
-            "data_json/tmpab12cd34.tmp/tmpab12cd34.tmp",
-            "data_json/tmpab12cd34.tmp/tmpab12cd34-baseline-2026-08-15.tmp",
-            "data_json/.4242_7.tmp/.4242_7.tmp",
+            "data_json/state.json",
+            "data_json/tmpab12cd34.tmp",
+            "data_json/.4242_7.tmp",
         ):
             (store / rel).parent.mkdir(parents=True, exist_ok=True)
             (store / rel).write_text("x", encoding="utf-8")
@@ -934,7 +970,7 @@ class TestDriveSync:
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
         assert result["total"] == 1
-        assert [f.relative_to(store).as_posix() for f in uploads[0]] == ["data_json/state.json/state.json"]
+        assert [f.relative_to(store).as_posix() for f in uploads[0]] == ["data_json/state.json"]
 
     def test_drive_sync_help_flag_prints_usage_and_never_runs_the_sync(
         self,
@@ -961,15 +997,15 @@ class TestDriveSync:
 
         # Two projects, not one run twice: the first run writes a tracker, and a
         # second run over the same store would skip every file and never reach
-        # the upload at all. build_versioned_store is NOT patched here -- the
-        # real builder already answers <project>/.backup/versioned, which is
+        # the upload at all. build_snapshot_path is NOT patched here -- the
+        # real builder already answers <project>/.backup/snapshots, which is
         # inside tmp_path, so the product's own path code runs.
         # The Google edge is sealed by conftest's autouse seal, the client is
         # a MagicMock, and upload_batch is the recorder below: nothing dials.
         def _seed(name: str) -> Path:
-            """A project whose versioned store holds one file to upload."""
+            """A project whose snapshot store holds one file to upload."""
             project = tmp_path / name
-            store = project / ".backup" / "versioned"
+            store = project / ".backup" / "snapshots"
             store.mkdir(parents=True)
             (store / "file.txt").write_text("content", encoding="utf-8")
             return project

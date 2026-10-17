@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-15
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -814,13 +814,31 @@ class TestEditGateExternalProject:
             )
         assert result["exit_code"] == 0
 
-    # The owner's ruling, 2026-09-18 22:17: "A manager (e.g. @vera in Vera Studio, like devpulse
-    # in AIPass) edits her own project's agents' files, within her project only."
+    def test_the_manager_row_writes_its_projects_unrowed_files_and_not_its_agents(self, registered_projects: dict):
+        """The owner's go, 2026-10-16 18:45: superseding DPLAN-0356 item 5 for files in no branch row."""
+        assert _write(registered_projects["vera_seat"], registered_projects["vera"] / "README.md")["exit_code"] == 0
+        agents = _write(registered_projects["vera_seat"], Path(registered_projects["writer"]) / "draft.md")
+        assert agents["exit_code"] == 2
+        assert "Cross-branch" in json.loads(agents["stdout"])["reason"]
 
-    def test_the_manager_row_no_longer_writes_her_projects_agents_files(self, registered_projects: dict):
-        """DPLAN-0356 item 5: the manager short-circuit is gone; her own branch is hers, the rest is not."""
-        for target in (Path(registered_projects["writer"]) / "draft.md", registered_projects["vera"] / "README.md"):
-            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 2, target
+    def test_a_nested_projects_manager_writes_its_root_and_app_tree(self, registered_projects: dict):
+        baud = registered_projects["baud"]
+        for target in (baud / "index.html", baud / "app" / "src" / "phone" / "FleetWheel.tsx"):
+            assert _write(registered_projects["baud_seat"], target)["exit_code"] == 0, target
+
+    def test_a_non_manager_on_a_project_level_file_is_still_told_to_email_the_manager(self, registered_projects: dict):
+        result = _write(registered_projects["writer"], registered_projects["vera"] / "README.md")
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "Project-level write blocked" in reason
+        assert "drone @ai_mail email @vera" in reason
+
+    def test_aipass_unrowed_files_stay_the_verified_admin_seats(self, registered_projects: dict):
+        target = registered_projects["aipass"] / "CHANGELOG.md"
+        with patch("aipass.hooks.apps.modules.admin_seat.is_admin_seat", return_value=False):
+            assert _write(registered_projects["devpulse"], target)["exit_code"] == 2
+        with patch("aipass.hooks.apps.modules.admin_seat.is_admin_seat", return_value=True):
+            assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
     def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
         with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):

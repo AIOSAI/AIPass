@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pump.py
 # Description: Host API Pump Handler — the bidirectional room socket and its control frames
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-08-21
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -28,6 +28,9 @@ TWO CONTROL VERBS:
               whose peer vanished without a FIN reads its socket as OPEN forever
               and renders a corpse frame the operator believes is live.
 
+WHEN THE ROOM ENDS FIRST the socket is closed with 4000 "room ended", so the
+phone can tell a finished room from a server that hung up.
+
 Functions:
     run_pump()  - Run both directions until either side goes away
 """
@@ -45,6 +48,11 @@ from aipass.api.apps.handlers.host import attach as host_attach
 # phone sends one every few seconds per open room, and this is the one shape
 # the client feature-detects on.
 PONG_FRAME = json.dumps({"type": "pong"})
+
+# The close a socket gets when its ROOM ended first: 4000 is the application
+# range, so no transport ever sends it on its own (DPLAN-0414 contract C-C).
+ROOM_ENDED_CODE = 4000
+ROOM_ENDED_REASON = "room ended"
 
 
 # THE PUMP AND ITS CONTROL FRAMES were nested inside the app factory in the
@@ -83,6 +91,14 @@ async def run_pump(websocket: Any, session: Any) -> Optional[int]:
         while not stop.is_set():
             data = await loop.run_in_executor(host_attach.pump_executor(), session.read)
             if not data:
+                # The room ended under the socket. A close code of our own lets
+                # the phone tell this from a server that hung up, and stop
+                # recreating an empty room with new-session -A (DPLAN-0414 C-C).
+                try:
+                    await websocket.close(code=ROOM_ENDED_CODE, reason=ROOM_ENDED_REASON)
+                except RuntimeError as e:
+                    # The client closed in the same instant; there is no socket left to tell.
+                    logger.info("[host_api] room %s ended after its socket closed: %s", session.room, e)
                 break
             await websocket.send_bytes(data)
         stop.set()

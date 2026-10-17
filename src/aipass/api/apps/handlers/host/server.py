@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.0
+# Version: 1.1.4
 # Created: 2026-08-14
-# Modified: 2026-10-13
+# Modified: 2026-10-16
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -55,9 +55,9 @@ one a client can silently read at the wrong one:
                           phone never loads a whole commit at once.
     GET /v1/git-remote  - read scope. The repository's remote, so the face can
                           build link-cards out to the forge with no auth and no
-                          network call. Shells NOTHING: there is no door for it
-                          on drone and the fleet gate refuses both raw readers,
-                          so the configuration is read as the file it is.
+                          network call, through drone's remote door. No remote
+                          answers 200 with remote null; a repository that
+                          cannot be read is refused.
 
 Phase 5 adds the phone face itself, served from this same origin (see face.py):
     GET /             - @baud's bundle. NO auth: a browser navigating to a URL
@@ -77,14 +77,12 @@ it and would open a GUI window instead of erroring — see fleet.py. Their schem
 is implemented field-for-field, so nothing here changes when the gate opens.
 
 FPLAN-0561 row 2 adds the monitor wheel's read (DPLAN-0341, see machine.py):
-    GET /v1/machine - read scope. @skills' machine_vitals(), relayed verbatim
-                      through a 1 s single-flight cache. An absent reading is
-                      a 200; 503 only when the owner could not answer.
+    GET /v1/machine - read scope. @skills' machine_vitals(), verbatim, 1 s single-flight cache. Absent
+                      is a 200; 503 only when the owner could not answer. /processes: machine_route.py.
 
 FPLAN-0585 row 2 adds the lock chip's read (see lock.py):
-    GET /v1/lock    - read scope. @skills' lock_state(), relayed verbatim
-                      through a 1 s single-flight cache. Cannot-tell is a
-                      200; 503 only when the door raised or broke its shape.
+    GET /v1/lock    - read scope. @skills' lock_state(), verbatim, 1 s single-flight cache. Cannot-tell
+                      is a 200; 503 only when the door raised or broke its shape.
 
 Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
     POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
@@ -94,6 +92,7 @@ Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
                                      headless kill, and theirs is the one door.
     POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never
                                      gated — lock must fire from anywhere.
+    /v1/backup/run (operate, 202), /cancel (operate), /job, /status (read) - @backup's door, backup_route.py
 
 RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
     POST /v1/notify                - Phase 4, content-minimized through the relay
@@ -116,6 +115,7 @@ from typing import Any, Dict, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.apps.handlers.host import backup_route as host_backup_route
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import face as host_face
@@ -123,6 +123,7 @@ from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
+from aipass.api.apps.handlers.host import machine_route as host_machine_route
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import pair_route as host_pair_route
 from aipass.api.apps.handlers.host import pump as host_pump
@@ -1144,6 +1145,8 @@ def create_app() -> Any:
         """Lock the machine, through @skills. Takes nothing and asks nothing."""
         return host_verbs.lock_screen()
 
+    host_backup_route.register(app, _deny, require_scope)
+    host_machine_route.register(app, _deny, _logged_denial, require_scope)
     # ---------------------------------------------------------- settings --
     # The desktop's two gears, served (DPLAN-0300): reads ride the read scope
     # because a dial's position is observation; writes are operate because

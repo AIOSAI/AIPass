@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -12,6 +12,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — _auto_register_sender()'s broad except Exception around contact auto-registration
+# seedgo: no-test-needed(shared) — a wake event carries no mail address: tests/test_wake.py pins its exact call
 
 import json
 import pytest
@@ -20,6 +21,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
+import aipass.ai_mail.apps.handlers.notify as notify_mod
 from aipass.memory.apps.modules import fleet
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 
@@ -36,10 +38,9 @@ def _silence_json_handler():
 
 
 @pytest.fixture(autouse=True)
-def _silence_notifications():
-    """Prevent desktop notifications during tests."""
-    with patch.object(delivery_mod, "_emit_notification_event"):
-        yield
+def _fresh_notification_rate_limit(monkeypatch):
+    """The 3-per-30s feed limit is module state; one test's events must not mute the next's."""
+    monkeypatch.setattr(delivery_mod, "_NOTIFICATION_TIMESTAMPS", {})
 
 
 @pytest.fixture
@@ -883,3 +884,47 @@ def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_name
     assert success is False
     assert error.startswith("AIPass registry unreadable, @target not resolved: AIPASS_REGISTRY.json ")
     assert not (lab_target / ".ai_mail.local").exists(), "the namesake must not be served"
+
+
+# ---- The feed event names the delivered message (DPLAN-0414 C-A) ----
+
+
+@pytest.fixture
+def baud_project(tmp_path, monkeypatch):
+    """A project of its own whose registry is BAUD's (the feed itself is in tmp_path: conftest)."""
+    root = tmp_path / "baud"
+    root.mkdir()
+    (root / "BAUD_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    return root
+
+
+def _feed_events() -> list:
+    return [json.loads(line) for line in notify_mod.FEED_PATH.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_delivered_mails_event_names_the_written_message_its_recipient_and_project(baud_project, noop_inbox_lock):
+    branches = _setup_branch(baud_project)
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@target", _make_email_data())
+
+    assert success is True, error
+    written = json.loads((Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    [event] = _feed_events()
+    assert event["kind"] == "mail"
+    assert event["body"] == "Test subject\nTest body"
+    assert (event["mail_id"], event["recipient"], event["project"]) == (written["messages"][0]["id"], "target", "baud")
+
+
+def test_a_mail_delivered_onto_an_inbox_file_names_it_the_same_way(baud_project, noop_inbox_lock):
+    inbox_file = baud_project / "target" / ".ai_mail.local" / "inbox.json"
+    inbox_file.parent.mkdir(parents=True)
+    inbox_file.write_text(json.dumps(_empty_inbox()), encoding="utf-8")
+
+    success, err, reply_id = delivery_mod.deliver_to_inbox_file(inbox_file, {**_DELIVERED, "to": "@target"})
+
+    assert success is True, err
+    [event] = _feed_events()
+    assert (event["mail_id"], event["recipient"], event["project"]) == (reply_id, "target", "baud")
+    assert json.loads(inbox_file.read_text(encoding="utf-8"))["messages"][0]["id"] == reply_id

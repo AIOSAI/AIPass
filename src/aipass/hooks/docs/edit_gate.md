@@ -18,7 +18,9 @@ nobody listed as a writer cannot name another branch's file or a memory file off
 git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
 `sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
 That shape reads anywhere, a memory file included (hooks todo 80). A `w` or `e` inside any other
-script is not read: its target or command passes unseen.
+script is not read: its target or command passes unseen. Two more reads (2026-10-16): a shell whose
+options before its script carry `-n` (`bash -n x.sh`, a syntax check; git_gate does not read the
+script's commands either), and `aipass init update ... --dry-run` (the owner: a preview is a read).
 
 ## Who may write whose files — the owner's ruling, 2026-09-18
 
@@ -27,15 +29,16 @@ The owner ruled at 22:17, after @memory's rollover was found writing Vera Studio
 | Seat | May write | Never |
 |---|---|---|
 | @devpulse (verified admin grant) | anywhere, system-wide | — |
-| every other seat, a project's manager row and @seedgo/@spawn included | their own branch directory | another branch, a project-level file, another project |
+| a project's manager row (`owner: true`), outside AIPass | their own branch and their project's files in no branch row | another branch, another project |
+| every other seat, @seedgo/@spawn included | their own branch directory | another branch, a project-level file, another project |
 
-Since DPLAN-0356 (`write_ownership` 2.0.0) the verified admin seat is the only cross-write exemption: a manager row (`owner: true`) and a directory name grant nothing.
+Since DPLAN-0356 (`write_ownership` 2.0.0) a directory name grants nothing. A manager row granted nothing either until 2026-10-16 18:45: the owner's go superseded item 5 for files in no branch row, after @aipass_site, @vera and @baud were refused their own project files and told to mail themselves (`write_ownership` 2.4.0). Another branch's row stays its branch's. In AIPass the manager row is the admin seat's, and it writes only as the verified grant.
 
 Reading is never refused by this rule. A file outside every project (a temp file) is nobody's and stays open. A session at a project root has no branch identity: it is the project's own seat and writes the project, fenced at its boundary.
 
 **Read from the registries, not from path shapes.** The caller's project is the nearest ancestor of the session cwd holding a `*_REGISTRY.json` (the marker @ai_mail's mail fence uses, GH #733). The cwd is where the walk starts because it is the only identity evidence a PreToolUse hook has, the same evidence the admin rail's leg 1 reads. What the walk finds is then read from the registry: a branch is a row's `path`, a manager is a row's `owner` flag (spawn writes it to the registry entry, not to a passport an agent can edit). The `src/<package>/<branch>` shape is only the fallback where a project has no branches table. A registry that proves it catalogues something else (a non-empty table with no `branches` key, like `flow_json/PLAN_REGISTRY.json`) marks no project; an unreadable or empty one still does.
 
-**Project-level files** (the repo root's own files: `.aipass/`, `.claude/`, `README.md`) belong to no branch row; a branch seat is refused and pointed at the manager, and only a session at the project root or the admin seat writes them. @hooks' own `.aipass/hooks.json`, `.aipass/project_hooks.json` and `.claude/provider_manifest.json` go through @devpulse since this ruling.
+**Project-level files** (the repo root's own files: `.aipass/`, `.claude/`, `README.md`) belong to no branch row; a branch seat is refused and pointed at the manager, and the manager's seat, a session at the project root or the admin seat writes them. @hooks' own `.aipass/hooks.json`, `.aipass/project_hooks.json` and `.claude/provider_manifest.json` go through @devpulse since this ruling.
 
 ### The project boundary
 

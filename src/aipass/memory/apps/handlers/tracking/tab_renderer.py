@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-25
-# Modified: 2026-09-15
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -450,6 +450,44 @@ def refresh_all_tabs(branches: list[str] | None = None) -> dict:
         "skipped": skipped,
         "errors": errors,
     }
+
+
+def refresh_moved_limits(entry_type: str, before: dict, after: dict) -> dict[str, list] | None:
+    """Re-render the meta lines of every registry branch whose enforced *entry_type* count moved.
+
+    A limit write changes the config, and each branch's ``*_meta`` line is its
+    copy, read by the hook and the agent as the cap. Left for the next rollover
+    or push it lied in between (DPLAN-0414 T7). Both configs go through
+    ``config_loader.resolve_limits``, the one resolver, so a branch holding its
+    own count keeps its file untouched.
+
+    Args:
+        entry_type: The type the write changed.
+        before: The whole config as loaded before the write.
+        after: The whole config as loaded after it.
+
+    Returns:
+        ``{"branches": [re-rendered names], "errors": [...]}``, or None, never a
+        dict, when the registry is unreadable: logged here, and no branch named.
+    """
+    from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, _read_registry
+
+    try:
+        registry = _read_registry()
+    except RegistryUnreadable as exc:
+        logger.error(f"[tab_renderer] meta lines not re-rendered after a {entry_type} limit write: {exc}")
+        return None
+
+    moved = []
+    for item in registry:
+        name = str(item.get("name", "")).lower()
+        old = config_loader.resolve_limits(before.get("rollover", {}), name, before.get("entry_limits"))
+        new = config_loader.resolve_limits(after.get("rollover", {}), name, after.get("entry_limits"))
+        if old[entry_type]["count"] != new[entry_type]["count"]:
+            moved.append(name)
+
+    errors = refresh_all_tabs(branches=moved).get("errors", []) if moved else []
+    return {"branches": moved, "errors": errors}
 
 
 def render_all_meta_tabs(branch_dir: str | None = None) -> dict[str, str]:

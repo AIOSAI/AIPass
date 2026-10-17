@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -1157,3 +1157,43 @@ class TestFileBudgetAccessor:
         tightened = mod.get_count_ceilings()
         assert tightened["sessions"]["ceiling"] < 15
         assert tightened["observations"]["ceiling"] >= 15, "observations.json's budget did not move"
+
+
+class TestTheSourceAndTheOverrideTellOneTruth:
+    """``source`` names where the count in force came from; ``is_override`` is that source being
+    per_branch AND the count differing from the default. One rule, every shape (DPLAN-0414 T7)."""
+
+    @staticmethod
+    def _row(mod, rollover: dict, entry_type: str = "sessions") -> tuple:
+        row = mod.resolve_limits(rollover, "guinea", _entry_limits(mod))[entry_type]
+        return row["count"], row["source"], row["is_override"]
+
+    def test_a_per_branch_count_equal_to_the_default_is_per_branch_and_not_an_override(self) -> None:
+        mod = _get_module()
+        rollover = _rollover_section(mod, {"guinea": {"local": {"sessions": {"count": 15}}}})
+        assert self._row(mod, rollover) == (15, "per_branch", False)
+
+    def test_a_per_branch_leaf_without_a_count_is_no_limit_from_per_branch_and_an_override(self) -> None:
+        """The per-file-key rule: the block shadows the defaults, so the engine enforces no limit."""
+        mod = _get_module()
+        rollover = _rollover_section(mod, {"guinea": {"local": {"sessions": {}}}})
+        assert self._row(mod, rollover) == (None, "per_branch", True)
+
+    def test_a_todos_leaf_without_a_count_falls_back_to_the_default_and_says_so(self) -> None:
+        mod = _get_module()
+        rollover = _rollover_section(mod, {"guinea": {"local": {"todos": {}}}})
+        assert self._row(mod, rollover, "todos") == (10, "defaults", False)
+
+    def test_a_real_override_is_per_branch_and_an_override(self) -> None:
+        mod = _get_module()
+        rollover = _rollover_section(mod, {"guinea": {"local": {"sessions": {"count": 3}}}})
+        assert self._row(mod, rollover) == (3, "per_branch", True)
+
+    def test_a_clamped_default_is_still_the_default_never_an_override(self) -> None:
+        """The clamp lowers the number in force; it does not move where the number came from."""
+        mod = _get_module()
+        rollover = _rollover_section(mod)
+        rollover["defaults"]["local"]["sessions"]["count"] = 99
+        count, source, is_override = self._row(mod, rollover)
+        assert count < 99
+        assert (source, is_override) == ("defaults", False)

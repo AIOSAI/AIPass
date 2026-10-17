@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
-# Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals()
-# Version: 2.5.0
+# Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
+# Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-10-12
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -23,7 +23,7 @@ actions refuse by name and give the install recipe; they never answer a
 partial.
 
 Called by: drone @skills run system_status <action>
-Published: machine_vitals() - from aipass.skills.lib.system_status import handler
+Published: machine_vitals(), machine_processes() - from aipass.skills.lib.system_status import handler
 """
 
 import configparser
@@ -381,6 +381,13 @@ BATTERY_STATES = ("charging", "discharging", "full")
 _BASELINES = {}
 _BASELINE_LOCK = threading.Lock()
 
+# machine_processes(): how long the CPU sample waits between its two reads, the
+# most it lists, and the sleep it waits with (a test spends it on its own clock).
+PROCESS_SAMPLE_S = 0.5
+PROCESS_LIMIT_MAX = 100
+MIB = 1024**2
+_sleep = time.sleep
+
 
 def machine_vitals():
     """Read the machine's vitals as one dict. Never raises for a reading.
@@ -391,33 +398,10 @@ def machine_vitals():
             detail beside its values. Or a whole-function refusal
             {"ok": False, "reason": "switched_off" | "psutil_missing", "detail": str}.
     """
-    # The runner gates on the switch before it imports a handler (DPLAN-0306).
-    # This door is imported directly, so it has to ask for itself - otherwise an
-    # in-process caller reads a skill an operator switched off. Imported here so
-    # the text actions, and every importer that never calls this door, stay
-    # stdlib + psutil + prax.
-    from aipass.skills.apps.handlers.switch_handler import STATE_FILENAME, SwitchStateUnreadable, is_enabled
-
-    try:
-        enabled = is_enabled(SKILL_NAME)
-    except SwitchStateUnreadable as exc:
-        # Cannot tell whether it is off, so it is off - the runner's answer.
-        logger.error("Refusing machine_vitals - switch state unreadable: %s", exc, exc_info=True)
-        return _refusal(
-            "switched_off",
-            f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), so this skill "
-            f"counts as switched OFF; the error is in the host log.",
-        )
-
-    if not enabled:
-        return _refusal(
-            "switched_off",
-            f"Skill '{SKILL_NAME}' is switched OFF and takes no readings. "
-            f"Turn it back on with: drone @skills on {SKILL_NAME}",
-        )
-
-    if psutil is None:
-        return _refusal("psutil_missing", PSUTIL_RECIPE)
+    # This door is imported directly, so it asks the switch itself (_gate).
+    refusal = _gate("machine_vitals")
+    if refusal is not None:
+        return refusal
 
     readers = {
         "cpu": _read_cpu,
@@ -445,6 +429,116 @@ def machine_vitals():
             detail = f"The {name} reading failed ({_describe(exc)}); the error is in the host log."
             vitals[name] = _section(name, "read_failed", detail=detail)
     return vitals
+
+
+def machine_processes(limit=20):
+    """The busiest processes by sampled CPU: what is running when the fan spins up.
+
+    Args:
+        limit: How many to list, clamped to 1..100.
+
+    Returns:
+        dict: {"sampled_at": ISO-8601 UTC, "window_ms": int, "total": every pid
+            seen, "sort": "cpu", "processes": [{pid, name, cpu_pct, mem_pct,
+            mem_mb, user, state}]}, busiest first, ties by mem_pct. Or the same
+            whole-function refusal machine_vitals() answers (contract C-B,
+            DPLAN-0414 theme 3).
+    """
+    refusal = _gate("machine_processes")
+    if refusal is not None:
+        return refusal
+
+    limit = min(max(int(limit), 1), PROCESS_LIMIT_MAX)
+    pids = psutil.pids()
+    vanished = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
+
+    # A process's first cpu_percent is a cold zero, so every process is primed,
+    # the sample waits, and only the second read is published.
+    started = _monotonic()
+    primed = []
+    for pid in pids:
+        try:
+            proc = psutil.Process(pid)
+            proc.cpu_percent(None)
+        except vanished as exc:
+            logger.debug("machine_processes: pid %s left the sample before priming (%s)", pid, _describe(exc))
+            continue
+        primed.append(proc)
+    _sleep(PROCESS_SAMPLE_S)
+    window_ms = int(round((_monotonic() - started) * 1000))
+
+    # psutil reports per-process CPU against one core (a busy 4-core box sums to
+    # ~400); dividing by the logical count normalises it to the machine (~100).
+    cores = psutil.cpu_count(logical=True) or 1
+    rows = []
+    for proc in primed:
+        try:
+            # The name only - never cmdline, arguments, environment or cwd.
+            row = {
+                "pid": proc.pid,
+                "name": proc.name(),
+                "cpu_pct": round(proc.cpu_percent(None) / cores, 1),
+                "mem_pct": round(proc.memory_percent(), 1),
+                "mem_mb": int(proc.memory_info().rss // MIB),
+                "user": _process_user(proc, vanished),
+                "state": proc.status(),
+            }
+        except vanished as exc:
+            logger.debug("machine_processes: pid %s left the sample mid-read (%s)", proc.pid, _describe(exc))
+            continue
+        rows.append(row)
+
+    rows.sort(key=lambda row: (row["cpu_pct"], row["mem_pct"]), reverse=True)
+    return {
+        "sampled_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "window_ms": window_ms,
+        "total": len(pids),
+        "sort": "cpu",
+        "processes": rows[:limit],
+    }
+
+
+def _process_user(proc, vanished):
+    """The process owner's name, or None when the host will not say."""
+    try:
+        return proc.username()
+    except vanished:
+        logger.debug("machine_processes: owner of pid %s not readable", proc.pid)
+        return None
+
+
+def _gate(door):
+    """The refusal a published door answers before any reading, or None to proceed.
+
+    The runner gates on the switch before it imports a handler (DPLAN-0306).
+    The published doors are imported directly, so they ask for themselves -
+    otherwise an in-process caller reads a skill an operator switched off.
+    Imported here so the text actions, and every importer that never calls a
+    door, stay stdlib + psutil + prax.
+    """
+    from aipass.skills.apps.handlers.switch_handler import STATE_FILENAME, SwitchStateUnreadable, is_enabled
+
+    try:
+        enabled = is_enabled(SKILL_NAME)
+    except SwitchStateUnreadable as exc:
+        # Cannot tell whether it is off, so it is off - the runner's answer.
+        logger.error(f"Refusing {door} - switch state unreadable: %s", exc, exc_info=True)
+        return _refusal(
+            "switched_off",
+            f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), so this skill "
+            f"counts as switched OFF; the error is in the host log.",
+        )
+
+    if not enabled:
+        return _refusal(
+            "switched_off",
+            f"Skill '{SKILL_NAME}' is switched OFF and takes no readings. "
+            f"Turn it back on with: drone @skills on {SKILL_NAME}",
+        )
+
+    if psutil is None:
+        return _refusal("psutil_missing", PSUTIL_RECIPE)
+    return None
 
 
 def _refusal(reason, detail):
@@ -963,4 +1057,5 @@ def _read_sysfs_or(path, fallback):
     try:
         return _read_sysfs(path)
     except FileNotFoundError:
+        logger.debug("sysfs attribute %s absent - answering the fallback", path)
         return fallback

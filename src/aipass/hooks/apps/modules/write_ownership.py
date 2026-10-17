@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -21,6 +21,9 @@ item 5, one identity rail):
   wrote across AIPass (TRUSTED_CROSS_WRITERS, a directory name), and a project's
   manager row wrote across its project. A directory name and a registry flag
   decide nothing now; those seats write their own branch like every other.
+- 2026-10-16 18:45 (the owner's go, superseding item 5 for these files only): a
+  project's manager row writes its project's files that lie in no branch row.
+  Not in AIPass, whose manager is the admin seat and writes only as the grant.
 - Reading is allowed; writing another's, never.
 
 Until this module the gate drew those lines from path SHAPES: a project was any
@@ -71,7 +74,8 @@ _SHOWN_CHARS = 120
 
 _WHO = (
     "Who writes where (the owner's rulings, 2026-09-18 and 2026-09-30): each agent its own branch; "
-    "the verified admin seat (@devpulse) everywhere. A name or a manager row grants nothing."
+    "a project's manager its project's files outside every branch row (2026-10-16); "
+    "the verified admin seat (@devpulse) everywhere."
 )
 
 
@@ -298,6 +302,8 @@ def _refusal(caller: Project | None, seat: Branch, owner: Branch | None, target:
             f'{_WHO}\nTo change it, ask its owner: drone @ai_mail {verb} @{owner.name} "Subject" "Body"'
         )
     if caller is None or caller.branches is None:
+        return None
+    if caller.manager is not None and caller.manager.path == seat.path and not caller.is_aipass:
         return None
     manager = caller.manager.name if caller.manager else "the project manager"
     return (

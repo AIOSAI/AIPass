@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: versioned.py
 # Description: Versioned module — per-file baseline + diff backup
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-04-17
-# Modified: 2026-06-12
+# Modified: 2026-10-16
 # =============================================
 
 """Versioned Module — per-file baseline + diff backup of a project directory."""
@@ -35,6 +35,8 @@ from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.handlers.state.changelog import append_changelog
 from aipass.backup.apps.handlers.state.metadata import build_metadata
+from aipass.backup.apps.handlers.state.progress import LaneProgress
+from aipass.backup.apps.handlers.state.stop_flag import catch_sigterm
 from aipass.backup.apps.modules.display import (
     build_progress_bar,
     refuse_missing_root,
@@ -44,6 +46,7 @@ from aipass.backup.apps.modules.display import (
     show_result_summary,
     show_run_header,
 )
+from aipass.backup.apps.modules.stop import report_stopped
 
 MODULE_NAME = "versioned"
 PRIMARY_COMMAND = "versioned"
@@ -66,13 +69,19 @@ def run_versioned(
     project_root: str,
     show_panels: bool = True,
     pre_scanned: list[tuple[str, str]] | None = None,
+    verb: str = PRIMARY_COMMAND,
 ) -> BackupResult:
     """Run a versioned backup into the persistent per-file store.
+
+    The run announces itself in ``.backup/running/versioned.json`` and turns
+    SIGTERM into a stop between files (DPLAN-0412); the file goes on every
+    exit path.
 
     Args:
         project_root: Absolute path to the project.
         show_panels: Whether to show rich CLI output.
         pre_scanned: Pre-scanned file list from 'all' (shared scan).
+        verb: What was invoked, for the running file: versioned, or all.
     """
     start = time.time()
 
@@ -81,6 +90,19 @@ def run_versioned(
     if create_backup_dir(project_root) is None:
         return refuse_missing_root("versioned", project_root, show_panels)
 
+    with catch_sigterm(), LaneProgress(project_root, PRIMARY_COMMAND, verb) as running:
+        return _versioned_run(project_root, show_panels, pre_scanned, verb, start, running)
+
+
+def _versioned_run(
+    project_root: str,
+    show_panels: bool,
+    pre_scanned: list[tuple[str, str]] | None,
+    verb: str,
+    start: float,
+    running: LaneProgress,
+) -> BackupResult:
+    """The versioned run proper, inside the stop handler and the running file."""
     if show_panels:
         show_last_backups()
 
@@ -113,6 +135,7 @@ def run_versioned(
     if show_panels:
         show_run_header(result)
 
+    running.plan(len(filtered))
     progress = build_progress_bar()
     with progress:
         task = progress.add_task("Processing files...", total=len(filtered))
@@ -120,9 +143,8 @@ def run_versioned(
             filtered,
             project_root,
             on_progress=lambda: progress.advance(task),
+            on_file=running.file_done,
         )
-
-    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked")
 
     duration = time.time() - start
 
@@ -131,6 +153,23 @@ def run_versioned(
     result.bytes_copied = copy_result.get("bytes_copied", 0)
     result.duration_seconds = duration
     result.errors = copy_result.get("errors", [])
+
+    # Stopped by request: no changelog entry (lanes.versioned.last means a run
+    # that completed). The stopped line is the last word.
+    if copy_result.get("stopped"):
+        result.add_warning("stopped by request")
+        report_stopped(
+            PRIMARY_COMMAND,
+            verb,
+            project_root,
+            done=copy_result.get("files_done", 0),
+            total=len(filtered),
+            failed=len(result.errors),
+            bytes_done=result.bytes_copied,
+        )
+        return result
+
+    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked")
 
     metadata = build_metadata(result)
     append_changelog(project_root, metadata)

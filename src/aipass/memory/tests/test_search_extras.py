@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_search_extras.py
 # Description: Tests for search query_executor subprocess encoding and vector search
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-03
+# Modified: 2026-10-16
 # Category: memory/tests
 # =============================================
 
@@ -240,6 +240,11 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
     the same answer as "no chunk carries this plan ID", so the exact-ID pin
     vanished silently. The one test here that starts a process runs a stand-in
     script under tmp_path that exits 3; the store is never opened.
+
+    Each stand-in reads its stdin first, as the real store does. One that exits
+    unread leaves the search writing into a closed pipe, and a worker whose
+    SIGPIPE is the kernel default dies there with no traceback (macOS CI
+    38128154826; flow.py's import-time SIG_DFL, since moved under __main__).
     """
 
     def _search(self, monkeypatch, tmp_path, script_text):
@@ -260,7 +265,7 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
         return result, said
 
     def test_a_store_that_exits_non_zero_is_named(self, monkeypatch, tmp_path):
-        result, said = self._search(monkeypatch, tmp_path, "import sys\nsys.exit(3)\n")
+        result, said = self._search(monkeypatch, tmp_path, "import sys\nsys.stdin.read()\nsys.exit(3)\n")
 
         assert result["results"] == []
         assert said == ["[search] Plan metadata fetch failed for DPLAN-0012: store exited 3 — exact-ID pin skipped"]
@@ -268,7 +273,7 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
     def test_a_store_that_answers_no_match_says_nothing(self, monkeypatch, tmp_path):
         """The control: an honest empty answer is not a failure."""
         answer = '{"success": true, "results": []}'
-        result, said = self._search(monkeypatch, tmp_path, f"print({answer!r})\n")
+        result, said = self._search(monkeypatch, tmp_path, f"import sys\nsys.stdin.read()\nprint({answer!r})\n")
 
         assert result["results"] == []
         assert said == []

@@ -121,9 +121,9 @@ The verb never touches the working tree and never commits. Its last line names t
 `drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on them, which
 stages a still-present file straight back into the index, or fails outright on one that is now
 ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
-every verb's does, and there is no separate owner-verb ledger to write. `--repo` is not served: the
-door would need its own repo-rooted lane, and the verb is refused there like any verb outside the
-door's table. Pinned by `TestUntrack` in `tests/test_git_module.py`, against a real repo.
+every verb's does, and there is no separate owner-verb ledger to write. `untrack` and `tracked` also
+run through the external-repo door (`--repo <path>`, admin seat, paths repo-relative, every use in
+its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in `tests/test_git_module.py`, against a real repo.
 
 ---
 
@@ -192,6 +192,26 @@ honoured, and a job whose log the API refuses fails the command by name (`TestRu
 
 Note the collision that shaped the door: these three verbs take gh's **own** `--repo OWNER/NAME`,
 which is why they are not external-repo door verbs.
+
+---
+
+## `release list` — published releases, every seat
+
+`drone @git release list [--repo OWNER/NAME] [--since TAG] [--limit N] [--json]` is global tier, like
+`run list` and `log`, so project citizens read it too. @vera's release watcher shelled gh to read
+AIPass's release tags and notes, and the lockdown refused it (feedback b44c7003, the owner's go
+2026-10-15). `--repo` is GitHub's OWNER/NAME, never a path, so `release` sits beside the gh
+passthroughs where the external-repo door does not take the flag; it defaults to AIOSAI/AIPass.
+Rows come newest first, tag, `published_at` and name, with the notes indented under each; `--json`
+gives one document with the raw rows. Drafts are skipped. `--since TAG` stops before that tag, and
+the pages are read on past `--limit` until it is seen, so a mistyped tag is refused rather than
+hidden behind a full page.
+
+It is backed by `gh api repos/OWNER/NAME/releases`, 100 to a page, because `gh release list`
+carries no notes. The repo's own record is read first: public data only, so a private repo is
+refused even when gh's account could read it. An unknown repo (GitHub's 404), a missing gh and a
+gh failure are each refused with the reason. Pinned by `TestReleaseList` in
+`tests/test_git_module.py`, with gh stubbed as GitHub would answer.
 
 ---
 

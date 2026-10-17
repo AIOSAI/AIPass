@@ -223,6 +223,16 @@ Two honesty requirements the report will not drop:
 `sent/` would attribute by *time* and credit the agent with anything else that
 wrote the mailbox during its run.
 
+### Feed records for delivered mail
+
+`kind: "mail"` lines carry three **additive** string keys — `mail_id` (the
+message's `id` in the recipient's `.ai_mail.local/inbox.json`), `recipient` (the
+branch, no @) and `project` (the recipient's project as its registry names it:
+`BAUD_REGISTRY.json` → `baud`, `unknown` when no registry names it). The body
+stays subject plus a 100-char preview; the keys are the way to the whole message
+(DPLAN-0414 C-A). An upsert update writes no line, so it carries none. `wake` lines
+carry none either.
+
 ### Feed records for dispatch completions
 
 `kind: "dispatch"` lines gained three **additive** keys — `dispatch_id`, `sender`,

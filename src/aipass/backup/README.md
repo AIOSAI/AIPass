@@ -4,7 +4,7 @@
 
 **Purpose:** Project-owned, local-first backups for any directory on this machine
 **Module:** `aipass.backup`
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Created:** 2026-04-16
 
 ---
@@ -33,12 +33,15 @@ drone @backup status @myapp                            # what is stored, and whe
 - **A run ceiling** — every run measures what it is about to copy and refuses
   loudly rather than walking a build-artifact tree for hours.
 - **Drive sync** — optional, off by default, and the only lane that leaves the
-  machine.
+  machine. It uploads the snapshot store, never the versioned one, and holds
+  back secrets and key files whatever the ignore file says.
 
 The backups belong to the project, not to this branch: the store and the ignore
 file live in the target project's own root, so a project keeps its backups when
-this branch is not around. There is no compression, no encryption, and no
-schedule — a backup happens when something asks for one.
+this branch is not around. There is no compression and no encryption. The
+schedule is not this branch's either: @daemon fires `all --registered` at 05:00
+each night from this branch's `.daemon/schedule.json`, and any other backup
+happens when something asks for one.
 
 ---
 
@@ -81,17 +84,21 @@ routes a verb to whichever one claims it, and resolves `@name` to a path.
 
 The modules are the verbs. `register` scaffolds a project's store; `snapshot`
 mirrors, `versioned` keeps history, and `all` runs both lanes over one shared
-scan before handing off to `drive_sync`. `restore` reads history back out,
-`status` reports what is stored, and `display` renders the panels the other
-lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
-`drive_clear` and `share`. `settings` is a stub that fails honestly rather than
-pretending to have saved anything. `door_trail` is not a verb: it is the door
-other branches import, publishing this branch's operation trail.
+scan before handing off to `drive_sync` when the project has it on (`all
+--registered` does that for every registered project). `restore` reads history
+back out, `status` reports what is stored and which lanes are running, `stop`
+ends a running lane by request (SIGTERM; the lane saves, says its counts and
+exits 130), `prune` lists (and with `--apply`
+deletes) stored copies the ignore rules now match, and `display` renders the panels the
+other lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
+`drive_clear` and `share`. `settings` sets one key, a project's `drive_sync` on
+or off, and fails honestly for anything else. `door_trail` is not a verb: it is
+the door other branches import, publishing this branch's operation trail.
 
 Underneath, the handlers do the work: walking and filtering a tree, applying
 ignore rules, copying, diffing, building store paths, reading and writing the
-project's config and registry, keeping the changelog, talking to Drive, and
-writing this branch's own operation trail. They are shared by every module, and
+project's config and registry, keeping the changelog and the running-lane
+progress files, talking to Drive, and writing this branch's own operation trail. They are shared by every module, and
 they refuse to be imported from outside this branch —
 see [docs/module_fence.md](docs/module_fence.md).
 
@@ -136,7 +143,7 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-16
 
 ---
 

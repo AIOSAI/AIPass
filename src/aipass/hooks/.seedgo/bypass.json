@@ -1315,6 +1315,31 @@
       "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same profile as bash_writes.py. print_introspection() IS provided."
     },
     {
+      "file": "apps/modules/comment_scan.py",
+      "standard": "json_structure",
+      "reason": "The comment budget's pure counter (devpulse 1858ba47): reads a file or text and returns line counts. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
+    },
+    {
+      "file": "apps/modules/comment_scan.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: the counter consumed by handlers/lifecycle/comment_budget.py and modules/comments.py, kept free of CLI and hook types so @seedgo can import it. The verb is comments.py. print_introspection() IS provided."
+    },
+    {
+      "file": "apps/handlers/lifecycle/comment_budget.py",
+      "standard": "json_structure",
+      "reason": "PostToolUse handler: stdlib json for the hook protocol response and to read its own JSONL ledger, written through prax append_jsonl as handlers/config/diagnostics.py does. Same profile as auto_fix.py."
+    },
+    {
+      "file": "apps/handlers/lifecycle/comment_budget.py",
+      "standard": "dead_code",
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.comment_budget.handle'. Wired in PostToolUse.comment_budget. Same profile as auto_fix.py."
+    },
+    {
+      "file": "apps/handlers/lifecycle/comment_budget.py",
+      "standard": "unused_function",
+      "reason": "handle() called dynamically by engine._run_handler via importlib from hooks.json (PostToolUse.comment_budget). Same profile as auto_fix.py."
+    },
+    {
       "file": "apps/modules/protected_paths.py",
       "standard": "json_structure",
       "reason": "Answers whether one path is a gate-switching file (DPLAN-0356 item 1) by pattern and path arithmetic. Reads and writes no JSON, logs no operation; same profile as admin_seat.py."
@@ -1599,7 +1624,7 @@
     {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
-      "lines": [992],
+      "lines": [1013],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {

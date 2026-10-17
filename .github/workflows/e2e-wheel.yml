@@ -4,10 +4,9 @@ name: e2e-wheel
 # Builds the wheel, installs it into a clean venv (handled by the pytest
 # fixtures in tests/e2e/conftest.py), and runs the 4-tier wiring ladder.
 #
-# The windows-latest leg was retired 2026-10-15 (the owner's ruling: CI runs
-# Linux and macOS; Windows is served through WSL2). Its RED-FIRST contract
-# (symlink init, bin-vs-Scripts, /tmp expected red) went with it. The retired
-# Windows lane sits beside this file as windows-test.yml(windows_disabled).
+# No Windows leg: CI runs Linux and macOS, Windows users run AIPass inside WSL2,
+# and no runner proves the Windows paths. The retired Windows lane sits beside
+# this file as windows-test.yml(windows_disabled), unread by Actions.
 
 on:
   push:
@@ -50,10 +49,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install build tooling
-        # Hash-pinned (Scorecard: Pinned-Dependencies). e2e.txt still carries
-        # colorama explicitly, a Windows-only need (os_name == "nt") kept from
-        # the retired windows-latest leg: harmless on Linux and macOS, and the
-        # lock is not regenerated for a retirement. See .github/requirements/e2e.in.
+        # Hash-pinned (Scorecard: Pinned-Dependencies). e2e.txt carries colorama
+        # explicitly, a Windows-only need (os_name == "nt"): harmless on Linux
+        # and macOS, not worth regenerating the lock over. See .github/requirements/e2e.in.
         run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
           python -m pip install --require-hashes -r .github/requirements/e2e.txt

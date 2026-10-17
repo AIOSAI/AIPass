@@ -5,9 +5,9 @@
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant (DPLAN-0344, the owner's go 2026-09-13). Ten verbs take
-`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, commit, push, tag, fetch, sync,
-merge-upstream, and the read side of gh's `run`.
+door, held by @devpulse's admin grant (DPLAN-0344, the owner's go 2026-09-13). Twelve verbs take
+`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, tracked, commit, untrack, push,
+tag, fetch, sync, merge-upstream, and the read side of gh's `run`.
 
 ---
 
@@ -65,6 +65,12 @@ fast-forwards as sync does. Nothing behind, it says there is nothing to merge. D
 conflict is read (`git diff --name-only --diff-filter=U`), then `git merge --abort` puts HEAD, index
 and tree back as they were, and the refusal names the conflicted paths: resolving is the owner's, by
 hand. It never rebases, resets, stashes or pushes; push is its own verb.
+
+**`tracked` and `untrack` take a file back out of the index.** A catch-all commit in
+projects/aipass-site swept in eight machine-state files carrying the owner's home path, and after a
+soft reset they sat staged with no drone way out (2026-10-15). Through the door both verbs run the
+handler they run at home, rooted at the named repo: paths are repo-relative, a tracked file leaves
+the index and stays on disk, every other class is refused by name, and nothing is committed.
 
 **The door's git never hangs and never prompts.** Every call the door's own runner makes carries a
 timeout: 120 s for `fetch` and `merge`, which talk to the remote or run merge drivers, 60 s for the
