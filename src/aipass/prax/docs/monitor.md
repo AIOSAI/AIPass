@@ -18,51 +18,15 @@ drone @prax monitor run --relay          # Mirror to Telegram (prax_monitor bot)
 drone @prax monitor --help               # Monitor usage
 ```
 
-**On request only — there is no monitor service.** The owner's ruling, 2026-08-18:
-*"monitor should only be running on request when i call it. not in background.
-the logs are already running."* Mission Control is an operator console, and
-logging does not depend on it: `system_logs/` and the branch-local logs are
-written by the logging handlers whether or not a monitor is running. Start it
-when you want to watch, quit it when you are done.
+**On request only — there is no monitor service.** Mission Control is an operator
+console, and logging does not depend on it: `system_logs/` and the branch-local
+logs are written by the logging handlers whether or not a monitor is running.
+Start it when you want to watch, quit it when you are done.
 
-No systemd unit runs it always-on: `prax-monitor.service` is
-**retired and deleted from the repo**, which is what retired means under the
-owner's archive doctrine: *`.archive/` is always ignored, no
-exceptions — and files there are not safe, they get cleaned without warning.*
-So the retirement record lives here, in tracked prose, rather than in an archive
-directory that neither ships nor survives. A convenience copy may sit in
-`.archive/` on any given machine; nothing depends on it.
-
-**Why it was retired.** Two rulings the same day landed on the one file. First,
-the on-request ruling above. Second, Telegram was retired — and this unit's
-entire stated purpose was `Description=AIPass Prax Monitor — Telegram relay`,
-setting `AIPASS_PRAX_MONITOR_RELAY=1`; BAUD is the surface going forward. It was
-also expensive: 3h23m of CPU consumed, 2.29GB RSS at the end, and it was one of
-the six processes that lost their watchdog dispatcher at 02:19 that day and grew
-unbounded (DPLAN-0305, fixed above).
-
-**What the unit was**, for anyone reconstructing it: a `Type=simple` user unit
-running `python3 -m aipass.prax.apps.modules.monitor run` with
-`Restart=always`, `WorkingDirectory` at the repo root, `AIPASS_PRAX_MONITOR_RELAY=1`,
-and both stdout and stderr appended to `~/.aipass/prax-monitor.service.log` —
-deliberately *outside* `system_logs/`, because the monitor tails `system_logs/*.log`
-and @trigger watches it too, so writing its own output there is a feedback loop.
-
-**If an always-on monitor is ever wanted again**, two questions have to be
-answered before reinstalling anything:
-
-- **Log rotation.** `StandardOutput=append:` has no rotation. That log reached
-  **117MB unrotated** before it was archived. A long-lived unit needs a rotation
-  story first.
-- **The ecosystem observer.** Any long-lived process that logs still lazy-starts
-  a recursive observer over the ecosystem root (`start_file_watcher()` schedules
-  one `WatchdogObserver` with `recursive=True`). Re-read 2026-09-05: the watch is
-  unchanged and always-on processes still multiply it. What changed on 2026-09-04
-  is *who waits for it* — the logger's first call now goes through
-  `start_file_watcher_in_background()`, so the walk happens on a thread nobody
-  joins (see "The watcher start does not block the first log line" below).
-  DPLAN-0307, which tracked the design, was closed 2026-08-22 in a batch with
-  three other prax plans — the plan is closed and the design is not.
+No systemd unit ships for it. An always-on monitor would need a rotation story
+for its own output first, and that output must stay *outside* `system_logs/`:
+the monitor tails `system_logs/*.log` and @trigger watches it too, so writing
+there is a feedback loop.
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
@@ -85,29 +49,13 @@ is resolved against *its own registry's* directory, not the process CWD. First r
 claim a name AIPass already uses.
 
 The project sweep resolves whoever the registries *declare*, not whoever has a
-directory. Measured 2026-09-05: **22 known branches** — the 18 in
-`AIPASS_REGISTRY.json` (AIPASS, AI_MAIL, API, BACKUP, CANARY, CLI, COMMONS,
-DAEMON, DEVPULSE, DRONE, FLOW, HOOKS, MEMORY, PRAX, SEEDGO, SKILLS, SPAWN,
-TRIGGER) plus the four project citizens that ship a registry today: BAUD,
-EARMARK, AIPASS_SITE and FINCH.
-
-Two names an earlier revision of this page listed are not resolvable, and the tree
-explains both without naming anyone: `projects/` now holds exactly four
-directories (`aipass-site`, `baud`, `earmark`, `finch`), so **MARKETSTAND** has
-no registry to declare it and `projects/speakeasy(on_hold)/` — once cited
-here as an empty-`branches[]` citizen — is not in the tree at all. The count
-moved because the declarations moved; the rule did not change. Earlier revisions
-also listed a `TESTING` citizen — no such project registry exists.
-
-That third shape was missing until 2026-08-14: `monitor run baud` answered "BAUD
-is not a known branch", and — worse — BAUD's files were labelled **AIPASS**,
-because the old fallback matched path segments against known names and the repo
-directory is called `AIPass`. Misattribution is worse than UNKNOWN: events land
-on the wrong screen and are filtered off the right one. Same family as the
-watchdog fix (c247fce8) and the statusline passport walk-up.
+directory. Path
+shape is never used: matching path segments against known names labels every
+file under the `AIPass` directory as AIPASS, and misattribution is worse than
+UNKNOWN — events land on the wrong screen and are filtered off the right one.
 
 **Branch scoping.** A comma-separated list (`monitor run seedgo,cli`) restricts the
-display to those branches; bare `run` and `run all` show everything, unchanged. A
+display to those branches; bare `run` and `run all` show everything. A
 scope covers each named branch's log lines, file changes and CLI sessions —
 including session labels that carry a project prefix or model tag
 (`AIPASS/SEEDGO/opus`) — plus commands the branch issued or was targeted by

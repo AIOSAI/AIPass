@@ -25,30 +25,24 @@ drone @prax dashboard --help             # Dashboard usage
 silently ignores unknown flags, so `refresh --all --dry-run` is a real
 fleet-wide write, not a preview — there is no dry-run mode.
 
-**`refresh @branch` reaches external projects (2026-09-11, FPLAN-0548).** The
-name is looked up in `AIPASS_REGISTRY.json` first, exactly as before. On a
-miss, prax looks in the caller's own project registry: the nearest
+**`refresh @branch` reaches external projects.** The name is looked up in
+`AIPASS_REGISTRY.json` first. On a miss, prax looks in the caller's own project registry: the nearest
 `*_REGISTRY.json` at or above the directory the caller stands in. A relative
 path there resolves against that registry's own directory. A name declared in
-both registries goes to core, and a warning names both rows. Before this, a
-Vera Studio branch running `drone @prax dashboard refresh @verify` got
-`Branch 'VERIFY' not found in registry` (exit 2), which is step 2 of the
-post-compact re-ground. So every external branch's dashboard stayed as it was:
-verify's still said `last_updated` 2026-07-09 and `new_mail` 0, while its inbox
-held 5 unread. `--all` is unchanged and still covers core only.
+both registries goes to core, and a warning names both rows. `--all` covers core
+only.
 
 **The caller's directory is `AIPASS_CALLER_CWD`, not the process cwd.** drone
 runs every branch with its cwd set to the *target* branch, so inside prax
-`Path.cwd()` is always prax. Measured the same day: a bare
-`drone @prax dashboard refresh` from `src/aipass/flow` refreshed **PRAX**. Both
-the project walk and the bare `refresh` now start from `_caller_dir()` in
+`Path.cwd()` is always prax, and a bare `refresh` read from it would refresh
+PRAX for every caller. Both the project walk and the bare `refresh` start from `_caller_dir()` in
 `apps/modules/dashboard.py`. That reads `AIPASS_CALLER_CWD` first (an empty
 value counts as unset) and falls back to the process cwd only for a direct run.
 With neither, the bare form refuses and tells you to name the branch. It is
 prax's one sanctioned working-directory read, the single entry in
 `tests/test_repo_root.py`'s allowlist, so it stays in the module. The handler
 `resolve_branch_path(ref, caller=None)` takes the directory as an argument and
-never reads a cwd. Called without one, it is core-only, as before.
+never reads a cwd. Called without one, it is core-only.
 
 **Mail counts come from the branch's own inbox, never from the ai_mail central.**
 `calculate_quick_status` counts `<branch>/.ai_mail.local/inbox.json`. The
@@ -69,9 +63,9 @@ write_section(branch_path, "ai_mail", {"new": 3, "total": 5})
 
 **quick_status has many writers.** prax refresh, `push-template`,
 `write_section()` and other branches (@flow's push) all touch the same block.
-Every prax write path now *merges*: it recomputes the keys prax owns
+Every prax write path *merges*: it recomputes the keys prax owns
 (`new_mail`, `opened_mail`, `active_plans`, `todo_count`, `action_required`,
-`summary`) and carries every other key through untouched. The invariant, agreed
+`summary`) and carries every other key through untouched. The invariant, shared
 with @flow: **no writer deletes a key it did not write.** The calculation itself
 lives in exactly one place
 (`handlers/dashboard/status.py::calculate_quick_status`) — `refresh.py`,
