@@ -83,7 +83,7 @@ surface — `core` (mint and adopt), `update`, `delete`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
 each parsing arguments and delegating. Two door modules, `door_owner` and
 `door_class_registry`, are no commands: they re-export handler names for other branches,
-because `apps/handlers/__init__.py` is a fence that refuses a foreign importer (DPLAN-0404).
+because `apps/handlers/__init__.py` is a fence that refuses a foreign importer.
 `apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
@@ -94,7 +94,7 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 `templates/citizen/` is the one template both classes mint from, and its
 `.spawn/.template_registry.json` manifest is what a mint is verified against — change a
 template file and regenerate that manifest in the same pass. A newborn is born fenced: the
-template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1, DPLAN-0404), and
+template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1), and
 its tests ship the fence pair `test_handlers_fence.py` and `support_fence.py`.
 `templates/docs_page.md`, the docs page skeleton, sits beside it so that no mint ever stamps it.
 
@@ -142,7 +142,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

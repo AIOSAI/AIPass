@@ -23,7 +23,7 @@ Every branch belongs to a **citizen class**, which decides its template:
 Both classes mint from the **one** template, `templates/citizen/` — the full three-layer
 scaffold: `.trinity/`, `.aipass/`, `apps/` (modules and handlers including the json shim),
 `tests/`, `docs/`, `logs/`. The class is a *behavioral* label in `identity.citizen_class`,
-not a choice of scaffold shape (DPLAN-0319), which is why the template directory is named
+not a choice of scaffold shape, which is why the template directory is named
 for what it is rather than for a class.
 
 **The class is decided at mint, not typed.** Citizen #1 of a project is born `manager`,
@@ -105,7 +105,7 @@ A newborn's startup files are measured against caps owned by other branches, and
 @seedgo's published cap, the branch prompt against @hooks' `BRANCH_CHAR_BUDGET`,
 `.trinity/` files and per-string length against @memory's `file_budgets`, and the dashboard
 against @prax's budget. Every number is read from its owner at assert time; a cap copied
-into the test as a literal fails the suite by design (DPLAN-0347).
+into the test as a literal fails the suite by design.
 
 The template also ships `DASHBOARD.local.json`, so a citizen is minted with its dashboard
 already rendered. Birth depends on neither @flow nor @prax to create it.

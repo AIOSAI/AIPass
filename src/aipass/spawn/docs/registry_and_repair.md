@@ -48,7 +48,7 @@ shapes a reader sees and no code does. **Normalising is not done here**, and
 
 ## Passport migration
 
-`migrate-passports` is the one-shot fleet migration to schema 2.0 (DPLAN-0319). It is
+`migrate-passports` is the one-shot fleet migration to schema 2.0. It is
 dry-run by default, can be restricted to a single branch, can be pointed at another repo
 root, and backs each passport up before writing. It either completes a passport or raises;
 there is no partial write.
@@ -94,7 +94,7 @@ guards the relocation lane, so neither carries a virtualenv into `.archive/`.
 
 ## Grant admin (ceremony)
 
-The admin privilege belongs to the orchestration branch alone (DPLAN-0288). Spawn owns
+The admin privilege belongs to the orchestration branch alone. Spawn owns
 exactly one leg of it: the `admin: true` flag on that branch's registry entry. The flag
 **grants nothing on its own** — the dispatch lane verifies five legs (verified caller, cert
 path, cert content, HMAC signature, and this flag).

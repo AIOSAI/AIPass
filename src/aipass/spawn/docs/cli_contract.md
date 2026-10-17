@@ -61,7 +61,7 @@ is the separate lane for callers that must distinguish "this passport has not be
 yet" from a hard error.
 
 `tests/test_modules_gateway.py` pins the door, and `tests/test_handlers_fence.py` pins
-spawn's own fence (`apps/handlers/__init__.py`, v2.1, DPLAN-0404) in a fresh interpreter per
+spawn's own fence (`apps/handlers/__init__.py`, v2.1) in a fresh interpreter per
 case. Every newborn is born with the same fence: `templates/citizen/apps/handlers/__init__.py`
 is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
 `tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence

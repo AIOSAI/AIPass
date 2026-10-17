@@ -26,7 +26,7 @@ phase.
    replaced, atomically written) · existing `.py` → **skip by design** · existing `.json` →
    deep merge (existing values win, plus the list policy below) · existing `.md` → compare
    and report, never write · `passport.json` → heal against a narrow allowlist only
-   (DPLAN-0262) · create-only paths → skip entirely · a file already present under a
+   · create-only paths → skip entirely · a file already present under a
    `dropbox/` or `.archive/` directory → never read, compared or merged, and no report row
    (a missing one is still added).
 5. **Refresh** — Regenerate `.spawn/.branch_meta.json` with current state.
