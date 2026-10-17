@@ -38,7 +38,7 @@ the value a caller typed is the exact drift the rename ends.
 **Class is resolved from the passport, not guessed.** A leading positional is read as a
 target path only when it is either a known class or carries an explicit path marker (a
 separator, `~`, `.`/`..`, or `@`). A bare token with neither — `create wizard` — refuses by
-name instead of silently making a branch called WIZARD in `./wizard` (APLAN-0007, fixed).
+name instead of silently making a branch called WIZARD in `./wizard`.
 
 ---
 
@@ -49,15 +49,16 @@ name instead of silently making a branch called WIZARD in `./wizard` (APLAN-0007
    directory that already has a passport is **adopted** instead of refused (see Adoption).
 2. **Lookup** — Resolve the citizen class to a template directory via `class_registry`.
 3. **Credential** — Resolve the target project's registry credential (`metadata.id`)
-   **before anything is written**. `load_registry` MINTS a fresh uuid4 when the registry
-   file is **missing** — that is what a brand-new external project is, and it stops its
-   first citizen inheriting AIPass's own id. A registry that **exists but will not parse**
-   deliberately gets no mint (id-less schema plus a logged warning): that is a live project
-   whose credential we failed to READ, and inventing a replacement would re-credential it
-   and orphan every passport already carrying the real one. The resolved value is handed to
+   **before anything is written**, through `resolve_project_credential` in `registry.py`.
+   Loading is a read: `load_registry` never mints. A **missing** registry gets a fresh
+   uuid4 — that is what a brand-new external project is, and it stops its first citizen
+   inheriting AIPass's own id. A **present** registry hands back its own id, untouched. A
+   registry that **exists but will not parse** gets `""`: that is a live project whose
+   credential could not be READ, and inventing a replacement would re-credential it and
+   orphan every passport already carrying the real one. The resolved value is handed to
    `add_to_registry`, which adopts it **only when it is creating the registry file** — keyed
-   off `registry_path.exists()` captured BEFORE the load, because a `load_registry` that
-   always returns an id makes "is it already set?" useless as a guard.
+   off `registry_path.exists()` captured before the load — and refuses to write a registry
+   that exists but is not a readable document.
 4. **Copy** — Recursive copy of the class template to target (skips `__pycache__`).
 5. **Rename** — Replace `{{BRANCH}}` in directory and file names.
 6. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including
@@ -68,7 +69,7 @@ name instead of silently making a branch called WIZARD in `./wizard` (APLAN-0007
    Minting it at registration time instead would be too late — the passport is written
    before the registry, so the two copies would be different UUIDs for one citizen. Distinct
    from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is
-   shared by every citizen in a project (the owner's ruling).
+   shared by every citizen in a project.
 8. **Meta** — Generate `.spawn/.branch_meta.json`: the per-branch tracking file that maps
    each delivered file back to its **template file id** with a current SHA-256, matched by
    path first and content hash second. This is what lets `update` reason about a renamed or
@@ -76,9 +77,8 @@ name instead of silently making a branch called WIZARD in `./wizard` (APLAN-0007
    degrading gracefully to empty when it is not.
 9. **Verify** — Compare the minted tree against the template's own manifest
    (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims
-   but the mint never produced REFUSES the create, names every missing path, and never
-   reaches the registry — a gitignored template file once minted a citizen with an empty
-   `artifacts/` and no `inbox.json` while printing "Agent created". Custom `--template`
+   but the mint never produced REFUSES the create, names every missing path, never
+   reaches the registry, and never prints "Agent created". Custom `--template`
    trees carry no manifest and are verified against their own contents only. The partial
    tree is deliberately left on disk for inspection.
 10. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version
@@ -108,8 +108,7 @@ against @prax's budget. Every number is read from its owner at assert time; a ca
 into the test as a literal fails the suite by design (DPLAN-0347).
 
 The template also ships `DASHBOARD.local.json`, so a citizen is minted with its dashboard
-already rendered. Birth depends on neither @flow nor @prax to create it, which is why
-@flow's writer no longer creating a missing dashboard costs a newborn nothing.
+already rendered. Birth depends on neither @flow nor @prax to create it.
 
 What the newborn's own template carries is deliberately thin: the README is the face, the
 branch prompt is breadcrumbs under a contract comment naming the cap's owner, and `docs/`
@@ -158,12 +157,10 @@ result = spawn_agent(
 
 ---
 
-## What a newborn scores
+## The newborn's tests
 
-A citizen minted from `templates/citizen/` was measured against the CI gate and the trinity
-checker and scored the floor on both. Those were one-day measurements; the way to know
-today is to mint a throwaway citizen and run the audit against it rather than to trust a
-number written here.
+To know what a newborn scores, mint a throwaway citizen and run the audit against it; no
+score is written here.
 
 The starter suite that ships at birth (`tests/test_cli_routing.py`) is listed in the
 template's `.spawn/.registry_ignore.json`: seedgo's architecture baseline treats every
@@ -171,14 +168,12 @@ template file as a structural requirement of **every** branch of that class, so 
 without that entry drops existing branches below the gate. The exclusion is what keeps a
 template addition from becoming a fleet-wide mandate.
 
-A template test that pinned the json shim was archived when the fleet folded those
-identities into a parametrised contract suite in @seedgo; the template stamped them into
-every newborn, so keeping it would have regrown the twins one citizen at a time. A newborn
-loses no coverage, because that suite discovers subjects by globbing the installed package
-and the newborn ships the exact path it globs. The one gap, stated rather than papered over:
-a citizen minted into ANOTHER project's tree is outside that glob and gets no contract
-coverage from it. `tests/test_template_hygiene.py` pins the file's ABSENCE from the template.
+The template ships no json shim test (`test_json_handler.py`): @seedgo's parametrised
+contract suite covers the shim by globbing the installed package, and the newborn ships the
+exact path it globs, so a per-citizen copy would only duplicate it. The one gap: a citizen
+minted into ANOTHER project's tree is outside that glob and gets no contract coverage from
+it. `tests/test_template_hygiene.py` pins the file's ABSENCE from the template.
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17

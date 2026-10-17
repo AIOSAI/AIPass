@@ -28,22 +28,21 @@ writes nothing and answers with an exit code.
 
 ---
 
-## Registry entry shape — mixed casing is historical, not a rule
+## Registry entry shape — mixed casing is not a rule
 
 `AIPASS_REGISTRY.json` carries entries in two shapes: UPPERCASE names with
 registry-relative paths, and lowercase names with absolute paths.
 
-**The uppercase-plus-relative shape is what `create` writes today.** `core.py` hands
+**The uppercase-plus-relative shape is what `create` writes.** `handlers/mint_ops.py` hands
 `add_to_registry` the uppercased name and a path relativized to the registry's own
-directory, falling back to absolute only when relativization raises. So that shape is
-spawn's own lane; the lowercase absolute entries predate it or were written by another hand.
+directory, falling back to absolute only when relativization raises. The lowercase absolute
+entries are not written by this lane.
 
 Nothing reads the difference: registry lookups lowercase both sides before comparing
 (`is_protected`, `ensure_admin`), and a path is resolved as `registry_dir / entry_path`,
 which pathlib returns unchanged when the entry is already absolute. It is cosmetic — two
-shapes a reader sees and no code does. **Normalising is not done here** and `sync-registry`
-does not currently touch casing; whether it should is the orchestration branch's call to
-make, not a defect to fix silently under a docs pass.
+shapes a reader sees and no code does. **Normalising is not done here**, and
+`sync-registry` does not touch casing.
 
 ---
 
@@ -107,4 +106,4 @@ from a template; only the owner's ceremony grants it.
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17

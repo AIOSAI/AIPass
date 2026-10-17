@@ -22,9 +22,8 @@ when the command called `error()` and **0** when it did not.
 | `2` | The command returned 0 after calling `error()` — the seam caught it |
 
 `migrate-passports` against a root with no discoverable passports is the worked example: it
-prints that nothing was scanned and **exits non-zero**. It exited 0 until the refusal sweep,
-which made "I searched the wrong root" indistinguishable from "your fleet is already
-migrated" to anything reading the exit code.
+prints that nothing was scanned and **exits non-zero**, so "I searched the wrong root" is
+never mistaken for "your fleet is already migrated" by anything reading the exit code.
 
 ---
 
@@ -100,4 +99,4 @@ index copies no cap.
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-10-17
