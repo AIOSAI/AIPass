@@ -3,21 +3,10 @@
 # Description: Tests for the unified monitoring module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
-
-# Covers:
-# - handle_command() dispatching (introspection, help, run, unknown subcommands)
-# - _get_watch_directories() registry-based directory enumeration
-# - PID cache functions (_parse_lock_pid, _refresh_pid_cache, _get_pid_for_branch)
-# - Threading management (_start_threads, _stop_threads, _display_worker)
-# - Event rendering and emission (_render_event, _emit_watcher_event)
-# - Inotify error handling and observer fallback
-# - File/log watcher workers
-# - Interactive loop and command dispatch
-# - _print_status, _run_monitor orchestration
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
@@ -41,13 +30,8 @@ from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
 from aipass.prax.apps.modules import monitor
 
 
-# ---------------------------------------------------------------------------
-# monitor is imported once at the top and never reloaded (prax, leg 11). Each
-# collaborator it binds from the monitoring handlers, the logger and the json
-# service is doubled where monitor binds it, and its run state is reset, which
-# is what the reload under stubbed handler packages used to give each test.
-# The console is the real one, read with capsys.
-# ---------------------------------------------------------------------------
+# Each collaborator is doubled where monitor binds it and its run state reset per test;
+# the console is the real one, read with capsys.
 
 _DOUBLED_COLLABORATORS = (
     "logger",
@@ -118,11 +102,6 @@ def _lazy_from(*pairs):
         yield
 
 
-# ---------------------------------------------------------------------------
-# handle_command tests
-# ---------------------------------------------------------------------------
-
-
 class TestHandleCommand:
     """Test the top-level command router."""
 
@@ -164,11 +143,7 @@ class TestHandleCommand:
             mock_run.assert_called_once_with(["seedgo,cli"])
 
     def test_unknown_subcommand_prints_error_and_help(self):
-        """Unknown subcommand is refused by name — a refusal, not a handled command.
-
-        Returning True is what the router reads as success; `monitor bogus` used
-        to exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
-        """
+        """Unknown subcommand is refused by name: returning True would read as success to the router."""
         mod = _import_monitor()
 
         with pytest.raises(UnknownArgument) as refusal:
@@ -177,10 +152,6 @@ class TestHandleCommand:
         assert refusal.value.verb == "monitor"
         assert refusal.value.token == "bogus"
 
-
-# ---------------------------------------------------------------------------
-# _dispatch_run routing tests (DPLAN-0257 — commons feed vs. branch log tail)
-# ---------------------------------------------------------------------------
 
 _COMMONS_FEED_TARGET = "aipass.prax.apps.handlers.monitoring.commons_feed.run_commons_feed"
 
@@ -250,11 +221,6 @@ class TestDispatchRun:
             mock_feed.assert_called_once_with([], relay_config=None)
 
 
-# ---------------------------------------------------------------------------
-# _get_watch_directories tests
-# ---------------------------------------------------------------------------
-
-
 class TestGetWatchDirectories:
     """Test directory enumeration from registry."""
 
@@ -268,7 +234,6 @@ class TestGetWatchDirectories:
     def test_includes_apps_and_trinity_dirs(self, tmp_path):
         """Registry with a branch that has apps/ and .trinity/ dirs."""
         mod = _import_monitor()
-        # Set up fake branch structure
         branch_dir = tmp_path / "src" / "aipass" / "flow"
         apps_dir = branch_dir / "apps"
         trinity_dir = branch_dir / ".trinity"
@@ -313,7 +278,6 @@ class TestGetWatchDirectories:
         claude_projects = fakehome / ".claude" / "projects"
         claude_projects.mkdir(parents=True)
 
-        # No registry needed for this test
         with patch("pathlib.Path.home", return_value=fakehome):
             result = mod._get_watch_directories(tmp_path)
 
@@ -338,16 +302,9 @@ class TestGetWatchDirectories:
             result = mod._get_watch_directories(tmp_path)
 
         paths = [p for p, _r in result]
-        # No apps/ entry
         assert (branch_dir / "apps") not in paths
-        # But branch root and .trinity are still there
         assert branch_dir in paths
         assert trinity_dir in paths
-
-
-# ---------------------------------------------------------------------------
-# print_introspection tests (lines 130-167)
-# ---------------------------------------------------------------------------
 
 
 class TestPrintIntrospection:
@@ -364,11 +321,6 @@ class TestPrintIntrospection:
         assert len(lines) > 10
 
 
-# ---------------------------------------------------------------------------
-# print_help tests (lines 172-207)
-# ---------------------------------------------------------------------------
-
-
 class TestPrintHelp:
     """Test print_help output."""
 
@@ -379,11 +331,6 @@ class TestPrintHelp:
         lines = capsys.readouterr().out.splitlines()
         assert "PRAX Monitor - Unified Branch Monitoring" in lines
         assert len(lines) > 10
-
-
-# ---------------------------------------------------------------------------
-# _render_event tests (lines 331-342)
-# ---------------------------------------------------------------------------
 
 
 class TestRenderEvent:
@@ -439,11 +386,6 @@ class TestRenderEvent:
         assert call_args[0][3] is None
 
 
-# ---------------------------------------------------------------------------
-# _start_threads / _stop_threads tests (lines 298-326)
-# ---------------------------------------------------------------------------
-
-
 class TestThreadManagement:
     """Test thread start and stop functions."""
 
@@ -483,7 +425,6 @@ class TestThreadManagement:
         monkeypatch.setattr(mod, "_file_watcher_thread", None)
         monkeypatch.setattr(mod, "_log_watcher_thread", None)
 
-        # Should not raise
         mod._stop_threads()
         assert mod._stop_event.is_set()
 
@@ -500,11 +441,6 @@ class TestThreadManagement:
 
         mod._stop_threads()
         mock_thread.join.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# _display_worker tests (lines 349-356)
-# ---------------------------------------------------------------------------
 
 
 class TestDisplayWorker:
@@ -559,11 +495,6 @@ class TestDisplayWorker:
         assert call_count >= 2
 
 
-# ---------------------------------------------------------------------------
-# _emit_watcher_event tests (lines 410-413)
-# ---------------------------------------------------------------------------
-
-
 class TestEmitWatcherEvent:
     """Test watcher event emission."""
 
@@ -586,7 +517,6 @@ class TestEmitWatcherEvent:
 
         mod._emit_watcher_event("error", "bad stuff happened")
         mock_queue.enqueue.assert_called_once()
-        # MonitoringEvent is mocked, so check the kwargs it was constructed with
         me_cls = _doubled("MonitoringEvent")
         me_cls.assert_called_once()
         call_kwargs = me_cls.call_args[1]
@@ -604,11 +534,6 @@ class TestEmitWatcherEvent:
         me_cls.assert_called_once()
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 2
-
-
-# ---------------------------------------------------------------------------
-# _inotify_fix_message tests (lines 428-438)
-# ---------------------------------------------------------------------------
 
 
 class TestInotifyFixMessage:
@@ -640,17 +565,11 @@ class TestInotifyFixMessage:
         assert "inotify error" in result
 
 
-# ---------------------------------------------------------------------------
-# _start_observer_with_fallback tests (lines 446-472)
-# ---------------------------------------------------------------------------
-
-
 class TestStartObserverWithFallback:
     """Test watchdog observer startup with fallback."""
 
     def _import_with_watchdog(self):
-        """The top-bound monitor: it imports watchdog nowhere at module level, so the
-        reload under stubbed watchdog packages gave it nothing (prax, leg 11)."""
+        """The top-bound monitor: it imports watchdog nowhere at module level."""
         return monitor
 
     def test_success_path(self, tmp_path):
@@ -729,11 +648,6 @@ class TestStartObserverWithFallback:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# _file_watcher_worker tests (lines 479-511)
-# ---------------------------------------------------------------------------
-
-
 class TestFileWatcherWorker:
     """Test file watcher worker thread."""
 
@@ -753,8 +667,7 @@ class TestFileWatcherWorker:
         ):
             mod._file_watcher_worker()
         mock_emit.assert_called_once_with("warning", "File watcher: no watch directories found — file events disabled")
-        # The handler is sandboxed to the repo root the worker resolved (prax, leg 12:
-        # the kwarg had no pin, and sandbox_root=None survived its mutant).
+        # The handler is sandboxed to the repo root the worker resolved.
         built = mock_fs_handler.MonitoringFileHandler.call_args.kwargs
         assert built["sandbox_root"] is mock_config._find_repo_root.return_value
         assert built["event_queue"] is mod._event_queue
@@ -822,11 +735,6 @@ class TestFileWatcherWorker:
         # stop() and join() take nothing here: the claim is each ran once, with no timeout handed on.
         mock_observer.stop.assert_called_once_with()
         mock_observer.join.assert_called_once_with()
-
-
-# ---------------------------------------------------------------------------
-# _start_log_watcher_with_fallback tests (lines 519-535)
-# ---------------------------------------------------------------------------
 
 
 class TestStartLogWatcherWithFallback:
@@ -898,11 +806,6 @@ class TestStartLogWatcherWithFallback:
         assert result is False
 
 
-# ---------------------------------------------------------------------------
-# _log_watcher_worker tests (lines 542-555)
-# ---------------------------------------------------------------------------
-
-
 class TestLogWatcherWorker:
     """Test log watcher worker thread."""
 
@@ -961,11 +864,6 @@ class TestLogWatcherWorker:
         mock_lw.stop_log_watcher.assert_called_once_with()
 
 
-# ---------------------------------------------------------------------------
-# _handle_interactive_cmd tests (lines 560-567)
-# ---------------------------------------------------------------------------
-
-
 class TestHandleInteractiveCmd:
     """Test interactive command dispatch."""
 
@@ -990,11 +888,6 @@ class TestHandleInteractiveCmd:
         with patch.object(mod, "error") as recorder:
             mod._handle_interactive_cmd("bogus", MagicMock())
         recorder.assert_called_once_with("Unknown command: bogus")
-
-
-# ---------------------------------------------------------------------------
-# _interactive_loop tests (lines 575-609)
-# ---------------------------------------------------------------------------
 
 
 class TestInteractiveLoop:
@@ -1138,11 +1031,6 @@ class TestInteractiveLoop:
         mock_handler.assert_called_once_with("status", mock_filter.get_help_text)
 
 
-# ---------------------------------------------------------------------------
-# _print_status tests (lines 616-621)
-# ---------------------------------------------------------------------------
-
-
 class TestPrintStatusMonitor:
     """Test status display function."""
 
@@ -1164,11 +1052,6 @@ class TestPrintStatusMonitor:
         lines = capsys.readouterr().out.splitlines()
         assert "Monitoring Status:" in lines
         assert not any(line.startswith("  Queue size:") for line in lines)
-
-
-# ---------------------------------------------------------------------------
-# _run_monitor tests (lines 256-290)
-# ---------------------------------------------------------------------------
 
 
 class TestRunMonitor:
@@ -1219,11 +1102,6 @@ class TestRunMonitor:
             mod._run_monitor([])
 
 
-# ---------------------------------------------------------------------------
-# _get_watch_directories edge cases (lines 389-403)
-# ---------------------------------------------------------------------------
-
-
 class TestGetWatchDirectoriesEdgeCases:
     """Test edge cases in _get_watch_directories."""
 
@@ -1237,8 +1115,6 @@ class TestGetWatchDirectoriesEdgeCases:
             result = mod._get_watch_directories(tmp_path)
 
         assert isinstance(result, list)
-        # No branch dirs from the broken registry, no CLI session dirs under a
-        # home that does not exist — the whole answer is the empty list.
         assert result == []
         _doubled("logger").warning.assert_called_once()
         assert "Could not read the branch registry (JSONDecodeError)" in _doubled("logger").warning.call_args.args[0]
@@ -1255,11 +1131,6 @@ class TestGetWatchDirectoriesEdgeCases:
 
         paths = [p for p, _r in result]
         assert codex_sessions in paths
-
-
-# ---------------------------------------------------------------------------
-# Branch scoping — `monitor run seedgo,cli` (devpulse 5331acc2)
-# ---------------------------------------------------------------------------
 
 
 def _run_scoped(mod, args):

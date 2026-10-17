@@ -3,29 +3,13 @@
 # Description: The display consumer must survive an unrenderable event
 # Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
 
-# Regression cover for the 2026-08-11 Mission Control consumer death.
-#
-# A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
-# interpolated it raw into a Rich markup string. Rich read it as a closing tag,
-# raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
-# the only consumer of the display queue for the life of the process. The queue
-# then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
-# the Telegram relay (fed from the same code path) went silent.
-#
-# Two independent defects, covered separately here:
-#
-# 1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
-#    ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
-# 2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
-#    loop has to survive whatever the next producer sends.
-#
-# Rendering goes through the product's own Rich console, read back with capsys —
-# a recording mock never renders, so it could not fail on either defect.
+# Event text is untrusted Rich markup, and one unrenderable event must not kill the display consumer.
+# Rendered through the product's own console: a recording mock never renders, so it could not fail.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
@@ -49,10 +33,6 @@ from aipass.prax.apps.handlers.monitoring import unified_stream
 from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 from aipass.prax.apps.modules import monitor
 
-# ---------------------------------------------------------------------------
-# Real-console rendering helper
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def render(monkeypatch, capsys):
@@ -68,16 +48,9 @@ def render(monkeypatch, capsys):
     return _render
 
 
-# The exact line that killed the live monitor (service log, 2026-08-11 11:29:04).
 CRASHING_MESSAGE = "PATH resolved to [/usr/bin] for the spawned shell"
 
-# The prax operator warning whose own subsystem tag Rich was eating on screen.
 EATEN_MESSAGE = "[event_queue] The live monitor display queue is full"
-
-
-# ---------------------------------------------------------------------------
-# Defect 1 — event text is untrusted markup
-# ---------------------------------------------------------------------------
 
 
 class TestEventTextIsUntrustedMarkup:
@@ -119,13 +92,7 @@ class TestEventTextIsUntrustedMarkup:
         assert "[/usr/bin]" in output
 
     def test_hook_event_says_which_branch_fired(self):
-        """The branch the hook fired in must reach the screen.
-
-        print_hook_event accepted branch and never printed it (seedgo's
-        accepted_and_never_used_parameter rule, 2026-09-24), so every hook line
-        in Mission Control read the same whether it came from hooks, drone or an
-        external project — the one column that tells them apart was dropped.
-        """
+        """The branch the hook fired in must reach the screen: it tells hook lines apart."""
         output = self._render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
         assert "SEEDGO" in output
         assert "cadence:fired loader=global" in output
@@ -142,9 +109,7 @@ class TestEventTextIsUntrustedMarkup:
         assert "PRAX" in output
 
     def test_canary_unescaped_message_raises(self):
-        """Proof the assertions above can fail: the line print_event draws, interpolated
-        raw into the same markup, explodes (prax, leg 12: the canary now reaches the
-        product it is the canary for)."""
+        """Proof the assertions above can fail: the line interpolated raw into the same markup explodes."""
         output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
         assert "[/usr/bin]" in output
 
@@ -154,15 +119,9 @@ class TestEventTextIsUntrustedMarkup:
             console.print(f"[white]{CRASHING_MESSAGE}[/white]")
 
 
-# ---------------------------------------------------------------------------
-# Defect 2 — one bad event must not kill the consumer
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _monitor_fresh(monkeypatch):
-    """monitor.py, bound at the top and never reloaded, with its run state fresh and
-    its logger and relay doubled for each test (prax, leg 12)."""
+    """monitor.py, bound at the top, with its run state fresh and its logger and relay doubled."""
     monkeypatch.setattr(monitor, "logger", MagicMock())
     monkeypatch.setattr(monitor, "relay_event", MagicMock())
     monkeypatch.setattr(monitor, "_event_queue", None)
@@ -224,13 +183,7 @@ class TestDisplayWorkerSurvivesBadEvent:
         assert render.call_count == 2
 
     def test_worker_returns_normally_when_every_event_fails(self):
-        """A permanently broken renderer must not propagate out of the thread.
-
-        "Returned normally" is only visible in what the worker did on the way
-        out: it attempted ALL THREE events (so the guard caught each one and the
-        loop went round again), recorded each failure, and left through its own
-        stop flag rather than through the exception.
-        """
+        """A permanently broken renderer must not propagate: all three tried, the worker leaves by its stop flag."""
         mod = _import_monitor()
 
         with patch.object(mod, "logger") as log:
@@ -252,12 +205,7 @@ class TestDisplayWorkerSurvivesBadEvent:
         assert "on-disk logs" in text
 
     def test_render_failures_are_rate_limited(self):
-        """A storm of bad events reports once, not once per event.
-
-        The report lands in a log prax itself tails, so per-event logging would
-        turn a broken renderer into a self-feeding firehose (same reasoning as
-        the queue-full warning).
-        """
+        """A storm of bad events reports once: the report lands in a log prax itself tails."""
         mod = _import_monitor()
         with patch.object(mod, "logger") as log:
             self._run_worker(mod, [_event() for _ in range(25)], ValueError("boom"))
@@ -283,13 +231,7 @@ class TestDisplayWorkerSurvivesBadEvent:
 
 
 class TestStandaloneRunArgs:
-    """`python -m ...monitor run` must mean run-all, not 'branch named run'.
-
-    The systemd unit that carries the owner's Telegram feed launches exactly that
-    way. Before launch-time scoping the stray 'run' was parsed and discarded;
-    once the scope became real it selected a branch nobody has, so a restart
-    would have brought the service up watching — and relaying — nothing.
-    """
+    """`python -m ...monitor run` must mean run-all, not 'branch named run': the Telegram systemd unit launches so."""
 
     def test_bare_run_is_unscoped(self):
         mod = _import_monitor()

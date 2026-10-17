@@ -3,27 +3,10 @@
 # Description: Load Module Registry Handler
 # Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Load Module Registry Handler
-
-Loads the Prax system-wide module discovery registry (prax_registry.json).
-Returns empty dict if file doesn't exist or on error.
-
-Features:
-- Loads prax_registry.json from prax_json directory
-- Extracts modules dict from registry structure
-- Graceful error handling with logger
-- Returns empty dict as fallback
-
-Usage:
-    from aipass.prax.apps.handlers.registry.load import load_module_registry
-
-    modules = load_module_registry()
-    print(f"Loaded {len(modules)} modules")
-"""
+"""Load Module Registry Handler"""
 
 import json
 import logging
@@ -34,47 +17,15 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "load"
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
-
-# =============================================
-# HANDLER FUNCTION
-# =============================================
 
 
 def load_module_registry() -> Optional[Dict[str, Dict[str, Any]]]:
     """Load module registry from prax_registry.json (system registry)
 
-    Returns:
-        Dict mapping module names to module info dicts. An empty dict when the
-        registry file does not exist yet (never scanned). None when the file
-        exists but cannot be read: a writer that took {} there saved one module
-        over the whole registry (prax, leg 15).
-
-    The registry structure is:
-    {
-        "registry_version": "1.0.0",
-        "timestamp": "2025-11-07T...",
-        "modules": {
-            "module_name": {
-                "relative_path": "...",
-                "size": 1234,
-                "modified_time": "..."
-            }
-        },
-        "statistics": {...}
-    }
-
-    Example:
-        >>> modules = load_module_registry()
-        >>> if modules:
-        >>>     print(f"Found {len(modules)} modules")
-    """
+    {} when never written; None when unreadable, so no writer saves one module over the registry."""
     if not REGISTRY_FILE.exists():
         return {}
 
@@ -92,15 +43,7 @@ def load_module_registry() -> Optional[Dict[str, Dict[str, Any]]]:
 def load_last_scan() -> Optional[Dict[str, Any]]:
     """What the last full scan reported, {} when no scan is on record, None when unreadable.
 
-    Written by ``run_scan`` through ``save_module_registry(scan_stats=...)``.
-    Empty is a real answer and means exactly what it says: this registry has
-    never been scanned, only added to (DPLAN-0339 step 4).
-
-    None means the registry exists and could not be read. It used to answer {}
-    there too, and status then printed "never" over a registry that had been
-    scanned (prax, leg 7). The one reader is get_system_status, which hands it
-    to status's Last Scan line.
-    """
+    None, not {}, so status's Last Scan line does not print "never" over a scanned registry."""
     if not REGISTRY_FILE.exists():
         return {}
 

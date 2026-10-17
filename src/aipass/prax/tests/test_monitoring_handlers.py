@@ -3,18 +3,10 @@
 # Description: Unit tests for monitoring handler modules
 # Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
-
-# Covers:
-# - branch_detector: get_detector, reload_registry, detect_from_path,
-#   detect_from_log, detect_from_module, get_stats
-# - BranchDetector: _exact_case_registries, _find_repo_root, _register_branch,
-#   _load_registry, _load_fallback_branches
-# Split 2026-10-08: the file watcher, the command and display, and the external
-# project detection each have their own test_monitoring_handlers_<topic>.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — _detect_from_claude_project, in the external_project sibling
@@ -40,11 +32,6 @@ pytestmark = pytest.mark.usefixtures("_branch_detector_fresh")
 
 # Alias mock_open to avoid false-positive pattern match on "open(" without encoding
 _mopen = _mock_file_open
-
-
-# =============================================
-# BRANCH DETECTOR TESTS
-# =============================================
 
 
 def _detector_log() -> MagicMock:
@@ -98,7 +85,6 @@ class TestReloadRegistry:
         """reload_registry() should clear all caches and reload from registry."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        # Populate caches
         detector.log_map["some_log"] = "PRAX"
         detector.module_map["some.module"] = "FLOW"
 
@@ -136,8 +122,7 @@ class TestDetectFromPath:
         """Should return branch for exact path match."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        # Path.resolve() returns the real path; we need the branch_map key
-        # to match. Mock Path to control resolution.
+        # Path is mocked so resolve() yields the branch_map key exactly.
         resolved = str(_ECO / "prax")
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -148,7 +133,6 @@ class TestDetectFromPath:
             mock_path.name = "branch_detector.py"
             mock_path_cls.return_value = mock_path
             mock_path_cls.home.return_value = Path(str(_HOME))
-            # _find_repo_root
             detector._repo_root = MagicMock(spec=Path)
             detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
@@ -294,9 +278,7 @@ class TestDetectFromLog:
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        # Use a POSIX-style path so the "/" in log_file check in detect_from_log
-        # triggers the delegation. On Windows, tmp_path uses backslashes which
-        # would not match the "/" check in the production code.
+        # A POSIX-style path: detect_from_log delegates on "/", which Windows' tmp_path lacks.
         fake_log_path = str(_HOME / "branch_output" / "something.log")
         with patch.object(detector, "detect_from_path", return_value="CLI") as mock_dfp:
             result = detector.detect_from_log(fake_log_path)
@@ -312,7 +294,6 @@ class TestDetectFromModule:
         """Should detect branch from first dotted segment."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        # Add AIPASS to known branches since modules start with "aipass"
         detector.known_branches.add("AIPASS")
         result = detector.detect_from_module("aipass.prax.apps")
         assert result == "AIPASS"
@@ -350,7 +331,6 @@ class TestDetectFromModule:
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        # Force an exception by corrupting the input type
         result = detector.detect_from_module(None)  # type: ignore[arg-type]
         assert result == "UNKNOWN"
 
@@ -393,25 +373,10 @@ class TestGetStats:
         assert stats["known_branches"] == 0
 
 
-# =============================================
-# BRANCH DETECTOR — REGISTRY TESTS
-# =============================================
-
-
 class TestExactCaseRegistries:
     """Path.glob is case-INSENSITIVE on Windows, and the registry is a trust anchor.
 
-    @memory found both of their registry walks exposed to this on 2026-08-31 and
-    closed it with an exact-case post-filter; @devpulse asked whether any prax
-    walk globbed a cased pattern. One did: the projects/ sweep in branch_detector.
-
-    Pinned by driving the FILTER with a stand-in glob, so the assertion runs on
-    Linux — where the real glob is case-sensitive and could never produce the
-    input that breaks it. A live-directory test here would be green on the only
-    platform I can run and silent on the one that has the defect.
-
-    The positive control that ran the stand-in glob alone is retired (prax, leg 4):
-    the mutant that drops the filter reddens the first pin at its assert.
+    A stand-in glob drives the filter, since Linux's case-sensitive glob never yields the bad input.
     """
 
     def test_a_lowercase_registry_is_rejected_even_when_the_glob_returns_it(self, tmp_path, monkeypatch):
@@ -449,14 +414,7 @@ class TestFindRepoRoot:
         assert result is sentinel
 
     def test_walks_parents_to_find_registry(self, tmp_path, monkeypatch):
-        """Should find AIPASS_REGISTRY.json above the module file.
-
-        Rewritten 2026-08-31. The previous version mocked the Path class inside
-        branch_detector to fake a walk that no longer lives there — it asserted
-        the shape of an implementation, so it went red the moment the walk moved
-        into handlers/repo_root.py while the ANSWER stayed identical. This drives
-        the real resolver over a real directory instead.
-        """
+        """Should find AIPASS_REGISTRY.json above the module file, via the real resolver."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
@@ -470,15 +428,7 @@ class TestFindRepoRoot:
         assert detector._find_repo_root() == root
 
     def test_a_registry_less_tree_never_falls_back_to_the_cwd(self, tmp_path, monkeypatch):
-        """REPLACES test_fallback_to_cwd_when_registry_missing.
-
-        That test asserted the defect: @memory reported on 2026-08-31 that the
-        Path.cwd() fallback crashes any import in a process whose working
-        directory was deleted, and silently resolves against the caller's shell
-        on every registry-less checkout — which is every clean CI clone, since
-        the marker is gitignored. The old pin is not weakened here, it is
-        INVERTED: the cwd answer is now the wrong one, so the assertion says so.
-        """
+        """A registry-less checkout (every clean CI clone) never resolves against the cwd."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
@@ -563,9 +513,7 @@ class TestRegisterBranch:
 class TestLoadRegistry:
     """Tests for BranchDetector._load_registry()."""
 
-    # Each test points the detector at a repo root under tmp_path and writes the
-    # registry there for real (prax, leg 12): a mocked open stood in for the very
-    # read under test.
+    # The registry is written for real under tmp_path: a mocked open would fake the read under test.
 
     def _detector_at(self, mod, root: Path):
         detector = _make_detector_with_branches(mod, branches={})
@@ -618,12 +566,7 @@ class TestLoadRegistry:
         assert "is not valid JSON (line 1)" in _detector_log().error.call_args.args[0]
 
     def test_loads_fallback_on_generic_exception(self, tmp_path):
-        """Should load fallback when the registry cannot be read at all.
-
-        The registry name is a directory: it exists, and opening it fails with
-        whatever error this platform raises for that. The assert names no error
-        type, only that the catch-all clause, not the JSON one, answered.
-        """
+        """Should load fallback when the registry cannot be read at all (it is a directory)."""
         mod = _import_branch_detector()
         detector = self._detector_at(mod, tmp_path)
         (tmp_path / "AIPASS_REGISTRY.json").mkdir()

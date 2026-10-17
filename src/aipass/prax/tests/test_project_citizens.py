@@ -3,32 +3,13 @@
 # Description: projects/* citizens resolve by registry and passport, not path shape
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
 
-# Regression cover for Mission Control's third path shape (DPLAN night item 9).
-#
-# prax learned two shapes: ``src/aipass/*`` branches from AIPASS_REGISTRY.json,
-# and external Vera-class projects under ``~/Projects/``. In-repo citizens at
-# ``projects/<proj>/src/<mod>/<name>`` were never learned, so the owner's live
-# ``monitor run baud`` answered "BAUD is not a known branch — nothing will be
-# shown."
-#
-# Two defects, one cause. Scoping could not resolve the name, and path detection
-# fell through to Strategy 6, which splits a path into segments and matches each
-# against known branch names — the segment ``AIPass`` matches the ``aipass``
-# branch, so every BAUD file was labelled **AIPASS**. Misattribution is worse than
-# UNKNOWN: the events show up on the wrong screen and are filtered off the right
-# one.
-#
-# Same family as the watchdog fix (c247fce8, sweep ``projects/*/*_REGISTRY.json``
-# after the main registry) and the statusline fix (walk up to the nearest
-# ``.trinity/passport.json`` instead of matching path patterns).
-#
-# Each test builds a real temporary repo, so nothing here depends on the live
-# tree's current citizen list.
+# Pins in-repo citizens at projects/<proj>/src/<mod>/<name>: known by name, never labelled AIPASS
+# by the path-segment fallback. Each test builds its own temp repo, never the live tree.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
@@ -55,17 +36,7 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _build_repo(tmp_path: Path, main_branches=None, projects=None, passports=()) -> Path:
-    """Build a repo root with a main registry, project registries and passports.
-
-    Args:
-        tmp_path: pytest temp dir
-        main_branches: entries for AIPASS_REGISTRY.json
-        projects: {project_dir_name: [branch entries]} -> projects/<dir>/<NAME>_REGISTRY.json
-        passports: paths (relative to repo root) that get a .trinity/passport.json
-
-    Returns:
-        The repo root path.
-    """
+    """Build a repo root with a main registry, project registries and passports."""
     repo = tmp_path / "AIPass"
     if main_branches is None:
         main_branches = [{"name": "PRAX", "path": "src/aipass/prax", "status": "active"}]
@@ -91,11 +62,6 @@ def _detector_for(repo: Path, monkeypatch, cwd: Path | None = None):
 
 
 BAUD_ENTRY = {"name": "BAUD", "path": "src/baud/baud", "status": "active"}
-
-
-# ---------------------------------------------------------------------------
-# The reported bug — scoping cannot resolve a projects/* citizen
-# ---------------------------------------------------------------------------
 
 
 class TestProjectCitizensAreKnown:
@@ -136,11 +102,6 @@ class TestProjectCitizensAreKnown:
         assert BranchScope(["BAUUD"]).unknown_names(set(detector.known_branches)) == ["BAUUD"]
 
 
-# ---------------------------------------------------------------------------
-# The worse half — misattribution to AIPASS
-# ---------------------------------------------------------------------------
-
-
 class TestProjectCitizenFilesAreNotMisattributed:
     """A BAUD file is BAUD, not the repo directory's name."""
 
@@ -158,11 +119,6 @@ class TestProjectCitizenFilesAreNotMisattributed:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
         assert detector.detect_from_path(str(target)) == "BAUD"
-
-
-# ---------------------------------------------------------------------------
-# Resolution comes from declarations, not from where the process happens to be
-# ---------------------------------------------------------------------------
 
 
 class TestPathsResolveAgainstTheirRegistry:
@@ -200,11 +156,6 @@ class TestMainRegistryWinsCollisions:
         assert str(repo / "projects" / "rogue" / "src" / "fake" / "prax") not in detector.branch_map
 
 
-# ---------------------------------------------------------------------------
-# Passports — the fallback that needs no registry at all
-# ---------------------------------------------------------------------------
-
-
 class TestPassportResolution:
     """A citizen with a passport resolves even when no registry lists it."""
 
@@ -228,11 +179,6 @@ class TestPassportResolution:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
         assert detector.detect_from_path(str(target)) == "BAUD"
-
-
-# ---------------------------------------------------------------------------
-# A broken neighbour must not take the sweep down
-# ---------------------------------------------------------------------------
 
 
 class TestSweepIsFaultTolerant:

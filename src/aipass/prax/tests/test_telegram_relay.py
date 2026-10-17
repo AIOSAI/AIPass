@@ -3,23 +3,10 @@
 # Description: Tests for the Telegram relay handler
 # Version: 1.3.0
 # Created: 2026-06-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/telegram_relay.py."""
-
-# Covers:
-# - Event formatting (log, command, hook types, PID labels)
-# - init_relay: disabled path, missing config, incomplete config, successful start
-# - Fail-silent-once: exactly one log line when config absent, zero sends
-# - stop_relay: final flush and thread join, no-op when inactive
-# - relay_event: buffering when active, no-op when inactive
-# - Batching: 4000-char split across messages
-# - Flood cap: truncation at 150 lines with suppression notice
-# - _render_event calls relay_event in monitor.py
-# - is_relay_enabled_by_env for env var detection
-# - Offline backoff: doubles+caps, resets on success, log-once, never blocks
-# - Control-file isolation: no test ever reads the operator's live pause state
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — _flush_loop, a threading.Event.wait timer around the tested _flush_buffer
@@ -43,10 +30,7 @@ from aipass.prax.apps.modules import monitor
 def _operator_control_file() -> Path:
     """The real operator's control file on this machine, the one no test may ever touch.
 
-    Resolved when a test asks, never at import (prax, leg 8): a home that cannot be
-    resolved then fails the tests that need it, not every test in the file. No
-    fixture here moves HOME, so the answer is the operator's own.
-    """
+    Resolved when a test asks, never at import, so an unresolvable home fails only those tests."""
     return Path.home() / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
 
 
@@ -65,23 +49,8 @@ class FakeEvent:
     pid: Optional[int] = None
 
 
-# ---------------------------------------------------------------------------
-# Control-file isolation
-# ---------------------------------------------------------------------------
-#
-# The module default CONTROL_FILE is ~/.aipass/telegram_bots/prax_monitor_control.json
-# — LIVE operator state, written by the Telegram bot when the operator pauses or
-# filters the feed. _flush_buffer discards the whole buffer when paused=true, so a
-# test that flushes without re-pointing CONTROL_FILE inherits the operator's pause:
-# red on a machine where the bot is paused, green on CI where no control file exists.
-# Tests assert on relay behavior, never on operator state, so the autouse fixture
-# aims CONTROL_FILE at a per-test tmp path through monkeypatch, and _import_relay
-# refuses to hand back a module still aimed at the operator's home.
-#
-# The relay is imported once, at the top, and never reloaded (prax, leg 9). The
-# reload is what used to recompute the default from HOME on every call, which is
-# why the old helper also moved HOME while it ran; with no reload the default is
-# computed once, never read by a test, and re-pointed before each one.
+# CONTROL_FILE defaults to the operator's LIVE pause state, and a paused flush discards
+# the buffer, so every test re-points it; _import_relay refuses one aimed at home.
 
 
 @pytest.fixture(autouse=True)
@@ -134,11 +103,6 @@ def _formatted(relay, event) -> str:
     line = relay._format_event(event)
     assert line is not None, f"_format_event dropped {event!r}"
     return line
-
-
-# ---------------------------------------------------------------------------
-# Event formatting
-# ---------------------------------------------------------------------------
 
 
 class TestFormatEvent:
@@ -222,11 +186,6 @@ class TestFormatEvent:
         assert "monitor.py modified" in result
 
 
-# ---------------------------------------------------------------------------
-# init_relay
-# ---------------------------------------------------------------------------
-
-
 class TestInitRelay:
     """Test init_relay activation and fail-silent behavior."""
 
@@ -283,11 +242,6 @@ class TestInitRelay:
         relay.stop_relay()
 
 
-# ---------------------------------------------------------------------------
-# relay_event
-# ---------------------------------------------------------------------------
-
-
 class TestRelayEvent:
     """Test relay_event buffering."""
 
@@ -308,11 +262,6 @@ class TestRelayEvent:
         assert "hello" in relay._buffer[0]
 
 
-# ---------------------------------------------------------------------------
-# stop_relay
-# ---------------------------------------------------------------------------
-
-
 class TestStopRelay:
     """Test stop_relay cleanup."""
 
@@ -330,11 +279,6 @@ class TestStopRelay:
         relay.stop_relay()
         assert relay._RELAY_ACTIVE is False
         assert relay._thread is None
-
-
-# ---------------------------------------------------------------------------
-# Batching
-# ---------------------------------------------------------------------------
 
 
 class TestBatching:
@@ -369,11 +313,6 @@ class TestBatching:
         assert len(sent) == 0
 
 
-# ---------------------------------------------------------------------------
-# Flood cap
-# ---------------------------------------------------------------------------
-
-
 class TestFloodCap:
     """Test flood cap truncation."""
 
@@ -403,11 +342,6 @@ class TestFloodCap:
         assert "50 more suppressed" in sent_lines[-1]
 
 
-# ---------------------------------------------------------------------------
-# _render_event calls relay_event
-# ---------------------------------------------------------------------------
-
-
 class TestRenderEventCallsRelay:
     """Test that monitor._render_event calls relay_event."""
 
@@ -425,11 +359,6 @@ class TestRenderEventCallsRelay:
         monitor._render_event(event)
 
         assert sinks == [("relay", event), ("console", event)]
-
-
-# ---------------------------------------------------------------------------
-# is_relay_enabled_by_env
-# ---------------------------------------------------------------------------
 
 
 class TestRelayEnabledByEnv:
@@ -464,11 +393,6 @@ class TestRelayEnabledByEnv:
         relay = _import_relay()
         with patch.dict("os.environ", {"AIPASS_PRAX_MONITOR_RELAY": "0"}):
             assert relay.is_relay_enabled_by_env() is False
-
-
-# ---------------------------------------------------------------------------
-# Control file: _read_control
-# ---------------------------------------------------------------------------
 
 
 class TestReadControl:
@@ -545,11 +469,6 @@ class TestReadControl:
             .warning.call_args.args[0]
             .startswith("[telegram_relay] The Telegram relay could not read its control file (%s)")
         )
-
-
-# ---------------------------------------------------------------------------
-# Control file: flush behavior with pause / level filter
-# ---------------------------------------------------------------------------
 
 
 class TestFlushControl:
@@ -640,11 +559,6 @@ class TestFlushControl:
         relay._flush_buffer()
         assert len(sent) == relay.FLOOD_CAP + 1
         assert "suppressed" in sent[-1]
-
-
-# ---------------------------------------------------------------------------
-# Offline backoff
-# ---------------------------------------------------------------------------
 
 
 class TestOfflineBackoff:
@@ -785,11 +699,6 @@ class TestOfflineBackoff:
         recovery_calls = [c for c in info_calls if "recovered" in str(c).lower()]
         assert len(recovery_calls) == 1
         assert "42" in str(recovery_calls[0])
-
-
-# ---------------------------------------------------------------------------
-# Control-file isolation
-# ---------------------------------------------------------------------------
 
 
 class TestControlFileIsolation:

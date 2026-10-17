@@ -3,23 +3,10 @@
 # Description: Log File Monitor
 # Version: 1.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Log Watcher - Event Queue Integration
-
-Monitors log files in real-time and pushes events to the monitoring queue.
-
-Features:
-- Real-time log tailing with position tracking
-- Color coding detection by log level
-- Command detection and formatting
-- Branch detection from log file path
-- Thread-safe event queue integration
-
-Based on: apps/handlers/discovery/watcher.py (production-ready log tailing)
-"""
+"""PRAX Log Watcher - Event Queue Integration"""
 
 import ast
 import os
@@ -41,10 +28,8 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 from watchdog.observers import Observer as WatchdogObserver  # type: ignore
 from watchdog.events import FileSystemEventHandler  # type: ignore
 
-# Import from prax config
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 
-# Import monitoring infrastructure
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_log
 
@@ -52,39 +37,21 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
-# No trigger fire here. Until 2026-09-27 every ERROR line this watcher saw fired
-# error_detected with keys trigger's handler does not read (log_file, module_name,
-# no count or fingerprint), so it never dispatched and only muddied trigger's
-# escalation counts. @trigger's own log watcher reads the same logs and fires the
-# full payload; this one feeds Mission Control and nothing else.
+# No trigger fire here: @trigger's own log watcher fires the full payload; this one feeds Mission Control only.
 
 
-# Global observer instance
 _log_observer: Any = None
 
 
 class LogFileWatcher(FileSystemEventHandler):
-    """
-    Watch log files and push events to monitoring queue.
-
-    Adapted from discovery/watcher.py PythonFileWatcher.on_modified()
-    with event queue integration instead of console output.
-    """
+    """Watch log files and push events to monitoring queue."""
 
     def __init__(self, event_queue: MonitoringQueue):
-        """
-        Initialize log watcher.
-
-        Args:
-            event_queue: MonitoringQueue instance for event delivery
-        """
+        """Initialize log watcher."""
         super().__init__()
         self.event_queue = event_queue
-        # Track file positions for log tailing
         self.log_positions: Dict[str, int] = {}
-        # Track last command execution for command detection
         self.last_command: Optional[str] = None
-        # Track command per branch to avoid duplicate command separators
         self.last_command_per_branch: Dict[str, str] = {}
 
     def _process_log_line(self, branch: str, line: str) -> None:
@@ -104,10 +71,7 @@ class LogFileWatcher(FileSystemEventHandler):
             self._emit_log_event(branch, line, level)
 
     def _read_new_content(self, file_path: str) -> Optional[str]:
-        """Read new content from a log file since last position.
-
-        Returns the new content string, or None if nothing new.
-        """
+        """Read new content from a log file since last position, or None if nothing new."""
         current_size = Path(file_path).stat().st_size
         last_pos = self.log_positions.get(file_path, 0)
 
@@ -154,12 +118,7 @@ class LogFileWatcher(FileSystemEventHandler):
     def _extract_hook_info(self, log_line: str) -> Optional[Dict[str, str]]:
         """Extract hook event info from structured [HOOKS] log lines.
 
-        The action is the bare second word (matches what hooks emits), e.g.:
-            [HOOKS] cadence fired loader=global turn=35 period=5 offset=0 session=...
-            [HOOKS] cadence skipped loader=branch turn=37 period=5 offset=0 session=...
-        group(1)=name (cadence), group(2)=action (fired/skipped). Remaining
-        key=value fields are parsed by the finditer loop below.
-        """
+        Contract with hooks: [HOOKS] cadence fired loader=global turn=35 period=5 offset=0 session=..."""
         match = self._HOOK_PATTERN.search(log_line)
         if not match:
             return None
@@ -239,18 +198,12 @@ class LogFileWatcher(FileSystemEventHandler):
         return None
 
     def _extract_command_info(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
-        """
-        Extract command information from log line if it's a new command execution.
-
-        Returns dict with keys: command, caller (optional), target (optional)
-        or None if not a command line.
-        """
-        # Pattern 1: Drone commands - "Drone started with args: ['close', 'plan', '0098']"
+        """Extract command info (command, caller, target) from a log line, or None."""
+        # Format: "Drone started with args: ['close', 'plan', '0098']"
         if "Drone started with args:" in log_line or "[drone] Drone started with args:" in log_line:
             match = re.search(r"args:\s*\[([^\]]+)\]", log_line)
             if match:
-                # The command as typed, its @branch read as the target - the form
-                # _match_executing_command already shows (prax, leg 4).
+                # The command as typed, its @branch read as the target, as _match_executing_command shows.
                 try:
                     args = [str(arg) for arg in ast.literal_eval(f"[{match.group(1)}]")]
                 except (ValueError, SyntaxError) as exc:
@@ -260,43 +213,36 @@ class LogFileWatcher(FileSystemEventHandler):
                 command = " ".join(args)
                 return {"command": f"drone {command}", "caller": None, "target": self._extract_target_from_cmd(command)}
 
-        # Pattern 2: Flow plan commands
         if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:
             result = self._match_flow_command(log_line)
             if result:
                 return result
 
-        # Pattern 3: Seedgo audit commands - extract target branch
         if "[seedgo]" in log_line.lower() and "audit" in log_line.lower():
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
                 target = match.group(1).upper()
                 return {"command": f"seedgo audit @{target.lower()}", "caller": None, "target": target}
 
-        # Pattern 4: Seedgo checklist commands
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
             if match:
                 return {"command": f"seedgo checklist {match.group(2)}", "caller": None, "target": None}
 
-        # Pattern 5: AI Mail commands - extract target
         if "[ai_mail]" in log_line.lower():
             if "Sending" in log_line:
-                # Try to extract recipient
                 target_match = re.search(r"to\s+@?(\w+)", log_line, re.IGNORECASE)
                 target = target_match.group(1).upper() if target_match else None
                 return {"command": "ai_mail send", "caller": None, "target": target}
             elif "inbox" in log_line.lower():
                 return {"command": "ai_mail inbox", "caller": None, "target": None}
 
-        # Pattern 6: Prax commands
         if "[prax]" in log_line.lower():
             if "monitor" in log_line.lower():
                 return {"command": "prax monitor", "caller": None, "target": None}
             elif "status" in log_line.lower():
                 return {"command": "prax status", "caller": None, "target": None}
 
-        # Pattern 8: Backup operations (direct python3 calls)
         if "[backup" in log_line.lower():
             if "snapshot" in log_line.lower() and (
                 "Starting" in log_line or "Running" in log_line or "Complete" in log_line
@@ -307,32 +253,28 @@ class LogFileWatcher(FileSystemEventHandler):
             elif "sync" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
                 return {"command": "backup sync", "caller": None, "target": None}
 
-        # Pattern 9: Memory operations (direct python3 calls)
         if "[memory]" in log_line.lower() or "memory" in log_line.lower():
             if "rollover" in log_line.lower() and ("Starting" in log_line or "Processing" in log_line):
                 return {"command": "memory rollover", "caller": None, "target": None}
             elif "search" in log_line.lower() and "query" in log_line.lower():
                 return {"command": "memory search", "caller": None, "target": None}
 
-        # Pattern 10: Spawn operations (direct python3 calls)
         if "[spawn]" in log_line.lower():
             if "Creating" in log_line and "branch" in log_line.lower():
                 match = re.search(r"Creating\s+(?:branch\s+)?(\w+)", log_line)
                 target = match.group(1).upper() if match else None
                 return {"command": "spawn create branch", "caller": None, "target": target}
 
-        # Pattern 11: Trigger operations (direct python3 calls)
         if "[trigger]" in log_line.lower():
             if "fired" in log_line.lower() or "triggered" in log_line.lower():
                 return {"command": "trigger fire", "caller": None, "target": None}
 
-        # Pattern 12: Drone routing with caller attribution - HIGHEST PRIORITY
+        # Routing carries the caller; it must match before the generic Executing match below.
         # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
         if "Routing @" in log_line and "[CALLER:" in log_line:
             caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
             caller = caller_match.group(1) if caller_match else None
 
-            # Extract target branch and command from "Routing @target ... → command [args]"
             route_match = re.search(r"Routing\s+@(\w+).*?→\s*(\S+)\s*(.*)", log_line)
             if route_match:
                 target = route_match.group(1).upper()
@@ -341,7 +283,6 @@ class LogFileWatcher(FileSystemEventHandler):
                 display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
                 return {"command": display_cmd, "caller": caller, "target": target}
 
-        # Pattern 7: ALL drone command executions - HIGH PRIORITY
         # Format: "Executing command [CALLER:PRAX]: seedgo.py audit @prax"
         if "Executing" in log_line and "command" in log_line:
             return self._match_executing_command(log_line)
@@ -360,7 +301,6 @@ class LogFileWatcher(FileSystemEventHandler):
         cmd = cmd_match.group(1).strip()
         target = self._extract_target_from_cmd(cmd)
 
-        # Clean up command display - simplify paths
         display_cmd = re.sub(r"[^\s]*/aipass/(\w+)/apps/\w+\.py", lambda m: f"@{m.group(1)}", cmd)
         display_cmd = re.sub(r"[^\s]*/aipass/(\w+)", lambda m: f"@{m.group(1)}", display_cmd)
 
@@ -379,11 +319,7 @@ class LogFileWatcher(FileSystemEventHandler):
         return None
 
     def _emit_command_separator(self, branch: str, command_info) -> None:
-        """
-        Emit command separator event to queue with caller and target attribution.
-        Deduplicates consecutive identical commands per branch.
-        """
-        # Handle dict format (new) and legacy string/tuple formats
+        """Emit a command separator event, skipping a repeat of the branch's last command."""
         if isinstance(command_info, dict):
             command = command_info.get("command", "")
             caller = command_info.get("caller")
@@ -396,7 +332,6 @@ class LogFileWatcher(FileSystemEventHandler):
             caller = None
             target = None
 
-        # Deduplicate: skip if same command just emitted for this branch
         dedup_key = f"{branch}:{command}"
         if self.last_command_per_branch.get(branch) == dedup_key:
             return
@@ -420,46 +355,23 @@ class LogFileWatcher(FileSystemEventHandler):
         self.event_queue.enqueue(separator_event)
 
     def _parse_log_message(self, log_line: str) -> str:
-        """
-        Parse raw log line to extract just the message content.
+        """Parse raw log line to extract just the message content.
 
-        Raw format: [BRANCH_NAME] TIMESTAMP | SOURCE | LEVEL | MESSAGE
-        Returns just the MESSAGE part to avoid duplicate prefixes.
-
-        Args:
-            log_line: Raw log line from log file
-
-        Returns:
-            Cleaned message content
-        """
-        # Try to extract message after last pipe separator
+        Raw format: [BRANCH_NAME] TIMESTAMP | SOURCE | LEVEL | MESSAGE"""
         if " | " in log_line:
             parts = log_line.split(" | ")
             if len(parts) >= 4:
-                # Format: [BRANCH] TIMESTAMP | SOURCE | LEVEL | MESSAGE
-                # Return everything after the LEVEL part
                 return " | ".join(parts[3:]).strip()
             elif len(parts) >= 2:
-                # Simpler format, return last part
                 return parts[-1].strip()
 
-        # Fallback: return as-is if can't parse
         return log_line.strip()
 
     def _emit_log_event(self, branch: str, log_line: str, level: str) -> None:
-        """
-        Create and emit log event to monitoring queue.
-
-        Args:
-            branch: Branch name detected from log file
-            log_line: Raw log line content
-            level: Log level (error, warning, info, debug)
-        """
-        # Parse to extract clean message (remove embedded prefix)
+        """Create and emit log event to monitoring queue."""
         clean_message = self._parse_log_message(log_line)
         current_time = datetime.now()
 
-        # Create monitoring event
         log_event = MonitoringEvent(
             priority=0,  # Auto-calculated from level
             event_type="log",
@@ -470,15 +382,10 @@ class LogFileWatcher(FileSystemEventHandler):
             timestamp=current_time,
         )
 
-        # Push to queue
         self.event_queue.enqueue(log_event)
 
     def initialize_positions(self):
-        """
-        Initialize log positions to END of existing files.
-
-        Only show NEW entries after watcher starts.
-        """
+        """Initialize log positions to END of existing files, so only new entries show."""
         if not get_system_logs_dir().exists():
             logger.warning(
                 f"[log_watcher] The live monitor's log watcher found no system logs folder, so no "
@@ -495,19 +402,9 @@ class LogFileWatcher(FileSystemEventHandler):
 
 
 def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -> Any:
-    """
-    Start watching log files and pushing events to queue.
-
-    Args:
-        event_queue: MonitoringQueue instance for event delivery
-        use_polling: If True, use PollingObserver instead of native inotify
-
-    Returns:
-        Observer instance
-    """
+    """Start watching log files and pushing events to queue."""
     global _log_observer
 
-    # Stop existing observer if running
     if _log_observer and _log_observer.is_alive():
         logger.warning(
             "[log_watcher] The live monitor's log watcher was already running — stopping the old "
@@ -515,13 +412,11 @@ def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -
         )
         stop_log_watcher()
 
-    # Create watcher instance
     watcher = LogFileWatcher(event_queue)
 
     # Soft start: seek to end of all logs, only show NEW activity after this
     watcher.initialize_positions()
 
-    # Create observer — polling fallback when inotify unavailable
     if use_polling:
         from watchdog.observers.polling import PollingObserver  # type: ignore
 
@@ -554,18 +449,9 @@ def stop_log_watcher():
 
 
 def is_log_watcher_active() -> bool:
-    """
-    Check if log watcher is currently active.
-
-    Returns:
-        True if watcher is running, False otherwise
-    """
+    """Check if log watcher is currently active."""
     return _log_observer is not None and _log_observer.is_alive()
 
-
-# =============================================================================
-# STANDALONE TEST
-# =============================================================================
 
 if __name__ == "__main__":
     """
@@ -588,23 +474,17 @@ if __name__ == "__main__":
     console.print("Press Ctrl+C to stop")
     console.print()
 
-    # Create event queue
     queue = MonitoringQueue()
 
-    # Start watcher
     observer = start_log_watcher(queue)
 
     try:
-        # Event processing loop
         while True:
-            # Check for events
             event = queue.dequeue(timeout=0.5)
 
             if event:
-                # Format and display event
                 timestamp = event.timestamp.strftime("%H:%M:%S")
 
-                # Color by level
                 level_colors = {
                     "error": "red",
                     "warning": "yellow",
@@ -613,7 +493,6 @@ if __name__ == "__main__":
                 }
                 color = level_colors.get(event.level, "white")
 
-                # Print event
                 if event.event_type == "command":
                     console.print(f"\n[bold green]{event.message}[/bold green]\n")
                 else:
@@ -621,7 +500,6 @@ if __name__ == "__main__":
                         f"[dim]{timestamp}[/dim] [cyan][{event.branch:>8}][/cyan] [{color}]{event.message}[/{color}]"
                     )
 
-            # Small delay to prevent CPU spinning
             time.sleep(0.1)
 
     except KeyboardInterrupt:

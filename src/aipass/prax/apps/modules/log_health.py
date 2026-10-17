@@ -3,14 +3,11 @@
 # Description: PRAX Log Health Command — rate overview
 # Version: 1.0.0
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 PRAX Log Health Module
-
-Implements the 'log-health' command showing current log file growth rates
-across system_logs/. Powered by the rate_tracker handler.
 """
 
 import os
@@ -91,10 +88,8 @@ def _display_rates(results: list, is_scan: bool) -> None:
     if flagged:
         console.print(f"  [yellow]Flagged: {len(flagged)}[/yellow]")
 
-    # A snapshot reports what an earlier scan measured. With no current
-    # samples every file reads 0 lines/min, which is pixel-identical to a
-    # genuinely quiet fleet — the zero has to name its own cause, or silence
-    # means two different things.
+    # With no current samples every file reads 0 lines/min, identical to a
+    # quiet fleet: the zero has to name its own cause.
     if not is_scan:
         ages = [r["age_seconds"] for r in results if r.get("age_seconds") is not None]
         if ages:
@@ -150,15 +145,7 @@ def _get_event_callback():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle log-health command.
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled
-    """
+    """Handle log-health command."""
     if command != "log-health":
         return False
 
@@ -166,9 +153,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A dashed help flag ANYWHERE wins — asking about `scan` must not sweep
-    # system_logs/ or write an operation line. After the ownership check above,
-    # so this module cannot answer another's help (prax.py routes by trial).
+    # Help anywhere wins: `scan --help` must not sweep. After the ownership
+    # check, so this module cannot answer another's help (prax.py routes by trial).
     if wants_help(args):
         print_help()
         return True

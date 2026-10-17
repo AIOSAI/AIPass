@@ -3,14 +3,12 @@
 # Description: PID cache for branch-to-agent mapping
 # Version: 1.0.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-10-17
 # =============================================
 
 """PID cache — maps branch names to active agent PIDs from dispatch lock files.
 
-Scans .dispatch.lock files in each branch's ai_mail.local/ directory,
-verifies the PID is alive via /proc, and caches the mapping with a TTL.
-Used by the monitor to attribute events to the owning agent process.
+The monitor attributes events to the owning agent process through this map.
 """
 
 import json as _json
@@ -50,11 +48,7 @@ def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int]) -> None:
 
 
 def refresh(repo_root: Optional[Path] = None) -> None:
-    """Scan dispatch lock files to build branch-to-PID mapping.
-
-    Args:
-        repo_root: Repository root path. When None, walks up from this file.
-    """
+    """Scan dispatch lock files to build branch-to-PID mapping."""
     global _pid_cache_last_refresh
 
     now = _time.time()

@@ -3,17 +3,12 @@
 # Description: File System Watching
 # Version: 1.6.0
 # Created: 2025-11-26
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX File Watcher (Handler)
+"""PRAX File Watcher (Handler)
 
-Pure worker that watches for new Python files and updates module registry.
-Memory file handling moved to memory branch's own watcher.
-
-No console output - follows 3-tier handler pattern.
-"""
+Reference: docs/discovery.md"""
 
 import logging
 import threading
@@ -26,58 +21,22 @@ from typing import Any
 from watchdog.observers import Observer as WatchdogObserver
 from watchdog.events import FileSystemEventHandler
 
-# Import from prax config
 from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_logs_dir, get_module_logs_dir
 
-# Import from prax registry handlers
 from aipass.prax.apps.handlers.registry.load import load_module_registry
 from aipass.prax.apps.handlers.registry.save import save_module_registry
 
-# Import filtering
 from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
-# =============================================
-# TRIGGER — OPTIONAL, AND FETCHED AT THE FIRE SITE
-# =============================================
-
 
 def _get_trigger() -> Any:
     """The trigger bus, or None when this host cannot hand us one.
 
-    IMPORTED HERE AND NOT AT MODULE LEVEL, and the reason is not style. A
-    module-level `from aipass.trigger.apps.modules.core import trigger` sat at
-    the top of this file until 2026-09-12 and it NEVER SUCCEEDED. The cycle:
-    this module is still executing its own import when it reaches that line →
-    trigger's `core.py:20` does `from aipass.prax.apps.modules.logger import
-    system_logger` → prax's logger does `from ...discovery.watcher import
-    is_file_watcher_active` → we are partially initialised and those names do
-    not exist yet → ImportError. Python then discards `core` but keeps the three
-    `aipass.trigger` package shells it had already created, so every process
-    that imported the logger carried them and used none of them.
-
-    The visible cost was worse than the shells: the fallback set a module-level
-    `_HAS_TRIGGER = False` that nothing could ever set back to True, so both
-    fires in this file — `module_discovered` and `file_watcher_died` — were
-    permanently unreachable. `file_watcher_died` in particular was a fire the
-    fleet believed it had (DPLAN-0305, and a step-4 decision in DPLAN-0339 was
-    made about keeping it). Found while proving FPLAN-0555, cured in FPLAN-0556.
-    By the time a fire site runs, this module is fully imported and the cycle is
-    gone, so the same import succeeds.
-
-    The guard stays `(ImportError, OSError)` and the reason it is that wide is
-    older and still true. MEASURED 2026-08-31: @trigger's `handlers/__init__.py`
-    guard resolves a frame filename at import time, and in a process with no
-    readable working directory that raises FileNotFoundError — an OSError, never
-    an ImportError. An optional dependency's fallback must be at least as wide
-    as the failures its import can produce. A peer branch being broken is
-    allowed; us dying of it is not.
-
-    Returns:
-        The `trigger` bus object, or None when it cannot be imported.
-    """
+    Imported here, never at module level: trigger imports prax's logger, which imports
+    this module mid-init. OSError too: trigger's guard raises it with no readable cwd."""
     try:
         from aipass.trigger.apps.modules.core import trigger
     except (ImportError, OSError) as e:
@@ -86,36 +45,21 @@ def _get_trigger() -> Any:
     return trigger
 
 
-# Global observer instance
 _observer: Any = None
 
-# The thread that is currently scheduling a watch, if any. Only one at a time:
-# a second scheduler would walk the same tree for a watch the first is about to
-# install. See start_file_watcher_in_background for what the walk costs.
+# One scheduling thread at a time: a second would walk the tree for a watch the first installs.
 _start_thread: Any = None
 
-# Two locks, two jobs. _START_LOCK serialises the walk itself, so a synchronous
-# caller and a background one cannot both install a watch. _SPAWN_LOCK only
-# guards the decision to spawn, and is never held while the walk runs — holding
-# one lock for both would make every caller of the "do not wait" door wait.
+# _START_LOCK serialises the walk; _SPAWN_LOCK, the spawn decision only, is never held across it.
 _START_LOCK = threading.Lock()
 _SPAWN_LOCK = threading.Lock()
 
-# Liveness state. The dispatcher dying is silent by construction (watchdog lets
-# the thread die and logs nothing to us), so the only way anyone learns about it
-# is if we look. `_LIVENESS.death_reported` makes the report fire ONCE per death
-# rather than once per check — prax owns the runaway-log detector, so a health check
-# that floods the log it monitors would be its own bug.
+# A dispatcher death is silent, so we look; death_reported makes it fire once per death, not per check.
 _LIVENESS_CHECK_INTERVAL_SEC = 60.0
 
 
 class LivenessState:
-    """Mutable bookkeeping for the liveness check.
-
-    A holder rather than three module-level names: these are mutable state, not
-    constants, and naming them like module globals both reads wrong and forces a
-    `global` statement at every write site.
-    """
+    """Mutable bookkeeping for the liveness check."""
 
     def __init__(self) -> None:
         self.last_check = 0.0
@@ -132,31 +76,12 @@ class PythonFileWatcher(FileSystemEventHandler):
     def on_created(self, event):
         """Handle new file creation events.
 
-        THE WHOLE BODY IS GUARDED, and that is the point — not defensive habit.
-        watchdog's dispatcher (`observers/api.py::EventDispatcher.run`) catches
-        ONLY `queue.Empty`, so any exception escaping this method kills the
-        dispatcher thread permanently and SILENTLY. The emitter and inotify
-        threads keep filling an UNBOUNDED EventQueue that nobody drains again,
-        so the process retains every filesystem event in the ecosystem forever.
-
-        That is not hypothetical. 2026-08-18 02:19, an archived probe file
-        (`api/.../.archive/probe.py`) was created and deleted inside the same
-        second; `stat()` on the vanished path raised FileNotFoundError from the
-        line below; six long-running processes lost their dispatcher at the same
-        instant and grew to ~2.3GB each (13.7 of 15GB, swap full) over 15 hours
-        with nothing logged. One missing `except` ate the machine.
-
-        A discovery handler must never be able to kill its own thread. Discovery
-        is best-effort by nature: the file it describes is a moving target, and
-        losing one module registration is a rounding error next to losing the
-        watcher. So every failure here is reported and swallowed.
-        """
+        The whole body is guarded: watchdog's dispatcher catches only queue.Empty, so an
+        escaping exception kills it silently and the event queue grows without bound."""
         try:
             self._register_created_module(event)
         except Exception as e:
-            # Deliberately broad: see the docstring. The alternative to
-            # swallowing an unknown error here is a dead dispatcher and an
-            # unbounded queue, which is strictly worse than a missed module.
+            # Deliberately broad: a missed module is better than a dead dispatcher.
             logger.error(
                 f"[watcher] on_created failed for {getattr(event, 'src_path', '<unknown>')} "
                 f"({type(e).__name__}: {e}) — event dropped, watcher still alive",
@@ -170,14 +95,12 @@ class PythonFileWatcher(FileSystemEventHandler):
 
         py_file = Path(str(event.src_path))
 
-        # Skip ignored paths, and anything in a dropbox or an .archive below the root
         if should_ignore_path(py_file) or in_sandbox(py_file, ECOSYSTEM_ROOT):
             return
 
         module_name = py_file.stem
 
-        # Skip if already in registry. None is an unreadable registry: saving
-        # this one module would replace every entry in it (prax, leg 15).
+        # None is an unreadable registry: saving this one module would replace every entry.
         modules = load_module_registry()
         if modules is None:
             logger.warning(f"[watcher] The module registry could not be read, so {py_file} was not registered")
@@ -185,25 +108,14 @@ class PythonFileWatcher(FileSystemEventHandler):
         if module_name in modules:
             return
 
-        # Add new module to registry
         try:
             relative_path = py_file.relative_to(ECOSYSTEM_ROOT)
         except ValueError as e:
-            # File is outside ECOSYSTEM_ROOT, skip
             logger.info(f"[watcher] Path outside ecosystem root, skipping {py_file}: {e}")
             return
 
-        # ONE stat, not two. The file that reaches this line is a file some other
-        # process just created, so it may vanish mid-handler; two stat() calls are
-        # two chances to lose the race and describe a file with a half-torn read.
-        #
-        # Losing that race is the ordinary case, not an incident: a create and a
-        # delete inside one second is what a test probe, an editor's write-and-
-        # rename and a build step all look like from here. Named here so it does
-        # not reach on_created's broad guard, which reports at ERROR with a
-        # traceback — ten of those landed in api's server log from one prax test
-        # run (2026-09-15). The dispatcher survives either way; this is about the
-        # log the rest of the fleet has to read.
+        # One stat: the file may vanish mid-handler, the ordinary case, so it is
+        # named here at INFO rather than reaching on_created's ERROR guard.
         try:
             stat_result = py_file.stat()
         except FileNotFoundError:
@@ -221,10 +133,8 @@ class PythonFileWatcher(FileSystemEventHandler):
             "enabled": True,
         }
 
-        # Save updated registry
         save_module_registry(modules)
 
-        # Fire trigger event for module discovery
         trigger = _get_trigger()
         if trigger is not None:
             try:
@@ -241,88 +151,31 @@ class PythonFileWatcher(FileSystemEventHandler):
 def start_file_watcher():
     """Start watching for new Python files, and WAIT for the watch to be in place.
 
-    Starts watchdog observer to monitor ECOSYSTEM_ROOT for new Python modules.
-
-    The caller pays for the inotify walk — one syscall per directory under the
-    root, seconds of it under thread contention (see
-    start_file_watcher_in_background for the measurement). That is the right
-    trade for an explicit "initialise the logging system" call, which is what
-    reaches this function now; the fleet's first-log-line path takes the
-    background door instead.
-
-    Serialised on _START_LOCK: without it a caller here and a background start
-    both find no observer, both walk the tree, and the second assignment orphans
-    the first observer — two watches on every directory and every event
-    delivered twice.
-    """
+    Serialised on _START_LOCK: two unserialised starts orphan an observer and deliver every event twice."""
     global _observer
 
     with _START_LOCK:
         if _observer and _observer.is_alive():
             return
 
-        # Create watcher instance
         watcher = PythonFileWatcher()
 
         new_observer = WatchdogObserver()
-        # Watch ecosystem root for Python files (recursive)
         new_observer.schedule(watcher, str(ECOSYSTEM_ROOT), recursive=True)
 
         new_observer.start()
         _observer = new_observer
         _LIVENESS.death_reported = False  # New observer: a previous death is no longer the current state.
 
-    # NO "started" RECORD HERE, DELIBERATELY (DPLAN-0339 step 1, 2026-09-12).
-    # This used to be `json_handler.log_operation("discovery_watcher_event",
-    # {"action": "started", ...})`, and it was the single largest source of
-    # orphaned staging temps in the ecosystem: 87% of the new-era
-    # `.<pid>_<n>.tmp` files in prax_json/ were staging this one record.
-    #
-    # The cause is a race the record cannot win. Since 2026-09-04 this function
-    # runs on `prax-watcher-start`, a daemon thread nobody joins, and it reaches
-    # this line at ~0.43s (measured: walk 0.431-0.440s wall). A short-lived
-    # process - a hook, a drone command - logs once and exits at ~0.39-0.43s.
-    # Interpreter exit kills a daemon thread wherever it stands, temp-and-rename
-    # included, so the write lands inside its own destruction window. It is one
-    # staged write for the log and a second for the data bump that rides on every
-    # log_operation: two orphan chances per process, every process.
-    #
-    # It cost that and bought nothing. `watcher_log.json` has no reader - not in
-    # production, not in the tests, nowhere in the fleet (re-grepped 2026-09-12).
-    # Do not restore it. Joining the thread or moving the write earlier were both
-    # considered and rejected on the contention numbers (DPLAN-0339 option B).
-    # The `died` record at _report_watcher_death stays: it is decided separately.
+    # No "started" record: this runs on an unjoined daemon thread, so the write orphaned
+    # staging temps at process exit, and nothing reads it. Do not restore it.
 
 
 def start_file_watcher_in_background() -> None:
     """Start the watcher without making the caller wait for the inotify walk.
 
-    MEASURED 2026-09-04, this repo, 1605 directories under ECOSYSTEM_ROOT:
-    scheduling the recursive watch costs 0.119s in the CALLING thread when that
-    thread is alone, and 13.9s — 117x — when one other Python thread is busy.
-    watchdog installs one inotify watch per directory, and every one of those
-    syscalls drops the GIL and then has to win it back from a thread that never
-    blocks, so the walk pays up to a full switch interval (5ms, the default) per
-    directory. Nothing is wrong with the walk; it is simply the wrong thing to
-    do on a thread someone is waiting on.
-
-    Who waits: prax's own logger, on the FIRST log line of the process
-    (SystemLogger._ensure_watcher). That is how a test suite whose only crime
-    was to log something ends up stalled for seconds on a watcher it never
-    asked for.
-
-    Neither cure suggested in the report applies here. Yielding between
-    directories adds GIL handoffs to a walk that is already starving on them.
-    Bounding the walk to apps/ — what the live monitor does, monitor.py
-    _get_watch_directories — would stop discovering the 112 of 195 currently
-    registered modules that live in tests/ and elsewhere, which is a change to
-    what discovery MEANS, not a change to what it costs. What is left is to
-    stop making anyone wait: same walk, same watches, on a thread nobody joins.
-
-    Never raises. An inotify limit reached here used to reach the caller as an
-    OSError; on a thread nobody joins there is no caller to tell, so it is
-    logged with the same words instead.
-    """
+    The walk is one inotify syscall per directory and starves for the GIL under contention.
+    Never raises: an unjoined thread has no caller to tell, so failures are logged."""
     global _start_thread
 
     def _schedule() -> None:
@@ -342,8 +195,7 @@ def start_file_watcher_in_background() -> None:
         _start_thread = threading.Thread(target=_schedule, name="prax-watcher-start", daemon=True)
         started = _start_thread
 
-    # Outside the spawn lock, and never holding _START_LOCK: the thread's first
-    # act is to take _START_LOCK inside start_file_watcher.
+    # Outside both locks: the thread's first act is to take _START_LOCK.
     started.start()
 
 
@@ -358,21 +210,12 @@ def stop_file_watcher():
 
 
 def is_file_watcher_active() -> bool:
-    """Check if file watcher is currently active
-
-    Returns:
-        True if watcher is running, False otherwise
-    """
+    """Check if file watcher is currently active"""
     return _observer is not None and _observer.is_alive()
 
 
 def _report_watcher_death() -> None:
-    """Say loudly that the watcher died. Best-effort; never raises.
-
-    Reached only when an observer we started is no longer alive, which after the
-    `on_created` guard should be unreachable through our own handler — so if this
-    ever fires, it is news.
-    """
+    """Say loudly that the watcher died. Best-effort; never raises."""
     queued = None
     try:
         queued = _observer.event_queue.qsize()
@@ -406,37 +249,18 @@ def _report_watcher_death() -> None:
 def check_file_watcher_liveness(force: bool = False) -> bool:
     """Periodic health check: is the watcher we started still running?
 
-    Returns True when healthy (or when no watcher was ever started here, which is
-    a legitimate state - not every process runs one).
-
-    Throttled to one real check per `_LIVENESS_CHECK_INTERVAL_SEC` because this
-    sits on the logging path, which is the hottest path in the ecosystem. Never
-    raises: this is called *by* the logger, and a health check that breaks
-    logging is worse than the condition it detects.
-
-    WHY THIS EXISTS SEPARATELY FROM `is_file_watcher_active`: that predicate was
-    already called, but only from `SystemLogger._ensure_watcher`, whose body runs
-    exactly ONCE per process behind a `_watcher_started` flag that is never
-    reset. It therefore answered at the one moment the watcher could not yet have
-    died, and never again. On 2026-08-18 the dispatcher died at 02:19 and no
-    process noticed for 15 hours. A check that cannot fire after startup is not
-    a liveness check.
-    """
+    True when no watcher was started here. Throttled and never raises: the logger calls it."""
     try:
         if _observer is None:
             return True  # No watcher in this process - nothing to be dead.
 
         now = time.monotonic()
 
-        # Lock-free fast path. This runs on every log call in the ecosystem, so
-        # the common answer ("checked recently") must not touch a lock; a float
-        # read is atomic under CPython and the worst case of a torn schedule is
-        # one redundant is_alive() call.
+        # Lock-free fast path: this runs on every log call; a racy read costs one extra is_alive().
         if not force and (now - _LIVENESS.last_check) < _LIVENESS_CHECK_INTERVAL_SEC:
             return not _LIVENESS.death_reported
 
         with _LIVENESS.lock:
-            # Re-check under the lock: another thread may have just done it.
             if not force and (now - _LIVENESS.last_check) < _LIVENESS_CHECK_INTERVAL_SEC:
                 return not _LIVENESS.death_reported
             _LIVENESS.last_check = now

@@ -3,15 +3,10 @@
 # Description: Logger Setup & Management
 # Version: 1.4.0
 # Created: 2025-11-10
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Logger Setup
-
-Creates and configures individual loggers for modules.
-Handles dual logging (system-wide + branch-local) and terminal output.
-"""
+"""PRAX Logger Setup"""
 
 import logging
 import threading
@@ -19,7 +14,6 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 from logging.handlers import RotatingFileHandler
 
-# Import from prax config
 from aipass.prax.apps.handlers.config.load import (
     get_system_logs_dir,
     get_module_logs_dir,
@@ -30,7 +24,6 @@ from aipass.prax.apps.handlers.config.load import (
     resolve_log_level,
 )
 
-# Import introspection functions
 from aipass.prax.apps.handlers.logging.introspection import (
     get_calling_module_path,
     detect_branch_from_path,
@@ -39,21 +32,17 @@ from aipass.prax.apps.handlers.logging.introspection import (
 
 from aipass.prax.apps.handlers.json import json_handler
 
-# Global state for logging system
 logger = logging.getLogger(__name__)
 _system_logger: Optional[logging.Logger] = None
 _captured_loggers: Dict[str, logging.Logger] = {}
 _captured_loggers_lock = threading.Lock()
-# Held across a whole logger BUILD, not just the cache read. Every build of one
-# module configures the same shared logging.getLogger object, so two threads
-# that both miss the cache both clear it and both add handlers: N racing first
-# calls left 2N handlers and every later line of that module written N times,
-# for the life of the process (@api's twin ERROR lines, 2026-09-27). Re-entrant
-# because a build can log through prax on its own thread.
+# Held across a whole logger build, not just the cache read: every build of a module
+# configures the same shared logging.getLogger object, so two racing builds stack
+# duplicate handlers and every later line is written twice. Re-entrant because a build
+# can log through prax on its own thread.
 _logger_build_lock = threading.RLock()
 _terminal_output_enabled = False
 
-# Try to import terminal handler support
 _terminal_module_available = False
 try:
     from aipass.prax.apps.handlers.logging.terminal.formatting import create_terminal_handler
@@ -67,19 +56,14 @@ except ImportError as e:
 
 
 class _WindowsSafeRotatingHandler(RotatingFileHandler):
-    """RotatingFileHandler that catches PermissionError/OSError during rotation on Windows.
-
-    Windows enforces mandatory file locking — rename fails if another handle
-    has the file open. On rotation failure, skip the rotation and keep writing
-    to the current file. Non-fatal.
-    """
+    """RotatingFileHandler that catches PermissionError/OSError during rotation on Windows."""
 
     def doRollover(self) -> None:
         """Rotate log file; skip on Windows file-lock errors rather than crash."""
         try:
             super().doRollover()
         except (PermissionError, OSError) as exc:
-            # Windows: file locked by another process. Skip rotation, keep writing.
+            # Windows locks open files, so the rename fails; keep writing to the current file.
             logger.warning("Log rotation skipped (file locked): %s", exc)
 
 
@@ -100,13 +84,8 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
 def _tier_handler(resolve_dir: Callable[[], Path], filename: str, max_bytes: int, backup_count: int) -> logging.Handler:
     """Open one tier's file. A log home that cannot be made is a NullHandler, never a raise.
 
-    The directory resolvers create what they return, so an unwritable log home raises
-    from them, before _safe_rotating_handler is reached: a logger call raised it into
-    its caller (FPLAN-0642 container proof, an `aipass install` crash).
-
-    From outside, a muted tier is one "Log handler failed" line on stderr when the
-    logger is built, then silence from that tier until the process restarts. The
-    built logger is cached with its NullHandler, so nothing retries, by design.
+    The resolvers create what they return, so an unwritable home raises from them. A muted
+    tier is one "Log handler failed" line at build, then silent until the process restarts.
     """
     try:
         log_dir = resolve_dir()
@@ -127,28 +106,13 @@ def setup_individual_logger(
     caller_path: Optional[str] = None,
     caller_branch: Optional[str] = None,
 ) -> logging.Logger:
-    """Setup individual logger for a specific module with dual logging support
-
-    Creates:
-    - System-wide log: {repo_root}/system_logs/{branch}_{module_name}.log
-    - Module-local log: src/aipass/{branch}/logs/{module_name}.log
-    - Terminal handler (if enabled)
-
-    Args:
-        module_name: Name of the module requesting a logger
-        caller_path: Pre-resolved caller file path (avoids redundant stack walk)
-        caller_branch: Pre-resolved branch name (avoids redundant stack walk)
-
-    Returns:
-        Configured logger instance
-    """
+    """Setup individual logger for a specific module with dual logging support"""
     with _captured_loggers_lock:
         if module_name in _captured_loggers:
             return _captured_loggers[module_name]
 
     with _logger_build_lock:
-        # Checked again under the build lock: the thread that held it may have
-        # just built this very logger.
+        # Checked again: the thread that held the build lock may have just built this logger.
         with _captured_loggers_lock:
             if module_name in _captured_loggers:
                 return _captured_loggers[module_name]
@@ -161,27 +125,21 @@ def _build_individual_logger(
     caller_branch: Optional[str],
 ) -> logging.Logger:
     """Build and cache one module's logger. Called only under _logger_build_lock."""
-    # Log new logger creation
     if _system_logger:
         _system_logger.info(f"Creating logger for module: {module_name}")
 
-    # Create individual logger for this module
     logger = logging.getLogger(f"captured_{module_name}")
     logger.setLevel(DEFAULT_LOG_LEVEL)
     logger.handlers.clear()
 
-    # Load config-driven limits
     log_config = load_log_config()
 
-    # Per-tier levels: the two log tiers can be quieted independently (verbose
-    # branch-local file, quiet central aggregation). The logger's own gate runs
-    # BEFORE any handler's, so it has to sit at the most permissive of the two
-    # or that tier's records are dropped before its handler ever sees them.
+    # The logger's own gate runs before any handler's, so it sits at the more permissive
+    # tier level or that tier's records are dropped before its handler sees them.
     system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
     local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
     logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
-    # Use pre-resolved branch if provided, otherwise detect from stack
     import os
 
     branch_name: Optional[str] = caller_branch
@@ -191,11 +149,10 @@ def _build_individual_logger(
         branch_path = detect_branch_from_path(resolved_module_path) if resolved_module_path else None
         branch_name = Path(branch_path).name if branch_path else None
 
-    # Environment variable fallback (set by drone for dispatched commands)
+    # Set by drone for dispatched commands.
     if not branch_name:
         branch_name = os.environ.get("AIPASS_BRANCH_NAME")
 
-    # External project detection: route logs to the caller's own project
     external_project = None
     if not branch_name:
         check_path = resolved_module_path or os.environ.get("AIPASS_CALLER_CWD")
@@ -205,14 +162,11 @@ def _build_individual_logger(
     if not branch_name and not external_project:
         branch_name = "unknown_branch"
 
-    # Create formatter (shared by all handlers)
     formatter = logging.Formatter(log_config["log_format"], log_config["date_format"])
 
     if external_project:
-        # EXTERNAL PROJECT: route both handlers to the caller's project directory
         project_name, project_root = external_project
 
-        # HANDLER 1: Project system log
         system_log_file = f"{project_name}_{module_name}.log"
         system_limits = log_config["system_logs"]
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
@@ -226,7 +180,6 @@ def _build_individual_logger(
         system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
-        # HANDLER 2: Project local log
         module_log_file = f"{module_name}.log"
         local_limits = log_config["local_logs"]
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
@@ -244,8 +197,6 @@ def _build_individual_logger(
                 f"{getattr(local_handler, 'baseFilename', module_log_file)}"
             )
     else:
-        # INTERNAL: route to AIPass system_logs + branch-local logs
-        # HANDLER 1: System-wide log (central aggregation)
         system_log_file = f"{branch_name}_{module_name}.log"
         system_limits = log_config["system_logs"]
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
@@ -256,7 +207,6 @@ def _build_individual_logger(
         system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
-        # HANDLER 2: Branch-root local log (two-tier: system_logs/ + branch logs/)
         module_log_file = f"{module_name}.log"
         local_limits = log_config["local_logs"]
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
@@ -276,13 +226,11 @@ def _build_individual_logger(
                 f"({local_limits['max_lines']} lines)"
             )
 
-    # HANDLER 3: Terminal output (if enabled)
     if _terminal_output_enabled and _terminal_module_available:
         if should_display_terminal(module_name):  # type: ignore[misc]
             terminal_handler = create_terminal_handler()  # type: ignore[misc]
             logger.addHandler(terminal_handler)
 
-    # Store for reuse (thread-safe)
     with _captured_loggers_lock:
         _captured_loggers[module_name] = logger
 
@@ -290,35 +238,24 @@ def _build_individual_logger(
 
 
 def setup_system_logger() -> logging.Logger:
-    """Setup prax_logger's own logging
-
-    Creates the system logger used by prax itself.
-
-    Returns:
-        Prax system logger instance
-    """
+    """Setup prax_logger's own logging"""
     global _system_logger
 
     if _system_logger:
         return _system_logger
 
-    # Load config-driven limits
     log_config = load_log_config()
 
-    # Create prax_logger's own logger
     _system_logger = logging.getLogger("prax_system_logger")
     _system_logger.handlers.clear()
 
-    # Per-tier levels — see setup_individual_logger for why the logger sits at
-    # the most permissive of the two.
+    # Most permissive tier level, as in _build_individual_logger.
     system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
     local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
     _system_logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
-    # Formatter shared by both handlers
     log_config_fmt = logging.Formatter(log_config["log_format"], log_config["date_format"])
 
-    # HANDLER 1: System-wide log (central aggregation)
     system_limits = log_config["system_logs"]
     system_max_bytes = lines_to_bytes(system_limits["max_lines"])
     system_handler = _tier_handler(
@@ -328,7 +265,6 @@ def setup_system_logger() -> logging.Logger:
     system_handler.setLevel(system_level)
     _system_logger.addHandler(system_handler)
 
-    # HANDLER 2: Module-local log (local debugging)
     local_limits = log_config["local_logs"]
     local_max_bytes = lines_to_bytes(local_limits["max_lines"])
     local_handler = _tier_handler(
@@ -342,7 +278,6 @@ def setup_system_logger() -> logging.Logger:
     system_log_file = getattr(system_handler, "baseFilename", None)
     local_log_file = getattr(local_handler, "baseFilename", None)
 
-    # Log system logger creation
     _system_logger.info("Prax system logger initialized successfully")
     _system_logger.info(f"System logger writing to: {system_log_file} + {local_log_file}")
 
@@ -352,11 +287,7 @@ def setup_system_logger() -> logging.Logger:
 
 
 def get_captured_loggers_count() -> int:
-    """Get count of captured loggers
-
-    Returns:
-        Number of module loggers created
-    """
+    """Get count of captured loggers"""
     return len(_captured_loggers)
 
 

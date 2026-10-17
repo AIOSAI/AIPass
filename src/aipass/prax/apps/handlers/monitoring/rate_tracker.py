@@ -3,21 +3,13 @@
 # Description: Log file rate tracking for runaway detection
 # Version: 1.3.0
 # Created: 2026-07-14
-# Modified: 2026-09-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rate Tracker — volume-based runaway-log detection.
 
-Tracks byte growth rate per log file in system_logs/. When a file sustains
-abnormal growth (lines/min above threshold for consecutive intervals), fires
-a ``runaway_log_detected`` event on the trigger event bus.
-
-Orthogonal to medic's content-based ERROR/CRITICAL detection — this catches
-rate regardless of log level.
-
-State persists to ``prax_json/rate_tracker_data.json`` so that rates survive
-across process restarts and CLI invocations can display meaningful data.
+Orthogonal to medic's content-based detection: catches rate regardless of level.
 """
 
 import time
@@ -44,9 +36,7 @@ CRITICAL_SUSTAINED_INTERVALS = 6  # 6 * 10s = 1 min
 _RATE_HISTORY_SIZE = 30
 _WINDOW_INTERVALS = 6
 
-# A running tracker holds at most _RATE_HISTORY_SIZE samples one SCAN_INTERVAL
-# apart, so anything older than that product is a sample it would already have
-# evicted. Restored state is trimmed to the same horizon.
+# The deque's own horizon: restored state is trimmed to what a live tracker keeps.
 _RATE_STALE_AFTER = _RATE_HISTORY_SIZE * SCAN_INTERVAL
 
 _DATA_FILE = "rate_tracker"
@@ -77,9 +67,7 @@ class FileRateState:
     def to_dict(self) -> dict:
         """Serialize to a dict for disk persistence.
 
-        The rate history goes with it: the CLI runs in its own process, so
-        anything left out here is simply not knowable to `log-health
-        snapshot`, which exists to report what the last scan measured.
+        Rates go too: `log-health snapshot` runs in another process and knows only this.
         """
         return {
             "last_offset": self.last_offset,
@@ -95,10 +83,7 @@ class FileRateState:
     def from_dict(cls, d: dict) -> "FileRateState":
         """Restore from a persisted dict, discarding samples too old to be current.
 
-        A tracker running without interruption would already have evicted
-        anything older than the deque's own horizon. Restoring such samples
-        after a long downtime would let the threshold window raise a runaway
-        alarm out of history rather than out of what is happening now.
+        Old samples would let the window raise a runaway alarm out of history.
         """
         state = cls(d.get("last_offset", 0), d.get("last_check", 0.0))
         cutoff = time.time() - _RATE_STALE_AFTER
@@ -107,17 +92,13 @@ class FileRateState:
             try:
                 ts, rate = sample[0], sample[1]
             except (TypeError, IndexError):
-                # Per-sample detail on demand only; the summary below is what an
-                # operator sees, so a corrupt file cannot flood the logs this
-                # tracker itself measures.
                 logger.debug("[rate_tracker] Unreadable rate sample discarded: %r", sample)
                 malformed += 1
                 continue
             if ts >= cutoff:
                 state.rates.append((ts, rate))
         if malformed:
-            # Counted, not logged per sample: a corrupted file would otherwise
-            # emit one line per entry into the very logs this tracker measures.
+            # Counted, not logged per sample: a corrupt file would flood the logs this tracker measures.
             logger.warning(
                 "[rate_tracker] Skipped %d unreadable rate sample(s) while restoring persisted state. "
                 "Growth measurement continues from the samples that did load; nothing was written back "
@@ -147,13 +128,7 @@ def configure(
     event_callback=None,
     suppressed_files: Optional[set] = None,
 ) -> None:
-    """Inject dependencies from the module layer.
-
-    Args:
-        logs_dir: Path to system_logs/ directory to scan.
-        event_callback: Callable(event_name, **kwargs) for firing events.
-        suppressed_files: Set of log file names to skip during detection.
-    """
+    """Inject dependencies from the module layer."""
     global _logs_dir, _EVENT_CALLBACK, _suppressed_files
     if logs_dir is not None:
         _logs_dir = logs_dir
@@ -188,12 +163,8 @@ def _load_state() -> None:
 def _save_state() -> None:
     """Persist current tracking state to disk.
 
-    Read-modify-write: the tracker owns ``files`` (and ``module_name`` when it
-    is absent) and nothing else. The document is also rate_tracker's data leg,
-    which the json service bumps on every log write (``operations_total``,
-    ``last_operation``), and its ``created`` dates from the first write. The
-    old whole-dict rebuild re-stamped ``created`` to today and wiped the
-    counters on every scan (FPLAN-0542).
+    Read-modify-write: the tracker owns only ``files``; the json service owns the
+    counters and ``created`` in the same document.
     """
     files = {}
     for file_key, state in _tracked.items():
@@ -202,18 +173,15 @@ def _save_state() -> None:
     data = json_handler.load_json(_DATA_FILE, "data")
     if not isinstance(data, dict):
         data = {}
-    # The service heals a data document before handing it back; these only
-    # matter when that heal could not land, and never overwrite a value.
+    # Only for when the service's heal could not land; never overwrite a value.
     today = date.today().isoformat()
     data.setdefault("created", today)
     data.setdefault("last_updated", today)
     data.setdefault("module_name", _DATA_FILE)
     data["files"] = files
 
-    # save_json raises rather than answering False since DPLAN-0325 — a lost
-    # document must not look like success. This is called from scan_rates(),
-    # which runs on the monitor's threads, so the raise is caught here: a
-    # writer that kills the thread it reports on is worse than a missed save.
+    # save_json raises; caught here because scan_rates() runs on the monitor's
+    # threads, and killing the thread is worse than a missed save.
     try:
         json_handler.save_json(_DATA_FILE, "data", data)
     except (json_handler.WriteFailed, json_handler.InvalidDocument) as exc:
@@ -221,11 +189,7 @@ def _save_state() -> None:
 
 
 def scan_rates() -> list:
-    """Scan all .log files in system_logs/, update rates, fire events if thresholds met.
-
-    Returns a list of dicts describing each tracked file's current state,
-    suitable for display by the log-health command.
-    """
+    """Scan all .log files in system_logs/, update rates, fire events if thresholds met."""
     _load_state()
 
     if _logs_dir is None or not _logs_dir.exists():
@@ -258,20 +222,9 @@ def scan_rates() -> list:
             continue
 
         if size < state.last_offset:
-            # The file shrank: RotatingFileHandler rolled .log -> .log.1 and
-            # opened a fresh file, or something truncated it. Bytes written
-            # before the roll are no longer observable here, so count the new
-            # file's content as this interval's floor (an undercount, which
-            # the window average absorbs).
-            #
-            # Critically, do NOT zero the sustained counters. A rotation is
-            # evidence of volume, not of subsidence - and the faster a runaway
-            # writes, the sooner it rotates, so resetting here made detection
-            # strictly less likely the worse the flood got. The 2026-07-31
-            # event-queue firehose ran at ~4090 lines/min (6.8x CRITICAL) and
-            # rotated every ~24s, below the 60s CRITICAL needs, so it never
-            # fired. Counters still clear on their own via the subsidence
-            # branch once the rate actually drops.
+            # Rotated or truncated: the new file's size is this interval's floor.
+            # Do NOT zero the sustained counters: rotation is evidence of volume,
+            # and a faster runaway rotates sooner, so a reset hides the worst floods.
             bytes_added = size
         else:
             bytes_added = size - state.last_offset
@@ -425,11 +378,7 @@ def _file_size(path: str) -> int:
 
 
 def get_snapshot() -> list:
-    """Return the current tracking state without scanning (for display only).
-
-    Loads persisted state from disk if not already loaded, so CLI
-    invocations can display rates collected by the monitor process.
-    """
+    """Return the current tracking state without scanning (for display only)."""
     _load_state()
     now = time.time()
     results = []

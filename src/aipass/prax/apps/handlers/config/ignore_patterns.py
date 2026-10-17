@@ -3,27 +3,11 @@
 # Description: Load Ignore Patterns Handler
 # Version: 1.0.0
 # Created: 2025-11-07
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 Load Ignore Patterns Handler
-
-Loads ignore patterns for module discovery from prax_logger_config.json.
-Returns set of folder names to ignore during Python module scanning.
-
-Features:
-- Loads ignore_patterns from prax_logger_config.json
-- Fallback to hardcoded defaults if config missing
-- Returns as Set for fast lookup
-- Used by module discovery system
-
-Usage:
-    from aipass.prax.apps.handlers.config.ignore_patterns import load_ignore_patterns_from_config
-
-    patterns = load_ignore_patterns_from_config()
-    if 'node_modules' in patterns:
-        print("Will ignore node_modules")
 """
 
 import json
@@ -35,15 +19,10 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "ignore_patterns"
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
-# Hardcoded fallback patterns
 DEFAULT_IGNORE_FOLDERS = {
     ".git",
     "__pycache__",
@@ -60,26 +39,9 @@ DEFAULT_IGNORE_FOLDERS = {
     "archive.local",
 }
 
-# =============================================
-# HANDLER FUNCTION
-# =============================================
-
 
 def load_ignore_patterns_from_config() -> Set[str]:
-    """Load ignore patterns from prax_logger config file
-
-    Returns:
-        Set of folder names to ignore during module discovery.
-        Falls back to DEFAULT_IGNORE_FOLDERS if config missing or invalid.
-
-    The ignore patterns are used by should_ignore_path() to filter
-    directories during recursive module scanning.
-
-    Example:
-        >>> patterns = load_ignore_patterns_from_config()
-        >>> if '.git' in patterns:
-        >>>     print("Will skip .git directories")
-    """
+    """Load ignore patterns from prax_logger config file"""
     try:
         if not PRAX_LOGGER_CONFIG_FILE.exists():
             return DEFAULT_IGNORE_FOLDERS

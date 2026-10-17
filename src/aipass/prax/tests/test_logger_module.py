@@ -3,16 +3,12 @@
 # Description: Unit tests for PRAX logger module (public API)
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/logger.py."""
 
-# Tests for prax logger module — the core public API for system-wide logging.
-#
-# logger.py takes names from 8+ handler files at import. It is bound once at
-# the top, and _inject_and_import doubles each of those names on it per test
-# (prax, leg 12).
+# logger.py is bound once at the top; _inject_and_import doubles each handler name on it per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
@@ -36,13 +32,8 @@ from aipass.prax.apps.modules import logger as logger_module
 from aipass.trigger.apps.modules import core as trigger_core
 
 
-# =============================================
-# HELPERS
-# =============================================
-
 MODULE_NAME = "aipass.prax.apps.modules.logger"
 
-# All handler dependencies that logger.py imports at module level
 HANDLER_DEPS = [
     "aipass.prax.apps.handlers.logging.setup",
     "aipass.prax.apps.handlers.logging.introspection",
@@ -57,18 +48,11 @@ HANDLER_DEPS = [
 
 
 def _build_handler_mocks(tmp_path):
-    """Create mock modules for every handler dependency.
-
-    Returns a dict of module_path -> MagicMock with the attributes
-    that logger.py actually uses wired up.
-    """
+    """Create mock modules for every handler dependency, keyed by module path."""
     mocks = {}
     for dep in HANDLER_DEPS:
         mocks[dep] = MagicMock()
 
-    # Wire up specific attributes that logger.py accesses at import time
-
-    # setup.py exports
     setup = mocks["aipass.prax.apps.handlers.logging.setup"]
     mock_stdlib_logger = MagicMock()
     mock_stdlib_logger.info = MagicMock()
@@ -80,28 +64,23 @@ def _build_handler_mocks(tmp_path):
     setup.enable_terminal_output = MagicMock()
     setup.disable_terminal_output = MagicMock()
 
-    # introspection.py exports
     intro = mocks["aipass.prax.apps.handlers.logging.introspection"]
     intro.get_calling_module = MagicMock(return_value="test_module")
     intro.get_caller_info = MagicMock(return_value=("test_module", "/fake/path.py", "prax"))
 
-    # override.py exports
     override = mocks["aipass.prax.apps.handlers.logging.override"]
     override.is_override_active = MagicMock(return_value=False)
 
-    # direct.py exports
     direct = mocks["aipass.prax.apps.handlers.logging.direct"]
     mock_direct_logger = MagicMock()
     direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
     direct.direct_log = MagicMock()
     direct.DirectLogger = MagicMock
 
-    # watcher.py exports
     watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
     watcher.start_file_watcher = MagicMock()
     watcher.is_file_watcher_active = MagicMock(return_value=True)
 
-    # registry/load.py exports
     registry = mocks["aipass.prax.apps.handlers.registry.load"]
     registry.load_module_registry = MagicMock(
         return_value=[
@@ -111,20 +90,17 @@ def _build_handler_mocks(tmp_path):
         ]
     )
 
-    # config/load.py exports
     config = mocks["aipass.prax.apps.handlers.config.load"]
     config.get_system_logs_dir = MagicMock(return_value=tmp_path / "prax" / "logs" / "system")
     config.get_module_logs_dir = MagicMock(return_value=tmp_path / "prax" / "logs" / "modules")
     config.PRAX_JSON_DIR = tmp_path / "prax" / "json"
 
-    # json handler
     json_mod = mocks["aipass.prax.apps.handlers.json"]
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     json_mod.json_handler = mock_json_handler
 
-    # The cli package is not doubled: logger.py prints through the real console
-    # and the tests read it with capsys (prax, leg 11).
+    # The cli package is not doubled: tests read the real console with capsys.
     return mocks
 
 
@@ -160,11 +136,7 @@ _IMPORTED_NAMES = {
 
 
 def _inject_and_import(monkeypatch, tmp_path):
-    """logger.py, bound at the top and never reloaded, with every name it took
-    from a handler doubled on it and its first-log-line latch reset (prax, leg 12).
-
-    Returns (logger_module, handler_mocks_dict).
-    """
+    """(logger_module, mocks): every handler name doubled on it, first-log-line latch reset."""
     mocks = _build_handler_mocks(tmp_path)
     for dep, names in _IMPORTED_NAMES.items():
         for local, source in names:
@@ -174,8 +146,7 @@ def _inject_and_import(monkeypatch, tmp_path):
 
 
 def _lifecycle_doubled(monkeypatch, modules_count: int = 0) -> MagicMock:
-    """Double the two doors on the real lifecycle module; logger.py imports them
-    lazily, so the call reads the double (prax, leg 12)."""
+    """Double the two doors on the real lifecycle module; logger.py imports them lazily."""
     doubled = MagicMock()
     doubled.run_initialize.return_value = {"modules_count": modules_count}
     monkeypatch.setattr(lifecycle, "run_initialize", doubled.run_initialize)
@@ -186,26 +157,11 @@ def _lifecycle_doubled(monkeypatch, modules_count: int = 0) -> MagicMock:
 def _inject_trigger(monkeypatch):
     """Mock the trigger core that the two lifecycle doors import lazily.
 
-    Deliberately NOT in HANDLER_DEPS: logger.py imports trigger inside
-    initialize_logging_system and shutdown_logging_system and nowhere else, and
-    that separation is the whole point of DPLAN-0339 step 3. Injecting it per
-    test keeps the module-level dependency list honest about what logging costs.
-
-    The real core module is loaded and only its `trigger` instance is swapped
-    for a recorder, so nothing reaches the live bus (prax, leg 13: no sys.modules
-    entry stands in for the module).
-
-    Returns the recorder the functions will call fire() on.
-    """
+    Not in HANDLER_DEPS: trigger is no module-level dependency of logging. Returns the recorder."""
     recorder = MagicMock()
     recorder.fire = MagicMock(return_value={"handlers": 0, "ran": 0, "failed": 0})
     monkeypatch.setattr(trigger_core, "trigger", recorder)
     return recorder
-
-
-# =============================================
-# get_system_logger
-# =============================================
 
 
 class TestGetSystemLogger:
@@ -264,22 +220,11 @@ class TestGetSystemLogger:
         assert call_kwargs[1]["caller_branch"] == "prax"
 
 
-# =============================================
-# get_system_status
-# =============================================
-
-
 class TestGetSystemStatus:
     """Tests for get_system_status() — returns a dict with system info."""
 
     def test_returns_dict(self, monkeypatch, tmp_path):
-        """The status dict carries exactly the seven documented keys.
-
-        The siblings below each pin one entry; this unit pins the SHAPE — a key
-        quietly dropped or renamed is invisible to a per-key test that no longer
-        exists, so the whole set is asserted here, plus the one value no sibling
-        reads.
-        """
+        """The status dict carries exactly the documented keys: the shape, not one entry."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
 
         result = mod.get_system_status()
@@ -295,8 +240,7 @@ class TestGetSystemStatus:
             "system_logs_dir",
             "total_modules",
         ]
-        # DATA_FILE was built at import from config's PRAX_ROOT/prax_json; the
-        # conftest points PRAX_JSON_DIR itself at tmp_path (prax, leg 13).
+        # DATA_FILE was built at import from PRAX_ROOT/prax_json, not the conftest's PRAX_JSON_DIR.
         assert result["registry_file"] == str(config_load.PRAX_ROOT / "prax_json" / "prax_logger_data.json")
 
     def test_contains_total_modules_key(self, monkeypatch, tmp_path):
@@ -370,17 +314,12 @@ class TestGetSystemStatus:
         registry.load_module_registry.assert_called_once_with()
 
 
-# =============================================
-# handle_command
-# =============================================
-
-
 class TestHandleCommand:
     """Tests for handle_command() — introspection gate and routing."""
 
     @staticmethod
     def _introspections(monkeypatch, mod):
-        """Record each print_introspection call handle_command makes (prax, leg 8: the effect, not the True)."""
+        """Record each print_introspection call handle_command makes: the effect, not the True."""
         seen = []
         monkeypatch.setattr(mod, "print_introspection", lambda: seen.append("introspection"))
         return seen
@@ -445,11 +384,6 @@ class TestHandleCommand:
         json_handler.log_operation.assert_called_once_with("logger_handle_command", {"args": ["--help"]})
 
 
-# =============================================
-# initialize_logging_system
-# =============================================
-
-
 class TestInitializeLoggingSystem:
     """Tests for initialize_logging_system() — delegates to lifecycle handler."""
 
@@ -480,9 +414,7 @@ class TestInitializeLoggingSystem:
         ]
 
     def test_fires_the_lifecycle_event_after_run_initialize(self, monkeypatch, tmp_path):
-        """seedgo trigger.md Pattern 9: the explicit system lifecycle doors
-        announce themselves. The standard's event table names no lifecycle
-        event, so prax names it: `logging_system_initialized`."""
+        """seedgo trigger.md Pattern 9: the explicit lifecycle door fires logging_system_initialized."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
         _lifecycle_doubled(monkeypatch, modules_count=42)
         trigger = _inject_trigger(monkeypatch)
@@ -492,8 +424,7 @@ class TestInitializeLoggingSystem:
         trigger.fire.assert_called_once_with("logging_system_initialized", modules_count=42)
 
     def test_a_failed_fire_does_not_fail_the_initialize(self, monkeypatch, tmp_path, capsys):
-        """These doors must still work on a host where trigger cannot import or
-        inotify is exhausted — the guard the removed startup fire carried."""
+        """These doors must still work where trigger cannot import or inotify is exhausted."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         _lifecycle_doubled(monkeypatch, modules_count=7)
         trigger = _inject_trigger(monkeypatch)
@@ -506,11 +437,6 @@ class TestInitializeLoggingSystem:
             capsys.readouterr().out.splitlines()[-1]
             == "[prax_logger] System initialized - 7 modules, individual logging"
         )
-
-
-# =============================================
-# shutdown_logging_system
-# =============================================
 
 
 class TestShutdownLoggingSystem:
@@ -543,8 +469,7 @@ class TestShutdownLoggingSystem:
         ]
 
     def test_fires_the_lifecycle_event_after_run_shutdown(self, monkeypatch, tmp_path):
-        """The other half of the Pattern 9 pair. Fired last, so the event says
-        the system IS down rather than that it is going down."""
+        """The other half of the Pattern 9 pair, fired last: the system IS down."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
         _lifecycle_doubled(monkeypatch)
         trigger = _inject_trigger(monkeypatch)
@@ -563,11 +488,6 @@ class TestShutdownLoggingSystem:
         mod.shutdown_logging_system()  # must not raise
 
         mock_lifecycle.run_shutdown.assert_called_once_with("prax_logger")
-
-
-# =============================================
-# enable_terminal_output / disable_terminal_output
-# =============================================
 
 
 class TestTerminalOutputControl:
@@ -593,11 +513,6 @@ class TestTerminalOutputControl:
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
         setup.disable_terminal_output.assert_called_once_with()
         setup.enable_terminal_output.assert_not_called()
-
-
-# =============================================
-# SystemLogger class
-# =============================================
 
 
 _PROXIED_LEVELS = ("debug", "info", "warning", "error")
@@ -655,11 +570,6 @@ class TestSystemLogger:
                 getattr(routed, other_level).assert_not_called()
 
 
-# =============================================
-# Module constants
-# =============================================
-
-
 class TestModuleConstants:
     """Tests for module-level constants."""
 
@@ -670,17 +580,10 @@ class TestModuleConstants:
         assert mod.MODULE_NAME == "prax_logger"
 
     def test_data_file_is_path(self, monkeypatch, tmp_path):
-        """DATA_FILE is a Path, and it is PRAX_JSON_DIR/prax_logger_data.json.
-
-        The sibling below only asks that the module name appears somewhere in
-        the filename; the whole path is what a reader needs, because the
-        directory half comes from config and nothing else pins it.
-        """
+        """DATA_FILE is a Path, and it is PRAX_JSON_DIR/prax_logger_data.json."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        # Read off the real config: logger.py is bound once, so DATA_FILE was
-        # built at import from PRAX_ROOT/prax_json, which the conftest's tmp_path
-        # PRAX_JSON_DIR does not reach (prax, leg 13).
+        # Real config: DATA_FILE was built at import, before the conftest's PRAX_JSON_DIR.
         json_dir = config_load.PRAX_ROOT / "prax_json"
         assert isinstance(mod.DATA_FILE, Path)
         assert mod.DATA_FILE.name == "prax_logger_data.json"
@@ -691,11 +594,6 @@ class TestModuleConstants:
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
         assert "prax_logger" in mod.DATA_FILE.name
-
-
-# =============================================
-# print_introspection
-# =============================================
 
 
 class TestPrintIntrospection:
@@ -723,28 +621,17 @@ class TestPrintIntrospection:
         """print_introspection falls back to rich Console if CLI import fails."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        # Without its console name the real display makes print_introspection's
-        # from-import raise ImportError (prax, leg 13: no sys.modules stand-in).
+        # Without its console name, print_introspection's from-import raises ImportError.
         monkeypatch.delattr(display, "console")
 
         capsys.readouterr()
         mod.print_introspection()  # must not raise
 
-        # The menu reaches the fallback console: its title line is the second line.
         assert capsys.readouterr().out.splitlines()[1] == "logger Module"
 
 
-# =============================================
-# NullLogger fallback (aipass/prax/__init__.py)
-# =============================================
-
-
 def _exec_prax_init() -> dict:
-    """Execute prax/__init__.py as source and return its namespace.
-
-    Runs the real source rather than a re-implementation — the point of the
-    fallback is what ships, not what a test can restate.
-    """
+    """Execute prax/__init__.py as source and return its namespace: what ships, not a restatement."""
     init_path = Path(__file__).resolve().parents[1] / "__init__.py"
     namespace: dict = {"__name__": "aipass.prax._fallback_probe", "__file__": str(init_path)}
     exec(compile(init_path.read_text(encoding="utf-8"), str(init_path), "exec"), namespace)
@@ -754,14 +641,7 @@ def _exec_prax_init() -> dict:
 def _load_lazily(name: str):
     """Resolve a prax package name with the real logger import forced to fail.
 
-    Under the lazy (PEP 562) init the name is NOT bound at exec time — the
-    fallback's moment moved from import to first attribute access. So the probe
-    execs the source and then calls the module's own ``__getattr__``.
-
-    The failure sits at the edge of the probe's own namespace: its ``importlib``
-    raises ImportError for the logger module and imports anything else for real
-    (prax, leg 13: no sys.modules entry stands in for the logger).
-    """
+    Lazy (PEP 562): the fallback fires on attribute access, so this calls the module's __getattr__."""
     namespace = _exec_prax_init()
     real_import = namespace["importlib"].import_module
 
@@ -789,13 +669,9 @@ class TestNullLoggerFallback:
         assert type(fallback).__name__ == "NullLogger"
 
     def test_exposes_every_system_logger_level(self):
-        """Fallback parity: a level SystemLogger has and NullLogger lacks is an
-        AttributeError raised precisely when prax is already broken.
+        """Fallback parity: a level NullLogger lacks is an AttributeError when prax is already broken.
 
-        SystemLogger's methods are read from the shipped source, not imported —
-        conftest replaces the logger module with a mock whose SystemLogger is
-        the MagicMock class itself, which would make this check vacuous.
-        """
+        Read from source: conftest's mock SystemLogger would make the check vacuous."""
         import ast
 
         source_path = Path(__file__).resolve().parents[1] / "apps" / "modules" / "logger.py"
@@ -815,13 +691,7 @@ class TestNullLoggerFallback:
             assert callable(getattr(fallback, level, None)), f"NullLogger is missing {level}()"
 
     def test_levels_swallow_the_call_and_delegate(self):
-        """Swallowing is the whole contract, so the consequence is asserted.
-
-        "It did not raise" is not an oracle. Each level must return None — a
-        caller gets nothing back and cannot trip over it — and must hand the
-        message, unaltered, to the stdlib logger underneath. The inner logger is
-        replaced so the delegation is visible rather than merely believed.
-        """
+        """Swallowing is the whole contract: each level returns None and hands the message on unaltered."""
         fallback = _load_fallback_logger()
 
         with patch.object(fallback, "_logger") as inner:
@@ -836,13 +706,11 @@ class TestNullLoggerFallback:
         inner.error.assert_called_once_with("error via fallback")
 
     def test_append_jsonl_degrades_to_none(self):
-        """The other eager fallback: a broken logger chain leaves append_jsonl
-        importable and falsy rather than raising at the import site."""
+        """A broken logger chain leaves append_jsonl importable and falsy, never raising."""
         assert _load_lazily("append_jsonl") is None
 
     def test_fallback_is_not_built_when_the_logger_imports(self):
-        """The fallback is the broken path only — a healthy prax hands back the
-        real SystemLogger instance, not a NullLogger."""
+        """The fallback is the broken path only: a healthy prax hands back the real SystemLogger."""
         namespace = _exec_prax_init()
 
         resolved = namespace["__getattr__"]("logger")
@@ -851,8 +719,7 @@ class TestNullLoggerFallback:
         assert resolved is sys.modules[MODULE_NAME].system_logger
 
     def test_resolved_name_is_cached_in_globals(self):
-        """PEP 562 __getattr__ fires once per name: the second access must come
-        from the module dict, not from a second import."""
+        """PEP 562 __getattr__ fires once per name: the second access comes from the module dict."""
         namespace = _exec_prax_init()
 
         first = namespace["__getattr__"]("logger")
@@ -867,14 +734,7 @@ class TestNullLoggerFallback:
             namespace["__getattr__"]("no_such_prax_name")
 
 
-# =============================================
-# Lazy package init — import footprint (aipass/prax/__init__.py)
-# =============================================
-
-# Measured, DPLAN-0325 phase 0/1: importing the json service through the lazy
-# package init pulls these aipass modules and nothing else. The eager init cost
-# 30 aipass modules plus watchdog and aipass.trigger; that graph is the logger's,
-# and no consumer of the json service should pay for it.
+# Measured: the json service through the lazy init pulls these and nothing else; the logger graph stays out.
 EXPECTED_COLD_FOOTPRINT = {
     "aipass",
     "aipass.prax",
@@ -884,10 +744,7 @@ EXPECTED_COLD_FOOTPRINT = {
     "aipass.prax.apps.handlers.json.json_service",
 }
 
-# Names a fresh interpreter carries that are neither stdlib nor ours.
-# _distutils_hack: setuptools' distutils-precedence.pth imports it at startup
-# wherever setuptools is installed (CI's 3.10/3.11 venvs; 3.12+ venvs ship
-# without setuptools). Site noise, not a service import (devpulse, 2026-09-03).
+# Neither stdlib nor ours: _distutils_hack comes from setuptools' .pth wherever setuptools is installed.
 _INTERPRETER_NOISE = {"__main__", "sitecustomize", "_distutils_hack"}
 
 _FOOTPRINT_PROBE = """
@@ -913,12 +770,7 @@ def _cold_import_footprint() -> set:
 
 
 class TestLazyInitImportFootprint:
-    """The lazy init's whole purpose, pinned in a subprocess.
-
-    In-process assertions cannot see this: pytest has already imported prax's
-    world by the time any test runs, so the measurement only exists in a fresh
-    interpreter.
-    """
+    """The lazy init's whole purpose, pinned in a subprocess: pytest has already imported prax's world."""
 
     def test_json_service_pulls_no_third_party(self):
         """Stdlib guard: the json path must reach no package outside aipass."""
@@ -939,18 +791,13 @@ class TestLazyInitImportFootprint:
         assert _cold_import_footprint() == EXPECTED_COLD_FOOTPRINT
 
     def test_the_logger_graph_stays_cold(self):
-        """The named costs of the eager init: the logger module, watchdog and the
-        aipass.trigger edge underneath it."""
+        """The named costs of the eager init: the logger module, watchdog and aipass.trigger."""
         footprint = _cold_import_footprint()
 
         assert "aipass.prax.apps.modules.logger" not in footprint
         assert not any(n == "watchdog" or n.startswith("watchdog.") for n in footprint)
         assert not any(n == "aipass.trigger" or n.startswith("aipass.trigger.") for n in footprint)
 
-
-# =============================================
-# The logging path never reaches trigger (DPLAN-0339 step 3, held open)
-# =============================================
 
 _TRIGGER_PROBE = """
 import json, sys
@@ -975,32 +822,17 @@ def _trigger_modules_after_one_log_line(log_dir) -> list:
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-# Measured 2026-09-12 on a fresh interpreter that imports the prax logger and
-# logs one line: NOTHING under aipass.trigger, not even a package shell.
-#
-# It was three shells until FPLAN-0556. watcher.py held a module-level
-# `from aipass.trigger.apps.modules.core import trigger` that could never
-# succeed — trigger's core imports prax's logger, which imports the watcher,
-# which was still mid-import — so Python discarded `core` and kept the parent
-# packages it had already created, and every process that logged carried them
-# and used none of them. That import now lives at the fire sites, so this list
-# is empty and an entry appearing in it is a new edge onto the logging path.
+# Logging one line loads nothing under aipass.trigger; an entry here is a new edge onto the logging path.
 _TRIGGER_SHELLS_AFTER_ONE_LOG_LINE = []
 
 
 class TestLoggingPathIsTriggerFree:
     """Lifecycle events live on the two explicit doors, not on the hot path.
 
-    initialize_logging_system and shutdown_logging_system fire on trigger's bus,
-    but they import it INSIDE themselves. If that import ever drifts to module
-    level, every process that logs pays the aipass.trigger graph again — which
-    was 0.339 s of a 0.361 s first log line before DPLAN-0339 step 3. Only a
-    fresh interpreter can see this; pytest has trigger loaded already.
-    """
+    The doors import trigger inside themselves; at module level every log line would pay its graph."""
 
     def test_logging_a_line_does_not_load_the_trigger_core(self, tmp_path):
-        """The cost is the graph under aipass.trigger.apps.modules, and a process
-        that only logs must not load any of it."""
+        """A process that only logs must load nothing under aipass.trigger.apps.modules."""
         loaded = _trigger_modules_after_one_log_line(tmp_path)
 
         assert not any(n.startswith("aipass.trigger.apps.modules") for n in loaded), (
@@ -1008,30 +840,15 @@ class TestLoggingPathIsTriggerFree:
         )
 
     def test_the_trigger_footprint_of_a_log_line_is_the_measured_set(self, tmp_path):
-        """The exact list. A new trigger import on the logging path is a
-        decision, not a drift — and if watcher.py's dead module-level import is
-        ever cured, this fails and someone updates it on purpose."""
+        """The exact list. A new trigger import on the logging path is a decision, not a drift."""
         assert _trigger_modules_after_one_log_line(tmp_path) == _TRIGGER_SHELLS_AFTER_ONE_LOG_LINE
 
 
-# =============================================
-# The first log line starts nothing (DPLAN-0339 step 4)
-# =============================================
-
-
 class TestEnsureWatcherStartsNothing:
-    """Logging is not a reason to watch the filesystem.
-
-    Until 2026-09-12 the first log line of every process started a recursive
-    inotify watch over the whole ecosystem on an unjoined daemon thread: 1,589
-    watches per long-lived process, a thread that short processes killed
-    mid-walk, and a registry that was still 83% incomplete after all of it.
-    Discovery is a scheduled scan now (`drone @prax discover`). These pin that
-    the logging path costs the machine nothing.
-    """
+    """Logging is not a reason to watch the filesystem: discovery is a scheduled scan."""
 
     def test_first_log_line_starts_no_watcher(self, monkeypatch, tmp_path):
-        """The whole point of step 4."""
+        """The first log line starts no watcher, background or not."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
         watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
         watcher.start_file_watcher_in_background = MagicMock()
@@ -1043,19 +860,15 @@ class TestEnsureWatcherStartsNothing:
         watcher.start_file_watcher.assert_not_called()
 
     def test_the_logger_no_longer_binds_the_background_start(self, monkeypatch, tmp_path):
-        """A name the module does not import cannot be called by accident, and
-        a re-added call would have to re-add the import in the same edit."""
+        """A name the module does not import cannot be called by accident."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
 
         assert not hasattr(mod, "start_file_watcher_in_background")
 
     def test_later_log_lines_still_check_liveness(self, monkeypatch, tmp_path):
-        """The check is what serves the explicit door
-        (`initialize_logging_system`), where a watcher really is running and can
-        still die under its process — DPLAN-0305."""
+        """The check serves initialize_logging_system, whose watcher can still die under its process."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
-        # Patched on the MODULE, not on the watcher mock: logger.py from-imports
-        # the name, so the module's own binding is what the call resolves.
+        # Patched on the module, not the watcher mock: logger.py from-imports the name.
         liveness = MagicMock()
         monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)
         mod.SystemLogger._watcher_started = True
@@ -1065,8 +878,7 @@ class TestEnsureWatcherStartsNothing:
         liveness.assert_called_once_with()
 
     def test_the_first_line_does_not_pay_for_the_liveness_check(self, monkeypatch, tmp_path):
-        """`_watcher_started` now means "past the first log line", which is the
-        one moment no watcher can exist yet."""
+        """`_watcher_started` means "past the first log line", when no watcher can exist yet."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
         liveness = MagicMock()
         monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)

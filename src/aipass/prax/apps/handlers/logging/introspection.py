@@ -3,15 +3,10 @@
 # Description: Stack Introspection
 # Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Logging Introspection
-
-Stack introspection for detecting calling modules and branch paths.
-Used by logger_setup.py to route logs to correct files.
-"""
+"""PRAX Logging Introspection"""
 
 import logging
 from pathlib import Path
@@ -60,11 +55,7 @@ def _find_external_caller_path() -> Optional[str]:
 
 
 def get_calling_module() -> str:
-    """Detect calling module from stack trace
-
-    Returns:
-        Module name (e.g., 'drone', 'flow', 'spawn') or 'unknown_module'
-    """
+    """Detect calling module from stack trace, or 'unknown_module'"""
     caller_path = _find_external_caller_path()
     if caller_path:
         return Path(caller_path).stem
@@ -72,27 +63,15 @@ def get_calling_module() -> str:
 
 
 def get_calling_module_path() -> Optional[str]:
-    """Detect calling module path from stack trace
-
-    Returns:
-        Full path to calling module file or None
-    """
+    """Detect calling module path from stack trace"""
     return _find_external_caller_path()
 
 
 def get_caller_info() -> tuple:
     """Detect calling module name, path, and branch from a single stack walk.
 
-    Avoids the double-walk problem where get_calling_module() and
-    get_calling_module_path() are called separately from different
-    stack depths, potentially finding different external callers.
-
-    Env var overrides (checked in order):
-        AIPASS_LOG_NAME  — explicit module name override for any process
-        AIPASS_BOT_ID    — set by telegram-bot@.service, mapped to bot_{id}
-
-    Returns:
-        (module_name, module_path, branch_name) — branch_name may be None
+    One walk, so name and path never come from different callers.
+    AIPASS_LOG_NAME, then AIPASS_BOT_ID (telegram-bot@.service), override the name.
     """
     import os
 
@@ -121,25 +100,10 @@ _REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
 def _resolve_caller_path(module_path: str) -> Optional[Path]:
     """Resolve a caller's path without ever requiring a working directory.
 
-    The stack hands back whatever ``__file__`` says, and that is not always an
-    absolute path to a real file: a heredoc or an embedded interpreter reports
-    ``<stdin>``, and a module imported via a relative entry reports a relative
-    name. ``Path.resolve()`` on either of those reads the process working
-    directory — so in a process whose cwd has been deleted this raised
-    FileNotFoundError while prax was building the logger, one frame EARLIER than
-    the config/load.py crash @memory reported on 2026-08-31 (their caller was a
-    real absolute file, so their traceback walked past this line).
-
-    Returns:
-        The resolved path, or None when the caller cannot be located — which is
-        an answer, not a failure. Branch detection is a routing hint; not knowing
-        where the caller lives must never take down the caller's import.
+    ``<stdin>`` or a relative ``__file__`` would make resolve() read a possibly deleted cwd.
+    None is an answer: not knowing the caller must never take down the caller's import.
     """
-    # ONE guard, not two. An explicit ``startswith("<")`` check was written here
-    # first and then removed: a pseudo-filename is not absolute, so is_absolute()
-    # already refuses it, and a mutation dropping the "<" check killed no test —
-    # correctly, because it could not. Two guards where one decides is a reader
-    # believing both are load-bearing.
+    # is_absolute() alone also refuses a "<" pseudo-filename; a second guard would be dead.
     candidate = Path(module_path) if module_path else None
     if candidate is None or not candidate.is_absolute():
         return None
@@ -151,37 +115,19 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
 
 
 def detect_branch_from_path(module_path: str) -> Optional[str]:
-    """Detect branch name from module file path
-
-    The package structure is: .../src/aipass/{module}/apps/...
-    Resolves relative to the aipass package root found via __file__.
-    Also handles branches outside src/aipass/ (e.g., src/commons/).
-
-    Examples:
-        .../src/aipass/flow/apps/module.py → "flow"
-        .../src/aipass/prax/apps/module.py → "prax"
-        .../src/aipass/drone/apps/branch.py → "drone"
-        .../src/commons/apps/module.py → "commons"
-
-    Returns:
-        Module/branch name (e.g., "flow") or None
-    """
+    """Detect branch name from module file path: src/aipass/{branch}/... or src/{branch}/..."""
     path = _resolve_caller_path(module_path)
     if path is None:
         return None
 
-    # Primary: src/aipass/{branch}/...
     try:
         relative = path.relative_to(_AIPASS_PKG_ROOT)
-        # relative is like: flow/apps/module.py → parts[0] = "flow"
         if len(relative.parts) >= 2:
-            # No json operation here: every get_direct_logger() at module level
-            # resolves through this, so one was two writes per import (DPLAN-0404, prax).
+            # No json operation here: every module-level get_direct_logger() resolves through this.
             return relative.parts[0]
     except ValueError:
         logger.info("Path %s is not relative to aipass package root", module_path)
 
-    # Fallback: src/{branch}/... for branches outside src/aipass/ (e.g., commons)
     try:
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
@@ -195,24 +141,17 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
 def detect_external_project(module_path: str) -> Optional[tuple]:
     """Detect if a module path belongs to an external project (outside AIPass repo).
 
-    Walks up from the module path looking for a project root (.git or pyproject.toml).
-    Returns the project name and root path if found and the path is outside the AIPass repo.
-
-    Returns:
-        (project_name, project_root) or None if path is inside AIPass or unresolvable
-    """
+    Returns (project_name, project_root) from the nearest .git or pyproject.toml, else None."""
     path = _resolve_caller_path(module_path)
     if path is None:
         return None
 
-    # If the path is inside the AIPass repo, it's not external
     try:
         path.relative_to(_REPO_ROOT)
         return None
     except ValueError:
         logger.info("Path %s is external to AIPass repo", module_path)
 
-    # Also check AIPASS_CALLER_CWD for cross-project dispatch
     import os
 
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
@@ -221,11 +160,10 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     if not search_path:
         return None
 
-    # Walk up to find project root
     for candidate in [search_path] + list(search_path.parents):
         if (candidate / ".git").exists() or (candidate / "pyproject.toml").exists():
             project_name = candidate.name.lower().replace(" ", "_").replace("-", "_")
-            # Outside AIPass only, never on a fleet module's import (DPLAN-0404, prax)
+            # Logged outside AIPass only, never on a fleet module's import.
             json_handler.log_operation(
                 "introspection_external_project",
                 {"module_path": module_path, "project": project_name},

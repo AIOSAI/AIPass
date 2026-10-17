@@ -3,14 +3,10 @@
 # Description: Tests for central file reader handler
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/central/reader.py."""
-
-# read_all_centrals().
-# Covers: valid central files, empty directory, missing directory,
-# malformed JSON, mixed valid/invalid files, service name derivation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(json_structure) — the shape of read_all_centrals' log_operation record, covered by that row
@@ -23,30 +19,16 @@ import pytest
 
 from aipass.prax.apps.handlers.central import reader
 
-# =============================================
-# FIXTURES
-# =============================================
-
 
 @pytest.fixture(autouse=True)
 def central_world(monkeypatch, tmp_path):
-    """Every edge of reader.py, replaced where reader binds it.
-
-    The repo root is tmp_path, so .ai_central is the test's own. The logger and
-    json_handler are recorders, so no line reaches a live log or prax_json, and
-    AIPASS_TEST_LOG_DIR points at tmp_path for anything that still writes.
-    """
+    """Every edge of reader.py replaced where reader binds it: repo root tmp_path, logger and json_handler recorders."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setattr(reader, "_find_repo_root", lambda: tmp_path)
     world = SimpleNamespace(logger=MagicMock(), json_handler=MagicMock())
     monkeypatch.setattr(reader, "logger", world.logger)
     monkeypatch.setattr(reader, "json_handler", world.json_handler)
     return world
-
-
-# =============================================
-# TESTS: read_all_centrals
-# =============================================
 
 
 class TestReadAllCentrals:
@@ -60,13 +42,10 @@ class TestReadAllCentrals:
 
         result = reader.read_all_centrals()
         assert isinstance(result, dict)
-        # Which dict: the whole mapping, not just a key spot-check -- one
-        # entry in, one entry out, keyed by the lowered service name.
         assert result == {"ai_mail": payload}
 
     def test_empty_dict_when_dir_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """No .ai_central directory should return empty dict."""
-        # Do NOT create .ai_central
         result = reader.read_all_centrals()
         assert result == {}
 
@@ -148,9 +127,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        # A valid central file
         (central_dir / "VALID.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
-        # Files that should NOT be picked up
         (central_dir / "notes.txt").write_text("just a note", encoding="utf-8")
         (central_dir / "config.json").write_text(json.dumps({"nope": True}), encoding="utf-8")
 
@@ -159,10 +136,7 @@ class TestReadAllCentrals:
         assert "valid" in result
 
     def test_logs_warning_on_malformed_json(self, central_world, tmp_path):
-        """Should call logger.warning when a file has bad JSON, naming the file.
-
-        Mutant: dropping central_file.name from the warning's arguments reddens this.
-        """
+        """Should call logger.warning when a file has bad JSON, naming the file."""
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
@@ -207,6 +181,5 @@ class TestReadAllCentrals:
 
     def test_no_json_handler_call_when_dir_missing(self, central_world):
         """When directory is missing, should return early without calling json_handler."""
-        # No .ai_central directory
         reader.read_all_centrals()
         central_world.json_handler.log_operation.assert_not_called()

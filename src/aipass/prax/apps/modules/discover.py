@@ -3,19 +3,12 @@
 # Description: PRAX Discover Command
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Discover Module
+"""PRAX Discover Module
 
-Implements the 'discover' command: one full walk of the ecosystem that makes
-the module registry a truthful snapshot.
-
-The verb existed before and was archived 2026-03-18 (fe5f1d2c) when discovery
-became a per-process inotify watch. DPLAN-0339 step 4 brings it back and retires
-the watch: the walk now happens once a day on a daemon command job instead of on
-the first log line of every process in the fleet.
+Reference: docs/discovery.md
 """
 
 import os
@@ -53,8 +46,7 @@ def print_help():
 
 
 def _print_names(label: str, names: List[str]) -> None:
-    """Print a capped, sorted name list — a scan that adds 900 modules is a
-    count, not a wall of text."""
+    """Print a capped, sorted name list: a scan that adds 900 modules is a count, not a wall."""
     if not names:
         return
     shown = ", ".join(names[:MAX_NAMES_SHOWN])
@@ -63,15 +55,7 @@ def _print_names(label: str, names: List[str]) -> None:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle the 'discover' command routed by the entry point.
-
-    Args:
-        command: Command name — anything but "discover" is another module's.
-        args: Command arguments.
-
-    Returns:
-        True if the command was handled, False to let routing continue.
-    """
+    """Handle the 'discover' command routed by the entry point."""
     if command != "discover":
         return False
 
@@ -79,8 +63,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_help()
         return True
 
-    # No args shows what this module is, it does not scan. A verb that rewrites
-    # the registry is not something a bare word should trigger.
+    # A bare word never rewrites the registry: no args shows introspection.
     if not args:
         print_introspection()
         return True
@@ -96,8 +79,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     console.print()
     if result["previous_unreadable"]:
-        # Said beside the counts: with no readable registry to compare against,
-        # every module reads as added (prax, leg 15).
+        # With no readable registry to compare against, every module reads as added.
         warning("The previous registry could not be read; it was rebuilt from disk.")
     console.print(f"  Added:      {len(result['added'])}")
     _print_names("added", result["added"])

@@ -3,18 +3,13 @@
 # Description: Single-instance lock for the prax monitor
 # Version: 1.1.1
 # Created: 2026-07-10
-# Modified: 2026-08-08
+# Modified: 2026-10-17
 # =============================================
 
 """Relay-scoped lock for the prax monitor Telegram relay.
 
-Prevents duplicate Telegram sends when multiple monitor viewers run
-concurrently. The display path is never blocked — only the TG relay
-acquires this lock, so interactive viewers always start.
-
-Uses a pidfile with liveness check — cross-platform (Linux / macOS / Windows).
-Lock file lives in prax_json/relay.pid (outside system_logs/ to avoid
-the tailed-directory feedback loop).
+Only the relay takes it, so viewers always start. The pidfile lives outside
+system_logs/: inside, the tailed directory would feed back on itself.
 """
 
 import json as _json
@@ -83,12 +78,7 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _current_boot_id() -> Optional[str]:
-    """Return a stable identifier for the current boot, or None if unavailable.
-
-    Linux exposes /proc/sys/kernel/random/boot_id, which is regenerated on
-    every boot. Platforms without it get None, which falls back to plain
-    pid-liveness — no regression, just no cross-boot protection.
-    """
+    """Return a stable identifier for the current boot, or None if unavailable."""
     try:
         return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip() or None
     except OSError as exc:
@@ -118,12 +108,8 @@ def try_acquire() -> bool:
             existing_boot = data.get("boot_id")
 
             if existing_boot and current_boot and existing_boot != current_boot:
-                # The lock file outlived a reboot. Its PID belongs to the
-                # previous boot, but the number may already be reused by an
-                # unrelated early-boot process, so a liveness check would
-                # wrongly report the relay as held. That stranded the relay in
-                # viewer-only mode for 1h51m on 2026-07-31 (pid 1567 reused
-                # seconds after boot). A lock from a past boot is always stale.
+                # A past boot's PID may be reused by an early-boot process, so
+                # liveness would lie: a lock from a past boot is always stale.
                 logger.info(
                     "[instance_lock] Reclaiming lock from previous boot (PID %d, boot %s != %s)",
                     existing_pid,

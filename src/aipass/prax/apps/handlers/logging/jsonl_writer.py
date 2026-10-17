@@ -3,26 +3,14 @@
 # Description: JSONL append with size-based rotation
 # Version: 1.0.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX JSONL Writer
+"""PRAX JSONL Writer
 
-Sanctioned path for structured JSONL appending with size-based rotation.
-
-Standalone — zero dependency on prax's logging pipeline, event system, or
-stack introspection. Safe to call from any branch, including those where
-importing the full prax logger would cause import recursion (e.g. @trigger
-event handlers).
-
-Usage (from any branch):
-    from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
-
-    append_jsonl(Path("logs/operations.jsonl"), {"op": "backup", "files": 42})
-
-Or via the package shortcut:
-    from aipass.prax import append_jsonl
+Standalone: no prax logging pipeline, event system or stack introspection, so any
+branch can call it, including @trigger event handlers where importing the prax
+logger would recurse. Import it as `from aipass.prax import append_jsonl`.
 """
 
 import json
@@ -46,14 +34,7 @@ def append_jsonl(
     max_bytes: int = JSONL_MAX_BYTES,
     backup_count: int = JSONL_BACKUP_COUNT,
 ) -> None:
-    """Append a JSON object as a single line, rotating when the file exceeds max_bytes.
-
-    Rotation: when the file reaches max_bytes, rename it to .1 (overwriting any
-    previous .1) and start fresh. Only 1 backup is kept by default — matching
-    prax's RotatingFileHandler behavior.
-
-    Auto-creates parent directories if missing.
-    """
+    """Append a JSON object as a single line, rotating when the file exceeds max_bytes."""
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
 

@@ -3,20 +3,10 @@
 # Description: Tests for launch-time branch scoping of Mission Control
 # Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_scope.py."""
-
-# `drone @prax monitor run seedgo,cli` has always been documented; until now the
-# branch list was logged and then ignored, so a scoped run showed everything.
-# These tests pin the parsing and the matching rules that make it real.
-#
-# Covers:
-# - parse_scope(): comma/space lists, flags ignored, 'all' escape, dedup + order
-# - BranchScope.matches_label(): project prefixes, model tags, SUB/agent/TESTS decorators
-# - BranchScope.matches_event(): branch, caller and command target attribution
-# - BranchScope.describe() / unknown_names(): truthful banner text + typo detection
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(json_structure) — parse_scope's log_operation record of the parsed names, covered by that row
@@ -41,11 +31,6 @@ class _Event:
     caller: Optional[str] = None
     action: str = ""
     event_type: str = "log"
-
-
-# ---------------------------------------------------------------------------
-# parse_scope
-# ---------------------------------------------------------------------------
 
 
 class TestParseScope:
@@ -91,11 +76,6 @@ class TestParseScope:
     def test_duplicates_deduped_order_preserved(self):
         """Requested order drives the banner text; repeats collapse."""
         assert parse_scope(["flow,seedgo,flow"]).names == ("FLOW", "SEEDGO")
-
-
-# ---------------------------------------------------------------------------
-# label matching
-# ---------------------------------------------------------------------------
 
 
 class TestLabelTokens:
@@ -186,11 +166,6 @@ class TestMatchesEvent:
 
     def test_unscoped_matches_every_event(self):
         assert BranchScope([]).matches_event(_Event(branch="WHATEVER")) is True
-
-
-# ---------------------------------------------------------------------------
-# operator-facing description
-# ---------------------------------------------------------------------------
 
 
 class TestDescribeAndUnknown:

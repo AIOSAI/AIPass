@@ -3,17 +3,11 @@
 # Description: Unified Display Handler
 # Version: 0.3.0
 # Created: 2025-11-23
-# Modified: 2026-09-24
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unified Stream Display Handler
-
-Single point for all monitoring terminal output with:
-- Event formatting with branch attribution
-- Color coding by event type
-- Thread-safe console output
-- Status displays and headers
 """
 
 from datetime import datetime
@@ -35,40 +29,22 @@ except ImportError as e:
 
     console = Console()
 
-# Thread safety
 _print_lock = Lock()
 
 
 def _plain(text: str) -> str:
     """Escape text that came from a branch, so Rich shows it instead of parsing it.
 
-    Everything the monitor displays is other people's output — tailed log lines,
-    command strings, file paths. Rich reads ``[word]`` as a style tag, which gives
-    untrusted text two ways to hurt: ``[event_queue]`` is swallowed silently, and
-    a path like ``[/usr/bin]`` raises MarkupError. The second one killed the live
-    monitor's display thread on 2026-08-11 and left the queue with no consumer for
-    ~20 hours. Escape at every point where dynamic text enters a markup string.
+    ``[/usr/bin]`` raises MarkupError and kills the display thread: escape all dynamic text.
     """
     return escape(str(text))
 
 
-# Color schemes by event type and level
 COLORS = {
     "file_created": "green",
     "file_modified": "yellow",
-    # file_deleted is the WATCHDOG event for a real unlink and stays. Trigger's
-    # bus renamed its own file_deleted to profile_write_failed (FPLAN-0492 wave
-    # 5); a bus event reaching this table under the new name had no colour, so
-    # the key is ADDED rather than swapped — the two streams mean different things.
-    #
-    # HONEST CAVEAT, measured 2026-09-08 (FPLAN-0512): nothing reads this table.
-    # `print_event` colours by BRANCH_COLORS and LEVEL_COLORS; COLORS has no
-    # reader in prax, no `__all__` entry, and no importer in any other branch.
-    # So the new key is inert today and cannot be mutation-checked — no test can
-    # go red for it, because no behaviour depends on it. It is here so the table
-    # is correct if it is ever wired up. Reported to @devpulse rather than
-    # quietly wiring COLORS into the formatter, which would be a display change
-    # nobody asked for.
+    # file_deleted is watchdog's real removal; profile_write_failed is trigger's
+    # bus event: both stay. Nothing reads COLORS today (print_event does not).
     "file_deleted": "red",
     "profile_write_failed": "red",
     "file_moved": "blue",
@@ -83,7 +59,6 @@ COLORS = {
     "system_error": "bold red",
 }
 
-# Symbols for different event types
 SYMBOLS = {
     "file": "📁",
     "log": "📝",
@@ -95,10 +70,9 @@ SYMBOLS = {
     "info": "ℹ️",
 }
 
-# Branch display width — wide enough for three-tier labels like AIPASS/DEVPULSE/OPUS
+# Wide enough for three-tier labels like AIPASS/DEVPULSE/OPUS
 BRANCH_WIDTH = 24
 
-# Level-based color mapping (simplified)
 LEVEL_COLORS = {
     "error": "red",
     "warning": "yellow",
@@ -107,11 +81,8 @@ LEVEL_COLORS = {
     "success": "green",
 }
 
-# Branch-specific colors for visual distinction.
-# For three-tier labels (AIPASS/DEVPULSE/OPUS), the base key is the first segment (AIPASS).
-# Internal AIPass branches also appear as bare names for non-session events.
+# Three-tier labels (AIPASS/DEVPULSE/OPUS) key on their first segment.
 BRANCH_COLORS = {
-    # Internal AIPass branches — individually colored for non-session events
     "SEEDGO": "green",
     "DRONE": "cyan",
     "FLOW": "blue",
@@ -127,7 +98,6 @@ BRANCH_COLORS = {
     "SPEAKEASY": "bright_white",
     "THE_COMMONS": "bright_green",
     "ASSISTANT": "bright_yellow",
-    # Project-level keys — used for three-tier labels (first segment of PROJECT/AGENT/MODEL)
     "AIPASS": "bold white",  # All internal AIPass agent sessions
     "AIPL": "bright_blue",  # AIPL external project
     "VERA-STUDIO": "bright_cyan",  # Vera Studio external project
@@ -137,39 +107,20 @@ BRANCH_COLORS = {
 def print_event(event_type: str, branch: str, message: str, level: str = "info", pid: Optional[int] = None):
     """
     Format and print event with branch attribution
-
-    Format:
-    [HH:MM:SS] [BRANCH:PID] Message text
-
-    Color coding:
-    - Timestamp: dim
-    - Branch name: unique color per branch
-    - Message: colored by level (error=red, warning=yellow, info=white)
-
-    Args:
-        event_type: Type of event (file, log, module, system)
-        branch: Branch name for attribution
-        message: Event message
-        level: Event level (info, warning, error, critical)
-        pid: Optional process ID for the active agent
     """
     json_handler.log_operation("stream_output", {"event_type": event_type, "branch": branch, "level": level})
 
     with _print_lock:
-        # Timestamp
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # Get branch color (unique per branch)
-        # Strip suffixes for color lookup: 'DEVPULSE AGENT' → DEVPULSE, 'DEVPULSE/opus' → DEVPULSE
         branch_upper = branch.upper()
         base_branch = branch_upper.split("/")[0]  # strip model tag
         if base_branch.endswith(" AGENT"):
             base_branch = base_branch[:-6]
         branch_color = BRANCH_COLORS.get(base_branch, "white")
 
-        # Format branch label with optional PID. The surrounding brackets are
-        # meant to be seen, so the whole group is escaped — an uppercase label
-        # survived Rich by luck, a lowercase one would be parsed as a tag.
+        # The brackets are meant to be seen: escape the whole group, or a
+        # lowercase label is parsed as a tag.
         if pid:
             branch_label = f"{branch_upper}:{pid}"
         else:
@@ -177,29 +128,20 @@ def print_event(event_type: str, branch: str, message: str, level: str = "info",
         label_text = _plain(f"[{branch_label:<{BRANCH_WIDTH}}]")
         branch_formatted = f"[{branch_color}]{label_text}[/{branch_color}]"
 
-        # Get message color based on level
         msg_color = LEVEL_COLORS.get(level, "white")
 
-        # Format and print - timestamp, branch colored, message colored by level
         console.print(f"[dim]{timestamp}[/dim] {branch_formatted} [{msg_color}]{_plain(message)}[/{msg_color}]")
 
 
 def print_command_separator(branch: str, command: str, caller: Optional[str] = None, target: Optional[str] = None):
     """
     Print prominent command separator/header with caller attribution.
-
-    Args:
-        branch: Branch that executed the command (log location)
-        command: The command that was run
-        caller: Branch that initiated the command (optional)
-        target: Branch being acted upon (optional, e.g. audit target)
     """
     with _print_lock:
         branch_color = BRANCH_COLORS.get(branch.upper(), "white")
         console.print()
         console.print(f"[bold {branch_color}]{'─' * 60}[/bold {branch_color}]")
 
-        # Build context line: CALLER → TARGET
         context_parts = []
         if caller and caller.upper() != "UNKNOWN":
             caller_color = BRANCH_COLORS.get(caller.upper(), "cyan")
@@ -216,13 +158,7 @@ def print_command_separator(branch: str, command: str, caller: Optional[str] = N
 
 
 def print_hook_event(branch: str, message: str, action: str = "unknown"):
-    """Print a hook event with distinct fired/skipped styling.
-
-    Args:
-        branch: Branch the hook event originated from
-        message: Hook event summary (e.g. "cadence:fired loader=global turn=35")
-        action: "fired" or "skipped" (controls color)
-    """
+    """Print a hook event with distinct fired/skipped styling."""
     with _print_lock:
         timestamp = datetime.now().strftime("%H:%M:%S")
         if action == "fired":
@@ -234,8 +170,6 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
         else:
             style = "white"
             symbol = "?"
-        # The branch is the column that tells two hook lines apart — coloured
-        # like every other branch label in this module, and escaped with it.
         branch_color = BRANCH_COLORS.get(branch.upper(), "white")
         branch_label = f"[{branch_color}]{_plain(branch.upper())}[/{branch_color}]"
         console.print(
@@ -246,11 +180,6 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):
     """
     Display current monitoring status
-
-    Args:
-        watched_branches: List of branches being monitored
-        verbosity: Current verbosity level (0-2)
-        filters: Optional filter configuration
     """
     with _print_lock:
         console.print("\n[bold]Current Status:[/bold]")

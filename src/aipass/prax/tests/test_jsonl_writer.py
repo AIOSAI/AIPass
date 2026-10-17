@@ -3,15 +3,10 @@
 # Description: Tests for PRAX JSONL writer with rotation
 # Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py, exported via apps/modules/logger.py."""
-
-# Tests for the JSONL writer — append_jsonl with size-based rotation.
-#
-# Tests verify: basic append, auto-rotation at size cap, backup creation,
-# directory auto-creation, and the package-level export.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(error_handling) — _rotate_with_backup unlinking when the rename fails, covered by that row

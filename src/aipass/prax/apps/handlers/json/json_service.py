@@ -3,32 +3,12 @@
 # Description: The fleet's one JSON handler service (prax-owned)
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
 
-Every branch's ``apps/handlers/json/json_handler.py`` is a byte-identical shim
-that binds this module's names to a handle for its own branch. There is no
-second implementation and nothing per-branch lives here.
-
-Each module owns three legs: log = the per-module operation trail (rotating,
-capped); data = lifetime state, bumped on every log write; config = the log's rotation cap.
-
-Reached through prax's lazy package init — ``from aipass.prax import
-json_handler`` — never by importing this path from another branch.
-
-Two constraints shape the code:
-
-* **Stdlib only.** Importing this module must not pull the prax logger graph
-  (30 modules, watchdog, the aipass.trigger edge). Warnings go to a plain
-  ``logging`` logger; a consumer that wants them routed configures logging.
-* **Dead working directory.** No ``Path.resolve()``, no ``os.getcwd()``, no
-  ``inspect.stack()``. The module imports and runs in a process whose working
-  directory has been deleted.
-
-The json directory is computed PER CALL, never captured at import: a test that
-sets ``AIPASS_TEST_LOG_DIR`` after importing still redirects the next write.
+Reference: docs/json_service.md
 """
 
 import itertools
@@ -47,29 +27,16 @@ logger = logging.getLogger("aipass.prax.json")
 JSON_TYPES = ("config", "data", "log")
 DEFAULT_MAX_LOG_ENTRIES = 100
 
-# os.replace on Windows raises PermissionError while ANY reader holds the target
-# open (no FILE_SHARE_DELETE on Python's open). Readers hold handles for
-# microseconds, so a short bounded retry converges; after the bound the error
-# raises honestly. POSIX never takes this path for open files, so a genuine
-# permission problem still surfaces — just ~200ms later.
+# Windows os.replace raises PermissionError while any reader holds the target; readers hold it microseconds.
 _REPLACE_ATTEMPTS = 40
 _REPLACE_BACKOFF_SECONDS = 0.005
 
-# What a plain open(path, "w") asks the OS for. The process umask narrows it —
-# that is the whole point: a NEW document must end up with the mode this
-# process would have given it anyway, not a mode this module chose.
+# What open(path, "w") asks for; the umask narrows it, so a new document gets this process's usual mode.
 _NEW_DOCUMENT_MODE = 0o666
 
-# A staged file that cannot get a free name after this many tries is a directory
-# problem, not a collision problem, and the OSError says so.
 _STAGE_NAME_ATTEMPTS = 8
 
-# Staged-file names come from pid + counter, never from the clock. count() hands
-# out a distinct value per call without a lock (its __next__ is atomic under
-# CPython), and O_EXCL settles anything the pid does not. Deliberately not
-# time.time_ns(): callers legitimately stub this module's `time` to take the
-# sleep out of the bounded retry, and a writer that cannot name a file under a
-# stubbed clock fails for a reason that has nothing to do with writing.
+# pid + counter, never the clock: callers stub this module's `time` to skip the retry sleep.
 _stage_serial = itertools.count()
 
 
@@ -81,18 +48,8 @@ class WriteFailed(OSError):
     """The write could not land: retry exhausted, or an OSError on the way."""
 
 
-# =============================================
-# MODULE HELPERS
-# =============================================
-
-
 def _default_document(json_type: str, module_name: str) -> Any:
-    """The in-code default document for a json_type.
-
-    Replaces the old on-disk ``json_templates/`` directories: a default that
-    lives in a file can go missing, and a handler whose default is missing
-    stops self-healing exactly when it is needed.
-    """
+    """The in-code default document for a json_type: a default in a file can go missing."""
     today = datetime.now().date().isoformat()
 
     if json_type == "config":
@@ -111,27 +68,12 @@ def _default_document(json_type: str, module_name: str) -> Any:
 
 
 def _current_mode(file_path: Path) -> Optional[int]:
-    """The document's own permission bits, or None when there is no document yet.
-
-    Asked by stat and answered by the exception, never by exists()-then-stat:
-    the answer exists() gives is already stale when it is read, and the whole
-    reward for asking is a second syscall before the same failure.
-
-    Args:
-        file_path: The document about to be rewritten.
-
-    Returns:
-        The target's mode bits, or None when it does not exist or cannot be
-        read — both mean "let _stage create a new document's mode".
-    """
+    """The document's own permission bits, or None when there is no document yet."""
     try:
         return stat.S_IMODE(os.stat(file_path).st_mode)
     except FileNotFoundError:
         return None
     except OSError as exc:
-        # Not the ordinary "not there yet": a permission problem on the
-        # directory, a broken link. The write still happens, but the document
-        # comes back with a new document's mode instead of its own, so say so.
         logger.warning(
             "json_service: cannot read the current mode of '%s' (%s) — writing it as a new document",
             file_path,
@@ -143,36 +85,8 @@ def _current_mode(file_path: Path) -> Optional[int]:
 def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
     """Write content to a temp file beside the target and return its path.
 
-    Staged beside the target on purpose: os.replace is only atomic within one
-    filesystem, and a temp directory can be on another one.
-
-    Opened with os.open rather than NamedTemporaryFile because tempfile creates
-    at a hardcoded 0600 for its own good reasons, and os.replace carries the
-    STAGED file's mode onto the target. Every service write therefore narrowed
-    the document it rewrote: a 664 config came back 600, fleet-wide, and the
-    group that could read it yesterday could not today (skills, DPLAN-0325
-    pair 2).
-
-    The mode is never chosen here:
-
-    * an existing document keeps its own, read off the target and applied with
-      fchmod, which the umask does not touch;
-    * a new document is created with _NEW_DOCUMENT_MODE and the kernel narrows
-      it by the process umask — byte for byte what ``open(path, "w")`` would
-      have produced, with no umask read (os.umask both sets and returns, so
-      reading it means briefly widening it for every other thread).
-
-    Args:
-        directory: Where the target document lives.
-        content: Serialised document.
-        mode: The target's current permission bits, or None when it does not
-            exist yet.
-
-    Returns:
-        Path of the staged file.
-
-    Raises:
-        OSError: The staged file could not be created or written.
+    Beside the target: os.replace is atomic only within one filesystem. os.open, not
+    NamedTemporaryFile: tempfile creates 0600 and os.replace carries that mode onto the target.
     """
     fd = -1
     temp_path = ""
@@ -186,9 +100,7 @@ def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
                 raise
 
     try:
-        # fchmod, not chmod: the fd is the file we just created, so no second
-        # path lookup can be redirected between the two calls. Absent on
-        # Windows, where the mode bits this preserves do not exist either.
+        # fchmod on the fd, not chmod on the path: no second lookup to redirect. Absent on Windows.
         if mode is not None and hasattr(os, "fchmod"):
             os.fchmod(fd, mode)
         staged = open(fd, "w", encoding="utf-8")
@@ -222,19 +134,7 @@ def _discard(temp_path: str) -> None:
 def replace_with_retry(source: str, destination: str) -> None:
     """os.replace that tolerates Windows sharing violations, bounded.
 
-    Public as the seam for a caller's test that needs the real replace step to
-    fail (a full disk): patch ``aipass.prax.json_handler.replace_with_retry``,
-    the package path, which never names these handlers. write_json reads it
-    from this module at call time (DPLAN-0404, prax; it was _replace_with_retry,
-    patched by its handler path from aipass's test_profile).
-
-    Args:
-        source: Staged file to move into place.
-        destination: The live document being replaced.
-
-    Raises:
-        PermissionError: Still blocked after every attempt.
-        OSError: Any non-sharing failure, immediately.
+    Public as a test seam: patch ``aipass.prax.json_handler.replace_with_retry``; write_json reads it at call time.
     """
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
@@ -247,31 +147,17 @@ def replace_with_retry(source: str, destination: str) -> None:
 
 
 def _get_caller_module_name() -> str:
-    """Name the module that called ``log_operation``.
+    """Name the module that called ``log_operation``, or "unknown" when no module is behind the frame.
 
-    Frame depth 2 is exact and load-bearing: [0] is this function, [1] is
-    log_operation, [2] is the caller. This is why the branch shim BINDS the
-    method and never wraps it — any wrapper adds a frame and silently renames
-    every operation in the log.
-
-    sys._getframe, never inspect.stack(): inspect reaches an unguarded
-    os.path.realpath, and on Windows ntpath.realpath calls os.getcwd() before it
-    checks anything, so on a box with no readable working directory every
-    operation was recorded as "unknown".
-
-    Returns:
-        The caller's module name, or "unknown" when there is no module behind
-        the frame.
+    Frame depth 2 is exact: the branch shim BINDS log_operation and never wraps it, or every entry is renamed.
+    sys._getframe, never inspect.stack(): inspect reaches os.getcwd() via realpath on Windows.
     """
     try:
         caller_frame = sys._getframe(2)
     except ValueError:
         return "unknown"
 
-    # A pseudo-frame has no module behind it. `<stdin>`, `<string>` from python
-    # -c or exec, `<frozen importlib._bootstrap>` — Path("<stdin>").stem is
-    # "<stdin>", and a log that attributes work to that asserts something false
-    # about who did it. It also became a DIRECTORY name once (2026-08-31).
+    # A pseudo-frame (<stdin>, <string>, <frozen ...>) has no module behind it.
     filename = caller_frame.f_code.co_filename
     if filename.startswith("<") and filename.endswith(">"):
         return "unknown"
@@ -286,22 +172,9 @@ def _get_caller_module_name() -> str:
 def for_module(file: "str | os.PathLike") -> "JsonHandle":
     """Build the handle for the branch that owns ``file``.
 
-    Args:
-        file: A branch's ``apps/handlers/json/json_handler.py`` (``__file__``).
-
-    Returns:
-        A JsonHandle rooted at that branch.
-
-    ``parents[3]`` walks json -> handlers -> apps -> the branch root. No
-    resolve(): the shim's ``__file__`` is already absolute under every import
-    form AIPass uses, and resolve() needs a working directory.
+    ``parents[3]`` is the branch root; no resolve(), which needs a working directory.
     """
     return JsonHandle(Path(file).parents[3])
-
-
-# =============================================
-# THE SERVICE
-# =============================================
 
 
 class JsonHandle:
@@ -312,32 +185,15 @@ class JsonHandle:
 
     @property
     def json_dir(self) -> Path:
-        """The branch's json directory, computed on every access.
-
-        Never captured at import: the value is a function of the environment,
-        and a test that sets AIPASS_TEST_LOG_DIR after importing must still be
-        redirected. An EMPTY value is absence, not a redirect.
-        """
+        """The branch's json directory, computed per access so a later AIPASS_TEST_LOG_DIR redirects; empty is absence."""
         name = self.branch_root.name
         test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
         if test_dir:
             return Path(test_dir) / name / f"{name}_json"
         return self.branch_root / f"{name}_json"
 
-    # ---------------------------------------------
-    # Path primitives
-    # ---------------------------------------------
-
     def read_json(self, file_path: Path) -> Optional[Any]:
-        """Read any json document by path.
-
-        Args:
-            file_path: The document to read.
-
-        Returns:
-            The parsed document, or None when it is missing or unreadable.
-            Never raises — a caller that wants the failure loud checks for None.
-        """
+        """Read any json document by path; None when missing or unreadable, never raises."""
         try:
             with open(file_path, "r", encoding="utf-8") as handle:
                 return json.load(handle)
@@ -348,32 +204,10 @@ class JsonHandle:
             return None
 
     def write_json(self, file_path: Path, data: Any, indent: int = 2) -> bool:
-        """Write any json document by path, atomically.
+        """Write any json document by path, atomically; False on any OSError.
 
-        Serialises BEFORE staging: a payload that cannot be serialised is a
-        caller bug, not a write failure, so TypeError and ValueError propagate
-        while an OSError only ever answers False.
-
-        Refuses NaN and Infinity (``allow_nan=False``). Python writes them as
-        the bare tokens ``NaN``/``Infinity``, which are not JSON: the document
-        lands looking fine and every strict parser in the fleet — and every
-        other language — rejects it later, far from the branch that wrote it.
-        Refusing is the same answer the service already gives an unknown
-        json_type, and it surfaces the payload bug in the sweep that wrote it.
-
-        Args:
-            file_path: The document to write.
-            data: The payload.
-            indent: json.dumps indent.
-
-        Returns:
-            True when the document landed, False on any OSError.
-
-        Raises:
-            TypeError: The payload is not serialisable.
-            ValueError: The payload is circular, or holds a NaN or an Infinity
-                (json.dumps raises ValueError for both; the message names
-                which).
+        Serialises before staging, so TypeError/ValueError (a caller bug) propagate. allow_nan=False:
+        NaN/Infinity are not JSON and every strict parser rejects them later, far from the writer.
         """
         file_path = Path(file_path)
 
@@ -395,10 +229,6 @@ class JsonHandle:
             _discard(temp_path)
             return False
 
-    # ---------------------------------------------
-    # Typed documents
-    # ---------------------------------------------
-
     def validate_json_structure(self, data: Any, json_type: str) -> bool:
         """Check a document against the structure its json_type declares."""
         if json_type == "config":
@@ -417,12 +247,7 @@ class JsonHandle:
         return False
 
     def get_json_path(self, module_name: str, json_type: str) -> Path:
-        """Path of a module's typed document.
-
-        Raises:
-            ValueError: json_type is not one of JSON_TYPES. Refused rather than
-                written: a typo'd type used to create a document nothing reads.
-        """
+        """Path of a module's typed document; ValueError on an unknown json_type, never a document nothing reads."""
         if json_type not in JSON_TYPES:
             raise ValueError(f"Unknown json_type '{json_type}' (expected one of {JSON_TYPES})")
 
@@ -431,19 +256,7 @@ class JsonHandle:
     def ensure_json_exists(self, module_name: str, json_type: str) -> bool:
         """Ensure a module's typed document exists and is structurally valid.
 
-        Missing, empty, unreadable or structurally invalid documents are
-        regenerated from the in-code default — with one exception. A "data"
-        document that parses as a dict but lacks a base key is HEALED, not
-        replaced: the absent base keys are added (today's date) and every key
-        it already carries is kept, its own values winning. The data leg is
-        lifetime state that other writers share (rate_tracker keeps its
-        ``files`` there), so regenerating it would wipe state nobody asked to
-        reset — and log_operation runs this before every bump.
-
-        Returns:
-            True once the document is in place; False only if the write could
-            not land, or a data document to be healed could not be written back
-            (it is then left exactly as it was, never replaced).
+        A dict "data" document missing base keys is healed in place, never replaced: other writers share it.
         """
         json_path = self.get_json_path(module_name, json_type)
 
@@ -463,10 +276,7 @@ class JsonHandle:
             try:
                 return self.write_json(json_path, existing)
             except (TypeError, ValueError) as exc:
-                # json.load accepts NaN/Infinity that the writer refuses. Such a
-                # document cannot be written back as-is; destroying the keys it
-                # carries to make it valid is the one thing the heal exists not
-                # to do, so it stays as it was and ensure answers False.
+                # json.load accepts NaN the writer refuses; the heal never destroys keys to write.
                 logger.warning("json_service: cannot heal '%s' without losing its keys: %s", json_path, exc)
                 return False
 
@@ -479,13 +289,7 @@ class JsonHandle:
         return True
 
     def load_json(self, module_name: str, json_type: str) -> Optional[Any]:
-        """Load a module's typed document, creating it if absent.
-
-        Returns:
-            The parsed document. A document still unreadable after ensure ran
-            yields the in-code default rather than None — the caller asked for
-            a document of a known shape and gets one.
-        """
+        """Load a module's typed document, creating it if absent; the in-code default if still unreadable."""
         self.ensure_json_exists(module_name, json_type)
 
         data = self.read_json(self.get_json_path(module_name, json_type))
@@ -496,18 +300,7 @@ class JsonHandle:
         return data
 
     def save_json(self, module_name: str, json_type: str, data: Any) -> bool:
-        """Save a module's typed document.
-
-        Returns:
-            True. The write either lands or raises — it never answers False,
-            which is how a lost document used to look like success.
-
-        Raises:
-            InvalidDocument: data does not match json_type.
-            WriteFailed: the write could not land.
-            TypeError: the payload is not serialisable.
-            ValueError: the payload is circular, or holds a NaN or an Infinity.
-        """
+        """Save a module's typed document: True or raises (InvalidDocument, WriteFailed), never False."""
         json_path = self.get_json_path(module_name, json_type)
 
         if not self.validate_json_structure(data, json_type):
@@ -529,27 +322,9 @@ class JsonHandle:
         data: Optional[Dict[str, Any]] = None,
         module_name: Optional[str] = None,
     ) -> bool:
-        """Append a timestamped entry to a module's operations log.
+        """Append a timestamped entry to a module's operations log, then bump its data document.
 
-        Telemetry, so a write failure answers False instead of raising: this is
-        called from watchdog and display threads where a raising writer is
-        silent half-death. A structurally invalid document is a caller bug and
-        stays loud.
-
-        Once the log entry has landed, the module's data document is bumped
-        (see _bump_data). A failed log never counts, and a failed bump never
-        changes the answer: it is logged and the log's own result stands.
-
-        Args:
-            operation: Operation name.
-            data: Optional payload attached to the entry.
-            module_name: Defaults to the calling module (frame 2).
-
-        Returns:
-            True when the entry landed, False on a write or payload failure.
-
-        Raises:
-            InvalidDocument: the log document does not match its type.
+        Telemetry on watchdog and display threads: a write failure answers False, never raises.
         """
         if module_name is None:
             module_name = _get_caller_module_name()
@@ -581,26 +356,9 @@ class JsonHandle:
         return logged
 
     def _bump_data(self, module_name: str, operation: str) -> None:
-        """Count one more operation in the module's lifetime data document.
+        """Count one more operation in the module's lifetime data document; never raises.
 
-        Sets ``operations_total`` (+1), ``last_operation`` (the name) and, via
-        save_json, ``last_updated``. Read-modify-write, never a fresh dict:
-        every other key is written back as it was read — rate_tracker's
-        ``files``, the old-era ``operations_successful``/``operations_failed``
-        (left alone; the call carries no success signal to count them by). A
-        document that is not a dict starts from the default; a missing or
-        non-integer total (a bool included) restarts at 0 before the +1.
-
-        The count is a read-modify-write exactly like the log trail itself, so
-        under racing writers (threads or processes) it is a LOWER BOUND, not an
-        exact figure — two writers that read the same total both write total+1.
-
-        Never raises: this is telemetry on the monitor's threads, and the log
-        entry it follows has already landed. A failure is logged as a warning.
-
-        Args:
-            module_name: The module whose data document is bumped.
-            operation: The operation name just logged.
+        Read-modify-write keeping every other key; under racing writers the total is a lower bound.
         """
         try:
             document = self.load_json(module_name, "data")
@@ -628,12 +386,7 @@ class JsonHandle:
             )
 
     def _max_log_entries(self, module_name: str) -> int:
-        """The module's declared log cap, or the default.
-
-        The knob is published in every module's config document, so a branch
-        that sets it gets it — the cap used to be a constant while the config
-        advertised a number nothing read.
-        """
+        """The module's declared log cap (config.max_log_entries), or the default."""
         config = self.load_json(module_name, "config")
         if not isinstance(config, dict):
             return DEFAULT_MAX_LOG_ENTRIES

@@ -3,14 +3,10 @@
 # Description: Tests for registry load and save handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
-
-# Covers: load_module_registry (valid file, missing file, corrupt file,
-# missing modules key) and save_module_registry (writes valid JSON,
-# creates directory, round-trip with load, error handling).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(error_handling) — _atomic_write's warning when the temp file cleanup fails, covered by that row
@@ -22,10 +18,6 @@ from unittest.mock import MagicMock
 
 from aipass.prax.apps.handlers.registry import load as load_mod
 from aipass.prax.apps.handlers.registry import save as save_mod
-
-# =============================================
-# HELPERS
-# =============================================
 
 
 def _patch_registry_load(monkeypatch, tmp_path):
@@ -39,7 +31,6 @@ def _patch_registry_load(monkeypatch, tmp_path):
     monkeypatch.setattr(load_mod, "PRAX_JSON_DIR", prax_json_dir)
     monkeypatch.setattr(load_mod, "REGISTRY_FILE", registry_file)
 
-    # Replace stdlib logger with a MagicMock so tests can assert on calls
     mock_logger = MagicMock()
     monkeypatch.setattr(load_mod, "logger", mock_logger)
 
@@ -56,23 +47,12 @@ def _patch_registry_save(monkeypatch, tmp_path):
     monkeypatch.setattr(save_mod, "REGISTRY_FILE", registry_file)
     monkeypatch.setattr(save_mod, "ECOSYSTEM_ROOT", tmp_path / "ecosystem")
 
-    # Replace stdlib logger with a MagicMock so tests can assert on calls
     mock_logger = MagicMock()
     monkeypatch.setattr(save_mod, "logger", mock_logger)
 
 
-# =============================================
-# TESTS: load_last_scan
-# =============================================
-
-
 class TestLoadLastScan:
-    """load_last_scan tells "never scanned" ({}) from "could not read" (None).
-
-    prax, leg 7: an unreadable registry used to answer {}, which status printed
-    as "never — run: drone @prax discover run" over a registry that had been
-    scanned. The pin's proof is its mutant (the old {} put back).
-    """
+    """load_last_scan tells "never scanned" ({}) from "could not read" (None)."""
 
     def test_a_registry_never_scanned_answers_empty(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_registry_load(monkeypatch, tmp_path)
@@ -98,11 +78,6 @@ class TestLoadLastScan:
         assert (form, where) == ("load: failed to read last_scan from '%s': %s", load_mod.REGISTRY_FILE)
 
 
-# =============================================
-# TESTS: load_module_registry
-# =============================================
-
-
 class TestLoadModuleRegistry:
     """Tests for load_module_registry()."""
 
@@ -116,8 +91,7 @@ class TestLoadModuleRegistry:
 
         result = load_mod.load_module_registry()
         assert isinstance(result, dict)
-        # Which dict: the file's "modules" section and nothing else -- the
-        # version and statistics wrappers are not handed to the caller.
+        # Only the "modules" section; the version and statistics wrappers stay behind.
         assert result == modules
 
     def test_empty_dict_when_file_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
@@ -149,8 +123,7 @@ class TestLoadModuleRegistry:
         assert result["flow"]["size"] == 2048
 
     def test_none_on_corrupt_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Corrupt JSON answers None, never the {} of a registry with no modules,
-        and says why in a warning (prax, leg 15: a writer took {} for the truth)."""
+        """Corrupt JSON answers None (never {}, which a writer takes for the truth) and warns."""
         _patch_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text("<<<not json>>>", encoding="utf-8")
 
@@ -191,11 +164,6 @@ class TestLoadModuleRegistry:
         load_mod.json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
             "registry_loaded", {"module_count": 2}
         )
-
-
-# =============================================
-# TESTS: save_module_registry
-# =============================================
 
 
 class TestSaveModuleRegistry:
@@ -280,7 +248,6 @@ class TestSaveModuleRegistry:
         save_mod.save_module_registry({"x": {"p": "q"}})
 
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
-        # Should not raise on valid ISO format, and it carries UTC's offset
         parsed = datetime.fromisoformat(data["timestamp"])
         assert parsed.utcoffset() == timedelta(0)
 
@@ -298,8 +265,6 @@ class TestSaveModuleRegistry:
         """Should return False when the file write fails."""
         _patch_registry_save(monkeypatch, tmp_path)
 
-        # Make PRAX_JSON_DIR point to a path that will fail mkdir
-        # by setting it to a file (not a directory)
         blocker = tmp_path / "blocker_file"
         blocker.write_text("I am a file", encoding="utf-8")
         monkeypatch.setattr(save_mod, "PRAX_JSON_DIR", blocker / "subdir")
@@ -330,14 +295,7 @@ class TestSaveModuleRegistry:
         assert leftovers == []
 
     def test_concurrent_saves_never_produce_torn_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Interleaved writers (temp file + rename) must never corrupt the registry file.
-
-        Regression test for the torn-write bug: a plain open("w") + json.dump
-        truncates immediately on open, so two concurrent writers could
-        interleave and leave trailing garbage after the closing brace
-        (matches the reported 'Extra data: line 21 column 2' error). Atomic
-        rename guarantees every reader sees a complete, valid file.
-        """
+        """Interleaved writers (temp file + rename) must never leave torn JSON in the registry."""
         _patch_registry_save(monkeypatch, tmp_path)
 
         writes = [{f"mod_{i}": {"path": f"p{i}"}} for i in range(20)]
@@ -348,15 +306,8 @@ class TestSaveModuleRegistry:
         for payload in writes:
             result = save_mod.save_module_registry(payload)
             assert result is True
-            # Every single write must leave the file fully parseable - this
-            # is what atomic rename guarantees even under real concurrency.
             data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
             assert data["modules"] == payload
-
-
-# =============================================
-# TESTS: round-trip (save then load)
-# =============================================
 
 
 class TestRegistryRoundTrip:
@@ -364,7 +315,6 @@ class TestRegistryRoundTrip:
 
     def test_round_trip_preserves_data(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Data saved by save_module_registry should be loadable by load_module_registry."""
-        # Import both with the same tmp_path
         _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry(
             {
@@ -373,7 +323,6 @@ class TestRegistryRoundTrip:
             }
         )
 
-        # Now import load pointing at the same directory
         _patch_registry_load(monkeypatch, tmp_path)
 
         result = load_mod.load_module_registry()

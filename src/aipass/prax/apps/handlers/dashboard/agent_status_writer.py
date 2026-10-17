@@ -3,20 +3,14 @@
 # Description: Agent Status Dashboard Write-Through
 # Version: 0.2.0
 # Created: 2026-02-25
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Agent Status Dashboard Write-Through Handler
 
-Pushes the 'agent_status' section to branch dashboards via prax write_section().
-Scans dispatch lock files and /proc to detect active and stale agents, then pushes
-to ALL branch dashboards (agent status is system-wide info).
-
-Data sources:
-  - Dispatch lock files: {branch}/ai_mail.local/.dispatch.lock (JSON: pid, timestamp, branch)
-  - Process validation: /proc/{pid}/cmdline to confirm agent is still alive
-  - Stale threshold: agents running > 120 minutes
+Reads {branch}/ai_mail.local/.dispatch.lock (JSON: pid, timestamp, branch), checks
+/proc/{pid}/cmdline, and pushes one system-wide section to ALL branch dashboards.
 """
 
 import json
@@ -33,21 +27,8 @@ from aipass.prax.apps.handlers.repo_root import find_repo_root
 logger = get_direct_logger()
 
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root, never reading the cwd.
-
-    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
-    this walk, every one ending ``return Path.cwd()`` — @memory reported the
-    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
-    most of the fleet, so a deleted working directory crashed the import, and a
-    registry-less checkout (every clean CI clone) resolved against wherever the
-    shell stood.
-    """
+    """Walk up from this file to find the repo root, never reading the cwd."""
     return find_repo_root(Path(__file__))
 
 
@@ -62,18 +43,8 @@ STALE_THRESHOLD_MINUTES = 120
 PROC_ROOT: Optional[Path] = Path("/proc") if sys.platform == "linux" else None
 
 
-# =============================================================================
-# DATA COLLECTION
-# =============================================================================
-
-
 def _get_all_branches() -> List[Dict[str, Any]]:
-    """
-    Load all branches from AIPASS_REGISTRY.json.
-
-    Returns:
-        List of dicts with 'name' and 'path' keys
-    """
+    """Load all branches from AIPASS_REGISTRY.json."""
     try:
         registry = _get_aipass_registry()
         if not registry.exists():
@@ -83,10 +54,8 @@ def _get_all_branches() -> List[Dict[str, Any]]:
         data = json.loads(registry.read_text(encoding="utf-8"))
         branches = []
         for branch in data.get("branches", []):
-            # Registry rows are repo-relative; an unjoined row resolves against
-            # whatever cwd the process started in — the branch is dropped, or a
-            # look-alike subtree there is taken for it. Same join as refresh.py
-            # and template_pusher.py. External projects register absolute rows.
+            # Rows are repo-relative (external projects register absolute ones); an
+            # unjoined row resolves against the cwd. Same join as refresh.py and template_pusher.py.
             raw_path = Path(branch.get("path", ""))
             branch_path = raw_path if raw_path.is_absolute() else repo_root / raw_path
             if branch_path.exists():
@@ -98,21 +67,8 @@ def _get_all_branches() -> List[Dict[str, Any]]:
 
 
 def _is_pid_alive(pid: int, proc_root: Optional[Path]) -> Optional[bool]:
-    """
-    Check if a process is still running by reading <proc_root>/<pid>/cmdline.
-
-    Args:
-        pid: Process ID to check
-        proc_root: The proc filesystem, PROC_ROOT; None where the platform has none
-
-    Returns:
-        True if the process exists and looks like a claude agent, False if it
-        does not exist, None when nobody could answer: no proc filesystem on
-        this platform, or the read raised. False there filed a live agent as a
-        dead_process; a holder that cannot be checked reads unchecked, never
-        dead (drone's lock_handler ruling of 10-04, applied by devpulse; prax,
-        leg 16).
-    """
+    """Check if a process is still running by reading <proc_root>/<pid>/cmdline."""
+    # None means nobody could check: a PID that cannot be checked is unchecked, never dead.
     if proc_root is None:
         return None
     try:
@@ -127,17 +83,8 @@ def _is_pid_alive(pid: int, proc_root: Optional[Path]) -> Optional[bool]:
 
 
 def _read_lock_file(lock_path: Path) -> Optional[Dict[str, Any]]:
-    """
-    Read a dispatch lock file.
-
-    Args:
-        lock_path: Path to .dispatch.lock file
-
-    Returns:
-        Lock data dict with pid, timestamp, branch; {} when there is no lock;
-        None when a lock exists and cannot be read. {} there hid a dispatch
-        from the dashboard as if no agent held the branch (prax, leg 16).
-    """
+    """Read a dispatch lock file."""
+    # {} is no lock; None is an unreadable lock, which must not hide a dispatch as {} would.
     try:
         if not lock_path.exists():
             return {}
@@ -148,15 +95,7 @@ def _read_lock_file(lock_path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _calculate_runtime_minutes(timestamp_str: str) -> float:
-    """
-    Calculate minutes elapsed since a timestamp.
-
-    Args:
-        timestamp_str: ISO format timestamp string
-
-    Returns:
-        Minutes elapsed, or 0.0 on parse failure
-    """
+    """Calculate minutes elapsed since a timestamp."""
     try:
         started = datetime.fromisoformat(timestamp_str)
         elapsed = datetime.now() - started
@@ -167,18 +106,7 @@ def _calculate_runtime_minutes(timestamp_str: str) -> float:
 
 
 def _scan_active_agents(proc_root: Optional[Path]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """
-    Scan all branches for active dispatch agents.
-
-    Reads .dispatch.lock files, validates PIDs against proc_root, and
-    classifies agents as active or stale based on runtime. An agent whose PID
-    could not be checked is filed with pid_checked False: under active with
-    status unchecked, or under stale as overtime past the threshold, never as
-    dead_process (prax, leg 16).
-
-    Returns:
-        Tuple of (active_agents, stale_agents) — each a list of dicts
-    """
+    """Scan all branches for active dispatch agents."""
     active_agents: List[Dict[str, Any]] = []
     stale_agents: List[Dict[str, Any]] = []
 
@@ -189,7 +117,6 @@ def _scan_active_agents(proc_root: Optional[Path]) -> tuple[List[Dict[str, Any]]
         lock_data = _read_lock_file(lock_path)
 
         if lock_data is None:
-            # A lock is there but unreadable: shown for a look, never hidden
             stale_agents.append({"branch": branch["name"], "status": "unreadable_lock", "pid_checked": False})
             continue
         if not lock_data:
@@ -199,10 +126,8 @@ def _scan_active_agents(proc_root: Optional[Path]) -> tuple[List[Dict[str, Any]]
         timestamp = lock_data.get("timestamp", "")
         runtime_minutes = _calculate_runtime_minutes(timestamp)
 
-        # Validate PID is still alive; None is a PID nobody could check
         alive = _is_pid_alive(pid, proc_root)
         if alive is False:
-            # Stale lock — process died without cleanup
             stale_agents.append(
                 {
                     "branch": branch["name"],
@@ -234,27 +159,9 @@ def _scan_active_agents(proc_root: Optional[Path]) -> tuple[List[Dict[str, Any]]
     return active_agents, stale_agents
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def build_agent_status_section(proc_root: Optional[Path] = PROC_ROOT) -> Dict[str, Any]:
-    """
-    Build the agent_status dashboard section data.
-
-    Scans for active dispatch agents and returns section dict ready for
-    write_section().
-
-    Args:
-        proc_root: Where PIDs are checked, PROC_ROOT (None where the platform
-            has no proc filesystem). A parameter so the tests hand in a proc
-            tree under tmp_path rather than reading this machine's (prax, leg 16).
-
-    Returns:
-        Dict with managed_by, active_agents, agent_count, stale_agents,
-        last_updated
-    """
+    """Build the agent_status dashboard section data."""
+    # proc_root is a parameter so tests hand in a proc tree rather than read this machine's.
     active_agents, stale_agents = _scan_active_agents(proc_root)
 
     return {
@@ -267,30 +174,12 @@ def build_agent_status_section(proc_root: Optional[Path] = PROC_ROOT) -> Dict[st
 
 
 def _get_all_branch_paths() -> List[Path]:
-    """
-    Get paths for all active branches from AIPASS_REGISTRY.json.
-
-    Returns:
-        List of Path objects for all registered branches
-    """
+    """Get paths for all active branches from AIPASS_REGISTRY.json."""
     return [b["path"] for b in _get_all_branches()]
 
 
 def _write_section_to_all_branches(section_name: str, section_data: Dict, branch_paths: List[Path]) -> int:
-    """
-    Write a dashboard section to multiple branches via a single subprocess.
-
-    Uses one subprocess call for all branches to avoid spawning N processes.
-    Pattern from memory/apps/handlers/dashboard_push.py.
-
-    Args:
-        section_name: Dashboard section key (e.g., "agent_status")
-        section_data: Section data dict to write
-        branch_paths: List of branch root directory paths
-
-    Returns:
-        Number of branches successfully updated
-    """
+    """Write a dashboard section to multiple branches via a single subprocess."""
     try:
         script = (
             "import sys, json\n"
@@ -326,19 +215,7 @@ def _write_section_to_all_branches(section_name: str, section_data: Dict, branch
 
 
 def push_agent_status_dashboard() -> bool:
-    """
-    Push the agent_status section to ALL branch dashboards.
-
-    Main entry point. Scans for active/stale dispatch agents and pushes
-    results to every branch dashboard. Agent status is system-wide info
-    so all branches benefit from knowing what's running.
-
-    Uses a single subprocess to call devpulse write_section() for all
-    branches. Dashboard write failures are silent — best-effort operation.
-
-    Returns:
-        True if at least one dashboard was updated, False on total failure
-    """
+    """Push the agent_status section to ALL branch dashboards."""
     try:
         section_data = build_agent_status_section()
         branch_paths = _get_all_branch_paths()
@@ -364,10 +241,6 @@ def push_agent_status_dashboard() -> bool:
         logger.error("Failed to push agent status dashboard: %s", e)
         return False
 
-
-# =============================================================================
-# CLI ENTRY POINT (for testing)
-# =============================================================================
 
 if __name__ == "__main__":
     print("Building agent_status dashboard section...")

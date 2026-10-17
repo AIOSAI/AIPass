@@ -3,17 +3,12 @@
 # Description: Unit tests for the dashboard refresh and section writes
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
 
-# Split out of test_operations.py (2026-10-08), whole classes: the legacy
-# update_section, refresh_all/single_dashboard, get_branch_paths,
-# resolve_branch_path and the dashboard module's update_section and
-# _resolve_branch_path wrappers. The modules under test are bound once at the
-# top; the conftest fixture _dashboard_quiet doubles their logger and json
-# service before every test (prax, leg 12).
+# The conftest fixture _dashboard_quiet doubles the modules' logger and json service before every test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
@@ -28,11 +23,6 @@ from aipass.prax.apps.handlers.dashboard import refresh, status
 from aipass.prax.tests.support_test_operations import _load_dashboard_module, _load_ops
 
 pytestmark = pytest.mark.usefixtures("_dashboard_quiet")
-
-
-# =============================================
-# update_section (operations.py -- legacy interface)
-# =============================================
 
 
 class TestUpdateSectionLegacy:
@@ -57,11 +47,9 @@ class TestUpdateSectionLegacy:
 
         result = ops.update_section(branch_dir, "ai_mail", {"new": 5}, template, mock_status)
         assert result is True
-        # Verify status function was called with sections containing our data
         assert "ai_mail" in status_called_with
         assert status_called_with["ai_mail"]["new"] == 5  # type: ignore[union-attr]
 
-        # Verify the file was written
         data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         assert data["sections"]["ai_mail"]["new"] == 5
         assert data["quick_status"]["action_required"] is True
@@ -71,7 +59,6 @@ class TestUpdateSectionLegacy:
         ops = _load_ops()
         branch_dir = tmp_path / "nosections"
         branch_dir.mkdir()
-        # Pre-populate dashboard without sections key
         (branch_dir / "DASHBOARD.local.json").write_text(
             json.dumps({"branch": "NOSECTIONS", "last_updated": ""}),
             encoding="utf-8",
@@ -92,11 +79,6 @@ class TestUpdateSectionLegacy:
         assert result is True
         data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         assert data["sections"]["flow"]["active_plans"] == 2
-
-
-# =============================================
-# refresh_all_dashboards (refresh.py)
-# =============================================
 
 
 def _load_refresh() -> types.ModuleType:
@@ -179,11 +161,6 @@ class TestRefreshAllDashboards:
         assert result["branches_failed"] == 1
 
 
-# =============================================
-# refresh_single_dashboard (refresh.py)
-# =============================================
-
-
 class TestRefreshSingleDashboard:
     """Tests for refresh_single_dashboard -- refreshes one branch."""
 
@@ -255,11 +232,6 @@ class TestRefreshSingleDashboard:
         assert saved["quick_status"]["summary"] == "3 new emails, 1 opened"
 
 
-# =============================================
-# get_branch_paths (status.py)
-# =============================================
-
-
 def _load_status() -> types.ModuleType:
     """The status module, bound at the top; _dashboard_quiet doubles its edges."""
     return status
@@ -312,11 +284,6 @@ class TestGetBranchPaths:
         result = mod.get_branch_paths()
         assert len(result) == 1
         assert result[0] == tmp_path / "src" / "aipass" / "flow"
-
-
-# =============================================
-# resolve_branch_path (status.py)
-# =============================================
 
 
 class TestResolveBranchPath:
@@ -450,10 +417,6 @@ class TestResolveBranchPath:
             mod.resolve_branch_path("@flow")
 
 
-# =============================================
-# update_section (dashboard.py module wrapper)
-# =============================================
-
 DASHBOARD_MODULE_PATH = "aipass.prax.apps.modules.dashboard"
 
 
@@ -478,11 +441,6 @@ class TestDashboardModuleUpdateSection:
 
         result = mod.update_section(bad_path, "flow", {"active_plans": 1})
         assert result is False
-
-
-# =============================================
-# _resolve_branch_path (dashboard.py wrapper)
-# =============================================
 
 
 class TestResolveBranchPathWrapper:

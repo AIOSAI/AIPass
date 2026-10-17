@@ -3,15 +3,10 @@
 # Description: Tests for stale log sweep in log_audit
 # Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
-
-# Tests for sweep_stale_logs — the 30-day stale log cleanup policy.
-#
-# Verifies: age-based deletion, pattern matching (.log, .jsonl, .1 siblings),
-# directory scanning across system_logs/ and branch logs/.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(error_handling) — _file_age_days answering 0.0 when the stat fails, covered by that row
@@ -59,20 +54,14 @@ def _stub_sweep(monkeypatch):
 def _stood_where_log_audit_looks(module, modules=sys.modules):
     """Fail before the route runs when the stubbed module is not the one log_audit will find.
 
-    _run_sweep imports the watchdog at call time, by name, through sys.modules. A raw
-    pop of that entry in any earlier test would leave the stub on an orphan and send
-    the sweep to the real function, which deletes live logs.
+    _run_sweep resolves the watchdog through sys.modules; an orphaned stub sends it to the real one, which deletes live logs.
     """
     if modules.get(module.__name__) is not module:
         pytest.fail(f"{module.__name__} in sys.modules is not the module the stub stands on")
 
 
 def test_the_guard_fails_when_sys_modules_holds_another_watchdog():
-    """A different object under the watchdog's name stops the test before the route.
-
-    Proven on the test side only, in a modules mapping of its own: no product
-    mutant is run here, because the far side deletes real logs.
-    """
+    """A different object under the watchdog's name stops the test before the route (test side only)."""
     name = lw.__name__
     with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
         _stood_where_log_audit_looks(lw, {name: ModuleType(name)})
@@ -178,13 +167,7 @@ class TestSweepCommand:
     """Test the 'sweep' subcommand routing in handle_command."""
 
     def test_sweep_subcommand_routes(self, monkeypatch, tmp_path):
-        """Verify 'drone @prax log-audit sweep' routes to _run_sweep.
-
-        log_audit is the real module, imported at the top; its console, warning,
-        logger and json_handler are replaced where log_audit binds them. The
-        recorders' calls ARE the output, and they are what this pins — the exact
-        strings _run_sweep emits for the summary the watchdog returns.
-        """
+        """Verify 'drone @prax log-audit sweep' routes to _run_sweep and emits its exact summary strings."""
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
         sweep = _stub_sweep(monkeypatch)
         console, warning, logger, json_handler = MagicMock(), MagicMock(), MagicMock(), MagicMock()

@@ -3,20 +3,11 @@
 # Description: Tests for the commons live feed handler
 # Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/commons_feed.py."""
 
-# Tests for apps/handlers/monitoring/commons_feed.py (DPLAN-0257)
-#
-# Covers:
-# - connect_readonly: mode=ro connection actually refuses writes
-# - initial_cursors / fetch_new_events: only-new-row cursor semantics
-# - fetch_backfill: last-N-events context on start, bounded by cursor
-# - display formatting: format_event, event_room, _join_body
-# - FeedState: record/visible room filtering
-# - _get_commons_db_path: env override
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
@@ -93,11 +84,6 @@ def _seed_post(path, room="general", author="alice", title="Hello", content="wor
     return post_id
 
 
-# =============================================================================
-# connect_readonly — write refusal
-# =============================================================================
-
-
 class TestConnectReadonly:
     """The feed's connection must never be able to write to commons.db."""
 
@@ -135,11 +121,6 @@ class TestConnectReadonly:
         count = verify.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
         verify.close()
         assert count == 1
-
-
-# =============================================================================
-# Cursor logic — only new rows
-# =============================================================================
 
 
 class TestCursorLogic:
@@ -200,11 +181,6 @@ class TestCursorLogic:
         assert new_cursors["reactions"] == 0
 
 
-# =============================================================================
-# Backfill — startup context
-# =============================================================================
-
-
 class TestFetchBackfill:
     """On start the feed shows recent history for context, bounded by cursor + limit."""
 
@@ -221,11 +197,7 @@ class TestFetchBackfill:
         assert [e["title"] for e in events] == [f"Post {i}" for i in range(5, 15)]
 
     def test_backfill_respects_cursor_bound(self, db_path):
-        """Backfill never includes rows that came in after the cursor snapshot.
-
-        Rows inserted after the cursor is taken belong to the live poll, not
-        the startup backfill — including them here would double-emit.
-        """
+        """Backfill never includes rows that came in after the cursor snapshot; the live poll owns them."""
         _seed_post(db_path, title="Old")
         conn = feed.connect_readonly(db_path)
         cursors = feed.initial_cursors(conn)
@@ -244,11 +216,6 @@ class TestFetchBackfill:
         events = feed.fetch_backfill(conn, cursors)
         conn.close()
         assert events == []
-
-
-# =============================================================================
-# Display formatting
-# =============================================================================
 
 
 class TestFormatEvent:
@@ -322,11 +289,6 @@ class TestJoinBody:
         assert feed._join_body("h:", "", " ") == "h:"
 
 
-# =============================================================================
-# FeedState
-# =============================================================================
-
-
 class TestFeedState:
     def test_record_tracks_rooms_agents_and_count(self):
         """record() accumulates distinct rooms, distinct agents, and a running count."""
@@ -338,8 +300,7 @@ class TestFeedState:
         assert state.events_count == 2
 
     def test_visible_true_when_no_filter(self):
-        """With no active room filter, every event is visible: the room the filter
-        test hides ("general") included (prax, leg 7)."""
+        """With no active room filter, every event is visible, "general" included."""
         state = feed.FeedState()
         assert state.visible({"room_name": "dev"}) is True
         assert state.visible({"room_name": "general"}) is True
@@ -350,11 +311,6 @@ class TestFeedState:
         state.room_filter = {"dev"}
         assert state.visible({"room_name": "dev"}) is True
         assert state.visible({"room_name": "general"}) is False
-
-
-# =============================================================================
-# _get_commons_db_path — env override
-# =============================================================================
 
 
 class TestGetCommonsDbPath:

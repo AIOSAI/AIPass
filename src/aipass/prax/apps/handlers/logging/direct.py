@@ -3,30 +3,13 @@
 # Description: Direct Logger (Event Pipeline Bypass)
 # Version: 1.2.0
 # Created: 2026-02-27
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Direct Logger
+"""PRAX Direct Logger
 
-Writes to the same log locations with the same format and rotation as the
-regular system_logger, but WITHOUT triggering the event pipeline.
-
-The regular system_logger flow:
-    caller -> SystemLogger -> setup_individual_logger -> RotatingFileHandler
-    + starts file watchers -> log_watcher detects changes -> MonitoringEvent
-
-The direct logger flow:
-    caller -> DirectLogger -> RotatingFileHandler
-    (no watchers, no triggers, no event queue)
-
-Use this ONLY for infrastructure handlers that would cause recursion:
-    - log_watcher.py (watches the same log files it would write to)
-    - error_registry.py (called by log_watcher on every error)
-    - log_streamer.py (tails system_logs/ for Telegram streaming)
-    - base_bot.py (owns log_streamer, writes to tailed directory)
-
-Everyone else should use the regular system_logger.
+system_logger's files, format and rotation without the event pipeline, for handlers that would
+recurse through it (log_watcher, error_registry, log_streamer, base_bot). Reference: docs/logging_api.md.
 """
 
 import inspect
@@ -46,10 +29,7 @@ from aipass.prax.apps.handlers.config.load import (
 from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
 from aipass.prax.apps.handlers.json import json_handler
 
-# Use original stdlib getLogger (not the prax-overridden version).
-# This is intentional: direct.py creates raw stdlib loggers for
-# RotatingFileHandler management. Using prax logger would cause
-# recursion since direct.py IS the pipeline-bypass mechanism.
+# The stdlib getLogger, not prax's override: the prax logger would recurse into this bypass.
 from aipass.prax.apps.handlers.logging.override import _original_getLogger as _stdlib_getLogger
 
 logger = logging.getLogger(__name__)
@@ -66,20 +46,13 @@ class RotatingFileHandler(_BaseRotatingFileHandler):
             logger.warning("Log rotation skipped (file locked): %s", exc)
 
 
-# Cache for direct loggers - keyed by "branch_module"
 _direct_loggers: Dict[str, logging.Logger] = {}
 
 
 def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
     """Stack introspection for direct logger callers.
 
-    Unlike the regular introspection (which skips ALL prax handler frames),
-    this only skips frames from this file and the public API (logger.py).
-    This is necessary because the direct logger IS designed for prax handlers.
-
-    Returns:
-        Tuple of (module_name, branch_path) where branch_path may be None.
-    """
+    Skips only this file and logger.py, not every prax handler frame: prax handlers are its callers."""
     frame = inspect.currentframe()
     try:
         current = frame
@@ -92,7 +65,6 @@ def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
             path = current.f_globals.get("__file__", "")
             if not path:
                 continue
-            # Only skip our own internal frames
             if "/logging/direct.py" in path or "/modules/logger.py" in path:
                 continue
             module_name = Path(path).stem
@@ -106,9 +78,7 @@ def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
 def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[str, Any]) -> logging.Handler:
     """Open one tier's file. An unwritable log home is a NullHandler, never a raise.
 
-    The first line of a new direct logger opens these files, so a raise here lands in
-    whatever the caller was doing (FPLAN-0642 container proof, an `aipass install` crash).
-    """
+    The first line a direct logger writes opens these files; a raise would land in the caller."""
     try:
         return RotatingFileHandler(
             resolve_dir() / filename,
@@ -122,22 +92,8 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[s
 
 
 def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optional[str]) -> logging.Logger:
-    """Create a standalone logger with dual RotatingFileHandlers.
-
-    Same dual-logging setup as setup_individual_logger but with NO
-    connection to the event pipeline. Uses logging.Logger internally
-    only for RotatingFileHandler management - no root logger propagation.
-
-    Args:
-        module_name: Name of the calling module (e.g., 'log_watcher')
-        branch_name: Short branch name (e.g., 'prax', 'trigger', 'api')
-        branch_path: Module/branch name (e.g., 'prax') or None
-
-    Returns:
-        Configured logger with dual file handlers and no propagation.
-    """
+    """Create a standalone logger with dual RotatingFileHandlers and no root propagation."""
     logger_key = f"direct_{branch_name}_{module_name}"
-    # _stdlib_getLogger: raw stdlib logger for file handler management (no prax pipeline)
     logger = _stdlib_getLogger(logger_key)
     logger.handlers.clear()
     logger.propagate = False  # Critical: no root logger propagation
@@ -145,22 +101,18 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
     config = load_log_config()
     formatter = logging.Formatter(config["log_format"], config["date_format"])
 
-    # Same per-tier level model as setup_individual_logger — DirectLogger has
-    # carried a debug() since it was written, but the logger sat at INFO, so
-    # every call to it was discarded before reaching a handler.
+    # The lower tier level, as setup_individual_logger does, or debug() never reaches a handler.
     system_level = resolve_log_level(config["system_logs"].get("log_level"))
     local_level = resolve_log_level(config["local_logs"].get("log_level"))
     logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
     target = branch_name if branch_path else "prax"
 
-    # Handler 1: System-wide log (central aggregation)
     sys_handler = _tier_handler(get_system_logs_dir, f"{target}_{module_name}.log", config["system_logs"])
     sys_handler.setFormatter(formatter)
     sys_handler.setLevel(system_level)
     logger.addHandler(sys_handler)
 
-    # Handler 2: Module-local log (local debugging)
     local_handler = _tier_handler(lambda: get_module_logs_dir(target), f"{module_name}.log", config["local_logs"])
     local_handler.setFormatter(formatter)
     local_handler.setLevel(local_level)
@@ -170,37 +122,18 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
 
 
 def _get_or_create_logger(module_name: str, branch_path: Optional[str]) -> logging.Logger:
-    """Get cached logger or create a new one.
-
-    Args:
-        module_name: Name of the calling module.
-        branch_path: Full branch path or None.
-
-    Returns:
-        Cached or newly created direct logger.
-    """
+    """Get cached logger or create a new one."""
     branch_name = Path(branch_path).name if branch_path else "unknown"
     key = f"{branch_name}_{module_name}"
     if key not in _direct_loggers:
         _direct_loggers[key] = _create_direct_logger(module_name, branch_name, branch_path)
-        # Recorded at the first log line, when the file is opened, never at
-        # get_direct_logger(), which runs at import (DPLAN-0404, prax).
+        # Recorded when the file opens, never in get_direct_logger(), which runs at import.
         json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
     return _direct_loggers[key]
 
 
 class DirectLogger:
-    """Logger that bypasses the event pipeline.
-
-    Writes to the same locations with the same format and rotation
-    as the regular system_logger. Module and branch are resolved
-    once at creation time via stack introspection.
-
-    Usage:
-        from aipass.prax.apps.modules.logger import get_direct_logger
-        direct_logger = get_direct_logger()
-        direct_logger.info("Safe to log from infrastructure handlers")
-    """
+    """Logger that bypasses the event pipeline; module and branch resolve once at creation."""
 
     def __init__(self, module_name: str, branch_path: Optional[str]):
         self._module_name = module_name
@@ -208,11 +141,7 @@ class DirectLogger:
         self._logger: Optional[logging.Logger] = None
 
     def _ensure_logger(self) -> logging.Logger:
-        """Lazily create the underlying logger on first use.
-
-        Returns:
-            The cached direct logger instance.
-        """
+        """Lazily create the underlying logger on first use."""
         if self._logger is None:
             self._logger = _get_or_create_logger(self._module_name, self._branch_path)
         return self._logger
@@ -237,31 +166,13 @@ class DirectLogger:
 def get_direct_logger() -> DirectLogger:
     """Get a DirectLogger bound to the calling module.
 
-    Resolves module name and branch path at creation time via
-    stack introspection. The returned logger can be stored as a
-    module-level variable and reused.
-
-    Returns:
-        DirectLogger instance bound to the caller's module/branch.
-
-    Writes nothing: most callers run it at module level, so a json operation
-    logged here was two writes per importing module, 58 for one import of the
-    dashboard module (DPLAN-0404, prax).
-    """
+    Writes nothing: most callers run it at module level, at import."""
     module_name, branch_path = _get_direct_caller_info()
     return DirectLogger(module_name, branch_path)
 
 
 def direct_log(level: str, message: str) -> None:
-    """Log a single message directly without event pipeline.
-
-    Resolves the calling module automatically. For repeated use,
-    prefer get_direct_logger() to avoid repeated stack walks.
-
-    Args:
-        level: Log level string ('info', 'warning', 'error', 'debug')
-        message: The log message
-    """
+    """Log a single message directly without event pipeline; get_direct_logger() avoids repeated stack walks."""
     module_name, branch_path = _get_direct_caller_info()
     logger = _get_or_create_logger(module_name, branch_path)
     log_fn = getattr(logger, level.lower(), logger.info)

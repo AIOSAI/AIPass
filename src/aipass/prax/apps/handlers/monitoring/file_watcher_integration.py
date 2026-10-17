@@ -3,33 +3,12 @@
 # Description: File Watcher Integration
 # Version: 0.1.1
 # Created: 2025-11-23
-# Modified: 2026-08-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-File Watcher Integration Handler
+"""File Watcher Integration Handler
 
-Connects the file watcher (apps/handlers/watcher/monitor.py) to the
-monitoring event queue (event_queue.py).
-
-Flow:
-1. Load branches from AIPASS_REGISTRY.json
-2. Set up BranchFileHandler for each branch
-3. Start watchdog observers
-4. File events -> MonitoringEvent -> MonitoringQueue
-5. Include branch attribution in all events
-
-Thread Safety:
-- Designed to run in monitor.py's file watcher thread
-- Uses MonitoringQueue's thread-safe enqueue
-- Watchdog observers run in their own threads
-
-Linux Limitations:
-- inotify has limits on watched files/directories
-- Watching 18+ branches recursively may exceed system limits
-- To increase: sudo sysctl fs.inotify.max_user_watches=524288
-- Or filter branches to watch only active ones
-"""
+Reference: docs/monitor.md. inotify limits: sudo sysctl fs.inotify.max_user_watches=524288."""
 
 import json
 import logging
@@ -42,12 +21,7 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
-# =============================================================================
-# IMPORTS - File watcher and event queue
-# =============================================================================
-
 try:
-    # Import file watcher handler
     from aipass.prax.apps.handlers.watcher.monitor import (
         start_monitoring,
         stop_monitoring,
@@ -69,34 +43,14 @@ except ImportError as e:
     global_queue = None  # type: ignore[assignment]
 
 
-# =============================================================================
-# AIPASS REGISTRY LOADER
-# =============================================================================
-
-
 def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[str, Path]]:
-    """
-    Load branch paths from AIPASS_REGISTRY.json
-
-    Args:
-        branch_filter: Optional list of branch names to watch (e.g., ['PRAX', 'CLI'])
-                      If None, loads all branches from registry
-
-    Returns:
-        List of (branch_name, path) tuples
-        Empty list if registry not found or error
-    """
+    """Load branch paths from AIPASS_REGISTRY.json; [] when absent or unreadable"""
     try:
         from aipass.prax.apps.handlers.config.load import _find_repo_root
 
         registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-        # Opened, not checked first. exists() answers about a moment that is
-        # already over: between the check and the open the registry can be
-        # replaced (spawn rewrites it atomically, so there IS a window where the
-        # old inode is gone) or vanish, and the reward for asking is a second
-        # syscall plus a FileNotFoundError from the line below anyway. The open
-        # is the check.
+        # Opened, not checked first: spawn replaces the registry atomically, so exists() races.
         try:
             with open(registry_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -115,11 +69,9 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
             )
             return []
 
-        # Normalize filter to uppercase
         if branch_filter:
             branch_filter = [b.upper() for b in branch_filter]
 
-        # Extract (name, path) tuples
         branch_paths = []
         for branch in branches:
             name = branch.get("name", "").upper()
@@ -132,7 +84,6 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
                 )
                 continue
 
-            # Apply filter if provided
             if branch_filter and name not in branch_filter:
                 continue
 
@@ -165,33 +116,15 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
         return []
 
 
-# =============================================================================
-# EVENT CALLBACK - File events to MonitoringQueue
-# =============================================================================
-
-
 def file_event_callback(branch_name: str, event_type: str, file_path: str):
-    """
-    Callback for file system events from BranchFileHandler
-
-    Converts file events to MonitoringEvent and enqueues to global queue.
-
-    Args:
-        branch_name: Name of branch where event occurred
-        event_type: Event type ('CREATED', 'MODIFIED', 'DELETED', 'MOVED')
-        file_path: Path to file (or "src -> dest" for MOVED)
-    """
+    """Callback for file system events from BranchFileHandler: enqueue a MonitoringEvent"""
     try:
-        # Map event type to action
         action_map = {"CREATED": "created", "MODIFIED": "modified", "DELETED": "deleted", "MOVED": "moved"}
         action = action_map.get(event_type, event_type.lower())
 
-        # Determine priority based on event type
-        # Deleted/Created are higher priority than modified
         priority_map = {"deleted": 2, "created": 2, "moved": 2, "modified": 3}
         priority = priority_map.get(action, 3)
 
-        # Create monitoring event
         event = MonitoringEvent(  # type: ignore[misc]
             priority=priority,
             timestamp=datetime.now(),
@@ -202,7 +135,6 @@ def file_event_callback(branch_name: str, event_type: str, file_path: str):
             level="info",
         )
 
-        # Enqueue to global queue (thread-safe)
         success = global_queue.enqueue(event)  # type: ignore[union-attr]
 
         if not success:
@@ -221,29 +153,11 @@ def file_event_callback(branch_name: str, event_type: str, file_path: str):
         )
 
 
-# =============================================================================
-# FILE WATCHER MANAGER
-# =============================================================================
-
-
 class FileWatcherManager:
-    """
-    Manages file watcher lifecycle and observer threads
-
-    Responsibilities:
-    - Load branches from registry
-    - Start/stop watchdog observers
-    - Connect file events to monitoring queue
-    """
+    """Manages file watcher lifecycle and observer threads"""
 
     def __init__(self, queue: Any = None, branch_filter: List[str] | None = None):
-        """
-        Initialize file watcher manager
-
-        Args:
-            queue: MonitoringQueue to use (defaults to global_queue)
-            branch_filter: Optional list of branch names to watch (e.g., ['PRAX', 'CLI'])
-        """
+        """Initialize file watcher manager; queue defaults to global_queue"""
         self.queue = queue or global_queue
         self.observer: Any = None
         self.branch_paths: List[Tuple[str, Path]] = []
@@ -251,12 +165,7 @@ class FileWatcherManager:
         self.running = False
 
     def start(self) -> bool:
-        """
-        Start file watching for all branches (or filtered branches)
-
-        Returns:
-            True if started successfully, False otherwise
-        """
+        """Start file watching for all branches (or filtered branches)"""
         if not WATCHDOG_AVAILABLE:
             logger.error(
                 "[file_watcher] The live monitor cannot watch files — the watchdog package is not "
@@ -271,7 +180,6 @@ class FileWatcherManager:
             )
             return True
 
-        # Load branch paths from registry
         self.branch_paths = load_branch_paths(self.branch_filter)
 
         if not self.branch_paths:
@@ -282,7 +190,6 @@ class FileWatcherManager:
             )
             return False
 
-        # Start monitoring with callback
         logger.info(f"Starting file watcher for {len(self.branch_paths)} branches")
         self.observer = start_monitoring(self.branch_paths, file_event_callback)  # type: ignore[misc]
 
@@ -325,21 +232,11 @@ class FileWatcherManager:
         }
 
 
-# =============================================================================
-# MODULE-LEVEL API
-# =============================================================================
-
-# Global file watcher instance
 _file_watcher: Optional[FileWatcherManager] = None
 
 
 def get_file_watcher() -> FileWatcherManager:
-    """
-    Get singleton file watcher instance
-
-    Returns:
-        FileWatcherManager instance
-    """
+    """Get singleton file watcher instance"""
     global _file_watcher
     if _file_watcher is None:
         _file_watcher = FileWatcherManager()
@@ -347,12 +244,7 @@ def get_file_watcher() -> FileWatcherManager:
 
 
 def start_file_watcher() -> bool:
-    """
-    Start file watching
-
-    Returns:
-        True if started successfully
-    """
+    """Start file watching"""
     return get_file_watcher().start()
 
 
@@ -371,21 +263,15 @@ def get_file_watcher_stats() -> dict:
     return get_file_watcher().get_stats()
 
 
-# =============================================================================
-# STANDALONE TEST
-# =============================================================================
-
 if __name__ == "__main__":
     import time
 
-    # Set up basic logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     print("File Watcher Integration Test")
     print("=" * 60)
     print()
 
-    # Test 1: Load branch paths
     print("Test 1: Loading branch paths from registry")
     paths = load_branch_paths()
     print(f"Found {len(paths)} branches:")
@@ -395,7 +281,6 @@ if __name__ == "__main__":
         print(f"  ... and {len(paths) - 5} more")
     print()
 
-    # Test 2: Start file watcher (LIMITED to PRAX only to avoid inotify limits)
     print("Test 2: Starting file watcher (PRAX branch only)")
     watcher = FileWatcherManager(branch_filter=["PRAX"])
 
@@ -403,14 +288,12 @@ if __name__ == "__main__":
         print("File watcher started successfully")
         print()
 
-        # Show stats
         stats = watcher.get_stats()
         print("Watcher stats:")
         for key, value in stats.items():
             print(f"  {key}: {value}")
         print()
 
-        # Monitor for a bit
         print("Monitoring for 10 seconds... (modify a file to test)")
         print("Watching queue for events...")
         print()
@@ -428,7 +311,6 @@ if __name__ == "__main__":
         print(f"Captured {event_count} events in 10 seconds")
         print()
 
-        # Stop watcher
         print("Test 3: Stopping file watcher")
         watcher.stop()
         print("File watcher stopped")
