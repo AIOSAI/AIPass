@@ -23,9 +23,10 @@ AIPass is an operating system for AI agents. Agents live in it as citizens. Each
 
 BAUD is its face: a real UI, built by AIPass agents for AIPass, that presents the same functions to a human on a phone. AIPass is what everything runs on. BAUD is how you look at it.
 
-![BAUD on a phone](assets/baud-phone.png)
-
-*BAUD on a phone: the fleet across the top, the devpulse room below with its live session, served from your own machine.*
+<p align="center">
+  <img src="assets/baud-phone.png" alt="BAUD on a phone" width="340" />
+</p>
+<p align="center"><em>BAUD on a phone: the fleet across the top, the devpulse room below with its live session, served from your own machine.</em></p>
 
 ## The Problem
 
@@ -86,9 +87,10 @@ drone @ai_mail dispatch @agent "Subject" "Body"  # Send a task and wake an agent
 drone @seedgo audit aipass                       # Run the standards checks
 ```
 
-![The devpulse card in BAUD](assets/baud-agent.png)
-
-*The same agent seen from BAUD: what it is doing right now, its mail, plans and todos, and the doors into its files, shell, memory and passport.*
+<p align="center">
+  <img src="assets/baud-agent.png" alt="The devpulse card in BAUD" width="340" />
+</p>
+<p align="center"><em>The same agent seen from BAUD: what it is doing right now, its mail, plans and todos, and the doors into its files, shell, memory and passport.</em></p>
 
 **Want the face? BAUD:** its [README](projects/baud/README.md) covers what it installs, phone pairing, and security.
 
