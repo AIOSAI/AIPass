@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -27,19 +27,11 @@ from aipass.trigger.apps.modules.core import Trigger as ReimportedTrigger
 wire_the_real_handlers = registry.setup_handlers
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _off_the_live_bus(monkeypatch):
     """Keep the real core module off every live edge it touches.
 
-    setup_handlers is the wiring pass that would register the live handlers
-    (trigger_json writes, real mail); core reads it from the registry module at
-    call time, so it is replaced at that home. core's logger and json_handler
-    are replaced where core holds them.
+    core reads setup_handlers from the registry module at call time, so it is replaced there.
     """
     assert sys.modules[registry.__name__] is registry, "registry is not the module core will import"
     monkeypatch.setattr(registry, "setup_handlers", MagicMock())
@@ -49,13 +41,9 @@ def _off_the_live_bus(monkeypatch):
 
 @pytest.fixture()
 def trigger_cls(monkeypatch):
-    """Return the real Trigger class with its class-level state reset.
-
-    Resets all class-level state so tests are fully isolated.
-    """
+    """Return the real Trigger class with its class-level state reset."""
     Trigger = core.Trigger
 
-    # Reset mutable class state between tests
     monkeypatch.setattr(Trigger, "_handlers", {})
     monkeypatch.setattr(Trigger, "_history", [])
     monkeypatch.setattr(Trigger, "_initialized", False)
@@ -67,11 +55,6 @@ def trigger_cls(monkeypatch):
     monkeypatch.setattr(Trigger, "_disabled_handlers", set())
     monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
-
-
-# ---------------------------------------------------------------------------
-# Tests -- on() registration
-# ---------------------------------------------------------------------------
 
 
 def test_on_registers_handler(trigger_cls):
@@ -95,16 +78,8 @@ def test_on_multiple_events(trigger_cls):
     assert h2 in trigger_cls._handlers["test"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- fire()
-# ---------------------------------------------------------------------------
-
-
 def test_fire_calls_registered_handler(trigger_cls):
-    """fire() invokes every handler registered for that event.
-
-    Mutant run: fire() dropping its fire_event callback reddens this.
-    """
+    """fire() invokes every handler registered for that event."""
     handler = MagicMock()
     trigger_cls.on("deploy", handler)
 
@@ -146,18 +121,13 @@ def test_fire_injects_fire_event_callback(trigger_cls):
 
     assert "fire_event" in received_kwargs
     assert callable(received_kwargs["fire_event"])
-    # Verify the callback resolves to Trigger.fire by checking its __name__
-    # (bound classmethod creates a new wrapper each access, so identity
-    # comparison does not work; qualname is stable)
+    # A bound classmethod is a new wrapper on each access; qualname is stable, identity is not.
     callback = received_kwargs["fire_event"]
     assert getattr(callback, "__qualname__", "") == "Trigger.fire"
 
 
 def test_fire_multiple_handlers_same_event(trigger_cls):
-    """fire() calls every handler registered for the same event.
-
-    Mutant run: fire() dropping its fire_event callback reddens this.
-    """
+    """fire() calls every handler registered for the same event."""
     h1 = MagicMock()
     h2 = MagicMock()
     h3 = MagicMock()
@@ -191,11 +161,6 @@ def test_fire_handler_exception_does_not_block_others(trigger_cls):
     assert call_order == ["h1", "h2"], "Both handlers must be called despite h1 raising"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- off() unregistration
-# ---------------------------------------------------------------------------
-
-
 def test_off_removes_handler(trigger_cls):
     """off() removes a previously registered handler so it no longer fires."""
     handler = MagicMock()
@@ -222,10 +187,8 @@ def test_off_unregistered_handler_on_existing_event(trigger_cls):
     h2 = MagicMock()
     trigger_cls.on("deploy", h1)
 
-    # h2 was never registered for "deploy"
     trigger_cls.off("deploy", h2)
 
-    # h1 should still be there
     assert h1 in trigger_cls._handlers["deploy"]
 
 
@@ -241,11 +204,6 @@ def test_off_only_removes_target_handler(trigger_cls):
     trigger_cls.fire("build")
     h1.assert_not_called()
     h2.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Tests -- status()
-# ---------------------------------------------------------------------------
 
 
 def test_status_empty(trigger_cls):
@@ -268,13 +226,7 @@ def test_status_counts_handlers(trigger_cls):
 
 
 def test_status_returns_a_snapshot_not_the_live_registry(trigger_cls):
-    """status() hands back counts in a fresh dict — writing to it cannot reach the bus.
-
-    This asserted isinstance(result, dict) and nothing else, which a bare
-    `return cls._handlers` satisfies just as well: right type, and the caller
-    left holding the bus's own mutable state. The comprehension in status() is
-    what makes the answer a snapshot, and that is the part worth pinning.
-    """
+    """status() hands back counts in a fresh dict — writing to it cannot reach the bus."""
     trigger_cls.on("x", MagicMock())
 
     result = trigger_cls.status()
@@ -285,20 +237,8 @@ def test_status_returns_a_snapshot_not_the_live_registry(trigger_cls):
     assert trigger_cls.status() == {"x": 1}
 
 
-# ---------------------------------------------------------------------------
-# Tests -- edge cases
-# ---------------------------------------------------------------------------
-
-
 def test_duplicate_handler_registration(trigger_cls):
-    """on() with the same handler twice registers it ONCE — one fire, one call.
-
-    This test used to assert 2, pinning the double-registration defect as if it
-    were a feature. It is the reason the defect survived: any correct fix looked
-    like a regression. The invariant a bus owes its callers is that a handler
-    registered for an event runs once per fire, no matter how many times the
-    wiring pass ran.
-    """
+    """on() with the same handler twice registers it ONCE — one fire, one call."""
     call_count = 0
 
     def counting_handler(**kwargs):
@@ -315,11 +255,7 @@ def test_duplicate_handler_registration(trigger_cls):
 
 
 def test_off_removes_a_handler_registered_twice(trigger_cls):
-    """One off() is enough, because one on() is all that ever landed.
-
-    Under the old append-blindly behaviour a caller had to call off() as many
-    times as the wiring pass had run, which nothing tracked.
-    """
+    """One off() is enough, because one on() is all that ever landed."""
     call_count = 0
 
     def counting_handler(**kwargs):
@@ -338,11 +274,8 @@ def test_off_removes_a_handler_registered_twice(trigger_cls):
 def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
     """The real-world path: setup_handlers() explicitly, then the lazy re-run.
 
-    setup_handlers() does not set _initialized, so the next fire() calls
-    _ensure_initialized() and wires everything a second time. Every handler in
-    that pass is a module-level function — the same object both times — so the
-    bus saw one event as two. Downstream that defeats medic gate 3, which needs
-    count >= 2 to dispatch: a single occurrence counted twice walks the gate.
+    setup_handlers() leaves _initialized False, so the next fire() wires the same functions again;
+    one event counted twice walks medic gate 3, which dispatches on count >= 2.
     """
     calls = []
 
@@ -364,10 +297,8 @@ def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
 def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monkeypatch, tmp_path, mock_infrastructure):
     """cli's header fire runs nothing in trigger and writes no operation line.
 
-    The real setup_handlers wires the bus (an isolated Trigger state). It also
-    hands the live mail adapter to two handler modules; those names are set
-    through monkeypatch first, so teardown takes the adapter back out.
-    Red first 2026-09-29: the retired handler ran and logged 'cli_event'.
+    The real setup_handlers hands the live mail adapter to two handler modules;
+    those names are monkeypatched first so teardown takes the adapter back out.
     """
     for handler_module in (core, error_detected, runaway_handler):
         assert sys.modules[handler_module.__name__] is handler_module, "not the module setup_handlers imports"
@@ -401,7 +332,6 @@ def test_deferred_queue_for_nested_fire(trigger_cls):
 
     def handler_a(**kwargs):
         order.append("a_start")
-        # This fire happens while _firing is True, so it gets deferred
         trigger_cls.fire("event_b")
         order.append("a_end")
 
@@ -413,7 +343,6 @@ def test_deferred_queue_for_nested_fire(trigger_cls):
 
     trigger_cls.fire("event_a")
 
-    # handler_a runs fully first, then deferred event_b fires handler_b
     assert order == ["a_start", "a_end", "b"]
 
 
@@ -457,11 +386,6 @@ def test_fire_only_triggers_matching_event(trigger_cls):
     h_test.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- contract gaps
-# ---------------------------------------------------------------------------
-
-
 def test_fire_none_event_name(trigger_cls):
     """fire(None) handles None event gracefully -- no handlers match, none run."""
     from typing import Any
@@ -494,13 +418,8 @@ def test_on_none_handler(trigger_cls):
 def test_fire_returns_execution_summary(trigger_cls):
     """fire() reports what it actually did.
 
-    Was `test_fire_return_type_is_none`, which pinned an implementation detail
-    rather than an invariant. The bus isolates handler failures BY DESIGN — one
-    handler raising must never break the others or the caller — but isolation is
-    not the same as silence: a caller (above all the CLI) has to be able to tell
-    "ran fine" from "every handler blew up" and from "nothing was listening".
-    Found live in the APLAN-0008 audit: firing an event with the wrong kwargs
-    crashed the handler and still printed a green `Fired event:`.
+    Handler failures are isolated, not silent: a caller (above all the CLI) must tell
+    "ran fine" from "every handler blew up" from "nothing was listening".
     """
     handler = MagicMock()
     trigger_cls.on("deploy", handler)
@@ -565,18 +484,12 @@ def test_fire_event_kwarg_always_overwritten(trigger_cls):
 
     trigger_cls.on("event", spy)
 
-    # Caller tries to inject a custom fire_event
     trigger_cls.fire("event", fire_event="custom_value")
 
     callback = received_kwargs["fire_event"]
     assert callback != "custom_value"
     assert callable(callback)
     assert getattr(callback, "__qualname__", "") == "Trigger.fire"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- per-(handler, branch) auto-disable
-# ---------------------------------------------------------------------------
 
 
 def test_handler_disabled_after_threshold_failures(trigger_cls):
@@ -587,10 +500,8 @@ def test_handler_disabled_after_threshold_failures(trigger_cls):
     for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
         trigger_cls.fire("error_detected", branch="DRONE")
 
-    # Handler should be disabled for DRONE now
     assert (fail_handler, "DRONE") in trigger_cls._disabled_handlers
 
-    # Fire again -- handler should NOT be called beyond the threshold invocations
     fail_handler.reset_mock()
     trigger_cls.fire("error_detected", branch="DRONE")
     fail_handler.assert_not_called()
@@ -609,13 +520,11 @@ def test_handler_disabled_for_one_branch_still_fires_for_another(trigger_cls):
 
     trigger_cls.on("error_detected", flaky_handler)
 
-    # Fail 5 times from DRONE to trigger auto-disable
     for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
         trigger_cls.fire("error_detected", branch="DRONE")
 
     assert (flaky_handler, "DRONE") in trigger_cls._disabled_handlers
 
-    # Fire from a different branch -- handler should still execute
     call_count = 0
     trigger_cls.fire("error_detected", branch="MEMORY")
 
@@ -636,13 +545,11 @@ def test_handler_failure_count_resets_on_success(trigger_cls):
 
     trigger_cls.on("check", sometimes_fails)
 
-    # Fail 3 times
     for _ in range(3):
         trigger_cls.fire("check", branch="API")
 
     assert trigger_cls._handler_failures.get((sometimes_fails, "API")) == 3
 
-    # Succeed once -- counter should reset
     trigger_cls.fire("check", branch="API")
     assert (sometimes_fails, "API") not in trigger_cls._handler_failures
 
@@ -662,25 +569,17 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
     fail_handler = MagicMock(side_effect=RuntimeError("boom"))
     trigger_cls.on("error_detected", fail_handler)
 
-    # Fail 3 times from DRONE
     for _ in range(3):
         trigger_cls.fire("error_detected", branch="DRONE")
 
-    # Fail 2 times from MEMORY
     for _ in range(2):
         trigger_cls.fire("error_detected", branch="MEMORY")
 
     assert trigger_cls._handler_failures[(fail_handler, "DRONE")] == 3
     assert trigger_cls._handler_failures[(fail_handler, "MEMORY")] == 2
 
-    # Neither should be disabled yet (threshold is 5)
     assert (fail_handler, "DRONE") not in trigger_cls._disabled_handlers
     assert (fail_handler, "MEMORY") not in trigger_cls._disabled_handlers
-
-
-# ---------------------------------------------------------------------------
-# Tests -- CLI `fire key=value` typing
-# ---------------------------------------------------------------------------
 
 
 def _fire_value(trigger_cls, monkeypatch, token):
@@ -713,13 +612,8 @@ def _fire_value(trigger_cls, monkeypatch, token):
 def test_fire_never_mangles_a_token_it_cannot_round_trip(trigger_cls, monkeypatch, token):
     """A value is only typed when the numeric form is byte-identical.
 
-    Identity tokens travelling through `fire key=value` are strings that may
-    happen to be all digits: an 8-char error_hash is all-digit 2.3% of the
-    time, and handle_error_detected annotates fingerprint/error_hash/
-    registry_id as str. Coercing "00123456" to int 123456 both breaks the type
-    contract and silently deletes a character from the user's token.
-    Reached through `fire key=value`. Mutant run: dropping the round-trip guard
-    in _coerce_value (plain int()/float()) reddens this.
+    Identity tokens (fingerprint, error_hash, registry_id) are str and may be all digits;
+    coercing "00123456" to 123456 breaks that type and deletes a character.
     """
     result = _fire_value(trigger_cls, monkeypatch, token)
     if result != token:
@@ -733,20 +627,14 @@ def test_fire_never_mangles_a_token_it_cannot_round_trip(trigger_cls, monkeypatc
     [("2", 2), ("0", 0), ("-7", -7), ("1.5", 1.5), ("-0.25", -0.25)],
 )
 def test_fire_still_types_lossless_numbers(trigger_cls, monkeypatch, token, expected):
-    """The guard must not over-correct: count=2 has to arrive as an int.
-
-    Mutant run: _coerce_value returning every value as a string reddens this.
-    """
+    """The guard must not over-correct: count=2 has to arrive as an int."""
     result = _fire_value(trigger_cls, monkeypatch, token)
     assert result == expected
     assert isinstance(result, type(expected))
 
 
 def test_fire_leaves_plain_strings_alone(trigger_cls, monkeypatch):
-    """Non-numeric values are untouched, as before.
-
-    Mutant run: _coerce_value upper-casing a string it cannot type reddens this.
-    """
+    """Non-numeric values are untouched."""
     tokens = ["api", "a1b2c3d4"]
     assert [_fire_value(trigger_cls, monkeypatch, token) for token in tokens] == tokens
 
@@ -765,18 +653,8 @@ def test_fire_cli_delivers_all_digit_identity_token_unmangled(trigger_cls):
     assert received["count"] == 2
 
 
-# ---------------------------------------------------------------------------
-# Tests -- help_flag_safety canary (a help flag ANYWHERE explains, never runs)
-# ---------------------------------------------------------------------------
-
-
 def test_help_flag_after_the_event_name_does_not_fire(trigger_cls, monkeypatch):
-    """`fire <event> --help` must describe the command, never fire the event.
-
-    The old gate read args[0] only, so the flag one position later was
-    discarded and the event fired. Trigger.fire is the dispatch target and is
-    mocked here: the assertion is that it is never reached.
-    """
+    """`fire <event> --help` must describe the command, never fire the event."""
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
@@ -806,8 +684,7 @@ def test_short_help_flag_after_key_values_does_not_fire(trigger_cls, monkeypatch
 def test_bare_word_help_as_a_payload_value_still_fires(trigger_cls, monkeypatch):
     """`help` later on the line is a VALUE, not a request for the manual.
 
-    This is why only the dashed forms scan the whole sequence: an event
-    payload may legitimately carry the word.
+    Only the dashed forms scan the whole line: a payload may carry the word.
     """
     fired = MagicMock(return_value={"event": "e", "handlers": 1, "ran": 1, "failed": 0})
     monkeypatch.setattr(core.Trigger, "fire", fired)
@@ -835,16 +712,10 @@ def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monk
     fired.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Deprecated event aliases — one release of grace, and it must be audible
-# ---------------------------------------------------------------------------
-
-
 class TestDeprecatedEventAliases:
     """A renamed event keeps working for one release and says it is retired.
 
-    The table is empty since 2026-09-28, so the mechanism tests stand on an
-    entry each test sets itself, under names no product fires.
+    The table is empty, so each test sets its own entry under names no product fires.
     """
 
     OLD = "probe_old_event"
@@ -860,9 +731,7 @@ class TestDeprecatedEventAliases:
     def test_old_name_reaches_a_handler_on_the_new_name(self, aliased):
         """The whole point: the old name is delivered to the new one.
 
-        Without this, renaming an event silently stops delivery for every
-        fire site still using the old name.
-        Mutant 2026-09-28: _canonical answering its argument reddens this.
+        Without it, a rename silently stops delivery to every fire site still on the old name.
         """
         handler = MagicMock()
         aliased.on(self.NEW, handler)
@@ -874,10 +743,7 @@ class TestDeprecatedEventAliases:
         assert summary["ran"] == 1
 
     def test_summary_names_the_event_that_actually_ran(self, aliased):
-        """A caller reading the summary back must not be sent hunting.
-
-        Reporting the old name would name an event with no handlers under it.
-        """
+        """A caller reading the summary back must not be sent hunting."""
         aliased.on(self.NEW, MagicMock())
 
         summary = aliased.fire(self.OLD, path="store.json")
@@ -885,10 +751,7 @@ class TestDeprecatedEventAliases:
         assert summary["event"] == self.NEW
 
     def test_a_handler_registered_on_the_old_name_still_hears_the_new_one(self, aliased):
-        """The alias resolves on registration too, not only on fire.
-
-        Mutant run: fire() dropping its fire_event callback reddens this.
-        """
+        """The alias resolves on registration too, not only on fire."""
         handler = MagicMock()
         aliased.on(self.OLD, handler)
 
@@ -899,8 +762,7 @@ class TestDeprecatedEventAliases:
     def test_off_under_the_old_name_actually_unregisters(self, aliased):
         """on(old) + off(old) must cancel out.
 
-        Resolving only in on() would register on the new name and remove
-        nothing, leaving a handler no caller can detach.
+        Resolving only in on() would leave a handler no caller can detach.
         """
         handler = MagicMock()
         aliased.on(self.OLD, handler)
@@ -914,9 +776,7 @@ class TestDeprecatedEventAliases:
     def test_the_deprecation_is_logged_once_per_process(self, aliased, monkeypatch):
         """Silent forwarding is how a rename never finishes — say it, but once.
 
-        Once per name, not once per fire: a renamed event can fire on a path
-        that repeats, and a warning per occurrence would be its own noise
-        source in a branch that watches logs for errors.
+        Once per name, not per fire: a warning per occurrence is its own log-error noise.
         """
         core = sys.modules[aliased.__module__]
         warned = MagicMock()
@@ -934,12 +794,7 @@ class TestDeprecatedEventAliases:
     def test_file_deleted_is_a_real_deletion_again(self, trigger_cls, monkeypatch):
         """The retired entry: `file_deleted` reaches its own name and nothing else.
 
-        The alias `file_deleted -> profile_write_failed` lived through v2.8.7 to
-        v2.8.11 and was retired 2026-09-28 (compass 485): the two fires left
-        under the old name, aipass install.py and daemon timer_install.py, are
-        real unlinks, and delivering them as a failed profile write was a lie.
-        Red first on the tree that still held the entry.
-        Mutant 2026-09-28: the entry put back in the table reddens this.
+        Its remaining fires (install.py, timer_install.py) are real unlinks, not failed profile writes.
         """
         warned = MagicMock()
         monkeypatch.setattr(core.logger, "warning", warned)
@@ -966,24 +821,11 @@ class TestDeprecatedEventAliases:
         handler.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Module identity — the delitem + re-import shape must not fork the bus
-# ---------------------------------------------------------------------------
-
-
 def test_reimport_does_not_fork_the_trigger_class(trigger_cls):
     """Every import site in this process resolves to ONE core module.
 
-    19 test files here force a fresh import with
-    `monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.core")`.
-    Trigger keeps its handler registry in CLASS-level state, so a second
-    module object parked under a second sys.modules key would give two
-    registries — handlers registered on one, fired through the other, and the
-    whole suite still green because each file only ever sees its own copy.
-
-    Measured clean on 3.12.3 across the full suite in one process. The floor
-    is 3.10 and this box cannot run it, so this is a canary in CI, not a
-    claim about 3.10.
+    Test files delitem core from sys.modules; Trigger's registry is class state, so a second
+    module object would mean two registries and a suite still green. Verified on 3.12 only.
     """
     import importlib
     import sys
@@ -1006,11 +848,7 @@ def test_reimport_does_not_fork_the_trigger_class(trigger_cls):
 
 
 def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls):
-    """The identity check restated as behaviour: register on one ref, read on another.
-
-    This is the failure a fork would actually cause — worth pinning directly,
-    because an identity assertion alone tells you nothing about what breaks.
-    """
+    """The identity check restated as behaviour: register on one ref, read on another."""
     reimported = ReimportedTrigger
 
     handler = MagicMock()

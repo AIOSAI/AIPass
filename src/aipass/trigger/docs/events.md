@@ -41,7 +41,7 @@ event.)
 | `plan_file_deleted` | `.archive/plan_file.py` | **Retired** — same |
 | `plan_file_moved` | `.archive/plan_file.py` | **Retired** — same |
 | `bulletin_created` | `.archive/bulletin_created.py` | **Retired** — never imported |
-| `pr_created` | `pr_status_sync.py` | **Decommissioned** — file kept, `trigger.on(...)` commented out in `registry.py` |
+| `pr_created` | `pr_status_sync.py` | **Decommissioned** — file kept, not registered in `registry.py` |
 | `pr_merged` | `pr_status_sync.py` | **Decommissioned** — same |
 
 **`error_logged` is not an event.** No handler file, no registration, and no

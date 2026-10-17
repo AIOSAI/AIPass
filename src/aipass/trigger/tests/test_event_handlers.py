@@ -3,7 +3,7 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
@@ -26,20 +26,13 @@ from aipass.trigger.apps.handlers.events import memory_template_updated, warning
 @pytest.fixture(autouse=True)
 def json_log(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """The json_handler each of the two handler modules logs through, as a recorder.
-
-    Replaced where each handler module holds the name, so no handler call in
-    this file reaches trigger's operation log.
+    Replaced where each handler module holds the name, so no handler call reaches the operation log.
     """
     log = MagicMock()
     log.log_operation = MagicMock(return_value=True)
     for handler_module in (memory_template_updated, warning_logged):
         monkeypatch.setattr(handler_module, "json_handler", log)
     return log
-
-
-# ---------------------------------------------------------------------------
-# memory_template_updated.py -- handle_memory_template_updated
-# ---------------------------------------------------------------------------
 
 
 class TestHandleMemoryTemplateUpdated:
@@ -57,12 +50,7 @@ class TestHandleMemoryTemplateUpdated:
 
     def test_documented_event_data_is_absorbed_and_never_reaches_the_log(self, json_log: MagicMock) -> None:
         """template_name and updated_by are documented, accepted, and discarded.
-
-        The module docstring names both as expected event data, so "does not
-        crash" was the weakest possible reading of that contract: it passes
-        equally if the handler folds either name into the logged payload. The
-        payload is fixed; the event data is context for a push this handler
-        does not perform.
+        The payload is fixed; the event data is context for a push this handler does not perform.
         """
         mod = memory_template_updated
 
@@ -75,11 +63,6 @@ class TestHandleMemoryTemplateUpdated:
         mod = memory_template_updated
         result = mod.handle_memory_template_updated()
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# warning_logged.py -- handle_warning_logged
-# ---------------------------------------------------------------------------
 
 
 class TestHandleWarningLogged:
@@ -97,12 +80,7 @@ class TestHandleWarningLogged:
 
     def test_the_three_discarded_params_are_really_discarded(self, lane) -> None:
         """error_hash, timestamp and level are accepted and then dropped.
-
-        The handler assigns them to `_` on purpose: the lane computes its own
-        signature and its own level, so a caller's `level="critical"` must not
-        be able to relabel a warning. "Accepts them without error" passed just
-        as well if any of the three travelled into the row, which is the only
-        way this could go wrong.
+        The lane computes its own signature and level, so a caller's `level="critical"` must not relabel a warning.
         """
         mod = warning_logged
 
@@ -125,19 +103,8 @@ class TestHandleWarningLogged:
 
     def test_all_none_records_nothing_and_still_logs(self, lane, json_log: MagicMock) -> None:
         """No branch and no message is not a warning — nothing recorded, still logged.
-
-        A malformed event must not mint a signature keyed on nothing, which
-        would then repeat and eventually mail the operator. Surviving the call
-        proved neither half: the lane has to stay empty AND the handler still
-        has to log that it ran.
-
-        Measured 2026-09-08, and worth knowing before rewriting this: deleting
-        the handler's own `if branch and message` guard does NOT turn this red.
-        escalation._record carries the identical guard (`not branch or not
-        module or not message` -> None), so the handler's copy is belt and
-        braces at a module boundary, not the thing keeping the lane empty. What
-        this unit actually pins is the pair — nothing recorded, and the log
-        call still made outside the guard.
+        A malformed event must not mint a signature keyed on nothing: the lane stays empty and the run is logged.
+        escalation._record repeats the branch/message guard, so deleting the handler's copy alone does not red this.
         """
         mod = warning_logged
 
@@ -156,11 +123,7 @@ class TestHandleWarningLogged:
 
     def test_an_undocumented_kwarg_reaches_neither_the_lane_nor_the_log(self, lane, json_log: MagicMock) -> None:
         """**kwargs absorbs what the contract does not name, and it stops there.
-
-        Firers add event data faster than handlers learn about it, so the
-        handler has to take an unknown key without failing — and without
-        letting it leak into a signature, where it would split one repeating
-        warning into many and defeat the digest.
+        An unknown key must be accepted without leaking into a signature and splitting one warning into many.
         """
         mod = warning_logged
 
@@ -183,18 +146,10 @@ class TestHandleWarningLogged:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# warning_logged.py -- escalation lane (DPLAN-0283 WS-A)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     """The escalation lane on a tmp state file with a known threshold.
-
-    handle_warning_logged records into the real lane module, so the state file,
-    the config and the digest callback are pinned here — the operator's config
-    never decides a test outcome, and no digest can leave the process.
+    State file, config and digest callback are pinned: operator config never decides an outcome, no digest leaves.
     """
     config: Dict[str, Any] = {
         "enabled": True,
@@ -223,9 +178,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
 
 class TestWarningLoggedFeedsEscalation:
     """Warnings have no dispatch path anywhere in medic.
-
-    Before this lane a warning loop was invisible to humans forever, so the
-    handler's real job is feeding the counter — not notifying anyone.
+    A warning loop has no other way to a human, so the handler's job is feeding the counter, not notifying.
     """
 
     def test_warning_is_counted(self, lane) -> None:

@@ -3,62 +3,21 @@
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
 # Version: 1.6.0
 # Created: 2026-08-08
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Escalation Digest Lane (DPLAN-0283 WS-A)
 
-Medic answers an error ONCE: it dispatches the owning branch and then goes
-quiet — backoff, a mute, or a suppression keeps it quiet. That is correct for
-agents and blind for humans. An error that keeps firing AFTER its owner was
-told, or while a branch is muted, is invisible to the owner forever. Warnings
-are worse: they have never had an escalation path at all.
+Counts repeats per normalized signature and mails the operator when repetition
+means nothing got fixed. A mute stops dispatch, never the counting or a digest;
+a suppression stays silent unless escalate_suppressed. A WARNING still repeating
+past warning_age_hours gets a registry row and goes to the branch that LOGGED it
+(never a name parsed from the text); the manager gets one roll-up instead.
+Mail upserts per thread (level, branch, module), not per signature.
 
-This lane counts repetition and mails the operator when repetition means
-nothing got fixed:
-
-    same signature, >= threshold occurrences inside the window
-      -> ONE email to the digest recipient (a manager: email, never a wake)
-      -> per-signature cooldown so the same noise cannot spam the mailbox
-
-RULES (the owner, S193 / DPLAN-0283):
-    - A mute stops re-DISPATCHING. It must NEVER stop the COUNTING, and it
-      must never stop a digest — a mute is how a branch says "I am building",
-      not how the system goes dark for the human.
-    - A suppression IS a human saying "this is benign" (compass #219), so it
-      stays silent here too unless escalate_suppressed is turned on.
-    - Counting is unconditional; only the SENDING is gated. A signature that
-      never escalates is still fully auditable in the state file.
-
-THE AGED-WARNING LANE (devpulse go, 2026-09-19):
-    Repetition into a manager's inbox that nobody reads for a day is not a
-    signal, it is a pile. A WARNING still repeating `warning_age_hours` after
-    it was FIRST seen stops going to the manager: it becomes a registry row at
-    level WARNING (never dispatched — only medic dispatches, off error events),
-    and one upserted mail goes to the branch that LOGGED it, on the same
-    thread. The manager gets one roll-up per `rollup_hours` naming every open
-    row instead. The owner is the logging branch, never a name parsed out of
-    the message text: @memory's lines say "only @verify can cure it", and
-    routing @verify's fault is @memory's job. With no registered owner to mail,
-    the manager digest stays — the signal is never dropped for want of an
-    address.
-
-COUNTING UNIT vs MAIL UNIT:
-    A signature is the counting unit: one normalized condition. The mail unit
-    is the THREAD — level, branch and module, exactly what the subject names.
-    Every signature under one subject upserts the same open message, and its
-    body carries the roster of the others. On 2026-09-17 one module's warnings
-    named a different branch and field each time, so a per-signature key
-    opened 29 threads under two subjects. Closing the thread re-arms it.
-
-Thresholds, window, cooldown and recipient are operator settings and live in
-trigger_json/custom_config/trigger.config.json — not in code. See
-handlers/json/config_loader.py for the doctrine.
-
-State lives at trigger_json/escalation_state.json. That name is deliberately
-NOT `<module>_<config|data|log>.json`: json_handler owns every trio name in
-that directory and regenerates a blank template over anything parked there.
+The state file name avoids `<module>_<config|data|log>.json`: json_handler
+regenerates a blank template over any trio name in trigger_json/.
 """
 
 import hashlib
@@ -79,49 +38,34 @@ from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.apps.handlers.json import json_handler
 
-# Live state — off the trio path (see module docstring).
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
 
-# Decision trail. .jsonl, not .log: the branch watcher only reads *.log, so
-# writing here cannot feed the lane its own output.
+# .jsonl, not .log: the branch watcher reads *.log, so this cannot feed the lane.
 ESCALATION_LOG = TRIGGER_ROOT / "logs" / "escalation.jsonl"
 
-# How much of a message is kept for the digest body / state file.
 MAX_MESSAGE_CHARS = 400
 MAX_SAMPLE_CHARS = 500
 
-# How many sibling signatures a thread's digest lists before it summarises.
 MAX_ROSTER_LINES = 15
 MAX_ROSTER_MESSAGE_CHARS = 160
 
-# How many open rows the manager's roll-up lists before it summarises.
 MAX_ROLLUP_LINES = 30
 
-# The roll-up occupies one thread in the manager's inbox, forever.
 ROLLUP_UPSERT_KEY = "escalation:rollup"
 
-# Email send callback (set by the module layer — handlers never import modules).
+# Set by the module layer: handlers never import modules.
 _send_email: Optional[Callable[..., bool]] = None
 
-# Config cache — see get_config(). (checked_at, config or None)
-# No production reset hook: nothing in the running system needs one (each CLI
-# invocation is a fresh process). Tests reset this global directly.
 CONFIG_TTL_SECONDS = 30.0
 _config_cache: tuple = (0.0, None)
 
 
-# Deliberately NOT prax: this code runs on the error path the log watchers
-# read. A prax line here would be detected, fired back as an error_detected
-# event, and land in record() again — the lane feeding itself forever.
+# Not prax: a prax line here is watched, fired back as an error event and recorded again.
 logger = trail_logger(ESCALATION_LOG)
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
-    """Set the callback used to send digest emails.
-
-    Args:
-        callback: Callable accepting (to_branch, subject, message, ...) -> bool
-    """
+    """Set the callback used to send digest emails."""
     global _send_email
     _send_email = callback
 
@@ -129,12 +73,7 @@ def set_send_email_callback(callback: Callable[..., bool]) -> None:
 def get_config() -> Dict[str, Any]:
     """Return the operator's escalation settings, merged over defaults.
 
-    Cached for a short TTL: record() runs once per watched WARNING/ERROR line,
-    and a config file read per log line would put file IO on the hot path. An
-    operator edit still takes effect within the TTL without a restart.
-
-    Returns:
-        The escalation config section
+    TTL-cached: record() runs per watched log line, so no file read per line.
     """
     global _config_cache
     checked_at, cached = _config_cache
@@ -148,50 +87,24 @@ def get_config() -> Dict[str, Any]:
 
 BRANCH_REGISTRY_FILE = find_repo_root(TRIGGER_ROOT, caller="escalation") / "AIPASS_REGISTRY.json"
 
-# Citizen names read from the registry, cached on a short TTL exactly like
-# get_config() above and for the same reason: this runs once per watched log
-# line, and a file read per line would put IO on the hot path.
-#
-# TTL rather than an mtime check, deliberately. Measured on this filesystem, two
-# writes moments apart report an IDENTICAL st_mtime AND st_mtime_ns — the clock
-# is coarser than the interval — so a spawn that rewrites the registry twice in
-# one tick would pin a stale name list until some later write happened to land
-# on a different tick. A TTL has no tie to lose: staleness is bounded by the
-# clock instead of by a comparison that can silently never fire.
+# TTL, not an mtime check: two registry writes in one clock tick share an mtime,
+# so an mtime check could pin a stale name list indefinitely.
 _branch_names_cache: Tuple[float, Optional[re.Pattern]] = (0.0, None)
 
-# An @handle, registered or not. The registry pattern below only knows citizens
-# that exist; this one collapses any handle, so an unregistered name in a
-# message cannot fragment a signature the registered ones unify.
+# Any @handle, so an unregistered name cannot fragment a signature.
 HANDLE_PATTERN = re.compile(r"@\w+")
 
-# Any standalone number, with an optional short unit suffix so a duration is
-# collapsed too. The suffix matters more than it looks: there is no word
-# boundary between the digits and the letters in "1237ms", so a bare \b\d+\b
-# leaves it untouched. Measured on the state file, that one gap was 76 separate
-# signatures for a single hooks gate firing — a second storm hiding behind the
-# one that was reported.
-#
-# Replaced with the SAME <id> placeholder the registry normalizer uses for 3+
-# digits. Pick a different token and the two rules disagree at the 100 boundary:
-# "99 events" and "101 events" would keep minting separate signatures for one
-# condition, because the registry pass has already rewritten the larger number.
+# The unit suffix matters: "1237ms" has no \b between digits and letters.
+# The token must stay <id>, the registry's own, or "99" and "101" sign apart.
 NUMBER_PATTERN = re.compile(r"\b\d+[a-zA-Z]{0,3}\b")
 
 
 def _branch_name_pattern() -> Optional[re.Pattern]:
-    """Compile an alternation of registered citizen names, or None if unreadable.
-
-    Returns:
-        Case-insensitive word-bounded pattern over registry names, or None when
-        the registry is missing or unparseable (callers then skip name collapse)
-    """
+    """Compile an alternation of registered citizen names, or None if unreadable."""
     global _branch_names_cache
     checked_at, cached = _branch_names_cache
     now = time.time()
-    # `checked_at`, not `cached`, decides freshness: a missing registry is a
-    # perfectly good cached answer, and re-reading it per log line to rediscover
-    # that it is still missing is the hot-path IO this cache exists to avoid.
+    # `checked_at`, not `cached`: a missing registry (None) is a valid cached answer.
     if checked_at and now - checked_at < CONFIG_TTL_SECONDS:
         return cached
 
@@ -200,8 +113,7 @@ def _branch_name_pattern() -> Optional[re.Pattern]:
         data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
         names = {str(b["name"]).upper() for b in data.get("branches", []) if b.get("name")}
         if names:
-            # Longest first so AI_MAIL is matched before AI, if such a pair
-            # ever exists.
+            # Longest first so AI_MAIL is matched before AI.
             ordered = sorted(names, key=len, reverse=True)
             pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in ordered) + r")\b", re.IGNORECASE)
     except Exception as exc:
@@ -212,19 +124,7 @@ def _branch_name_pattern() -> Optional[re.Pattern]:
 
 
 def _collapse_repeat_variables(text: str) -> str:
-    """Collapse the values that vary between repeats of one condition.
-
-    The registry normalizer strips what varies between *errors* — paths,
-    timestamps, hashes, big IDs. Repeat detection needs more: a message whose
-    only difference is a count or a named citizen is the SAME condition
-    recurring, and must land on one signature or the digest fragments.
-
-    Args:
-        text: Message already through the registry normalizer
-
-    Returns:
-        Text with standalone integers and citizen names replaced by placeholders
-    """
+    """Collapse the values that vary between repeats of one condition."""
     text = NUMBER_PATTERN.sub("<id>", text)
     names = _branch_name_pattern()
     if names is not None:
@@ -235,18 +135,7 @@ def _collapse_repeat_variables(text: str) -> str:
 def _normalize(message: str) -> str:
     """Strip variable data from a message so repeats share one signature.
 
-    Reuses the error registry's normalizer (paths, timestamps, hashes, IDs)
-    so an escalation signature lines up with the fingerprint an operator
-    already sees in `errors list`, then collapses the repeat-only variables
-    on top. That second pass is deliberately LOCAL to this lane: registry
-    fingerprints keep their finer grain, so `errors list` and medic dispatch
-    are unaffected by anything decided here.
-
-    Args:
-        message: Raw message text
-
-    Returns:
-        Normalized message, or the raw message if the normalizer is missing
+    The repeat-only collapse stays local: registry fingerprints keep their grain.
     """
     try:
         from aipass.trigger.apps.handlers.error_registry import normalize_message
@@ -258,30 +147,13 @@ def _normalize(message: str) -> str:
 
 
 def compute_signature(level: str, branch: str, module: str, message: str) -> str:
-    """Compute the repeat signature for a log line.
-
-    Args:
-        level: Log level (WARNING / ERROR / CRITICAL)
-        branch: Owning branch name
-        module: Module that logged the line
-        message: Raw message text
-
-    Returns:
-        12-char hex signature
-    """
+    """Compute the repeat signature for a log line."""
     raw = f"{level.upper()}|{branch.upper()}|{module}|{_normalize(message)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
 
 def _registry_report(**kwargs: Any) -> Dict[str, Any]:
-    """Open or increment a registry row. The seam tests replace.
-
-    Args:
-        **kwargs: Forwarded to error_registry.report()
-
-    Returns:
-        The registry entry dict, or {} when the registry is unreachable
-    """
+    """Open or increment a registry row. The seam tests replace."""
     try:
         from aipass.trigger.apps.handlers.error_registry import report
 
@@ -294,13 +166,7 @@ def _registry_report(**kwargs: Any) -> Dict[str, Any]:
 def _age_hours(entry: Dict[str, Any], now: float) -> Optional[float]:
     """Return how many hours ago this signature was FIRST seen.
 
-    Args:
-        entry: Signature state entry
-        now: Current epoch time
-
-    Returns:
-        Age in hours, or None when the stamp cannot be read — an unreadable
-        stamp must never decide that a signal has aged out of the manager's lane
+    None when unreadable: a bad stamp must never age a signal out of the manager's lane.
     """
     try:
         return (now - datetime.fromisoformat(entry.get("first_seen", "")).timestamp()) / 3600.0
@@ -310,17 +176,7 @@ def _age_hours(entry: Dict[str, Any], now: float) -> Optional[float]:
 
 
 def _aged_owner(level: str, entry: Dict[str, Any], cfg: Dict[str, Any], now: float) -> Optional[Tuple[str, float]]:
-    """Decide whether this repeat belongs to its own branch now, and whose it is.
-
-    Args:
-        level: WARNING or ERROR
-        entry: Signature state entry
-        cfg: Escalation config section
-        now: Current epoch time
-
-    Returns:
-        (recipient address, age in hours), or None to keep the manager digest
-    """
+    """Decide whether this repeat belongs to its own branch now, and whose it is."""
     limit = float(cfg.get("warning_age_hours", 24) or 0)
     if level != "WARNING" or limit <= 0:
         return None
@@ -337,35 +193,14 @@ def _aged_owner(level: str, entry: Dict[str, Any], cfg: Dict[str, Any], now: flo
 
 
 def thread_key(level: str, branch: str, module: str) -> str:
-    """Return the digest thread a signature's mail lands in.
-
-    The subject's identity, not the signature: every signature under one
-    subject upserts the same open message in the recipient's inbox.
-
-    Args:
-        level: Log level (WARNING / ERROR)
-        branch: Owning branch name
-        module: Module that logged the line
-
-    Returns:
-        Upsert key, e.g. 'escalation:WARNING:memory:captured_memory_files'
-    """
+    """Return the digest thread a signature's mail lands in."""
     return f"escalation:{level.upper()}:{branch.lower()}:{module}"
 
 
 def _thread_siblings(
     signatures: Dict[str, Any], signature: str, entry: Dict[str, Any]
 ) -> List[Tuple[str, Dict[str, Any]]]:
-    """Return the other signatures sharing *entry*'s thread, newest first.
-
-    Args:
-        signatures: The full signature map
-        signature: The signature being escalated (excluded)
-        entry: Its state entry
-
-    Returns:
-        [(signature, entry), ...] ordered most recently seen first
-    """
+    """Return the other signatures sharing *entry*'s thread, newest first."""
     key = thread_key(entry.get("level", ""), entry.get("branch", ""), entry.get("module", ""))
     siblings = [
         (sig, other)
@@ -392,24 +227,8 @@ def _empty_state() -> Dict[str, Any]:
 def _next_write_seq(state: Dict[str, Any]) -> int:
     """Return the next write-ordering number for this state document.
 
-    Ordering here is by `last_seen`, an ISO timestamp — and on Windows the
-    clock only advances in ~15.6ms steps, so two signatures touched inside one
-    tick get byte-identical strings. Python's sort is stable, so every tie then
-    falls back to dict insertion order: the order signatures were FIRST
-    created, not last touched. That is backwards for both callers — the newest
-    signature sorts last in `get_signatures`, and `_prune` drops the one just
-    written instead of the genuinely stale one.
-
-    The counter lives in the state file rather than coming from
-    time.monotonic(), whose epoch is per-process: persisted across a restart a
-    monotonic value is not comparable to anything, and would order worse than
-    the tie it was meant to break.
-
-    Args:
-        state: Mutable state document, updated in place
-
-    Returns:
-        A number strictly greater than every previous write to this file
+    Breaks last_seen ties (Windows clock ticks ~15.6ms); persisted, not monotonic(),
+    because a monotonic value is meaningless across a restart.
     """
     seq = int(state.get("write_seq", 0)) + 1
     state["write_seq"] = seq
@@ -417,26 +236,12 @@ def _next_write_seq(state: Dict[str, Any]) -> int:
 
 
 def _seen_order(entry: Dict[str, Any]) -> tuple:
-    """Return the sort key for "how recently was this signature touched".
-
-    Timestamp first so entries written before this file carried a write_seq
-    still order correctly against each other; the counter only decides ties.
-
-    Args:
-        entry: Signature state entry
-
-    Returns:
-        (last_seen, write_seq) — ascending is oldest-first
-    """
+    """Return the sort key for "how recently was this signature touched"."""
     return (entry.get("last_seen", ""), int(entry.get("last_seen_seq", 0)))
 
 
 def _load_state() -> Dict[str, Any]:
-    """Read the state file, tolerating absence and corruption.
-
-    Returns:
-        State dict — always usable, empty when the file is unreadable
-    """
+    """Read the state file, tolerating absence and corruption."""
     if not STATE_FILE.exists():
         return _empty_state()
     try:
@@ -453,12 +258,7 @@ def _load_state() -> Dict[str, Any]:
 
 
 def _prune(signatures: Dict[str, Any], max_signatures: int) -> None:
-    """Drop least-recently-seen signatures so the state file stays bounded.
-
-    Args:
-        signatures: Signature map, mutated in place
-        max_signatures: Maximum entries to keep
-    """
+    """Drop least-recently-seen signatures so the state file stays bounded."""
     if max_signatures <= 0 or len(signatures) <= max_signatures:
         return
     ordered = sorted(signatures.items(), key=lambda kv: _seen_order(kv[1]))
@@ -469,20 +269,7 @@ def _prune(signatures: Dict[str, Any], max_signatures: int) -> None:
 def _is_error_eligible(branch: str, fingerprint: str, cfg: Dict[str, Any]) -> tuple:
     """Decide whether a repeating ERROR is one the human needs to hear about.
 
-    Eligible means medic will NOT be waking the owner about this right now:
-    it already dispatched them, or the branch is muted, or medic is off, or
-    the error has no registered owner to dispatch to at all.
-
-    A deliberately SUPPRESSED fingerprint stays silent (compass #219) unless
-    escalate_suppressed is set.
-
-    Args:
-        branch: Branch the error was attributed to
-        fingerprint: Registry fingerprint (may be empty)
-        cfg: Escalation config section
-
-    Returns:
-        (eligible, reason) — reason is a short human-readable state string
+    Eligible means medic is not waking the owner about it right now.
     """
     if fingerprint:
         try:
@@ -514,12 +301,7 @@ def _is_error_eligible(branch: str, fingerprint: str, cfg: Dict[str, Any]) -> tu
 def _has_registered_owner(branch: str) -> bool:
     """Check whether *branch* is a citizen medic could dispatch to.
 
-    Args:
-        branch: Branch name (e.g. 'MEMORY', 'UNKNOWN')
-
-    Returns:
-        True if the branch resolves to a registered email, or if the check
-        itself failed — an unverifiable registry must not manufacture digests
+    True when the check fails: an unverifiable registry must not manufacture digests.
     """
     try:
         from aipass.trigger.apps.handlers.events.error_detected import _get_registered_emails
@@ -533,22 +315,7 @@ def _has_registered_owner(branch: str) -> bool:
 def record_warning(
     branch: str, module: str, message: str, log_file: str = "", raw_line: str = ""
 ) -> Optional[Dict[str, Any]]:
-    """Record a WARNING occurrence and escalate if it keeps repeating.
-
-    Warnings have no dispatch path anywhere in medic, so there is nothing to
-    gate on — repetition alone is the signal.
-
-    Args:
-        branch: Branch the warning came from
-        module: Module that logged it
-        message: Warning message text
-        log_file: Source log path
-        raw_line: Full log line, kept as a digest sample
-
-    Returns:
-        Decision dict, or None when the lane is off or the input is unusable;
-        outcome "record_failed" when counting raised
-    """
+    """Record a WARNING occurrence and escalate if it keeps repeating."""
     return _record("WARNING", branch, module, message, log_file, raw_line, fingerprint="")
 
 
@@ -557,21 +324,7 @@ def record_error(
 ) -> Optional[Dict[str, Any]]:
     """Record an ERROR occurrence and escalate if it recurs past medic.
 
-    MUST be called before medic's dispatch gates, not after: a muted branch
-    or an open circuit breaker stops the dispatch, and neither may stop the
-    count.
-
-    Args:
-        branch: Branch the error was attributed to
-        module: Module that logged it
-        message: Error message text
-        log_file: Source log path
-        fingerprint: Registry fingerprint, used for dispatch/suppression state
-        raw_line: Full log line, kept as a digest sample
-
-    Returns:
-        Decision dict, or None when the lane is off or the input is unusable;
-        outcome "record_failed" when counting raised
+    Call before medic's dispatch gates: a mute or open breaker must not stop the count.
     """
     return _record("ERROR", branch, module, message, log_file, raw_line, fingerprint=fingerprint)
 
@@ -585,25 +338,7 @@ def _record(
     raw_line: str,
     fingerprint: str,
 ) -> Optional[Dict[str, Any]]:
-    """Count one occurrence and decide whether a digest fires.
-
-    Silent-failure contract: this runs inside event handlers, so it never
-    raises and never returns a value the caller must handle.
-
-    Args:
-        level: WARNING or ERROR
-        branch: Owning branch
-        module: Logging module
-        message: Message text
-        log_file: Source log path
-        raw_line: Full log line for the sample block
-        fingerprint: Registry fingerprint (errors only)
-
-    Returns:
-        Decision dict {signature, count, outcome}; None when the lane chose not
-        to count (off, ignored branch, unusable input); outcome "record_failed"
-        with an empty signature when counting itself raised
-    """
+    """Count one occurrence and decide whether a digest fires. Never raises."""
     try:
         if not branch or not module or not message:
             return None
@@ -642,7 +377,7 @@ def _record(
                 }
                 signatures[signature] = entry
 
-            # Bookkeeping first, unconditionally — a mute must never stop this.
+            # Bookkeeping first, unconditionally: a mute must never stop this.
             entry["last_seen"] = datetime.now().isoformat()
             entry["last_seen_seq"] = _next_write_seq(state)
             entry["total_count"] = int(entry.get("total_count", 0)) + 1
@@ -686,20 +421,7 @@ def _evaluate_digest(
     now: float,
     siblings: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
 ) -> str:
-    """Apply cooldown + eligibility to an over-threshold signature, then send.
-
-    Args:
-        signature: Repeat signature
-        entry: Mutable state entry for this signature
-        cfg: Escalation config section
-        window_count: Occurrences inside the window
-        window_seconds: Window length in seconds
-        now: Current epoch time
-        siblings: Other signatures in the same thread, for the digest roster
-
-    Returns:
-        Outcome string: sent / send_failed / cooldown / not_eligible
-    """
+    """Apply cooldown + eligibility to an over-threshold signature, then send."""
     level = entry.get("level", "ERROR")
     branch = entry.get("branch", "UNKNOWN")
 
@@ -718,7 +440,7 @@ def _evaluate_digest(
                 )
                 return "cooldown"
         except ValueError:
-            # Unparseable stamp — treat as no cooldown rather than going silent.
+            # Unparseable stamp: no cooldown rather than going silent.
             logger.warning(f"bad last_digest stamp on {signature}: {last_digest!r}")
 
     if level == "ERROR":
@@ -754,17 +476,13 @@ def _evaluate_digest(
         )
         return "send_failed"
 
-    # Keyed on the THREAD — the subject's identity minus its repeat count. Never
-    # the rendered subject (the count changes every digest, so it would stop
-    # matching on the first update), and never the signature: one module's
-    # warnings can name a different branch or field each time, and a
-    # per-signature key opened 29 messages under two subjects on 2026-09-17.
+    # Keyed on the thread: the rendered subject changes with the count, and a
+    # per-signature key splits one module's mail across many messages.
     upsert_key = thread_key(level, branch, entry.get("module", ""))
     upsert_result: Dict[str, Any] = {}
 
     try:
-        # auto_execute=False: this is an EMAIL, never a dispatch. Managers
-        # cannot be woken, and a digest is for reading, not for spawning.
+        # auto_execute=False: an email, never a dispatch; managers cannot be woken.
         sent = _send_email(
             to_branch=recipient,
             subject=subject,
@@ -780,7 +498,7 @@ def _evaluate_digest(
         return "send_failed"
 
     if not sent:
-        # Cooldown is NOT set on a failed send — the next occurrence retries.
+        # No cooldown on a failed send: the next occurrence retries.
         logger.warning(
             "digest delivery failed",
             signature=signature,
@@ -792,12 +510,8 @@ def _evaluate_digest(
 
     entry["last_digest"] = datetime.now().isoformat()
     entry["digests_sent"] = int(entry.get("digests_sent", 0)) + 1
-    # Reset the window so the next digest reports occurrences since this one.
     entry["occurrences"] = []
-    # "created" = a new message in the inbox, "updated" = the existing one grew a
-    # repeat. None means the callback answered without reporting — an older
-    # adapter, or a delivery path that ignored the key. Recording it makes an
-    # in-place update auditable instead of looking like a digest that vanished.
+    # None: the callback did not report created/updated (older adapter).
     upsert_action = upsert_result.get("upsert_action")
     logger.info(
         "digest sent",
@@ -811,9 +525,7 @@ def _evaluate_digest(
         upsert_action=upsert_action,
         outcome="sent",
     )
-    # Operational record: a digest leaving the branch is an outbound action,
-    # not just a trail entry. json_handler writes JSON, never a watched .log,
-    # so recording it here cannot feed the lane back into itself.
+    # json_handler writes JSON, never a watched .log, so this cannot feed the lane.
     json_handler.log_operation(
         "escalation_digest_sent",
         {
@@ -837,19 +549,7 @@ def _send_aged_notice(
     siblings: Optional[List[Tuple[str, Dict[str, Any]]]],
     aged: Tuple[str, float],
 ) -> str:
-    """Open a registry row and mail the branch that logged this repeat.
-
-    Args:
-        signature: Repeat signature
-        entry: Mutable state entry for this signature
-        window_count: Occurrences inside the window
-        window_seconds: Window length in seconds
-        siblings: Other signatures in the same thread
-        aged: (recipient address, age in hours) from _aged_owner
-
-    Returns:
-        Outcome string: aged_owner_mail / send_failed
-    """
+    """Open a registry row and mail the branch that logged this repeat."""
     recipient, age = aged
     branch = str(entry.get("branch", ""))
 
@@ -877,9 +577,7 @@ def _send_aged_notice(
 
     upsert_result: Dict[str, Any] = {}
     try:
-        # The owner's thread, keyed exactly like the manager's was: one live
-        # message per subject. auto_execute stays False — this is mail the
-        # owner reads on their own time, never a wake and never a task.
+        # auto_execute=False: mail the owner reads, never a wake.
         sent = _send_email(
             to_branch=recipient,
             subject=subject,
@@ -895,7 +593,7 @@ def _send_aged_notice(
         return "send_failed"
 
     if not sent:
-        # No cooldown stamp on a failed send — the next occurrence retries.
+        # No cooldown stamp on a failed send: the next occurrence retries.
         logger.warning(
             "aged notice delivery failed",
             signature=signature,
@@ -939,19 +637,7 @@ def _send_aged_notice(
 def _rollup_is_due(state: Dict[str, Any], current: List[str], hours: float, now: float) -> bool:
     """Decide whether the manager's roll-up should be written again.
 
-    The roll-up owns ONE thread, so a refresh costs the reader nothing — it
-    rewrites the message they already have. Cadence therefore only paces
-    repeats of an UNCHANGED list; a list that grew is news, and a roll-up
-    naming yesterday's rows is worse than a second write.
-
-    Args:
-        state: State document carrying the last roll-up stamp and row list
-        current: Open aged signatures, sorted
-        hours: Roll-up cadence in hours
-        now: Current epoch time
-
-    Returns:
-        True when the roll-up should be sent
+    Cadence paces only an unchanged list; a changed list is news and sends now.
     """
     if current != state.get("rollup_rows"):
         return True
@@ -969,16 +655,7 @@ def _rollup_is_due(state: Dict[str, Any], current: List[str], hours: float, now:
 
 
 def _maybe_send_rollup(state: Dict[str, Any], cfg: Dict[str, Any], now: float) -> None:
-    """Mail the manager one roll-up of every open aged row, at most per window.
-
-    Silent-failure contract: the roll-up is a courtesy line on top of the
-    owner's mail, so nothing here may break the record that already happened.
-
-    Args:
-        state: Mutable state document (the roll-up stamp lives here)
-        cfg: Escalation config section
-        now: Current epoch time
-    """
+    """Mail the manager one roll-up of every open aged row, at most per window. Never raises."""
     try:
         hours = float(cfg.get("rollup_hours", 24) or 0)
         if hours <= 0 or _send_email is None:
@@ -1013,16 +690,7 @@ def _maybe_send_rollup(state: Dict[str, Any], cfg: Dict[str, Any], now: float) -
 
 
 def build_rollup(rows: List[Tuple[str, Dict[str, Any]]], recipient: str, hours: float) -> tuple:
-    """Build the manager's roll-up of open aged rows.
-
-    Args:
-        rows: [(signature, entry), ...], newest first
-        recipient: Roll-up recipient address
-        hours: The roll-up cadence, hours
-
-    Returns:
-        (subject, body)
-    """
+    """Build the manager's roll-up of open aged rows."""
     lines = [
         f"  {sig}  @{entry.get('branch', '?').lower()}/{entry.get('module', '?')}  "
         f"x{entry.get('total_count', 0)} lifetime  aged since {entry.get('aged_since', 'unknown')}  "
@@ -1061,21 +729,7 @@ def build_aged_notice(
     age: float,
     fingerprint: str,
 ) -> tuple:
-    """Build the mail the logging branch gets once a warning has aged.
-
-    Args:
-        signature: Repeat signature
-        entry: State entry for this signature
-        window_count: Occurrences inside the window
-        window_seconds: Window length in seconds
-        recipient: The logging branch's address
-        siblings: Other signatures in the same thread
-        age: Age in hours since first seen
-        fingerprint: Registry fingerprint for the row just opened
-
-    Returns:
-        (subject, body)
-    """
+    """Build the mail the logging branch gets once a warning has aged."""
     subject, body = build_digest(
         signature,
         entry,
@@ -1110,25 +764,7 @@ def build_digest(
     recipient: str,
     siblings: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
 ) -> tuple:
-    """Build the digest subject and body.
-
-    Investigation must be able to start from the mail alone: signature, count,
-    window, branch, log path and the last sample lines all travel with it. The
-    mail is the whole thread, so the other signatures under its subject are
-    listed too, in the order given.
-
-    Args:
-        signature: Repeat signature
-        entry: State entry for this signature
-        window_count: Occurrences inside the window
-        window_seconds: Window length in seconds
-        reason: Why this repeat is escalation-worthy
-        recipient: Digest recipient address
-        siblings: Other signatures in the same thread, already ordered
-
-    Returns:
-        (subject, body)
-    """
+    """Build the digest subject and body; investigation must start from the mail alone."""
     level = entry.get("level", "ERROR")
     branch = entry.get("branch", "UNKNOWN")
     module = entry.get("module", "unknown")
@@ -1191,15 +827,7 @@ Sent to {recipient} by @trigger."""
 
 
 def get_signatures(level: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
-    """Return tracked signatures, most recently seen first.
-
-    Args:
-        level: Optional level filter (WARNING / ERROR)
-        limit: Maximum entries returned
-
-    Returns:
-        List of signature dicts with the signature key included
-    """
+    """Return tracked signatures, most recently seen first."""
     state = _load_state()
     rows = []
     for sig, entry in state.get("signatures", {}).items():
@@ -1214,11 +842,7 @@ def get_signatures(level: Optional[str] = None, limit: int = 20) -> List[Dict[st
 
 
 def get_stats() -> Dict[str, Any]:
-    """Return escalation lane statistics for the CLI.
-
-    Returns:
-        Dict with config knobs, tracked counts and digest totals
-    """
+    """Return escalation lane statistics for the CLI."""
     cfg = get_config()
     state = _load_state()
     signatures = state.get("signatures", {})
@@ -1248,8 +872,6 @@ def get_stats() -> Dict[str, Any]:
         "state_file": str(STATE_FILE),
         "config_file": str(config_loader.CONFIG_PATH),
         "email_wired": _send_email is not None,
-        # Trail lines lost because the sidecar itself could not be written.
-        # The one place in this lane that cannot report its own failure, so
-        # it is counted here instead of vanishing.
+        # The trail cannot log its own write failures, so they are counted here.
         "trail_writes_dropped": logger.dropped,
     }

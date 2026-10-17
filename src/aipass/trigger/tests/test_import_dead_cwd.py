@@ -3,49 +3,16 @@
 # Name: test_import_dead_cwd.py
 # Description: trigger imports without a readable cwd
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Version: 1.4.0
 # Category: trigger/tests
 # =============================================
 
 """Tests that apps/trigger.py and every module under apps/ import without a readable cwd."""
 
-# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-# relayed round 4): ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only
-# for relative paths, the way posixpath does - and Path.resolve() routes through
-# it. So on Windows every Path(__file__).resolve() REACHED AT IMPORT is a
-# working-directory read, and a process whose cwd was deleted cannot import the
-# module at all.
-#
-# WHY THIS BRANCH, LOUDLY. @prax reproduced it on Linux against trigger and their
-# traceback is the reason this file exists: prax's logger imports
-# discovery/watcher.py, which imports aipass.trigger.apps.modules.core, which ran
-# trigger's handler guard, which died on line 12. One guard in one branch took
-# down every consumer of prax's logger. Trigger carried eight import-time sites
-# plus the guard.
-#
-# THE WORLD injects ntpath's behaviour as a CONDITION rather than a platform:
-# os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is denied.
-# The injection happens in a child process before any aipass import, so no module
-# has cached the real functions. In-process this property is unobservable - the
-# imports already happened - which is why every world here is a subprocess.
-#
-# AND THE INJECTION HAS TO REACH THE CALL. Patching os.path.realpath only reaches
-# sites that look the name up each time. CPython 3.10's pathlib captures a copy at
-# its own first import (_NormalAccessor.realpath), so on 3.10 the order of imports
-# decides whether this whole file measures anything - and 3.10 is in the CI matrix.
-# _ACCESSOR_PATCH rebinds the captured copy too, so the world arms on every
-# interpreter rather than on luck. Credit: @flow found it, @memory read the 3.10
-# source, @devpulse relayed it.
-#
-# WHY THE PRELOAD LIST IS SHORT HERE. The fleet pattern preloads peer branches in
-# the healthy world so a pin measures its own branch only. Trigger cannot preload
-# @prax: prax's logger imports trigger, so preloading prax would import the very
-# sites under test in the healthy world and the pin would go green measuring
-# nothing. It is preloaded UNDER the denial instead, which is sound because prax's
-# own cure landed 2026-08-31 (verified: prax imports clean in this world). @cli was preloaded
-# healthy while its guard still walked inspect.stack(); that preload was retired
-# 2026-08-31 once their cure was verified from here.
+# ntpath.realpath reads os.getcwd() unconditionally, so on Windows any import-time
+# Path.resolve() dies when the cwd is deleted; one such site in trigger breaks every
+# importer of prax's logger. Each world is a subprocess: in-process the imports already ran.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own tests
@@ -60,42 +27,17 @@ from aipass.trigger.apps.config import module_file
 from aipass.trigger.apps.handlers import repo_root
 from aipass.trigger.tests import support_fence
 
-# Peers held constant in the healthy world, before the denial.
-#
-# @cli's preload was here and is RETIRED. Two facts, and the second corrects
-# what this file used to claim: their guard was cured 2026-08-31 and verified
-# importing clean under the ntpath world below from this branch — AND @cli is
-# never reached from these worlds at all. Measured: after importing every site
-# below under the denial, no aipass.cli module is in sys.modules. prax is (it is
-# on trigger's import path); prax does not pull cli. So the preload was
-# belt-and-braces, not load-bearing, and this file previously said otherwise.
-#
-# @prax is deliberately NOT preloaded and never can be — prax's logger imports
-# trigger, so preloading it would import the sites under test in the HEALTHY
-# world and every assert here would go green measuring nothing. Prax rides under
-# the denial instead, which is sound because their own cure landed the same day.
+# Peers held constant in the healthy world. @prax is never preloaded: its logger
+# imports trigger, so preloading it would import the sites under test before the denial.
 _PRELOAD = r"""
 import rich.console  # noqa: F401
 import inspect  # noqa: F401
 import linecache  # noqa: F401
 """
 
-# THE CAPTURED COPY (@flow's find, relayed by @devpulse 2026-08-31).
-#
-# Patching os.path.realpath only reaches call sites that LOOK IT UP each time.
-# CPython 3.10's pathlib does not: Lib/pathlib.py binds
-# `realpath = staticmethod(os.path.realpath)` onto _NormalAccessor at class
-# creation, i.e. at pathlib's FIRST import, and resolve() reads it back through
-# `self._accessor.realpath`. Rebind os.path afterwards and you rebind a name
-# nothing reads again - the world goes inert and every pin under it passes
-# measuring nothing.
-#
-# So the world rebinds the captured copy too. staticmethod is not decoration:
-# a plain function assigned to a class becomes a bound method and eats the path
-# into `self`, which fails for the wrong reason and can leave a raise-shaped pin
-# green. Guarded by hasattr because 3.11+ deleted _NormalAccessor - there the
-# rebind is a no-op and the call-time lookup is what arms the world (measured on
-# 3.12: this world arms whether pathlib is imported before or after the patch).
+# CPython 3.10's pathlib captures os.path.realpath onto _NormalAccessor at first import,
+# so patching os.path alone leaves the world inert there. staticmethod is required: a bare
+# function binds as a method and eats the path into `self`. 3.11+ has no _NormalAccessor.
 _ACCESSOR_PATCH = r"""
 import pathlib
 
@@ -104,7 +46,6 @@ if _captured is not None:
     _captured.realpath = staticmethod(os.path.realpath)
 """
 
-# The posix-shaped denial: enough to reach every module-level resolve().
 _PREAMBLE = (
     _PRELOAD
     + r"""
@@ -140,20 +81,8 @@ except FileNotFoundError:
 """
 )
 
-# The ntpath-SHAPED denial, needed to reach the guard's old defect.
-#
-# On POSIX every route inspect.stack() takes to os.path.realpath runs through
-# getabsfile(), whose os.path.abspath raises FileNotFoundError for the relative
-# "<frozen importlib._bootstrap>" filenames an import stack carries - and
-# getmodule() CATCHES FileNotFoundError, so the unguarded
-# `modulesbyfile[os.path.realpath(f)]` below it is never reached. A pin built on
-# the preamble above therefore goes GREEN against a reintroduced inspect.stack():
-# it measures the module-level resolve() next door, not the stack walk.
-#
-# ntpath has no such early raise, so on Windows getmodule() proceeds and dies.
-# Emulated by giving abspath ntpath's non-raising behaviour while realpath keeps
-# reading cwd - the injection then denies the call the DEFECT actually makes
-# (@memory's rule), not one the platform happens to catch first.
+# The ntpath-shaped denial: on POSIX getmodule() catches abspath's FileNotFoundError before
+# inspect.stack() reaches realpath, so only an ntpath-style non-raising abspath convicts it.
 _NTPATH_PREAMBLE = (
     _PRELOAD
     + r"""
@@ -200,12 +129,7 @@ except FileNotFoundError:
 """
 )
 
-# Every trigger site that resolves a path at IMPORT, named one per line so a
-# failure says which module died rather than "the branch".
-#
-# events/plan_file.py was a fourth _find_repo_root caller and is gone: retired
-# 2026-08-31 as measured inert (see apps/handlers/events/.archive/plan_file.py).
-# This pin went red when it was archived, which is the list doing its job.
+# One site per line so a failure names the module that died.
 _SITES = r"""
 import aipass.trigger.apps.handlers  # noqa: F401
 print("GUARD_OK")
@@ -227,7 +151,6 @@ print("IMPORTED")
 
 SWEEP_WORLD = _PREAMBLE + _SITES
 
-# The guard alone, under the world its old implementation actually died in.
 NTPATH_GUARD_WORLD = (
     _NTPATH_PREAMBLE
     + r"""
@@ -237,7 +160,6 @@ print("IMPORTED")
 """
 )
 
-# The whole branch under the ntpath world - the shape @prax's traceback took.
 NTPATH_SWEEP_WORLD = _NTPATH_PREAMBLE + _SITES
 
 
@@ -253,44 +175,18 @@ def _run(world: str) -> subprocess.CompletedProcess:
 
 
 def _assert_probe_armed(out: str) -> None:
-    """The instrument must be able to fire, or the pin proves nothing.
-
-    This used to accept PROBE_VACUOUS on sys.version_info < (3, 11), citing
-    "pre-3.11 pathlib never routes an absolute resolve through os.path.realpath".
-    That sentence was a RETRACTED diagnosis and it is false: 3.10 routes through
-    a copy of os.path.realpath captured onto _NormalAccessor at pathlib's first
-    import. The clause therefore blessed exactly the vacuity it exists to catch,
-    on the one interpreter where the world could genuinely go inert - and 3.10 is
-    in the CI matrix. _ACCESSOR_PATCH arms that interpreter, so no version is
-    excused any more. A vacuous world is a failure everywhere.
-    """
+    """The instrument must be able to fire, or the pin proves nothing."""
     assert "PROBE_ARMED" in out, (
         "the denial did not reach resolve() - the instrument is broken, not the "
         f"world, and every pin under it proves nothing:\n{out}"
     )
 
 
-# The JUDGEMENT, separated from the WORLD (@commons' round-5 rule). No
-# interpreter here can produce a vacuous probe, so the branch that decides what
-# to DO about one is unreachable from any real world on this host - which is how
-# the version escape hatch survived in the first place, and how it would come
-# back. Fed synthetic strings, every interpreter case is reachable from any
-# machine, including the one no local run can create.
+# The judgement is fed synthetic strings: no real world on this host produces a vacuous probe.
 
 
 def test_a_vacuous_probe_is_refused_on_this_interpreter_too():
-    """A vacuous probe is refused on every interpreter, 3.10 included.
-
-    3.10 is the ONE interpreter that can go inert, and it gets no exemption.
-    A deleted clause read `assert sys.version_info < (3, 11)` and returned
-    quietly there, blessing the vacuity this helper exists to catch.
-
-    This unfaked pin is the proof, on every interpreter CI runs. A restored
-    clause stays green on this host (it is not 3.10), and dies in the CI 3.10
-    lane, here. Until leg 12 a twin faked sys.version_info process-wide to stand
-    where 3.10 stands. The helper reads no version, so that fake changed nothing
-    the judgement read, and the twin is retired (@devpulse's ruling, leg 12).
-    """
+    """A vacuous probe is refused on every interpreter, 3.10 included."""
     with pytest.raises(AssertionError):
         _assert_probe_armed("PROBE_VACUOUS\nIMPORTED\n")
 
@@ -318,9 +214,7 @@ def test_import_time_sites_survive_a_denied_cwd():
 def test_handlers_guard_survives_the_ntpath_shaped_denial():
     """The guard must not walk inspect.stack().
 
-    Separate from the sweep because the posix-shaped world is satisfied by the
-    guarded resolve alone. This one is RED against an inspect.stack() walk and
-    green against the sys._getframe cure.
+    The posix-shaped sweep cannot see a stack walk; this world can.
     """
     result = _run(NTPATH_GUARD_WORLD)
     out = result.stdout
@@ -343,40 +237,10 @@ def test_whole_branch_imports_under_the_ntpath_shaped_denial():
     assert "IMPORTED" in out, f"a trigger import died under the ntpath world:\nstdout={out}\nstderr={result.stderr}"
 
 
-# ---------------------------------------------------------------------------
-# Is _ACCESSOR_PATCH load-bearing, or decoration? Falsifiable HERE, on 3.12.
-#
-# The interpreter that needs it (3.10) is in the CI matrix and is not installed
-# on this machine, so "it works on 3.10" is not something this suite can claim.
-# What it CAN do is rebuild 3.10's capture shape - an eager staticmethod bound at
-# class creation, read back through an instance - and pin the two directions
-# separately: the bare os.path patch is INERT against it, the shipped patch ARMS
-# it.
-#
-# ROUND 7, PAID FOR ON THE WINDOWS RUNNER. The first cut let the shape capture
-# the LIVE os.path.realpath and then asked "did a later patch reach it?" by
-# reading raise/no-raise under a denied getcwd. That discriminates on POSIX only:
-# posixpath.realpath ignores the cwd for an absolute path, so RAISED could only
-# mean the patch landed. On nt, ntpath.realpath (ntpath.py:673) computes
-# `cwd = os.getcwd()` UNCONDITIONALLY - above the `isabs` test that is the only
-# thing reading it - so the ORIGINAL raises too and RAISED stops discriminating.
-# CI printed EMULATION_EAGER / CAPTURE_ARMED and the pin failed for the reason it
-# was built to detect, one platform over.
-#
-# @memory's verdict, and the rule this file now obeys: AN INSTRUMENT MUST NOT
-# IMPORT BEHAVIOUR IT IS NOT TESTING. The captured function is a SENTINEL that
-# touches no filesystem, no cwd and no path module, and answers with a constant
-# rather than a path - so whatever raises or returns afterwards is the patch's
-# doing, on any platform, and no return-value pin can quietly start measuring the
-# host (@drone's addendum).
-# ---------------------------------------------------------------------------
-
-# Two distinguishable sentinels, because a sentinel alone cannot show EAGERNESS.
-# @skills' asymmetry note: sentinel the dialect-divergent half only, or a pin
-# that measures when the capture happened goes dark. An identity check would not
-# have survived the cure either - a lazy wrapper around one sentinel returns the
-# same answer as an eager capture of it. Moving the SOURCE after class creation
-# is what separates them, and it needs no platform behaviour at all.
+# _ACCESSOR_PATCH, falsified on any host by rebuilding 3.10's eager capture. The captured
+# function is a sentinel that touches no filesystem or cwd: ntpath.realpath reads the cwd
+# even for absolute paths, so a live capture makes raise/no-raise mean nothing on Windows.
+# Two sentinels, because moving the source name after class creation is what shows eagerness.
 _SENTINELS = r"""
 def _sentinel_captured(path, *, strict=False):
     # Touches no filesystem, no cwd, no path module. Answers with a CONSTANT,
@@ -398,13 +262,7 @@ _source_realpath = _sentinel_captured
 print("SENTINELS_DIFFER", _sentinel_captured(_ABS) != _sentinel_moved(_ABS))
 """
 
-# The win32 branch of ntpath.realpath, built BY NAME from ntpath's own helpers.
-#
-# NOT by aliasing: off Windows `ntpath.realpath` is a WRAPPER that returns
-# abspath(path) (ntpath.py:564), not an alias - `ntpath.realpath is
-# ntpath.abspath` is False here, so an is-test proves nothing either way
-# (@flow's alias trap as corrected by @skills). Aliasing it would produce a
-# green-looking answer that silently stops reproducing the bug.
+# The win32 branch of ntpath.realpath, rebuilt: off Windows ntpath.realpath wraps abspath.
 _NT_SHAPED = r"""
 import ntpath
 
@@ -446,29 +304,12 @@ import sys
 _ABS = "/AIPASS_NO_SUCH_PROBE_PATH"
 """
 
-# Said out loud rather than assumed, and printed before any verdict: a row whose
-# probe is not absolute in the captured dialect is measuring the host's notion of
-# absoluteness, not the patch.
-#
-# posixpath ONLY, and that is a measurement rather than an oversight. The two
-# dialects are asymmetric (@flow's note, confirmed here): posixpath REFUSES an nt
-# literal, ntpath ACCEPTS a posix one and treats it as drive-relative. So there
-# is no path that is posix-absolute and not nt-absolute -
-#   '/x'    posix True  nt True
-#   'D:\x'  posix False nt True
-#   r'\\srv\s' posix False nt True
-# - and an `and ntpath.isabs(_ABS)` clause can never fire. It was here and a
-# mutant proved it: dropping it changed nothing. Named rather than kept looking
-# load-bearing. posixpath is the strict dialect, so it is the one that has to
-# agree, and every row shares one literal.
+# posixpath only: every posix-absolute path is also nt-absolute, so an ntpath check never fires.
 _PROBE_CONTROL = r"""
 print("PROBE_IS_ABS", posixpath.isabs(_ABS))
 """
 
-# @spawn's ROUTE_ARMED/ROUTE_DARK: the emulation proves it TOOK the route before
-# anything downstream claims anything. For the nt shape that means showing the
-# unconditional cwd read really fires for an ABSOLUTE path - which is the entire
-# reason the nt dialect breaks a raise-shaped probe.
+# The nt shape must prove its cwd read fires for an absolute path before any verdict counts.
 _ROUTE_CONTROL = r"""
 if _CAPTURED is _nt_shaped_realpath or _HOST_REALPATH is _nt_shaped_realpath:
     _before = len(_getcwd_reads)
@@ -485,9 +326,7 @@ class _NormalAccessorShape:
 _accessor = _NormalAccessorShape()
 """
 
-# The eagerness control, by VALUE and with no platform behaviour in it: move the
-# source name after the class was built. An eager capture still answers with the
-# function it captured; a lazy wrapper follows the name and answers "MOVED".
+# An eager capture still answers "CAPTURED" after the source moves; a lazy wrapper answers "MOVED".
 _EAGER_CONTROL = r"""
 if _CAPTURED is _sentinel_captured:
     _source_realpath = _sentinel_moved
@@ -522,8 +361,7 @@ if _captured is not None:
     _captured.realpath = staticmethod(os.path.realpath)
 """
 
-# Read back through the INSTANCE, the way pathlib 3.10's resolve() does
-# (`self._accessor.realpath`), never off the class.
+# Read through the instance, as pathlib 3.10's resolve() does.
 _EXERCISE_CAPTURE = r"""
 try:
     result = _accessor.realpath(_ABS)
@@ -557,16 +395,10 @@ def _capture_world(
 ) -> str:
     """Assemble one capture world.
 
-    capture= what the accessor captured EAGERLY. "sentinel" is the shipped
-    shape; "posix"/"nt" rebuild the PRE-CURE shape so the round-7 failure stays
-    reproducible on this host rather than living only in a CI log.
-    host=    which dialect the SURROUNDING os.path.realpath speaks. Varying this
-    while holding the capture fixed is the litmus.
+    "posix"/"nt" captures rebuild the pre-cure shape; host varies with the capture held fixed.
     """
     world = ""
     if spoof_executable is not None:
-        # Stand where the other platform stands, before the world computes
-        # anything from it.
         world += f"import sys\n\nsys.executable = {spoof_executable!r}\n"
     world += _CAPTURE_HEAD
     if probe is not None:
@@ -627,9 +459,7 @@ def test_the_shipped_accessor_patch_arms_the_captured_copy():
 def test_the_accessor_patch_needs_staticmethod_not_a_bare_function():
     """Why _ACCESSOR_PATCH wraps: bare, the instance is eaten into the path slot.
 
-    Without this, someone simplifies the fragment to a plain assignment, the
-    call fails with TypeError instead of FileNotFoundError, and a pin that only
-    asks "did it raise" reports a cured world.
+    A bare rebind raises TypeError, which a "did it raise" pin reads as a cured world.
     """
     result = _run(_capture_world("sentinel", bare_rebind=True))
     out = result.stdout
@@ -647,11 +477,7 @@ def test_the_inert_verdict_does_not_move_between_host_dialects(host: str):
     """@memory's litmus: run the probe under the opposite platform's dialect and
     require the verdict NOT to move.
 
-    The capture is held fixed at the sentinel and the SURROUNDING realpath is
-    swapped, which is the variable that actually moved between the Linux and
-    Windows runners. This is the round-7 regression pin: revert the sentinel to
-    a live capture and the nt row goes red HERE, on Linux, instead of on the
-    Windows runner three hours later.
+    A live capture in place of the sentinel turns the nt row red here, on Linux.
     """
     result = _run(_capture_world("sentinel", host=host))
     out = result.stdout
@@ -667,12 +493,7 @@ def test_the_inert_verdict_does_not_move_between_host_dialects(host: str):
 def test_the_litmus_is_armed_by_a_shape_whose_verdict_does_move(dialect: str, expected: str):
     """The arming for the litmus above (@skills' trap (d)).
 
-    A run-under-both-dialects check is vacuously green if the dialect slot
-    reaches nothing - and with a sentinel it reaches nothing BY DESIGN. So one
-    shape whose verdict is SUPPOSED to move has to be measured beside it: the
-    PRE-CURE live capture, which reads INERT on posix and ARMED on nt for two
-    different reasons. That divergence IS the round-7 failure, reproduced on
-    this host rather than quoted from a CI log.
+    The pre-cure live capture must diverge by dialect, or the litmus slot reaches nothing.
     """
     result = _run(_capture_world(dialect, host=dialect))
     out = result.stdout
@@ -684,8 +505,7 @@ def test_the_litmus_is_armed_by_a_shape_whose_verdict_does_move(dialect: str, ex
     )
 
 
-# A stand-in for each host's sys.executable, which is what the probe path used to
-# be. Absolute to its own dialect and to nothing else - which is the entire bug.
+# Each host's sys.executable shape: absolute to its own dialect only.
 _HOST_SHAPED_EXECUTABLE = {
     "posix": "/usr/bin/python3",
     "nt": "D:\\a\\AIPass\\AIPass\\.venv\\Scripts\\python.exe",
@@ -696,23 +516,12 @@ _HOST_SHAPED_EXECUTABLE = {
 def test_a_host_shaped_probe_path_is_refused_rather_than_silently_answered(host_shape: str):
     """The round-8 regression pin, and it convicts the INSTALLER not the world.
 
-    Round 7's probe path was sys.executable: absolute in the running host's
-    dialect and nobody else's. On the Windows runner posixpath.isabs() of it is
-    False, so the posix capture treated it as relative, joined the denied cwd,
-    and reported ARMED - and the row announced "the failure this file was rebuilt
-    around has stopped reproducing", which was a statement about the probe
-    wearing the words of a statement about the subject.
-
-    So the world now REFUSES a probe that is not absolute in both dialects and
-    says which thing is wrong, rather than answering a question it can no longer
-    read (@spawn's UNAVAILABLE-with-a-reason). This pin runs both host shapes on
-    this machine, so neither leg of the matrix has to discover it.
+    The world refuses a probe path that is not absolute to posixpath, and says so.
     """
     result = _run(_capture_world("posix", probe=_HOST_SHAPED_EXECUTABLE[host_shape]))
     out = result.stdout
 
     if host_shape == "posix":
-        # Absolute to posixpath here, so the row can still answer - and must.
         assert "PROBE_IS_ABS True" in out, out
         assert "CAPTURE_INERT" in out, f"a posix-absolute probe stopped being inert against the posix capture:\n{out}"
         return
@@ -729,12 +538,7 @@ def test_a_host_shaped_probe_path_is_refused_rather_than_silently_answered(host_
 def test_the_probe_path_does_not_follow_the_hosts_executable(host_shape: str):
     """Convicts the round-8 defect ITSELF on this machine, not just its symptom.
 
-    The pin above proves the world refuses a bad probe when one is handed to it.
-    This one proves the world does not GO AND FETCH a bad one: sys.executable is
-    spoofed to each platform's shape before the world computes _ABS, and the
-    verdict must not move. A literal is immune; anything derived from the host -
-    sys.executable, os.getcwd(), __file__ - is convicted here rather than on the
-    runner that happens to have the other shape.
+    The probe path must not be derived from the host (sys.executable, cwd, __file__).
     """
     result = _run(_capture_world("posix", spoof_executable=_HOST_SHAPED_EXECUTABLE[host_shape]))
     out = result.stdout
@@ -747,11 +551,7 @@ def test_the_probe_path_does_not_follow_the_hosts_executable(host_shape: str):
 
 
 def test_the_shipped_probe_path_is_absolute_to_the_strict_dialect():
-    """The positive half: the literal actually shipped satisfies the rule.
-
-    Without this the pin above passes on a world that refuses EVERYTHING, which
-    would be a refusal wearing a control's name.
-    """
+    """The positive half: the literal actually shipped satisfies the rule."""
     result = _run(_capture_world("posix"))
 
     assert "PROBE_IS_ABS True" in result.stdout, result.stdout
@@ -761,11 +561,7 @@ def test_the_shipped_probe_path_is_absolute_to_the_strict_dialect():
 def test_repo_root_fallback_is_the_source_tree_never_the_process_directory():
     """The QUIET defect: four walks used to end in `return Path.cwd()`.
 
-    A registry-less tree (every clean clone; AIPASS_REGISTRY.json is gitignored)
-    took that fallback on every import, so each caller resolved against whatever
-    directory the shell happened to be in. Pinned from a child process standing
-    somewhere unrelated, because in-process the cwd is the repo root and the
-    wrong answer and the right one look identical.
+    A registry-less fallback must be the source tree. Run from an unrelated directory: in-process the cwd is the repo root and hides the defect.
     """
     world = r"""
 import os
@@ -797,18 +593,7 @@ print("CWD", Path.cwd())
 def test_repo_root_refuses_a_case_folded_marker(tmp_path):
     """A cased literal folds too: exists() answers about `aipass_registry.json`.
 
-    find_repo_root decides which installation this branch belongs to and several
-    callers build write paths from the answer, so a folded bait file accepted as
-    THE repo root is the quiet defect arriving through a different door.
-
-    THE FOLDING IS INJECTED, not waited for. On ext4 the bait cannot fire, so a
-    test that merely places a lowercase file and asserts refusal passes for the
-    wrong reason - measured: a mutant degrading exists_exactly() to a bare
-    exists() SURVIVED that shape on Linux. The probe handed in through exists_fn
-    gives the answer a folding filesystem would give, which is the call the
-    defect actually makes. Moved off a patch of Path.exists onto the seam in
-    leg 5 (2026-09-29); green on the tree from its first run, so its proof is
-    its mutant.
+    Folding is injected through exists_fn: on ext4 a bare exists() mutant survives otherwise.
     """
     bait_dir = tmp_path / "bait"
     bait_dir.mkdir()
@@ -835,16 +620,13 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path):
         "the walk stopped at a directory holding aipass_registry.json"
     )
 
-    # And the exact spelling is still accepted, under the same injected world.
     real_dir = tmp_path / "real"
     real_dir.mkdir()
     (real_dir / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     assert repo_root.exists_exactly(real_dir / "AIPASS_REGISTRY.json", exists_fn=folding_exists)
     assert repo_root.find_repo_root(real_dir, caller="pin", exists_fn=folding_exists) == real_dir
 
-    # The probe reaches every step of the walk: one that denies the inner marker
-    # walks past it to the outer one. Without this the seam could go unread and
-    # ext4's own answer would keep every assert above green.
+    # Proves the walk reads the probe at every step, not ext4's own answer.
     inner = real_dir / "inner"
     inner.mkdir()
     (inner / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -858,36 +640,19 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path):
 
 
 def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch):
-    """The control FOR the control: without the injection, the bait is inert.
-
-    Proves the previous test's refusal comes from exists_exactly and not from
-    ext4 answering no - a green that would survive deleting the cure.
-    """
+    """The control FOR the control: without the injection, the bait is inert."""
     bait_dir = tmp_path / "bait"
     bait_dir.mkdir()
     (bait_dir / "aipass_registry.json").write_text("{}", encoding="utf-8")
 
     if (bait_dir / "AIPASS_REGISTRY.json").exists():
-        # A genuinely folding host: the injection is redundant there, and the
-        # pin above measures the live condition rather than an emulation.
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
     else:
-        # Case-sensitive host: the bait is invisible WITHOUT the injection,
-        # which is exactly why the injection exists.
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
 
 
-# ===========================================================================
-# The fence's kin walk under a dead cwd, through its public shape
-# ===========================================================================
-#
-# Until DPLAN-0404 leg 10 a world here called the old guard's private
-# _find_real_caller and _guard_branch_access by hand. Fence v2 has neither
-# shape to call, so the pin now runs the fence probe (tests/support_fence.py)
-# from its kin seat, the way test_handlers_fence does, under the ntpath-shaped
-# denial. Every frame the fence walks is resolved there, and kin must still pass.
-# The dead cwd is the file's emulation (os.getcwd raises FileNotFoundError), not
-# a real rmdir: Windows refuses to remove a process's own working directory.
+# The fence probe from its kin seat under the ntpath-shaped denial. The dead cwd is
+# emulated: Windows refuses to remove a process's own working directory.
 
 KIN_SEAT_WORLD = (
     _NTPATH_PREAMBLE
@@ -902,11 +667,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
 
 
 def test_the_fence_lets_kin_through_with_no_cwd():
-    """The kin seat imports its handlers under the ntpath-shaped denial: ALLOWED.
-
-    Red against a fence whose frame walk resolves a path without its OSError arm:
-    the denied cwd then kills the import and the probe never answers.
-    """
+    """The kin seat imports its handlers under the ntpath-shaped denial: ALLOWED."""
     result = _run(KIN_SEAT_WORLD)
     out = result.stdout
 
@@ -917,12 +678,7 @@ def test_the_fence_lets_kin_through_with_no_cwd():
 
 
 def test_module_file_resolves_through_a_symlink(tmp_path):
-    """module_file hands back the real file behind a symlinked __file__.
-
-    Every import-time path in this branch starts at module_file, so the healthy
-    arm is the one that runs on every machine. Red against a module_file that
-    returns Path(file) without trying .resolve().
-    """
+    """module_file hands back the real file behind a symlinked __file__."""
     real = tmp_path / "real_module.py"
     real.write_text("", encoding="utf-8")
     link = tmp_path / "linked_module.py"

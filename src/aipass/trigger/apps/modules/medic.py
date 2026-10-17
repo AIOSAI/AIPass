@@ -3,27 +3,13 @@
 # Description: Medic toggle module for auto-healing error dispatch control
 # Version: 1.9.0
 # Created: 2026-02-12
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Medic Toggle Module - Control auto-healing error dispatch
 
-Provides on/off/status/mute/unmute commands for the Medic system
-(error detection + auto-dispatch chain). When Medic is off, errors
-are still detected and logged but NOT dispatched to branches.
-Per-branch muting suppresses dispatch for specific branches only.
-
-Two mute classes, deliberately independent:
-    mute / unmute                CONTENT — gates error_detected dispatch
-    volume-mute / volume-unmute  VOLUME  — gates runaway_log_detected alerts
-
-Commands: on, off, status, mute, unmute, volume-mute, volume-unmute
-Architecture: Module orchestrates, medic_state handler manages persistence
-
-Also the public door for medic's cold-start recovery — run_error_catchup().
-It is not a command; it exists because log_watcher_service is an ENTRY POINT
-and entry points import modules, not handlers (seedgo encapsulation rule 3).
+Also the door to run_error_catchup(): log_watcher_service is an entry point, and entry points import modules.
 """
 
 import os
@@ -70,22 +56,7 @@ if sys.platform == "win32":
 def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
     """Scan system_logs for errors missed while no watcher was up.
 
-    Medic's cold-start recovery, and the module-level door to it. The scan
-    itself is the startup handler's (handlers/events/startup.py); this is the
-    public entry point log_watcher_service.main() calls once its watchers are
-    up, so recovery belongs to the process that owns the watching instead of
-    arriving by accident on prax's per-process `startup` fire (DPLAN-0339
-    step 2, the prerequisite for prax dropping that fire).
-
-    Deliberately a direct call rather than `trigger.fire("startup")`: a fire
-    with no registered listener returns `handlers: 0` and reports success, so
-    the day someone unwires the handler, recovery would go silent and nothing
-    would say so. Trigger has that exact failure live elsewhere — prax fires
-    `file_watcher_died` into zero handlers — and this path must not join it.
-
-    Args:
-        fire_event: Callback used to fire error_detected for each error found.
-            None scans and records without dispatching.
+    A direct call, not trigger.fire("startup"): a fire with no listener reports success, so recovery would go silent.
     """
     run_startup_catchup(fire_event)
 
@@ -94,7 +65,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
@@ -123,17 +94,9 @@ def _extract_branch_name(raw: str) -> str:
     """
     Extract branch name from raw argument.
 
-    Handles both direct names (@speakeasy, speakeasy) and
-    drone-resolved paths (e.g., src/aipass/speakeasy).
-
-    Args:
-        raw: Raw argument from command line
-
-    Returns:
-        Lowercase branch name (e.g., 'speakeasy')
+    Accepts @name, name, or a drone-resolved path such as src/aipass/speakeasy.
     """
     cleaned = raw.lstrip("@")
-    # If it looks like a path, take the last directory component
     if "/" in cleaned:
         cleaned = Path(cleaned).name
     return cleaned.lower()
@@ -220,12 +183,7 @@ def print_help() -> None:
 
 
 def _parse_duration_args(args: list) -> tuple:
-    """Extract --for <dur> and --forever from args.
-
-    Returns:
-        (duration_seconds_or_None, is_forever, remaining_args)
-        Default (no flags): duration=DEFAULT_MUTE_SECONDS, is_forever=False
-    """
+    """Extract --for <dur> and --forever from args."""
     remaining = []
     duration = None
     is_forever = False
@@ -394,8 +352,7 @@ def _handle_status(console) -> None:
     elif not systemd_available():
         watcher_text = "[yellow]unavailable[/yellow] — no systemd on this host"
     elif watcher_active is None:
-        # systemctl was there but never answered (a timeout, an exec failure):
-        # the watcher's state is unknown, and "stopped" would be a guess.
+        # systemctl never answered: "stopped" would be a guess.
         watcher_text = "[yellow]unknown[/yellow] — systemctl did not answer; see the service log"
     elif enabled:
         watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
@@ -430,8 +387,7 @@ def _handle_on(console) -> None:
 
     logger.info("[MEDIC] Medic ENABLED - error dispatch active")
     active = is_service_active()
-    # Only an answered "not running" is started. None means systemctl never
-    # answered, and a start sent after a hung is-active is a guess.
+    # Only an answered "not running" is started; None (no answer) would make the start a guess.
     if active is False:
         ensure_service_installed()
         started = systemctl("start")
@@ -464,12 +420,7 @@ def _handle_on(console) -> None:
 def _stop_watcher() -> str:
     """Stop the log watcher for 'medic off --forever' and say what happened.
 
-    Running, or systemctl never answered: the stop is sent either way, because
-    a stop to a unit that is not running is a no-op. Only a stop that answered
-    success is reported as one.
-
-    Returns:
-        The watcher sentence for the off panel
+    Unanswered is stopped too (a stop to a stopped unit is a no-op); only an answered success reports as one.
     """
     active = is_service_active()
     if active is False:
@@ -540,20 +491,9 @@ def _route_medic_module(args: list) -> bool:
 def handle_command(command: str, args: list) -> bool:
     """
     Handle medic commands - orchestrate toggle operations.
-
-    Routes on/off/status to handler functions and coordinates
-    with branch_log_events module for watcher lifecycle.
-
-    Args:
-        command: Module name or subcommand (medic, on, off, status)
-        args: Additional arguments
-
-    Returns:
-        True if command was handled, False otherwise
     """
     from aipass.cli.apps.modules import console
 
-    # Module-name routing (drone @trigger medic <subcmd>)
     if command == "medic":
         if not args:
             print_introspection()

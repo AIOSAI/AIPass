@@ -3,34 +3,11 @@
 # Description: Structured error tracking and registry for Medic v2
 # Version: 2.5.0
 # Created: 2026-02-13
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Error Registry Handler - Structured error tracking for Medic v2
-
-Replaces the simple MD5 hash dedup from Medic v1 with a structured
-error registry. Errors become first-class objects with fingerprinting,
-deduplication, status tracking, and metadata.
-
-Phase 2 adds:
-    - Circuit breaker: Pauses all dispatch when error rate exceeds threshold.
-      Three states (closed/open/half_open) with exponential cooldown backoff.
-    - Per-fingerprint rate limiting: Exponential backoff per error fingerprint
-      to prevent repeated dispatch of the same known error.
-
-Architecture:
-    Module (medic.py) orchestrates, this handler manages error records.
-    Errors are normalized, fingerprinted (SHA1), and stored as structured
-    entries in error_registry.json. Circuit breaker and rate limiting state
-    is held in-memory (resets on process restart).
-
-Storage:
-    trigger/trigger_json/error_registry.json
-    Format: {
-        "errors": {fingerprint: ErrorEvent_as_dict, ...},
-        "metadata": {"version": "2.0.0", "last_updated": "..."}
-    }
 """
 
 import hashlib
@@ -55,8 +32,7 @@ VALID_STATUSES = ("new", "investigating", "suppressed", "resolved")
 VALID_SEVERITIES = ("low", "medium", "high", "critical")
 VALID_FIX_STATUSES = ("none", "pending_fix", "fix_requested", "fix_confirmed")
 
-# Patterns that indicate user errors (bad commands, wrong args) rather
-# than system failures.  Matched case-insensitively against the raw message.
+# User errors (bad commands, wrong args), not system failures: auto-suppressed on report.
 _USER_ERROR_PATTERNS: re.Pattern = re.compile(
     r"unknown command|invalid argument|unrecognized|"
     r"missing required argument|usage:|no such command|"
@@ -68,24 +44,7 @@ _USER_ERROR_PATTERNS: re.Pattern = re.compile(
 
 @dataclass
 class ErrorEvent:
-    """Structured error entry for the registry.
-
-    Attributes:
-        id: Short UUID4 identifier (first 8 chars)
-        fingerprint: SHA1 of normalized error_type + message + component
-        error_type: Error class name (e.g., 'ImportError', 'ConnectionError')
-        message: Original error message text
-        normalized_message: Message stripped of variable data
-        component: Branch/module that generated the error
-        severity: Error severity level (low, medium, high, critical)
-        count: Number of times this fingerprint was seen
-        status: Current tracking status (new, investigating, suppressed, resolved)
-        first_seen: ISO timestamp of first occurrence
-        last_seen: ISO timestamp of most recent occurrence
-        log_path: Source log file path
-        suppress_reason: Why this error was suppressed (optional)
-        source_fix_status: Fix tracking (none, pending_fix, fix_requested, fix_confirmed)
-    """
+    """Structured error entry for the registry."""
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     fingerprint: str = ""
@@ -105,37 +64,22 @@ class ErrorEvent:
 
 @dataclass
 class CircuitBreakerState:
-    """Circuit breaker state tracking.
+    """Circuit breaker state tracking: closed, open, or half_open (one probe dispatch)."""
 
-    Three states control dispatch flow:
-    - closed: Normal operation, all dispatches allowed
-    - open: Paused, no dispatches until cooldown expires
-    - half_open: Testing, allows one dispatch to probe recovery
-    """
-
-    state: str = "closed"  # closed, open, half_open
-    opened_at: float = 0.0  # time.time() when breaker opened
-    cooldown_seconds: int = 300  # Current cooldown (5 min default)
-    base_cooldown: int = 300  # Base cooldown for reset
-    max_cooldown: int = 3600  # Max cooldown (1 hour)
-    recent_errors: list = field(default_factory=list)  # timestamps of recent new errors
-    trip_threshold: int = 10  # Errors per window to trip
-    trip_window_seconds: int = 60  # Window to count errors in
-    summary_sent: bool = False  # Whether summary notification sent for current open state
-    half_open_allow: bool = True  # Whether the half_open probe dispatch is still available
-
-
-# ---------------------------------------------------------------------------
-# Circuit Breaker Persistence
-# ---------------------------------------------------------------------------
+    state: str = "closed"
+    opened_at: float = 0.0
+    cooldown_seconds: int = 300
+    base_cooldown: int = 300
+    max_cooldown: int = 3600
+    recent_errors: list = field(default_factory=list)
+    trip_threshold: int = 10
+    trip_window_seconds: int = 60
+    summary_sent: bool = False
+    half_open_allow: bool = True
 
 
 def _save_circuit_breaker_state() -> None:
-    """Persist full circuit breaker + per-fingerprint state to trigger_cb_state.json.
-
-    Saves CB state (including recent_errors, half_open_allow) and per-fingerprint
-    dispatch tracking so the full state survives process restarts.
-    """
+    """Persist full circuit breaker + per-fingerprint state to trigger_cb_state.json."""
     try:
         with json_file_lock(CB_STATE_FILE):
             state_data = {
@@ -172,14 +116,7 @@ def _restore_fingerprint_tracking(pf_data: dict) -> None:
 
 
 def _load_circuit_breaker_state() -> CircuitBreakerState:
-    """Load full circuit breaker state from trigger_cb_state.json.
-
-    Restores CB state including recent_errors and half_open_allow,
-    plus per-fingerprint dispatch tracking into module-level dicts.
-
-    Returns:
-        CircuitBreakerState populated from disk or defaults.
-    """
+    """Load full circuit breaker state from trigger_cb_state.json."""
     try:
         if not CB_STATE_FILE.exists():
             return CircuitBreakerState()
@@ -213,29 +150,16 @@ def _clear_circuit_breaker_state() -> None:
         logger.warning("Failed to clear circuit breaker state: %s", exc)
 
 
-# Module-level dicts for per-fingerprint dispatch tracking
-_fingerprint_dispatch_times: Dict[str, List[float]] = {}  # fingerprint -> [dispatch_timestamps]
-_fingerprint_dispatch_count: Dict[str, int] = {}  # fingerprint -> total dispatch count
+_fingerprint_dispatch_times: Dict[str, List[float]] = {}
+_fingerprint_dispatch_count: Dict[str, int] = {}
 
-# Module-level circuit breaker state (restored from disk if available)
 _circuit_breaker = _load_circuit_breaker_state()
-
-
-# ---------------------------------------------------------------------------
-# Circuit Breaker
-# ---------------------------------------------------------------------------
 
 
 def _evaluate_state(now: Optional[float] = None) -> None:
     """Evaluate circuit breaker state transitions on read.
 
-    If state is 'open' and cooldown has expired, transition to 'half_open'
-    with the probe slot available. Called by both circuit_breaker_allows()
-    and get_circuit_breaker_status() so the breaker self-heals even when
-    medic is off and no dispatches are running.
-
-    Args:
-        now: The clock reading to judge by, as from time.time(); None reads the clock
+    Runs on status reads too, so the breaker self-heals while medic is off.
     """
     global _circuit_breaker
     if _circuit_breaker.state != "open":
@@ -251,24 +175,8 @@ def _evaluate_state(now: Optional[float] = None) -> None:
 def circuit_breaker_allows(now: Optional[float] = None) -> bool:
     """Check if the circuit breaker allows dispatch.
 
-    Three states:
-    - Closed (normal): All dispatches allowed. Records are checked against
-      trip_threshold to determine if breaker should open.
-    - Open (paused): No dispatches. Transitions to half_open after cooldown
-      period expires (evaluated on read via _evaluate_state).
-    - Half-Open (testing): Allow ONE dispatch to test recovery. On success
-      the caller must call circuit_breaker_probe_succeeded() to close.
-      If another error comes, circuit_breaker_record_error() re-opens
-      with doubled cooldown.
-
-    Args:
-        now: The clock reading to judge the cooldown by; None (every product
-            caller) reads time.time(). It exists so a test can hand in a
-            reading past the cooldown instead of rewriting the breaker's
-            private opened_at.
-
-    Returns:
-        True if dispatch is allowed, False if breaker is blocking
+    Half-open allows ONE probe; the caller must call circuit_breaker_probe_succeeded() to close.
+    `now` is a test seam; product callers pass None.
     """
     global _circuit_breaker
     _evaluate_state(now)
@@ -289,24 +197,13 @@ def circuit_breaker_allows(now: Optional[float] = None) -> bool:
 def circuit_breaker_record_error(now: Optional[float] = None) -> None:
     """Record a new error occurrence for circuit breaker tracking.
 
-    Adds the current timestamp to recent_errors. Prunes errors outside
-    the trip_window_seconds window. If the count of recent errors exceeds
-    trip_threshold, trips the breaker to open state.
-
-    In half_open state, any error re-opens the breaker with doubled
-    cooldown (up to max_cooldown).
-
-    Args:
-        now: The clock reading to stamp the error with; None (every product
-            caller) reads time.time(). It exists so a test can place errors
-            inside or outside the trip window without sleeping.
+    In half_open, any error re-opens with doubled cooldown. `now` is a test seam.
     """
     global _circuit_breaker
     if now is None:
         now = time.time()
 
     if _circuit_breaker.state == "half_open":
-        # Error during probe - re-open with doubled cooldown
         new_cooldown = min(_circuit_breaker.cooldown_seconds * 2, _circuit_breaker.max_cooldown)
         _circuit_breaker.state = "open"
         _circuit_breaker.opened_at = now
@@ -316,26 +213,16 @@ def circuit_breaker_record_error(now: Optional[float] = None) -> None:
         _save_circuit_breaker_state()
         return
 
-    # Add timestamp and prune old entries
     _circuit_breaker.recent_errors.append(now)
     cutoff = now - _circuit_breaker.trip_window_seconds
     _circuit_breaker.recent_errors = [t for t in _circuit_breaker.recent_errors if t >= cutoff]
 
-    # Check if threshold exceeded -> trip
     if len(_circuit_breaker.recent_errors) >= _circuit_breaker.trip_threshold:
         circuit_breaker_trip(reason="threshold_exceeded")
 
 
 def circuit_breaker_trip(reason: str = "") -> None:
-    """Manually trip the circuit breaker to open state.
-
-    Sets state to open with the current cooldown_seconds. Resets
-    summary_sent flag so a new summary can be generated.
-    Persists state to trigger_cb_state.json for restart survival.
-
-    Args:
-        reason: Optional reason string for logging/diagnostics
-    """
+    """Manually trip the circuit breaker to open state."""
     global _circuit_breaker
     logger.info("Circuit breaker tripped: %s", reason or "manual")
     _circuit_breaker.state = "open"
@@ -345,12 +232,7 @@ def circuit_breaker_trip(reason: str = "") -> None:
 
 
 def circuit_breaker_probe_succeeded() -> None:
-    """Close the breaker after a successful dispatch during half_open probe.
-
-    Transitions half_open -> closed and resets cooldown to base_cooldown
-    so future trips start with the short cooldown again. No-op if the
-    breaker is not in half_open state.
-    """
+    """Close the breaker after a successful dispatch during half_open probe."""
     global _circuit_breaker
     if _circuit_breaker.state != "half_open":
         return
@@ -364,12 +246,7 @@ def circuit_breaker_probe_succeeded() -> None:
 
 
 def circuit_breaker_reset() -> None:
-    """Reset circuit breaker to closed state.
-
-    Restores all state to defaults: closed state, base cooldown,
-    empty recent_errors list, and cleared flags.
-    Clears persisted state from trigger_cb_state.json.
-    """
+    """Reset circuit breaker to closed state."""
     global _circuit_breaker
     _circuit_breaker.state = "closed"
     _circuit_breaker.opened_at = 0.0
@@ -381,20 +258,7 @@ def circuit_breaker_reset() -> None:
 
 
 def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
-    """Get current circuit breaker state as a dictionary.
-
-    Evaluates state transitions first so the returned state is always
-    up-to-date (e.g. an expired open breaker will report as half_open).
-
-    Args:
-        now: The clock reading to judge the cooldown by; None (every product
-            caller) reads time.time(). It exists so a test can hand in a
-            reading instead of rewriting the breaker's private opened_at.
-
-    Returns:
-        Dict with keys: state, opened_at, cooldown_seconds,
-        recent_error_count, summary_sent, remaining_seconds
-    """
+    """Get current circuit breaker state as a dictionary."""
     if now is None:
         now = time.time()
     _evaluate_state(now)
@@ -411,27 +275,8 @@ def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Per-Fingerprint Rate Limiting (Exponential Backoff)
-# ---------------------------------------------------------------------------
-
-
 def get_backoff_seconds(dispatch_count: int) -> int:
-    """Calculate backoff duration based on dispatch count.
-
-    Backoff schedule:
-    - 0 previous dispatches: 0 seconds (dispatch immediately)
-    - 1 previous dispatch: 300 seconds (5 minutes)
-    - 2 previous dispatches: 900 seconds (15 minutes)
-    - 3 previous dispatches: 2700 seconds (45 minutes)
-    - 4+ previous dispatches: 7200 seconds (2 hours)
-
-    Args:
-        dispatch_count: How many times this fingerprint has been dispatched
-
-    Returns:
-        Seconds to wait before next dispatch
-    """
+    """Calculate backoff duration based on dispatch count."""
     if dispatch_count <= 0:
         return 0
     if dispatch_count == 1:
@@ -446,16 +291,7 @@ def get_backoff_seconds(dispatch_count: int) -> int:
 def get_dispatch_count(fingerprint: str) -> int:
     """Return how many times this fingerprint has been dispatched.
 
-    Read-only view of the per-fingerprint tracking backoff already keeps (and
-    that survives restarts via the circuit breaker state file). The escalation
-    digest lane reads it to tell "medic told the owner and it is STILL
-    happening" apart from "the owner has not been told yet".
-
-    Args:
-        fingerprint: Error fingerprint to look up
-
-    Returns:
-        Dispatch count, 0 if this fingerprint has never been dispatched
+    The escalation digest reads it to tell "owner told, still happening" from "not told yet".
     """
     return _fingerprint_dispatch_count.get(fingerprint, 0)
 
@@ -463,15 +299,7 @@ def get_dispatch_count(fingerprint: str) -> int:
 def is_suppressed(fingerprint: str) -> bool:
     """Check whether a fingerprint is currently marked suppressed in the registry.
 
-    Only the 'suppressed' status silences dispatch. 'resolved' deliberately
-    does NOT — a resolved error that recurs means the fix did not hold, which
-    is genuine signal and must still wake its owner.
-
-    Args:
-        fingerprint: Error fingerprint to check
-
-    Returns:
-        True if the entry exists and its status is 'suppressed'
+    'resolved' deliberately does not silence: a recurring resolved error means the fix did not hold.
     """
     try:
         entry = get_entry(fingerprint)
@@ -485,26 +313,8 @@ def is_suppressed(fingerprint: str) -> bool:
 def should_dispatch(fingerprint: str, now: Optional[float] = None) -> bool:
     """Check if this fingerprint should be dispatched.
 
-    Two independent gates, in order:
-      1. Registry status — a 'suppressed' fingerprint never dispatches while
-         suppressed. A benign error that has been investigated and judged
-         must not wake its owner again (compass #219). Un-suppressing
-         restores dispatch immediately, subject to the backoff below.
-      2. Exponential backoff — enough time must have elapsed since the last
-         dispatch of this fingerprint.
-
-    Occurrence bookkeeping is unaffected: register_error() still counts and
-    timestamps every occurrence, so a wrong suppress stays fully auditable
-    in `errors list` even while it is silent.
-
-    Args:
-        fingerprint: Error fingerprint to check
-        now: The clock reading to judge the backoff by; None (every product
-            caller) reads time.time(). It exists so a test can hand in a
-            reading past the backoff instead of rewriting private dispatch times.
-
-    Returns:
-        True if this fingerprint may be dispatched now
+    Gates: suppressed status first, then exponential backoff. Suppressed errors are still
+    counted, so a wrong suppress stays auditable. `now` is a test seam.
     """
     if is_suppressed(fingerprint):
         return False
@@ -525,14 +335,7 @@ def should_dispatch(fingerprint: str, now: Optional[float] = None) -> bool:
 
 
 def record_dispatch(fingerprint: str) -> None:
-    """Record that a dispatch was sent for this fingerprint.
-
-    Appends the current timestamp to the dispatch history and increments
-    the total dispatch count for this fingerprint.
-
-    Args:
-        fingerprint: Error fingerprint that was dispatched
-    """
+    """Record that a dispatch was sent for this fingerprint."""
     now = time.time()
     if fingerprint not in _fingerprint_dispatch_times:
         _fingerprint_dispatch_times[fingerprint] = []
@@ -541,100 +344,47 @@ def record_dispatch(fingerprint: str) -> None:
     _save_circuit_breaker_state()
 
 
-# ---------------------------------------------------------------------------
-# Fingerprinting
-# ---------------------------------------------------------------------------
-
-
 def normalize_message(message: str) -> str:
-    """Normalize an error message by stripping variable data.
-
-    Strips line numbers, timestamps, absolute paths, UUIDs, hex hashes,
-    port numbers, and numeric IDs to produce a stable message for
-    fingerprinting.
-
-    Args:
-        message: Raw error message text
-
-    Returns:
-        Normalized message with variable data replaced by placeholders
-    """
+    """Normalize an error message by stripping variable data."""
     normalized = message
 
-    # Strip ISO timestamps (2026-02-13T10:30:45.123456, 2026-02-13 10:30:45)
     normalized = re.sub(
         r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:[+-]\d{2}:?\d{2}|Z)?", "<timestamp>", normalized
     )
 
-    # Strip date-only patterns (2026-02-13)
     normalized = re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", normalized)
 
-    # Strip absolute paths: a drive-letter path with either separator
-    # (C:\path\to\x, C:/path/to/x) or any /path/to/something. The drive
-    # colon is eaten here, before the port rule below can see it.
+    # Rule order matters: paths eat a drive colon before the port rule can see it.
     normalized = re.sub(r"\b[A-Za-z]:[\\/][\w.\\/-]*|/[\w./-]+", "<path>", normalized)
 
-    # Strip line numbers ("line 42" -> "line N")
     normalized = re.sub(r"\bline \d+\b", "line N", normalized, flags=re.IGNORECASE)
 
-    # Strip UUIDs (8-4-4-4-12 hex format)
     normalized = re.sub(
         r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "<uuid>", normalized
     )
 
-    # Strip hex hashes (8+ hex chars that look like hashes)
     normalized = re.sub(r"\b[0-9a-fA-F]{8,}\b", "<hash>", normalized)
 
-    # Strip port numbers (:8080, :3000, :443)
     normalized = re.sub(r":\d{2,5}\b", ":<port>", normalized)
 
-    # Strip standalone numeric IDs (pure numbers 3+ digits)
     normalized = re.sub(r"\b\d{3,}\b", "<id>", normalized)
 
-    # Collapse multiple spaces
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
     return normalized
 
 
 def compute_fingerprint(error_type: str, normalized_msg: str, component: str) -> str:
-    """Compute a SHA1 fingerprint for error deduplication.
-
-    Creates a deterministic hash from the combination of error type,
-    normalized message, and component. This allows the same logical
-    error from the same component to be recognized across occurrences.
-
-    Args:
-        error_type: Error class name (e.g., 'ImportError')
-        normalized_msg: Message after normalize_message() processing
-        component: Branch/module identifier (e.g., 'FLOW')
-
-    Returns:
-        Full SHA1 hex digest (40 chars). Use [:12] for display.
-    """
+    """Compute a SHA1 fingerprint for error deduplication."""
     content = f"{error_type}:{normalized_msg}:{component}"
     return hashlib.sha1(content.encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# Registry I/O
-# ---------------------------------------------------------------------------
 
 
 def _load_registry() -> dict:
     """Load the error registry from disk.
 
-    Returns:
-        Registry dict with 'errors' and 'metadata' keys.
-        Returns empty registry structure on read failure.
-
-    Note:
-        The read is retried through read_text_with_retry because a Windows
-        sharing violation during another writer's os.replace is transient, and
-        the blank returned below is written straight back by every caller —
-        json_handler lost whole documents to exactly that (Windows CI
-        32167459635). A refusal that NEVER clears still returns blank here;
-        that residual is recorded as a todo, not fixed in this pass.
+    Callers write the blank fallback straight back, so a transient Windows sharing violation
+    is retried; a refusal that never clears still returns blank and loses the registry.
     """
     try:
         if REGISTRY_FILE.exists():
@@ -650,14 +400,7 @@ def _load_registry() -> dict:
 
 
 def _save_registry(data: dict) -> bool:
-    """Save the error registry to disk.
-
-    Args:
-        data: Full registry dict to persist
-
-    Returns:
-        True on success, False on failure
-    """
+    """Save the error registry to disk."""
     try:
         data["metadata"]["last_updated"] = datetime.now().isoformat()
         atomic_write_json(REGISTRY_FILE, data)
@@ -667,38 +410,15 @@ def _save_registry(data: dict) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
-    """Report an error to the registry.
-
-    Normalizes the message, computes a fingerprint, and either creates
-    a new entry or increments the count on an existing one.
-
-    Args:
-        error_type: Error class name (e.g., 'ImportError', 'ConnectionError')
-        message: Original error message text
-        component: Branch/module that generated the error (e.g., 'FLOW')
-        log_path: Path to source log file (optional)
-        severity: Error severity - low, medium, high, critical (default: medium)
-
-    Returns:
-        Dict of the error entry with an additional 'is_new' bool flag.
-        Returns minimal error dict on failure.
-    """
+    """Report an error to the registry; the returned entry carries an 'is_new' flag."""
     try:
-        # Validate severity
         if severity not in VALID_SEVERITIES:
             severity = "medium"
 
         normalized = normalize_message(message)
         fingerprint = compute_fingerprint(error_type, normalized, component)
 
-        # User-error rejection: errors that look like bad commands or
-        # invalid arguments are auto-suppressed to avoid noisy dispatch.
         is_user_error = bool(_USER_ERROR_PATTERNS.search(message))
 
         with json_file_lock(REGISTRY_FILE):
@@ -706,14 +426,11 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
             now = datetime.now().isoformat()
 
             if fingerprint in registry["errors"]:
-                # Existing error - increment count and update last_seen
                 entry = registry["errors"][fingerprint]
                 entry["count"] = entry.get("count", 1) + 1
                 entry["last_seen"] = now
-                # Update log_path if provided (might be from a different log file)
                 if log_path:
                     entry["log_path"] = log_path
-                # Auto-suppress user errors that were previously unsuppressed
                 if is_user_error and entry.get("status") != "suppressed":
                     entry["status"] = "suppressed"
                     entry["suppress_reason"] = "user_error"
@@ -725,7 +442,6 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
                 )
                 return result
             else:
-                # New error - create entry
                 initial_status = "suppressed" if is_user_error else "new"
                 initial_suppress_reason = "user_error" if is_user_error else ""
 
@@ -767,25 +483,11 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
 def query(
     status: Optional[str] = None, component: Optional[str] = None, severity: Optional[str] = None, limit: int = 50
 ) -> list:
-    """Query the error registry with optional filters.
-
-    Filters errors by any combination of status, component, and severity.
-    Results are sorted by last_seen descending (most recent first).
-
-    Args:
-        status: Filter by status (new, investigating, suppressed, resolved)
-        component: Filter by component/branch name
-        severity: Filter by severity (low, medium, high, critical)
-        limit: Maximum number of results to return (default: 50)
-
-    Returns:
-        List of matching error entry dicts, sorted by last_seen descending
-    """
+    """Query the error registry with optional filters, most recent first."""
     try:
         registry = _load_registry()
         entries = list(registry["errors"].values())
 
-        # Apply filters
         if status is not None:
             entries = [e for e in entries if e.get("status") == status]
         if component is not None:
@@ -793,7 +495,6 @@ def query(
         if severity is not None:
             entries = [e for e in entries if e.get("severity") == severity]
 
-        # Sort by last_seen descending
         entries.sort(key=lambda e: e.get("last_seen", ""), reverse=True)
 
         return entries[:limit]
@@ -804,19 +505,7 @@ def query(
 
 
 def update_status(fingerprint: str, new_status: str, reason: str = "") -> bool:
-    """Update the status of an error entry.
-
-    Supports the lifecycle: new -> investigating -> resolved/suppressed.
-    If suppressing, stores the reason in suppress_reason.
-
-    Args:
-        fingerprint: Full or prefix fingerprint to match
-        new_status: Target status (new, investigating, suppressed, resolved)
-        reason: Reason for status change (stored in suppress_reason if suppressing)
-
-    Returns:
-        True on success, False if fingerprint not found or invalid status
-    """
+    """Update the status of an error entry."""
     try:
         if new_status not in VALID_STATUSES:
             return False
@@ -841,17 +530,7 @@ def update_status(fingerprint: str, new_status: str, reason: str = "") -> bool:
 
 
 def get_entry(fingerprint: str) -> Optional[dict]:
-    """Get a single error entry by fingerprint or prefix.
-
-    Supports prefix matching - if the provided string is shorter than
-    40 chars, matches against the beginning of stored fingerprints.
-
-    Args:
-        fingerprint: Full fingerprint (40 chars) or prefix to match
-
-    Returns:
-        Error entry dict, or None if not found
-    """
+    """Get a single error entry by fingerprint or prefix."""
     try:
         registry = _load_registry()
         return _find_entry(registry, fingerprint)
@@ -861,18 +540,7 @@ def get_entry(fingerprint: str) -> Optional[dict]:
 
 
 def clear_resolved(days: int = 7) -> int:
-    """Remove resolved entries older than N days.
-
-    Cleans up the registry by removing entries with status='resolved'
-    whose last_seen timestamp is older than the specified number of days.
-
-    Args:
-        days: Age threshold in days (default: 7)
-
-    Returns:
-        Count of removed entries (0 when nothing qualified), or -1 when the
-        registry could not be read or walked - a count can never be negative.
-    """
+    """Remove resolved entries older than N days; -1 means the registry could not be walked."""
     try:
         registry = _load_registry()
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
@@ -902,12 +570,7 @@ def clear_resolved(days: int = 7) -> int:
 def purge_stale(days: int = 30) -> int:
     """Remove entries whose last_seen is older than N days regardless of status.
 
-    Args:
-        days: Age threshold in days (default: 30)
-
-    Returns:
-        Count of removed entries (0 when nothing qualified), or -1 when the
-        registry could not be read or walked - a count can never be negative.
+    Returns -1 when the registry could not be walked.
     """
     try:
         registry = _load_registry()
@@ -935,15 +598,7 @@ def purge_stale(days: int = 30) -> int:
 
 
 def get_stats() -> dict:
-    """Get summary statistics from the error registry.
-
-    Returns:
-        Dict with:
-            - total: Total number of tracked errors
-            - by_status: Count per status (new, investigating, etc.)
-            - by_component: Count per component/branch
-            - by_severity: Count per severity level
-    """
+    """Get summary statistics from the error registry."""
     try:
         registry = _load_registry()
         entries = list(registry["errors"].values())
@@ -970,18 +625,7 @@ def get_stats() -> dict:
 
 
 def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
-    """Update the source fix status of an error entry.
-
-    Tracks whether the source branch has been notified and fixed
-    the underlying issue.
-
-    Args:
-        fingerprint: Full or prefix fingerprint to match
-        fix_status: One of: none, pending_fix, fix_requested, fix_confirmed
-
-    Returns:
-        True on success
-    """
+    """Update the source fix status of an error entry."""
     if fix_status not in VALID_FIX_STATUSES:
         return False
     try:
@@ -996,26 +640,11 @@ def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-
 def _find_entry(registry: dict, fingerprint: str) -> Optional[dict]:
-    """Find an entry by exact fingerprint or prefix match.
-
-    Args:
-        registry: Loaded registry dict
-        fingerprint: Full fingerprint or prefix
-
-    Returns:
-        Reference to the entry dict within the registry, or None
-    """
-    # Exact match first
+    """Find an entry by exact fingerprint or prefix match; returns the live dict."""
     if fingerprint in registry["errors"]:
         return registry["errors"][fingerprint]
 
-    # Prefix match (for short fingerprint lookups like [:12])
     if len(fingerprint) < 40:
         for fp, entry in registry["errors"].items():
             if fp.startswith(fingerprint):

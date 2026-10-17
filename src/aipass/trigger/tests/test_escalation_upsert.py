@@ -3,24 +3,14 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.0
 # Created: 2026-08-10
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
 
-# FPLAN-0389 phase 2.
-# Three things have to hold, and only the first is obvious:
-#
-# 1. The escalation send carries the THREAD key, ``escalation:<LEVEL>:<branch>:<module>``
-#    — what the subject names, never the signature. On 2026-09-17 a per-signature
-#    key opened 29 threads under two subjects: one module's warnings named a
-#    different branch and field each time, so each was its own signature.
-# 2. The adapter FORWARDS that key to ai_mail. Its signature ends in ``**kwargs``,
-#    so a key threaded by the wrong name is swallowed with no error and no upsert —
-#    delivery still returns True and the inbox keeps stacking. That is the
-#    regression this file exists to catch.
-# 3. The medic and runaway paths carry NO key. They are unrelated errors that must
-#    stay one message each; sharing a key would collapse them into one.
+# The send carries the THREAD key ``escalation:<LEVEL>:<branch>:<module>``, never the signature.
+# The adapter forwards it by name: its ``**kwargs`` swallows a misnamed key with no error.
+# Medic and runaway sends carry NO key: unrelated errors stay one message each.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — counting, gating and digest bodies, in test_escalation.py
@@ -38,11 +28,6 @@ from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.events import error_detected, runaway_handler
 from aipass.trigger.apps.handlers.events.registry import setup_handlers
 from aipass.trigger.apps.modules import core
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -83,15 +68,12 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
 def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
     """A fake ai_mail that records every (to_branch, email_data, upsert_key) call.
 
-    This stands in for the real deliver_email_to_branch on the real email_send
-    module, which is where setup_handlers resolves it — so the adapter under test is the
-    real closure, not a re-implementation of it.
+    Patched on email_send, where setup_handlers resolves it, so the adapter under test is the real closure.
     """
     calls: List[Dict[str, Any]] = []
 
     def _deliver(to_branch, email_data, on_delivered=None, upsert_key=None):
         calls.append({"to_branch": to_branch, "email_data": email_data, "upsert_key": upsert_key})
-        # ai_mail reports the outcome back on the caller's dict.
         email_data["upsert_action"] = "updated" if upsert_key else "created"
         return True, "delivered"
 
@@ -103,9 +85,7 @@ def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
 def wired(monkeypatch: pytest.MonkeyPatch, mailbox) -> Dict[str, Any]:
     """The real send adapter setup_handlers builds, captured off each public setter.
 
-    The three setters are replaced by recorders, so this test never rewires the
-    handlers' module-level callbacks for the rest of the process. core.trigger
-    is a Mock so setup_handlers registers nothing on the live event bus.
+    Recorders replace the setters and core.trigger is a Mock, so nothing live is rewired or registered.
     """
     monkeypatch.setattr(core, "trigger", MagicMock())
 
@@ -147,11 +127,6 @@ def _trail(lane) -> List[Dict[str, Any]]:
     if path is None or not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-# ---------------------------------------------------------------------------
-# The adapter — the kwargs-swallow guard
-# ---------------------------------------------------------------------------
 
 
 class TestAdapterForwardsTheKey:
@@ -201,11 +176,6 @@ class TestAdapterForwardsTheKey:
     def test_unknown_kwargs_still_tolerated(self, adapter, mailbox) -> None:
         """**kwargs stays — old callers pass reply_to and friends without breaking."""
         assert adapter(to_branch="@b", subject="s", message="m", something_new="x") is True
-
-
-# ---------------------------------------------------------------------------
-# The escalation lane
-# ---------------------------------------------------------------------------
 
 
 class TestEscalationCarriesTheKey:
@@ -296,11 +266,9 @@ class TestEscalationCarriesTheKey:
         ]
 
     def test_a_burst_of_signatures_opens_one_thread_until_it_is_closed(self, monkeypatch, lane) -> None:
-        """The 2026-09-17 replay: many signatures under one subject, one live message.
+        """The replay: many signatures under one subject, one live message.
 
-        The fake inbox applies ai_mail's documented match rule (same key and not
-        closed rewrites in place), so this pins the key against the rule it feeds.
-        Closing the thread re-arms it: the next escalation opens a fresh one.
+        The fake inbox applies ai_mail's match rule (same key, not closed, rewrites); closing re-arms it.
         """
         inbox: List[Dict[str, Any]] = []
 
@@ -399,19 +367,11 @@ class TestEscalationCarriesTheKey:
         assert state["signatures"][signature]["digests_sent"] == 2
 
 
-# ---------------------------------------------------------------------------
-# The paths that must NOT change
-# ---------------------------------------------------------------------------
-
-
 class TestOtherLanesUnkeyed:
     """Medic and runaway emails are one-per-error. A key here would merge them."""
 
     def test_medic_error_path_sends_no_key(self, wired, mailbox) -> None:
-        """The callback medic is handed sends one unkeyed message per error.
-
-        Mutant killed 2026-09-27: the adapter forwarding `upsert_key or "k"` to deliver_email_to_branch.
-        """
+        """The callback medic is handed sends one unkeyed message per error."""
         wired["medic"](
             to_branch="@backup",
             subject="Error in drive.py",
@@ -423,10 +383,7 @@ class TestOtherLanesUnkeyed:
         assert mailbox[-1]["upsert_key"] is None
 
     def test_runaway_path_sends_no_key(self, wired, mailbox) -> None:
-        """The callback the runaway handler is handed sends one unkeyed message per alert.
-
-        Mutant killed 2026-09-27: the adapter forwarding `upsert_key or "k"` to deliver_email_to_branch.
-        """
+        """The callback the runaway handler is handed sends one unkeyed message per alert."""
         wired["runaway"](
             to_branch="@backup",
             subject="Runaway log",

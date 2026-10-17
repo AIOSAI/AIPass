@@ -3,15 +3,10 @@
 # Description: Shared event payloads and lane helpers for test_escalation.py and test_escalation_digest.py
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Helpers for the tests of apps/handlers/escalation.py (no test_ prefix: never collected).
-
-Moved out of test_escalation.py when it was split along the unit under test
-(fleet green, oversize_test_file): the counting file and the digest file both
-fire events into the lane and read its state file back through these.
-"""
+"""Helpers for the tests of apps/handlers/escalation.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -24,10 +19,7 @@ from typing import Any, Dict
 
 import pytest
 
-# Inert fixture data — nothing ever opens this path, it only rides along in the
-# event payload and gets asserted back out. Kept branch-relative and built with
-# Path: an absolute /home/... literal is a hardcoded path in any file, tests
-# included, and it hardcodes a separator the Windows lane then has to survive.
+# Never opened; branch-relative and built with Path so no absolute path or separator is hardcoded.
 FLOW_LOG = str(Path("flow") / "logs" / "flow.log")
 
 ERROR_EVENT = {
@@ -65,11 +57,7 @@ def _fire_warning(lane, times: int = 1, **overrides: Any) -> Any:
     return decision
 
 
-# Messages that are genuinely different CONDITIONS, for tests that need N
-# separate signatures. Deliberately not "warning number {i}": the lane collapses
-# standalone integers so one condition's repeats share a signature, which would
-# make every one of these the SAME signature — turning a prune or limit test
-# green while it exercises a single row.
+# Not "warning number {i}": the lane collapses integers, so those would all share one signature.
 DISTINCT_WARNINGS = [
     "disk is filling up",
     "memory is filling up",
@@ -87,11 +75,7 @@ def _fire_distinct(lane, index: int) -> Any:
 def _freeze_clock(monkeypatch: pytest.MonkeyPatch, lane) -> None:
     """Pin datetime.now() so every last_seen string comes out byte-identical.
 
-    This is the Windows CI clock reproduced deterministically on any platform:
-    its granularity is ~15.6ms, so signatures written back-to-back tie on
-    last_seen. Ties are what sent both ordering paths — newest-first listing
-    and oldest-first pruning — back to dict insertion order, which is creation
-    order, not touch order.
+    Reproduces the coarse Windows clock: tied last_seen values fall back to insertion order.
     """
     frozen = datetime(2026, 8, 9, 12, 0, 0)
     monkeypatch.setattr(

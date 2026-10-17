@@ -3,7 +3,7 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
@@ -21,11 +21,8 @@ import pytest
 
 from aipass.trigger.apps import config
 
-# The bounds the helpers promise, written here rather than read off config's
-# private constants: a test that reads the constant moves with it, so a changed
-# bound passes unseen. The replace pair is the fleet's (prax, hooks and spawn
-# carry 40 x 0.005s); the lock pair is the win32 wait before refusing, ~5s.
-# Trigger's decision, fleet green leg 6 (2026-10-02).
+# Written here, not read off config's private constants: a test that reads the
+# constant moves with it, so a changed bound passes unseen.
 REPLACE_ATTEMPTS = 40
 REPLACE_BACKOFF_SECONDS = 0.005
 LOCK_ATTEMPTS = 100
@@ -57,9 +54,7 @@ def win32():
 
 class TestWindowsLockIsRealNotSkipped:
     """A lock one platform walks past is not a lock. The old code read
-    `if sys.platform == "win32": yield` — every caller believed it was
-    serialised and none of them were.
-    """
+    `if sys.platform == "win32": yield`, and every caller believed it was serialised."""
 
     def test_win32_acquires_and_releases_a_real_lock(self, win32, tmp_path):
         """The win32 path calls the OS primitive, both ways."""
@@ -68,10 +63,7 @@ class TestWindowsLockIsRealNotSkipped:
         assert win32.calls[-1] == (win32.LK_UNLCK, 1), "lock never released"
 
     def test_win32_retries_a_contended_lock_then_succeeds(self, tmp_path):
-        """A lock held by someone else is waited for, not walked past.
-
-        Mutant run (leg 6): _LOCK_BACKOFF_SECONDS 0.05 -> 0.06 reddens this.
-        """
+        """A lock held by someone else is waited for, not walked past."""
         fake = _FakeMsvcrt(fail_times=3)
         sleeps: list = []
 
@@ -82,11 +74,7 @@ class TestWindowsLockIsRealNotSkipped:
         assert fake.calls.count((fake.LK_NBLCK, 1)) == 4
 
     def test_win32_refuses_rather_than_running_unlocked(self, tmp_path):
-        """Exhausting the retries RAISES after a bounded wait. Silent data loss is the one forbidden outcome.
-
-        Mutant run: the win32 backoff sleep deleted reddens this.
-        Mutant run (leg 6): _LOCK_ATTEMPTS 100 -> 101, and _LOCK_BACKOFF_SECONDS 0.05 -> 0.06, each redden it.
-        """
+        """Exhausting the retries RAISES after a bounded wait. Silent data loss is the one forbidden outcome."""
         fake = _FakeMsvcrt(fail_times=LOCK_ATTEMPTS + 5)
         sleeps: list = []
 
@@ -102,9 +90,7 @@ class TestWindowsLockIsRealNotSkipped:
     def test_no_platform_yields_without_locking(self):
         """No branch of the lock may reach `yield` without taking a lock.
 
-        Pinned on the source because the defect was a MISSING call, and no
-        behavioural assertion on Linux can see a win32 branch that skips one.
-        """
+        Pinned on the source: no Linux assertion can see a win32 branch that skips the call."""
         import inspect
 
         source = inspect.getsource(config.json_file_lock)
@@ -113,15 +99,10 @@ class TestWindowsLockIsRealNotSkipped:
 
 class TestReplaceSurvivesWindowsSharingViolations:
     """os.replace raises PermissionError under AV/indexer locks on Windows;
-    one stuck replace ate the whole CI lane at the 45-minute wall. Bounded
-    retry, PermissionError only, exhaustion raises. Mirrors the fleet helper.
-    """
+    bounded retry, PermissionError only, exhaustion raises. Mirrors the fleet helper."""
 
     def test_success_after_transient_permission_errors(self, monkeypatch, tmp_path):
-        """A replace blocked twice still lands, waiting once per refusal (mutant: a wait after success).
-
-        Mutant run (leg 6): _REPLACE_BACKOFF_SECONDS 0.005 -> 0.006 reddens this.
-        """
+        """A replace blocked twice still lands, waiting once per refusal (mutant: a wait after success)."""
         attempts = {"n": 0}
 
         def flaky(src, dst):
@@ -136,10 +117,7 @@ class TestReplaceSurvivesWindowsSharingViolations:
         assert sleeps == [REPLACE_BACKOFF_SECONDS] * 2
 
     def test_exhaustion_raises_at_exactly_the_declared_attempts(self, monkeypatch, tmp_path):
-        """Bounded, and the bound is the declared constant.
-
-        Mutant run (leg 6): _REPLACE_ATTEMPTS 40 -> 41 reddens this.
-        """
+        """Bounded, and the bound is the declared constant."""
         attempts = {"n": 0}
 
         def always_blocked(src, dst):
@@ -167,10 +145,7 @@ class TestReplaceSurvivesWindowsSharingViolations:
     def test_the_backoff_is_a_wait_not_a_busy_spin(self, monkeypatch, tmp_path):
         """Deleting the sleep leaves a spin that passes every other pin here.
 
-        Counting the sleeps pins the wait without asserting on wall-clock time,
-        so it cannot flake on a loaded runner.
-        Mutant run (leg 6): _REPLACE_ATTEMPTS 40 -> 41, and _REPLACE_BACKOFF_SECONDS 0.005 -> 0.006, each redden it.
-        """
+        Counting the sleeps pins the wait with no wall clock, so a loaded runner cannot flake it."""
 
         def refused(src, dst):
             raise PermissionError()
@@ -201,12 +176,7 @@ class TestReplaceSurvivesWindowsSharingViolations:
 
 class TestReadTextWithRetry:
     """The mirror of replace_with_retry, and the half that was missing until
-    Windows CI counted 98 of 100 appends (run 32167459635, 2026-08-18).
-
-    Hardening only the write left every reader exposed to the same sharing
-    window, and json_handler's readers answered a refused open by regenerating
-    the document from a template — a transient laundered into data loss.
-    """
+    reads retried too: a refused open regenerated the document from a template."""
 
     def _flaky(self, tmp_path, refusals):
         path = tmp_path / "doc.json"
@@ -231,10 +201,7 @@ class TestReadTextWithRetry:
 
     def test_it_actually_waits_between_attempts(self, monkeypatch, tmp_path):
         """A busy spin retries, bounds and returns perfectly while never
-        outlasting the handle the retry exists to wait out. Count the waits —
-        no wall clock, so a loaded runner cannot flake this.
-        Mutant run (leg 6): _REPLACE_BACKOFF_SECONDS 0.005 -> 0.006 reddens this.
-        """
+        outlasting the handle the retry exists to wait out. Count the waits, not the clock."""
         path, _state, read_text = self._flaky(tmp_path, 3)
         sleeps: list = []
         config.read_text_with_retry(path, read_fn=read_text, sleep_fn=sleeps.append)
@@ -242,9 +209,7 @@ class TestReadTextWithRetry:
 
     def test_a_refusal_that_never_clears_raises(self, monkeypatch, tmp_path):
         """Exhaustion raises. Returning a blank document is the one outcome
-        this function must never have — that is the defect it was written for.
-        Mutant run (leg 6): _REPLACE_ATTEMPTS 40 -> 41 reddens this.
-        """
+        this function must never have."""
         path, state, read_text = self._flaky(tmp_path, 10_000)
         with pytest.raises(PermissionError):
             config.read_text_with_retry(path, read_fn=read_text, sleep_fn=lambda s: None)
@@ -266,15 +231,7 @@ class TestReadTextWithRetry:
 
 class _PositionalFakeMsvcrt:
     """A fake that models what real msvcrt.locking does: lock nbytes starting
-    at the CURRENT file position of the descriptor, conflicting only where the
-    ranges overlap.
-
-    Asked for by devpulse (2564f815) as the way to make position drift
-    constructible from Linux: the sidecar is opened "a+", so a fresh handle
-    sits at EOF, and two handles at different offsets would each take their
-    own byte and both proceed — a lock that never collides. The real fd is
-    used, so the position this reads is the one msvcrt would see.
-    """
+    at the descriptor's CURRENT position, conflicting only where the ranges overlap."""
 
     LK_NBLCK = 1
     LK_UNLCK = 0
@@ -298,21 +255,12 @@ class _PositionalFakeMsvcrt:
 class TestWindowsLockIsPositionAware:
     """msvcrt locks bytes at the descriptor's CURRENT position. The sidecar is
     opened "a+", which lands a fresh handle at EOF, so the seek(0) before every
-    lock is the only thing keeping two handles on the same byte. Today the
-    sidecar is always zero-length and the bug is invisible; the day anything
-    writes to it, position drift would silently un-serialise every caller.
-    """
+    lock is the only thing keeping two handles on the same byte."""
 
     def test_a_sidecar_that_grew_still_collides(self, tmp_path):
         """The drift case, constructed: the file grows between the two opens.
 
-        Handle A opens an empty sidecar and sits at byte 0. The sidecar then
-        grows, so handle B opens at byte 64. Without the seek they lock
-        different bytes and BOTH proceed — a lock that never collides. The
-        seek is the only thing making them meet.
-        Mutant for the wait assert: the win32 backoff sleep deleted.
-        Mutant run (leg 6): _LOCK_ATTEMPTS 100 -> 101 reddens the wait assert.
-        """
+        Without the seek the two handles lock different bytes and BOTH proceed."""
         fake = _PositionalFakeMsvcrt()
         sleeps: list = []
         doc = tmp_path / "doc.json"
@@ -332,10 +280,7 @@ class TestWindowsLockIsPositionAware:
     def test_the_model_can_see_position_drift(self, monkeypatch, tmp_path):
         """Vacuity floor: prove the model WOULD grant two unsought locks.
 
-        Without this, the test above could pass because the fake never
-        conflicts with anything. Same growth, no seek — both handles lock
-        where they land, both succeed, and that is exactly the defect.
-        """
+        Without it, the test above could pass because the fake never conflicts."""
         fake = _PositionalFakeMsvcrt()
         lock_path = tmp_path / "drift.lock"
         lock_path.write_text("", encoding="utf-8")
@@ -351,20 +296,10 @@ class TestWindowsLockIsPositionAware:
 
 class TestThePosixLockArmIsRealToo:
     """The win32 arm is pinned by injection; the POSIX arm was only pinned
-    through its callers. devpulse asked outright whether the byte-lock is
-    msvcrt-only with no fcntl twin (2564f815 follow-up, Linux CI 32228159169).
-
-    It is not: fcntl.flock is taken on a fresh open file description per call,
-    and separate descriptions conflict even inside ONE process — which is what
-    makes threads serialise. Measured rather than asserted.
-    """
+    through its callers. fcntl.flock on separate open file descriptions serialises threads."""
 
     def test_four_threads_never_hold_it_at_once(self, tmp_path):
-        # sys, not config.sys: the machine decides whether this runs, and the
-        # subject under test does not get a vote. Reaching the same value
-        # through config meant the module I am testing sat between me and the
-        # platform fact — one attribute rename away from deciding my own
-        # collection (seedgo self_skip, 2026-09-08).
+        # sys, not config.sys: the subject under test must not decide its own collection.
         if sys.platform == "win32":  # pragma: no cover - POSIX arm only
             pytest.skip("POSIX arm; the win32 arm is pinned by injection above")
 
@@ -380,8 +315,7 @@ class TestThePosixLockArmIsRealToo:
                         state["peak"] = max(state["peak"], state["inside"])
                         if state["inside"] > 1:
                             state["overlaps"] += 1
-                    # Hand the CPU over while holding it: a no-op lock lets
-                    # another worker in right here.
+                    # Yield while holding it: a no-op lock lets another worker in right here.
                     os.sched_yield()
                     with guard:
                         state["inside"] -= 1

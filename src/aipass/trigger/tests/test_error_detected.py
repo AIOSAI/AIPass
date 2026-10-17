@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -32,29 +32,11 @@ from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import escalation
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture: the real module, with every edge that reaches outside
-# patched, and a registry-available environment by default. Individual tests
-# override module-level helpers after it.
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Put the real error_detected module on tmp_path and recording stubs.
-
-    Every edge that reaches outside is swapped with monkeypatch.setattr, so
-    teardown restores it even when a test assigns over it directly:
-    _send_email (mail), wake.wake_branch (ai_mail's door_wake, which the
-    lazy import reads at call time, wakes a branch),
-    the registry gates error_detected bound at import, json_handler's
-    log_operation, the medic/branch-registry files and the logger. Escalation
-    reaches error_registry.report (a registry write) by a lazy import, so
-    report is a recording stub and the registry's files point at tmp_path.
-
-    The registry's normalize_message stays REAL: escalation signatures are
-    computed off it, and a mock returns the same object for every input, so
-    any "these two share one signature" assertion would pass without it.
+    Every outside edge is swapped with monkeypatch.setattr, so teardown restores direct assignments.
+    normalize_message stays real: a mock returns one object for every input, so a shared-signature assertion passes vacuously.
     """
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
@@ -111,11 +93,6 @@ def _setup_happy_path(mod: object) -> MagicMock:
     return send_mock
 
 
-# ---------------------------------------------------------------------------
-# set_send_email_callback
-# ---------------------------------------------------------------------------
-
-
 class TestSetSendEmailCallback:
     """Tests for set_send_email_callback."""
 
@@ -134,11 +111,6 @@ class TestSetSendEmailCallback:
         mod.set_send_email_callback(first)
         mod.set_send_email_callback(second)
         assert mod._send_email is second
-
-
-# ---------------------------------------------------------------------------
-# handle_error_detected -- early-return gates
-# ---------------------------------------------------------------------------
 
 
 class TestHandleErrorDetectedGates:
@@ -247,11 +219,8 @@ class TestHandleErrorDetectedGates:
 
     def test_an_unreadable_branch_registry_is_reported_not_skipped(self, tmp_path: Path) -> None:
         """A registry that cannot be read names itself in the trail; nothing is skipped or sent.
-
-        The real lookup runs over a tmp registry that is not JSON. Answering the
-        empty set would log 'Unknown branch skipped' for a branch that has an
-        owner. Mutants 2026-09-29: the raise put back to return set(), and the
-        file's name taken out of the message, each redden this.
+        Answering the empty set would log 'Unknown branch skipped' for a branch that has an owner.
+        Mutants: the raise put back to return set(), and the file's name dropped from the message, each redden this.
         """
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
@@ -266,8 +235,7 @@ class TestHandleErrorDetectedGates:
 
     def test_an_unreadable_medic_state_dispatches_nothing(self, tmp_path: Path) -> None:
         """A medic state nobody can read may hold a person's 'off': no mail, the trail names it.
-
-        Red first 2026-09-29: the unreadable state answered enabled and the error was sent.
+        Red first: the unreadable state answered enabled and the error was sent.
         """
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
@@ -284,8 +252,7 @@ class TestHandleErrorDetectedGates:
 
     def test_an_absent_branch_registry_is_a_registry_with_nobody_in_it(self, tmp_path: Path) -> None:
         """No registry file answers the empty set: the branch is skipped as unknown, no warning.
-
-        Mutant 2026-09-29: an absent file made to raise reddens this.
+        Mutant: an absent file made to raise reddens this.
         """
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
@@ -351,14 +318,8 @@ class TestHandleErrorDetectedGates:
 
     def test_suppressed_fingerprint_does_not_dispatch(self) -> None:
         """A registry-suppressed fingerprint never dispatches (compass #219).
-
-        KEPT against the DPLAN-0323 merge walk, which read this as a restatement
-        of test_returns_early_should_dispatch_false. Measured 2026-09-07: move
-        the shared `return` into the backoff arm only, so the suppressed arm
-        falls through and dispatches, and the entire 1042-case suite stays
-        GREEN — this is the only test that fails. The logging sibling asserts
-        which trail the refusal is written to and never looks at the send, so
-        it cannot see a suppressed error going out the door.
+        A suppressed arm falling through to dispatch fails only this test; the logging sibling
+        asserts which trail the refusal is written to and never looks at the send.
         """
         mod = _import_module()
         send = _setup_happy_path(mod)
@@ -389,11 +350,6 @@ class TestHandleErrorDetectedGates:
         suppression_log.assert_called_once()
         rate_log.assert_not_called()
         assert "Suppressed fingerprint" in str(suppression_log.call_args)
-
-
-# ---------------------------------------------------------------------------
-# handle_error_detected -- happy path
-# ---------------------------------------------------------------------------
 
 
 class TestHandleErrorDetectedHappyPath:
@@ -460,13 +416,8 @@ class TestHandleErrorDetectedHappyPath:
 
     def test_a_throwing_send_is_reported_and_stops_the_pipeline(self) -> None:
         """_send_email raising is caught, named in the log, and records nothing.
-
-        The unit was the call and nothing else, so it passed on `except: pass`
-        — which is the worst outcome available here. This handler is the last
-        thing standing between an error and an operator: if a throwing send
-        went unlogged, dispatch would be dead and the only symptom would be
-        silence. And the exception must not be mistaken for a delivery, so
-        nothing downstream of the send may run.
+        This handler is the last thing between an error and an operator: a throwing send must be
+        logged, and the exception must not pass as a delivery, so nothing downstream may run.
         """
         mod = _import_module()
         send = _setup_happy_path(mod)
@@ -508,16 +459,10 @@ class TestHandleErrorDetectedHappyPath:
             fingerprint="fp_fail",
         )
 
-        # Email was attempted
         send.assert_called_once()
         # But nothing after it should have run
         json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# Fallback stubs (when error_registry import fails)
-# ---------------------------------------------------------------------------
 
 
 class TestFallbackStubs:
@@ -526,11 +471,8 @@ class TestFallbackStubs:
     @pytest.fixture
     def fallback_mod(self, monkeypatch: pytest.MonkeyPatch) -> Any:
         """A second copy of error_detected, imported while error_registry cannot be.
-
-        HELD for import_site: these stubs exist only in the `except ImportError`
-        arm, so the one way to reach them is an import that fails. No setattr on
-        the real module can make its import-time `from ... import` fail again.
-        monkeypatch restores both sys.modules entries at teardown.
+        HELD for import_site: these stubs exist only in the `except ImportError` arm, and no
+        setattr on the real module can make its import-time `from ... import` fail again.
         """
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", None)
         monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.error_detected")
@@ -550,12 +492,8 @@ class TestFallbackStubs:
 
     def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self, fallback_mod: Any) -> None:
         """The fallback takes the same one argument and answers None like the real one.
-
-        A stub stands in for a function the caller cannot see is missing, so
-        the two things worth pinning are the shape of the call and the shape of
-        the answer. "It did not raise" covers neither: a stub that took no
-        argument, or returned a truthy sentinel a caller then branched on,
-        would pass it. record_dispatch returns nothing, so the stub must too.
+        "It did not raise" passes a stub that took no argument or returned a truthy sentinel;
+        record_dispatch returns nothing, so the stub must too.
         """
         mod = fallback_mod
 
@@ -564,21 +502,12 @@ class TestFallbackStubs:
 
     def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self, fallback_mod: Any) -> None:
         """The fallback breaker records nothing and says nothing.
-
-        Same reasoning as the record_dispatch stub, with one addition that
-        matters here: without a registry there is no breaker state, so this
-        must not fabricate one. It counts nothing and returns None, and a
-        caller cannot tell it apart from the real call by the answer.
+        Without a registry there is no breaker state, so the stub must not fabricate one.
         """
         mod = fallback_mod
 
         assert mod.circuit_breaker_record_error() is None
         assert mod.circuit_breaker_allows() is True
-
-
-# ---------------------------------------------------------------------------
-# TTL-aware medic enable/disable
-# ---------------------------------------------------------------------------
 
 
 class TestMedicEnabledTTL:
@@ -650,11 +579,6 @@ class TestMedicEnabledTTL:
         )
 
         send.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Branch mute dict/string format support
-# ---------------------------------------------------------------------------
 
 
 class TestBranchMutedFormats:
@@ -796,11 +720,6 @@ class TestBranchMutedFormats:
         send.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# circuit_breaker_probe_succeeded after dispatch
-# ---------------------------------------------------------------------------
-
-
 class TestProbeSucceeded:
     """Tests for circuit_breaker_probe_succeeded called after dispatch."""
 
@@ -824,16 +743,9 @@ class TestProbeSucceeded:
         mod.circuit_breaker_probe_succeeded.assert_called_once()  # type: ignore[attr-defined]
 
 
-# ---------------------------------------------------------------------------
-# Occurrences field fidelity (reported by @drone 2026-08-04)
-# ---------------------------------------------------------------------------
-
-
 class TestOccurrencesReportsTrueCount:
     """The dispatched notification must report the registry count, not a literal 1.
-
-    The call site hardcoded occurrences=1 while threading every other field
-    through, so every dispatch told its reader a recurring error was a one-off.
+    The call site hardcoded occurrences=1, so every dispatch called a recurring error a one-off.
     """
 
     def test_occurrences_matches_count(self) -> None:
@@ -859,9 +771,7 @@ class TestOccurrencesReportsTrueCount:
 
     def test_occurrences_consistent_with_seen_window(self) -> None:
         """A count spanning a first/last-seen window stays internally consistent.
-
-        The inconsistency @drone spotted -- 'Occurrences: 1' against a month-long
-        window -- was the tell that two different sources fed one payload.
+        'Occurrences: 1' against a month-long window means two sources fed one payload.
         """
         mod = _import_module()
         send = _setup_happy_path(mod)
@@ -884,11 +794,7 @@ class TestOccurrencesReportsTrueCount:
 
 class TestNotificationNamesTheRegistryRow:
     """The responder must be able to look the error up and close it.
-
-    @hooks, 2026-09-24: the mail said "Error ID: 5a2ac45a", which no registry
-    verb accepts — the row was 6fd3636e — and nothing in the instructions named
-    the closing verb, so three cured entries sat at status new and re-dispatched
-    two days later.
+    A mail naming an id no registry verb accepts, and no closing verb, leaves cured entries re-dispatching.
     """
 
     def test_registry_id_is_the_id_the_verbs_take(self) -> None:
@@ -935,18 +841,10 @@ class TestNotificationNamesTheRegistryRow:
         assert "drone @trigger errors suppress 6fd3636e" in body
 
 
-# ---------------------------------------------------------------------------
-# Escalation lane recording (DPLAN-0283 WS-A)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     """The escalation lane on a tmp state file with known thresholds.
-
-    handle_error_detected records into the real lane module, so the state file,
-    the config and the digest callback are all pinned here — the operator's
-    config never decides a test outcome, and no digest can leave the process.
+    State file, config and digest callback are pinned: operator config never decides an outcome, no digest leaves.
     """
     config: Dict[str, Any] = {
         "enabled": True,
@@ -971,9 +869,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(escalation, "get_config", lambda: config)
     monkeypatch.setattr(escalation, "_send_email", _send)
 
-    # medic_state is reached by a lazy `from ... import medic_state`, which
-    # resolves off the package attribute — stubbing it there keeps the real
-    # module (and the live medic_state.json behind it) out of this test.
+    # Stubbed on the package attribute the lazy import resolves, keeping the live medic_state.json out.
     medic = MagicMock()
     medic.is_enabled.return_value = True
     medic.get_muted_branches.return_value = []
@@ -988,10 +884,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
 
 class TestEscalationRecording:
     """The occurrence is counted BEFORE every dispatch gate.
-
-    A mute, a medic toggle or a first occurrence stops the DISPATCH. None of
-    them may stop the COUNT, or a repeating failure goes dark for the human
-    exactly when medic has gone quiet about it (DPLAN-0283).
+    A mute, medic toggle or first occurrence stops the dispatch, never the count, or a repeat goes dark.
     """
 
     def test_dispatched_error_is_recorded(self, lane) -> None:

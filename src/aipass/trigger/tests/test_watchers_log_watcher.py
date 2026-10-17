@@ -3,7 +3,7 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -23,19 +23,11 @@ import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
 import aipass.trigger.apps.modules.core as trigger_core
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
     """Replace every door the watcher opens onto live state, on the real modules.
 
-    The module is imported once, at the top; each door is set here and put
-    back by monkeypatch, which also undoes the tests below that assign
-    ``wlw.SYSTEM_LOGS_DIR`` or ``wlw._log_observer`` directly.
-    """
+    monkeypatch also undoes tests that assign ``wlw.SYSTEM_LOGS_DIR`` or ``wlw._log_observer``."""
     mock_logger = MagicMock()
     monkeypatch.setattr(wlw, "logger", mock_logger)
 
@@ -44,29 +36,19 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(wlw, "json_handler", mock_json_handler)
 
-    # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE
-    # system_logs. It points at this test's own directory instead.
+    # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE system_logs.
     monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
-    # -- error registry: an ERROR line is reported through a lazy import. Left
-    # real, test_reads_new_content wrote a TEST row into the LIVE registry on
-    # every run (found 2026-09-24, first written 2026-05-22). The lazy
-    # `from ... import report` reads the attribute at call time, so the
-    # replacement on the real module is what it gets.
+    # The lazy `from ... import report` reads the attribute at call time; left real,
+    # an ERROR line writes a row into the LIVE registry.
     monkeypatch.setattr(error_registry, "report", MagicMock(return_value={}))
 
-    # -- trigger core: the lazy `from ... import trigger` gets this recorder,
-    # never the live bus that would run medic's handlers.
+    # Never the live bus that would run medic's handlers.
     monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
     # -- watchdog: no real observer is ever armed over a directory.
     monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
     monkeypatch.setattr(wlw, "_log_observer", None)
-
-
-# ---------------------------------------------------------------------------
-# Tests -- generate_error_hash
-# ---------------------------------------------------------------------------
 
 
 class TestGenerateErrorHash:
@@ -95,11 +77,6 @@ class TestGenerateErrorHash:
         assert h1 != h2
 
 
-# ---------------------------------------------------------------------------
-# Tests -- detect_branch_from_log
-# ---------------------------------------------------------------------------
-
-
 class TestDetectBranchFromLog:
     """Tests for detect_branch_from_log."""
 
@@ -118,11 +95,6 @@ class TestDetectBranchFromLog:
     def test_multiple_underscores(self):
         """ai_mail_dispatch.log returns AI (first part before underscore)."""
         assert wlw.detect_branch_from_log("ai_mail_dispatch.log") == "AI"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- detect_log_level
-# ---------------------------------------------------------------------------
 
 
 class TestDetectLogLevel:
@@ -157,11 +129,6 @@ class TestDetectLogLevel:
         assert wlw.detect_log_level("just a plain log message") == "info"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- parse_log_message
-# ---------------------------------------------------------------------------
-
-
 class TestParseLogMessage:
     """Tests for parse_log_message."""
 
@@ -180,11 +147,6 @@ class TestParseLogMessage:
         assert wlw.parse_log_message("  just a message  ") == "just a message"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- extract_module_name
-# ---------------------------------------------------------------------------
-
-
 class TestExtractModuleName:
     """Tests for extract_module_name."""
 
@@ -196,11 +158,6 @@ class TestExtractModuleName:
     def test_non_pipe_returns_unknown(self):
         """Non-pipe line returns 'unknown'."""
         assert wlw.extract_module_name("no pipes here") == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- should_skip_log
-# ---------------------------------------------------------------------------
 
 
 class TestShouldSkipLog:
@@ -227,11 +184,6 @@ class TestShouldSkipLog:
         assert wlw.should_skip_log("Cleanup completed - Removed 0 entries") is True
 
 
-# ---------------------------------------------------------------------------
-# Tests -- LogFileWatcher._read_new_lines
-# ---------------------------------------------------------------------------
-
-
 class TestLogFileWatcherReadNewLines:
     """Tests for LogFileWatcher._read_new_lines with tmp_path."""
 
@@ -243,16 +195,13 @@ class TestLogFileWatcherReadNewLines:
         log_file.write_text("initial line\n", encoding="utf-8")
         file_path = str(log_file)
 
-        # Set position to end of initial content
         watcher.log_positions[file_path] = log_file.stat().st_size
 
-        # Append new error content
         with open(log_file, "a", encoding="utf-8") as f:
             f.write("2026-01-01 | mod | ERROR | New error\n")
 
         watcher._read_new_lines(file_path)
 
-        # Position should have advanced past new content
         assert watcher.log_positions[file_path] == log_file.stat().st_size
 
     def test_no_change_no_read(self, tmp_path):
@@ -264,30 +213,14 @@ class TestLogFileWatcherReadNewLines:
         file_path = str(log_file)
         watcher.log_positions[file_path] = log_file.stat().st_size
 
-        # Patch _process_log_line to verify it is NOT called
         with patch.object(watcher, "_process_log_line") as mock_proc:
             watcher._read_new_lines(file_path)
             mock_proc.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- LogFileWatcher rotation tail drain
-# ---------------------------------------------------------------------------
-
-
 def _rotate_log(log_file: Path) -> Path:
     """
-    Perform a real RotatingFileHandler-style rotation.
-
-    Renames the live log to '<name>.log.1' (inode travels with the rename)
-    and creates a fresh empty '<name>.log'.
-
-    Args:
-        log_file: Path to the live log file
-
-    Returns:
-        Path to the rotated-out backup file
-    """
+    Perform a real RotatingFileHandler-style rotation."""
     backup = Path(f"{log_file}.1")
     if backup.exists():
         backup.unlink()
@@ -298,19 +231,7 @@ def _rotate_log(log_file: Path) -> Path:
 
 def _rotate_chain(log_file: Path, backup_count: int = 3) -> Path:
     """
-    Perform a real RotatingFileHandler rotation including backup shifting.
-
-    Shifts '<name>.log.N' -> '<name>.log.N+1' (dropping the oldest), renames
-    the live log to '<name>.log.1', then creates a fresh empty '<name>.log'.
-    Inodes travel with the renames exactly as they do in production.
-
-    Args:
-        log_file: Path to the live log file
-        backup_count: Number of backups kept (prax uses 3)
-
-    Returns:
-        Path to the newest backup file ('<name>.log.1')
-    """
+    Perform a real RotatingFileHandler rotation including backup shifting."""
     for index in range(backup_count - 1, 0, -1):
         source = Path(f"{log_file}.{index}")
         target = Path(f"{log_file}.{index + 1}")
@@ -339,12 +260,10 @@ class TestLogFileWatcherRotationDrain:
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
-        # Bulk of the file is already processed (mirrors a log near its size cap)
         log_file.write_text("2026-08-04 | mod | ERROR | already seen\n" * 20, encoding="utf-8")
         file_path = str(log_file)
         watcher._record_position(file_path, log_file.stat().st_size)
 
-        # Unread tail: written after last position, before rotation
         with open(log_file, "a", encoding="utf-8") as f:
             f.write("2026-08-04 | mod | ERROR | missed one\n")
             f.write("2026-08-04 | mod | ERROR | missed two\n")
@@ -391,15 +310,12 @@ class TestLogFileWatcherRotationDrain:
 
         log_file = tmp_path / "prax_core.log"
         log_file.write_text("old rotation content\n2026-08-04 | mod | ERROR | ancient\n", encoding="utf-8")
-        # Earlier rotation happened before we started tracking the live file
         _rotate_log(log_file)
 
-        # Now the live file is a DIFFERENT inode with its own content
         log_file.write_text("2026-08-04 | mod | ERROR | live line one\n", encoding="utf-8")
         file_path = str(log_file)
         watcher._record_position(file_path, log_file.stat().st_size)
 
-        # Live file is truncated (shrinks) but the stale backup still sits there
         log_file.write_text("2026-08-04 | mod | ERROR | fresh\n", encoding="utf-8")
         watcher.log_positions[file_path] = 9999
 
@@ -419,7 +335,6 @@ class TestLogFileWatcherRotationDrain:
         file_path = str(log_file)
         watcher._record_position(file_path, log_file.stat().st_size)
 
-        # Shrink with no backup file at all
         log_file.write_text("2026-08-04 | mod | ERROR | tiny\n", encoding="utf-8")
 
         with patch.object(watcher, "_process_log_line") as mock_proc:
@@ -437,13 +352,11 @@ class TestLogFileWatcherRotationDrain:
         file_path = str(log_file)
         log_file.write_text("2026-08-04 | mod | ERROR | first pass line\n", encoding="utf-8")
 
-        # A stale backup exists holding a copy of the same text, different inode
         backup = Path(f"{file_path}.1")
         backup.write_text("2026-08-04 | mod | ERROR | first pass line\n", encoding="utf-8")
 
         watcher._record_position(file_path, log_file.stat().st_size)
 
-        # Truncate in place - inode is unchanged
         inode_before = log_file.stat().st_ino
         with open(log_file, "w", encoding="utf-8") as f:
             f.write("2026-08-04 | mod | ERROR | short\n")
@@ -458,9 +371,7 @@ class TestLogFileWatcherRotationDrain:
     def test_normal_append_never_drains(self, tmp_path):
         """No-overreach guard: an ordinary append never touches the drain path.
 
-        This test passes with and without the fix - it exists to prove the
-        drain does not run on the normal (non-shrink) path.
-        """
+        Passes with and without the fix: the drain never runs on the non-shrink path."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -468,7 +379,6 @@ class TestLogFileWatcherRotationDrain:
         file_path = str(log_file)
         watcher.log_positions[file_path] = log_file.stat().st_size
 
-        # A backup with the SAME content exists but must be ignored
         backup = Path(f"{file_path}.1")
         backup.write_text("2026-08-04 | mod | ERROR | backup only\n", encoding="utf-8")
 
@@ -493,7 +403,6 @@ class TestLogFileWatcherRotationDrain:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write("2026-08-04 | mod | ERROR | tail line\n")
 
-        # Rotate, leaving the new live file EMPTY (nothing written yet)
         _rotate_log(log_file)
 
         with patch.object(watcher, "_process_log_line") as mock_proc:
@@ -506,15 +415,12 @@ class TestLogFileWatcherRotationDrain:
     def test_unknown_inode_skips_drain(self, tmp_path):
         """Position recorded without an inode (old state) disables the drain.
 
-        No-overreach guard: passes with and without the fix - it proves an
-        unknown inode degrades to exactly the pre-fix behaviour.
-        """
+        Passes with and without the fix: an unknown inode degrades to the pre-fix behaviour."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
         log_file.write_text("2026-08-04 | mod | ERROR | tail line\n", encoding="utf-8")
         file_path = str(log_file)
-        # Position only - exactly what an older in-memory/on-disk state holds
         watcher.log_positions[file_path] = log_file.stat().st_size
 
         _rotate_log(log_file)
@@ -534,7 +440,6 @@ class TestLogFileWatcherRotationDrain:
         log_file.write_text("2026-08-04 | mod | ERROR | content\n", encoding="utf-8")
         file_path = str(log_file)
         watcher._record_position(file_path, log_file.stat().st_size)
-        # Pretend we were further along than the file ever got
         watcher.log_positions[file_path] = 9999
 
         _rotate_log(log_file)
@@ -579,11 +484,6 @@ class TestLogFileWatcherRotationDrain:
         assert watcher.log_inodes[file_path] == log_file.stat().st_ino
 
 
-# ---------------------------------------------------------------------------
-# Tests -- LogFileWatcher inode-based rotation detection
-# ---------------------------------------------------------------------------
-
-
 def _fresh_lines(count: int) -> list:
     """Build a list of distinct full ERROR lines for the post-rotation file."""
     return [f"2026-08-04 | mod | ERROR | after rotation {i:03d}" for i in range(count)]
@@ -595,9 +495,7 @@ class TestLogFileWatcherInodeRotation:
     def test_rotation_detected_when_new_file_already_grew(self, tmp_path):
         """A fresh log already past the old offset is still detected as rotated.
 
-        The size-only check missed this entirely and seeked into the middle of
-        the brand new file, yielding a partial line.
-        """
+        A size-only check seeks into the middle of the new file and yields a partial line."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -611,7 +509,6 @@ class TestLogFileWatcherInodeRotation:
 
         _rotate_chain(log_file)
 
-        # New file is LARGER than the recorded offset - there is no shrink to see
         fresh = _fresh_lines(40)
         log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
         assert log_file.stat().st_size > recorded_pos
@@ -621,7 +518,6 @@ class TestLogFileWatcherInodeRotation:
 
         lines = _processed_lines(mock_proc)
         assert any("missed one" in line for line in lines)
-        # Read from position 0: every fresh line whole, none dropped, none partial
         assert [line for line in lines if "after rotation" in line] == fresh
         assert not any("already seen" in line for line in lines)
         assert watcher.log_positions[file_path] == log_file.stat().st_size
@@ -686,11 +582,7 @@ class TestLogFileWatcherInodeRotation:
         assert watcher.log_positions[file_path] == log_file.stat().st_size
 
     def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
-        """No-overreach guard: same inode plus a full backup chain never drains.
-
-        Passes with and without the fix - it proves walking the chain did not
-        turn an in-place truncation into a false rotation.
-        """
+        """No-overreach guard: same inode plus a full backup chain never drains."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -714,11 +606,7 @@ class TestLogFileWatcherInodeRotation:
         assert lines == ["2026-08-04 | mod | ERROR | short"]
 
     def test_normal_append_with_backup_chain_never_drains(self, tmp_path):
-        """No-overreach guard: an append with backups present stays on the normal path.
-
-        Passes with and without the fix - it proves the chain walk only runs
-        when the inode actually changed.
-        """
+        """No-overreach guard: an append with backups present stays on the normal path."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -742,9 +630,7 @@ class TestLogFileWatcherInodeRotation:
     def test_zero_inode_falls_back_to_size_check(self, tmp_path):
         """No-overreach guard: a recorded inode of 0 is treated as unknown.
 
-        Passes with and without the fix - some Windows filesystems report
-        st_ino 0, which must never be trusted as a rotation signal.
-        """
+        Some Windows filesystems report st_ino 0, which must never read as a rotation."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -762,11 +648,6 @@ class TestLogFileWatcherInodeRotation:
         lines = _processed_lines(mock_proc)
         assert lines == ["2026-08-04 | mod | ERROR | new"]
         assert watcher.log_positions[file_path] == log_file.stat().st_size
-
-
-# ---------------------------------------------------------------------------
-# Tests -- start / stop / is_active
-# ---------------------------------------------------------------------------
 
 
 class TestStartStopActive:
@@ -795,11 +676,6 @@ class TestStartStopActive:
         assert wlw.is_log_watcher_active() is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- on_modified
-# ---------------------------------------------------------------------------
-
-
 class TestWatcherOnModified:
     """Tests for LogFileWatcher.on_modified."""
 
@@ -819,7 +695,6 @@ class TestWatcherOnModified:
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
         event.is_directory = False
-        # Use str(Path(...)) so separator matches SYSTEM_LOGS_DIR on all platforms
         event.src_path = str(logs_dir / "data.txt")
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
@@ -848,11 +723,7 @@ class TestWatcherOnModified:
     def test_a_read_failure_is_reported_and_costs_only_that_event(self, monkeypatch, tmp_path):
         """IOError is swallowed — but it is named, and the watcher keeps watching.
 
-        The whole unit was the call itself, which a bare `except: pass` passes
-        just as well. This observer is the one feeding error_detected, so a
-        swallow that says nothing is the shape where system_logs goes unread
-        and the board stays green. Named cause, and the next event still lands.
-        """
+        This observer feeds error_detected; a silent swallow leaves system_logs unread."""
         logs_dir = tmp_path / "system_logs"
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
@@ -865,9 +736,7 @@ class TestWatcherOnModified:
 
         warned: MagicMock = wlw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        # Assert on the call's own arguments, not a repr of the call — repr
-        # doubles backslashes in a Windows path, so a path search through it
-        # can never match even a correctly-built expected string.
+        # Assert on the call's own arguments: repr doubles backslashes in a Windows path.
         reported_args = warned.call_args.args
         assert str(logs_dir / "app.log") == reported_args[1], f"the failing file must be named: {reported_args}"
         assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"
@@ -875,11 +744,6 @@ class TestWatcherOnModified:
         watcher._read_new_lines.side_effect = None
         watcher.on_modified(event)
         assert watcher._read_new_lines.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# Tests -- initialize_positions
-# ---------------------------------------------------------------------------
 
 
 class TestWatcherInitializePositions:
@@ -936,27 +800,15 @@ class TestWatcherInitializePositions:
         assert len(watcher.log_positions) == 1
 
 
-# ---------------------------------------------------------------------------
-# system_logs ownership — the branch watcher is the sole owner
-# ---------------------------------------------------------------------------
-
-
 class TestSystemLogsOwnership:
-    """The owner's ruling (2026-08-14): one owner for system_logs, not two.
+    """The owner's ruling: one owner for system_logs, not two.
 
-    Both watchers used to register the directory, so one condition minted two
-    escalation signatures with different attribution — the branch watcher
-    resolving the owning branch, this watcher reporting UNKNOWN. Measured cost:
-    4 of 14 digests in 24h were the same condition twice.
-    """
+    One condition must not mint two escalation signatures with different attribution."""
 
     def test_start_declines_even_when_it_could_start(self, tmp_path, monkeypatch):
         """Watchdog available and the directory present — still declines.
 
-        The two pre-existing None returns are inability. This one is a
-        deliberate refusal, so it has to be proven under conditions where the
-        old code WOULD have started an observer.
-        """
+        A deliberate refusal, proven where the old code WOULD have started an observer."""
         monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")

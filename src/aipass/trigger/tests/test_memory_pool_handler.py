@@ -3,7 +3,7 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.0.0
 # Created: 2026-06-06
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -25,9 +25,7 @@ from aipass.trigger.apps.modules import core
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Point the real handler's two outward writes away from live state.
 
-    Real trail_logger, not a mock: the handler's sidecar is what
-    test_writes_handler_log_on_failure reads back, so the logger is rebuilt
-    on tmp_path. json_handler writes the live operation log and is mocked.
+    A real trail_logger on tmp_path: test_writes_handler_log_on_failure reads its sidecar back.
     """
     monkeypatch.setattr(memory_pool, "logger", trail_logger(tmp_path / "logs" / "memory_pool_handler.jsonl"))
     mock_json_handler = MagicMock()
@@ -83,11 +81,7 @@ class TestHandleMemoryPoolAutoProcessedSuccess:
     def test_absent_pool_and_rollover_log_as_unknown_not_as_a_crash(self) -> None:
         """Missing sections collapse to the documented defaults, and still log.
 
-        `pool = pool or {}` is the whole reason a firer may omit them, and the
-        payload it produces is the point: absent is reported as zero counts and
-        a named "unknown" status, never as a silently missing key. Surviving
-        the call proved only that .get was not reached on None — it passed
-        equally if the handler returned early and logged nothing at all.
+        Absent is reported as zero counts and an "unknown" status, never as a missing key.
         """
         mod = _import_module()
         json_handler = mod.json_handler
@@ -190,11 +184,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
     def test_a_failure_with_no_fire_event_still_records_the_failure(self) -> None:
         """No callback means no dispatch — it must not also mean no record.
 
-        fire_event arrives through **kwargs, so it is optional by construction
-        and every caller that forgets it lands here. The danger is not the
-        crash this unit used to rule out; it is the handler treating an absent
-        callback as nothing to do and dropping the failure on the floor, which
-        would leave a memory pool error with no trace anywhere.
+        fire_event is optional by construction (**kwargs); an absent one must not drop the failure.
         """
         mod = _import_module()
         json_handler = mod.json_handler
@@ -234,13 +224,10 @@ class TestEventRegistration:
         mock_trigger = MagicMock()
         mock_trigger.on = MagicMock()
 
-        # setup_handlers resolves core/email_send at CALL time, so no registry
-        # re-import is needed. The real core module, its bus swapped for a recording mock, so
-        # setup_handlers wires nothing onto the live bus.
+        # setup_handlers resolves core at call time: swapping its bus wires nothing live.
         monkeypatch.setattr(core, "trigger", mock_trigger)
 
-        # ai_mail's email_send is another branch's live delivery; the stub on the
-        # real module keeps the adapter setup_handlers builds off real mail.
+        # Keeps the adapter setup_handlers builds off ai_mail's real delivery.
         monkeypatch.setattr(email_send, "deliver_email_to_branch", MagicMock(return_value=(True, None)))
 
         registry.setup_handlers()

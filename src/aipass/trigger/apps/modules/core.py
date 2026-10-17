@@ -3,15 +3,11 @@
 # Description: Trigger event bus for AIPass system-wide event handling
 # Version: 1.4.0
 # Created: 2026-02-03
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
-Core Trigger class - Event bus for AIPass
-
-Branches fire events, Trigger handles reactions.
-Pattern: Like Prax logger but for events.
-"""
+Core Trigger class - Event bus for AIPass"""
 
 import os
 import sys
@@ -32,7 +28,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         from rich.console import Console
 
@@ -50,17 +46,8 @@ def print_introspection():
     console.print()
 
 
-# Renamed events, old name -> current name. An entry buys the fleet ONE release:
-# both names keep working, the old one logs a deprecation, and the entry is
-# deleted in the release after.
-#
-# RETIRED 2026-09-28: file_deleted -> profile_write_failed (added 2026-09-07,
-#   FPLAN-0492 wave 5; lived through v2.8.7 to v2.8.11; retired under compass
-#   485 by @devpulse, DPLAN-0354 leg 3). Both profile fire sites in @aipass
-#   fire profile_write_failed by name, and the two fires left under the old
-#   name are real unlinks (aipass install.py, daemon timer_install.py), which
-#   the entry relabelled as a failed profile write. No handler was registered
-#   under either name. file_deleted now names a real deletion again.
+# Renamed events, old name -> current name. An entry lives ONE release: both
+# names work, the old one logs a deprecation, then the entry is deleted.
 DEPRECATED_EVENT_ALIASES: dict[str, str] = {}
 
 
@@ -95,32 +82,14 @@ class Trigger:
     def _ensure_log_watcher(cls):
         """Lazy-start log watcher - DISABLED to prevent inotify exhaustion.
 
-        The lazy-start pattern causes each process to start its own watchers,
-        exhausting the system's inotify instance limit (128 by default).
-
-        Log watching should be done by a dedicated persistent process:
-        - Use `prax monitor` for real-time log watching
-        - Or use the catch-up pattern to scan logs on demand
-
-        See ERROR 1b5dd1af for details on inotify exhaustion issue.
-        """
-        # DISABLED: Each process starting watchers exhausts inotify instances
-        # The lock mechanism only prevented simultaneous starts, not accumulation
-        # over time as processes start/stop throughout the day.
-        #
-        # Architecture decision: Log watching belongs in prax monitor (persistent)
-        # not lazy-started in every trigger.fire() call.
+        A watcher per process exhausts inotify instances; a persistent process owns log watching."""
         pass
 
     @classmethod
     def _canonical(cls, event: str) -> str:
         """Resolve a deprecated event name to the name that replaced it.
 
-        One release of grace: a firer or a handler still using the old name
-        keeps working and gets told, once per name per process, that it is on
-        borrowed time. Unknown names pass straight through — this is a rename
-        table, not a whitelist.
-        """
+        Warns once per name per process; unknown names pass through (a rename table, not a whitelist)."""
         replacement = DEPRECATED_EVENT_ALIASES.get(event)
         if replacement is None:
             return event
@@ -136,18 +105,8 @@ class Trigger:
     def on(cls, event: str, handler: Callable):
         """Register handler for event, at most once.
 
-        Registration is idempotent BY DESIGN, not as a convenience. Two wiring
-        passes over the same handler set are routine here — setup_handlers() can
-        be called explicitly and does not set _initialized, so the next fire()
-        runs _ensure_initialized() and wires everything again. Appending blindly
-        made the bus deliver one event twice, and downstream that defeats medic
-        gate 3: the gate needs count >= 2 before it dispatches, so a single
-        occurrence counted twice walks straight through it and mails a branch
-        about a one-off. Registering the same callable twice for one event has
-        no legitimate meaning — an event fires a handler once.
-        """
-        # Registering under a retired name lands on the current one, so a
-        # handler wired the old way still hears events fired the new way.
+        Idempotent by design: setup_handlers() can run twice, and a doubled handler
+        delivers one event twice, which walks a one-off past medic's count >= 2 gate."""
         event = cls._canonical(event)
         handlers = cls._handlers.setdefault(event, [])
         if handler not in handlers:
@@ -157,21 +116,14 @@ class Trigger:
     def off(cls, event: str, handler: Callable):
         """Remove handler.
 
-        Resolves the alias too — otherwise `on("old")` then `off("old")` would
-        register on the current name and unregister nothing.
-        """
+        Resolves the alias too, or `off("old")` would miss what `on("old")` registered."""
         event = cls._canonical(event)
         if event in cls._handlers and handler in cls._handlers[event]:
             cls._handlers[event].remove(handler)
 
     @classmethod
     def _fire_to_handlers(cls, event: str, data: dict) -> dict:
-        """Fire a single event to its registered handlers.
-
-        Returns a summary of what actually happened: how many handlers were
-        registered, how many completed, how many raised. Handler failures stay
-        isolated — the count is what lets a caller tell isolation from silence.
-        """
+        """Fire a single event to its registered handlers."""
         handlers = cls._handlers.get(event, [])
         data = dict(data)  # Copy to avoid mutating caller's dict
         data["fire_event"] = cls.fire
@@ -221,23 +173,11 @@ class Trigger:
     def fire(cls, event: str, **data) -> dict:
         """Fire event to all registered handlers
 
-        Supports nested event firing via deferred queue - events fired during
-        handler execution are queued and processed after current handler completes.
-
-        Returns an execution summary — `{event, handlers, ran, failed}`, or
-        `{event, deferred: True}` for a nested fire that was queued. Handler
-        exceptions never propagate to the caller (isolation is the point of a
-        bus), so the counts are the only way a caller can tell "all handlers
-        completed" from "every handler raised" from "nothing was listening".
-        Callers are free to ignore it; the CLI does not.
-        """
-        # Resolve a retired name BEFORE the recursion guard, so the summary a
-        # caller reads back names the event that actually ran — a deferred fire
-        # reporting the old name would send them looking for handlers that are
-        # registered somewhere else.
+        Handler exceptions never propagate, so the returned counts are how a caller tells
+        "all ran" from "all raised" from "nobody listening"; a nested fire is queued."""
+        # Before the recursion guard, so a deferred summary names the event that runs.
         event = cls._canonical(event)
 
-        # If already firing, queue this event for later (prevents recursion, enables nesting)
         if cls._firing:
             cls._deferred_queue.append((event, data))
             return {"event": event, "deferred": True}
@@ -261,20 +201,7 @@ class Trigger:
 def _coerce_value(val_str: str) -> int | float | str:
     """Coerce a string value to int, float, or leave as string.
 
-    Typing is by LOSSLESS ROUND TRIP, not by shape: a token is only converted
-    when `str(number) == val_str`. Event data carries identity tokens as well
-    as numbers — `handle_error_detected` annotates `fingerprint`, `error_hash`
-    and `registry_id` as `str` — and an 8-char `uuid4()[:8]` is all digits
-    2.3% of the time, (10/16)**8. A shape test ("it looks like a number")
-    turns `fingerprint=00123456` into int 123456: the type contract breaks and
-    a character of the user's token is deleted on the way through. `int()` is
-    wider than it looks and would also eat `1_0`, `+5` and ` 5`; `float()`
-    reshapes `1.50` and `1e3`. Round-tripping catches all of them at once.
-
-    Reported by @drone (2026-08-13) after the same shape test in their own
-    `view N` index shortcut ate real message IDs — the collision is between
-    the token spaces themselves, so only a lossless check removes the class.
-    """
+    Only on a lossless round trip: an all-digit hex id like `00123456` must stay a str."""
     for cast in (int, float):
         try:
             number = cast(val_str)
@@ -286,25 +213,11 @@ def _coerce_value(val_str: str) -> int | float | str:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Commands:
-        fire <event> [key=value ...]  - Fire an event with optional data
-        status                        - Show registered event handlers
-        list                          - Alias for status
-
-    Args:
-        command: Command to execute (fire, status, list)
-        args: Additional arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle commands routed by the entry point."""
     from aipass.cli.apps.modules import console, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
-    # Handle module-name routing (drone @trigger core <subcmd>)
     if command == "core":
         if not args:
             print_introspection()
@@ -317,10 +230,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["fire", "status", "list"]:
         return False
 
-    # Whole-sequence help gate, AFTER the ownership check above: claiming a
-    # command this module does not own would hijack every other module's
-    # --help at the entry point. `help` counts only at position 0 — later it
-    # is event payload (`fire evt message=help`).
+    # After the ownership check, or this would hijack other modules' --help.
     if wants_help(args):
         _print_help(console)
         return True
@@ -330,7 +240,6 @@ def handle_command(command: str, args: list) -> bool:
             error("Usage: drone @trigger fire <event> [key=value ...]")
             return True
         event_name = args[0]
-        # Parse key=value pairs from remaining args
         data = {}
         for arg in args[1:]:
             if "=" in arg:
@@ -389,5 +298,4 @@ def _print_help(console):
     console.print()
 
 
-# Create instance for import
 trigger = Trigger()

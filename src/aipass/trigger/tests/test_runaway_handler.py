@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -28,15 +28,7 @@ from aipass.trigger.apps.handlers.events import runaway_handler as mod
 RUNAWAY_LOG = str(Path(tempfile.gettempdir()) / "test.log")
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture: redirect file paths to tmp_path, capture the sidecar trail,
-# mock wake_branch, clear cooldown state between tests.
-# ---------------------------------------------------------------------------
-
-# The handler writes two kinds of sidecar line — logger.warning() and the
-# decision log via append_trail() — and BOTH funnel through config's one prax
-# hook. Patching that single seam captures the whole trail in call order and
-# keeps the suite out of the live logs/ directory.
+# Both sidecar writers funnel through config's one prax hook: patching it captures the trail.
 _trail = MagicMock()
 
 
@@ -52,7 +44,6 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     _trail.reset_mock()
     monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
 
-    # The handler imports wake_branch from ai_mail's door at call time: replace it there
     monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
 
     yield
@@ -63,11 +54,6 @@ def _setup_happy_path() -> MagicMock:
     send_mock = MagicMock(return_value=True)
     mod.set_send_email_callback(send_mock)
     return send_mock
-
-
-# ---------------------------------------------------------------------------
-# 1. Missing file_path — returns without dispatch
-# ---------------------------------------------------------------------------
 
 
 class TestMissingFilePath:
@@ -86,20 +72,11 @@ class TestMissingFilePath:
         send.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# 2. Per-file cooldown — second call within 30min is suppressed
-# ---------------------------------------------------------------------------
-
-
 class TestPerFileCooldown:
     """Second call for the same file within 30min cooldown is suppressed."""
 
     def test_second_call_within_cooldown_suppressed(self) -> None:
-        """Second call for the same file is suppressed; another file still dispatches.
-
-        The cooldown is keyed per file. Mutant run: keying the cooldown on one
-        shared key suppresses the other file and reddens the last assert.
-        """
+        """Second call for the same file is suppressed; another file still dispatches."""
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
@@ -111,7 +88,6 @@ class TestPerFileCooldown:
         )
         assert send.call_count == 1
 
-        # Second call — same file, should be suppressed
         mod.handle_runaway_log_detected(
             file_path=RUNAWAY_LOG,
             branch="flow",
@@ -121,7 +97,6 @@ class TestPerFileCooldown:
         )
         assert send.call_count == 1
 
-        # A different file is not on this file's cooldown
         mod.handle_runaway_log_detected(
             file_path=str(Path(tempfile.gettempdir()) / "other.log"),
             branch="flow",
@@ -133,21 +108,13 @@ class TestPerFileCooldown:
         assert [subject.split()[1] for subject in subjects] == ["test.log", "other.log"]
 
 
-# ---------------------------------------------------------------------------
-# 3. Cooldown expired — call after cooldown passes dispatches again
-# ---------------------------------------------------------------------------
-
-
 class TestCooldownExpired:
     """Call after cooldown window expires dispatches again."""
 
     def test_dispatches_again_after_cooldown_expires(self) -> None:
         """Dispatch succeeds again once the 1800s cooldown has elapsed.
 
-        The clock stub stands at the handler's own time binding, so the
-        process clock is never patched.
-        Mutant run: a cooldown ten times as long reddens this.
-        """
+        The clock stub stands at the handler's own time binding; the process clock is never patched."""
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
@@ -159,7 +126,6 @@ class TestCooldownExpired:
         )
         assert send.call_count == 1
 
-        # The handler's clock reads past the 1800s cooldown
         later = time.time() + mod.COOLDOWN_SECONDS + 1
         with patch.object(mod, "time", MagicMock(time=MagicMock(return_value=later))):
             mod.handle_runaway_log_detected(
@@ -170,11 +136,6 @@ class TestCooldownExpired:
                 severity="critical",
             )
         assert send.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# 4. Mute classes — content mutes never gate runaways, volume mutes do
-# ---------------------------------------------------------------------------
 
 
 def _write_config(tmp_path: Path, config: dict) -> None:
@@ -191,10 +152,7 @@ class TestBranchMuted:
     def test_content_muted_branch_still_delivers(self, tmp_path: Path) -> None:
         """REGRESSION: a medic-muted branch still gets its runaway alert.
 
-        Every dispatch checklist tells agents to medic-mute before build work,
-        which is exactly when floods happen — gating runaways on the content
-        mute made this channel dead in its own peak window.
-        """
+        Agents medic-mute before build work, exactly when floods happen."""
         send = _setup_happy_path()
 
         _write_config(tmp_path, {"muted_branches": ["flow"]})
@@ -224,10 +182,7 @@ class TestBranchMuted:
         send.assert_not_called()
 
     def test_expired_volume_mute_delivers(self, tmp_path: Path) -> None:
-        """An expired volume mute entry does not suppress.
-
-        Mutant run: every runaway addressed to @prax reddens this.
-        """
+        """An expired volume mute entry does not suppress."""
         send = _setup_happy_path()
 
         expired = (datetime.now() - timedelta(hours=1)).isoformat()
@@ -259,10 +214,7 @@ class TestBranchMuted:
         assert send.call_args.kwargs["to_branch"] == "@flow"
 
     def test_critical_bypass_is_case_insensitive(self, tmp_path: Path) -> None:
-        """Severity matching tolerates 'CRITICAL' as well as 'critical'.
-
-        Mutant run: every runaway addressed to @prax reddens this.
-        """
+        """Severity matching tolerates 'CRITICAL' as well as 'critical'."""
         send = _setup_happy_path()
 
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
@@ -279,10 +231,7 @@ class TestBranchMuted:
     def test_warning_still_respects_volume_mute(self, tmp_path: Path) -> None:
         """Non-critical runaways still honour an explicit volume mute.
 
-        Observe-only made the no-email half of this trivially true, so the
-        assertion that carries weight now is that a volume-muted WARNING is
-        dropped entirely — it does not even reach the observe-only record.
-        """
+        Observe-only makes the no-email half trivial; a volume-muted WARNING must not even be recorded."""
         send = _setup_happy_path()
 
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
@@ -300,13 +249,7 @@ class TestBranchMuted:
     def test_unreadable_mute_file_fails_open_and_says_so(self, tmp_path: Path) -> None:
         """An unreadable medic_state.json is not a mute, and the trail says it was unread.
 
-        Before, a corrupt file read as "not muted" with only a sidecar warning, so
-        the decision trail could not tell an unread mute from a branch nobody muted.
-        Failing open is kept: a runaway must reach someone. One event is one
-        trail line: the observe_only line is not written beside it (2026-09-28,
-        red first on the code that wrote both).
-        Mutant 2026-09-28: the observe-only write keyed to 'observe_only' alone reddens this.
-        """
+        Failing open is kept (a runaway must reach someone); one event is one trail line."""
         (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
 
         mod.handle_runaway_log_detected(
@@ -321,11 +264,6 @@ class TestBranchMuted:
         assert [(e["outcome"], e["branch"]) for e in entries] == [("observed", "flow")]
         assert _decision_entries("observe_only") == []
         assert len(_read_alerts(tmp_path)) == 1
-
-
-# ---------------------------------------------------------------------------
-# 5. UNKNOWN branch — dispatches to @prax instead
-# ---------------------------------------------------------------------------
 
 
 class TestUnknownBranch:
@@ -346,11 +284,6 @@ class TestUnknownBranch:
         assert send.call_args[1]["to_branch"] == "@prax"
 
 
-# ---------------------------------------------------------------------------
-# 6. None branch — dispatches to @prax instead
-# ---------------------------------------------------------------------------
-
-
 class TestNoneBranch:
     """None branch falls back to @prax."""
 
@@ -369,21 +302,13 @@ class TestNoneBranch:
         assert send.call_args[1]["to_branch"] == "@prax"
 
 
-# ---------------------------------------------------------------------------
-# 7. No email callback — logs warning, no dispatch
-# ---------------------------------------------------------------------------
-
-
 class TestNoEmailCallback:
     """Handler logs warning and returns when _send_email is None.
 
-    Only the CRITICAL path needs a callback — observe-only WARNINGs never
-    reach this guard (see TestObserveOnlyWarning).
-    """
+    Only the CRITICAL path needs a callback; observe-only WARNINGs never reach this guard."""
 
     def test_logs_warning_no_dispatch(self) -> None:
         """Logs a WARNING to the sidecar trail when no callback set."""
-        # _send_email stays None (no set_send_email_callback call)
         mod.handle_runaway_log_detected(
             file_path=RUNAWAY_LOG,
             branch="flow",
@@ -396,12 +321,6 @@ class TestNoEmailCallback:
         warning_calls = [c for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
         assert len(warning_calls) >= 1
         assert "No email callback" in warning_calls[0][0][1]["msg"]
-
-
-# ---------------------------------------------------------------------------
-# 8. Successful dispatch — email sent, wake called, alert written,
-#    cooldown recorded
-# ---------------------------------------------------------------------------
 
 
 class TestSuccessfulDispatch:
@@ -420,7 +339,6 @@ class TestSuccessfulDispatch:
             severity="critical",
         )
 
-        # Email sent with expected kwargs
         send.assert_called_once()
         kwargs = send.call_args[1]
         assert kwargs["to_branch"] == "@flow"
@@ -430,21 +348,12 @@ class TestSuccessfulDispatch:
         assert "[RUNAWAY]" in kwargs["subject"]
         assert "CRITICAL" in kwargs["subject"]
 
-        # wake_branch called (replaced at its home by the autouse fixture)
         _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
 
-        # Alert file written
         alerts_file = tmp_path / "alerts.json"
         assert alerts_file.exists()
 
-        # Cooldown recorded: the next detection of the file is gated (leg 7: read
-        # through the handler, not _file_cooldowns; mutant: the booking removed)
         assert _gated_by_cooldown(file_path), "no cooldown was booked"
-
-
-# ---------------------------------------------------------------------------
-# 9. Alert file written — verify alerts.json schema
-# ---------------------------------------------------------------------------
 
 
 class TestAlertFileSchema:
@@ -514,11 +423,6 @@ class TestAlertFileSchema:
         assert data["alerts"][0]["expires_at"] is None
 
 
-# ---------------------------------------------------------------------------
-# 10. Alert appends — existing alerts preserved when new one appended
-# ---------------------------------------------------------------------------
-
-
 class TestAlertAppends:
     """Existing alerts are preserved when a new alert is appended."""
 
@@ -553,11 +457,6 @@ class TestAlertAppends:
         assert data["alerts"][1]["source"] == "prax"
 
 
-# ---------------------------------------------------------------------------
-# 11. Email send fails — returns early, no alert written, no cooldown
-# ---------------------------------------------------------------------------
-
-
 class TestEmailSendFails:
     """When _send_email returns False, no alert or cooldown is recorded."""
 
@@ -578,13 +477,7 @@ class TestEmailSendFails:
         send.assert_called_once()
         alerts_file = tmp_path / "alerts.json"
         assert not alerts_file.exists()
-        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
         assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
-
-
-# ---------------------------------------------------------------------------
-# 12. Decision log — every gating decision is recorded with an outcome
-# ---------------------------------------------------------------------------
 
 
 def _decision_entries(reason: str) -> list:
@@ -596,10 +489,7 @@ def _decision_entries(reason: str) -> list:
 def _gated_by_cooldown(file_path: str) -> bool:
     """Detect the same file again at once; True when the handler's own trail says its cooldown gated it.
 
-    The public answer for the per-file cooldown (leg 7): _file_cooldowns itself
-    is module state. The cooldown is checked before any send, so a gated probe
-    sends nothing; an ungated one runs the CRITICAL path into the test's stubs.
-    """
+    _file_cooldowns is module state; a gated probe sends nothing."""
     before = len(_decision_entries("cooldown"))
     mod.handle_runaway_log_detected(
         file_path=file_path, branch="flow", rate_lines_per_min=5000, sustained_duration_sec=60, severity="critical"
@@ -620,7 +510,6 @@ class TestSuppressionLog:
         _setup_happy_path()
         file_path = RUNAWAY_LOG
 
-        # First call dispatches normally
         mod.handle_runaway_log_detected(
             file_path=file_path,
             branch="flow",
@@ -628,10 +517,8 @@ class TestSuppressionLog:
             sustained_duration_sec=60,
         )
 
-        # Reset mock to isolate suppression log call
         _trail.reset_mock()
 
-        # Second call is on cooldown — should write suppression log
         mod.handle_runaway_log_detected(
             file_path=file_path,
             branch="flow",
@@ -683,11 +570,7 @@ class TestSuppressionLog:
     def test_critical_bypass_that_fails_to_send_is_not_delivered(self, tmp_path: Path) -> None:
         """Delivered is written after the send returns, never before it.
 
-        The handler used to write the bypass_critical 'delivered' line before the
-        mail was attempted, so a refused send left a trail saying delivered.
-        Red first on that code (2026-09-28).
-        Mutant 2026-09-28: the delivered write moved back above the send reddens this.
-        """
+        A refused send must not leave a trail saying delivered."""
         send = MagicMock(return_value=False)
         mod.set_send_email_callback(send)
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
@@ -704,11 +587,7 @@ class TestSuppressionLog:
         assert _decision_entries("bypass_critical") == []
 
     def test_critical_over_an_unreadable_mute_is_delivered_once(self, tmp_path: Path) -> None:
-        """A sent critical over a mute nobody could read leaves one line: delivered, mute_unreadable.
-
-        Green on the tree from its first run; its proof is the mutant.
-        Mutant 2026-09-29: delivered written for bypass_critical alone reddens this.
-        """
+        """A sent critical over a mute nobody could read leaves one line: delivered, mute_unreadable."""
         send = _setup_happy_path()
         (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
 
@@ -724,10 +603,7 @@ class TestSuppressionLog:
         assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("delivered", "mute_unreadable")]
 
     def test_an_unmuted_critical_that_was_sent_is_delivered(self) -> None:
-        """The trail records what happened to every event, the ones the gate passed included.
-
-        Red first on 2026-09-29: an unmuted critical wrote no line at all.
-        """
+        """The trail records what happened to every event, the ones the gate passed included."""
         _setup_happy_path()
 
         mod.handle_runaway_log_detected(
@@ -782,20 +658,11 @@ class TestSuppressionLog:
         assert not _decision_entries("bypass_critical")
 
 
-# ---------------------------------------------------------------------------
-# 13. set_send_email_callback — sets the callback correctly
-# ---------------------------------------------------------------------------
-
-
 class TestSetSendEmailCallback:
     """Tests for set_send_email_callback."""
 
     def test_sets_callback_correctly(self) -> None:
-        """The callback set is the one a CRITICAL dispatch sends through.
-
-        Read through the handler since leg 7 (it compared _send_email by
-        identity). Mutant run (leg 7): the setter storing nothing reddens this.
-        """
+        """The callback set is the one a CRITICAL dispatch sends through."""
         callback = MagicMock(return_value=True)
         mod.set_send_email_callback(callback)
 
@@ -811,11 +678,7 @@ class TestSetSendEmailCallback:
         assert callback.call_args.kwargs["to_branch"] == "@flow"
 
     def test_overwrites_previous_callback(self) -> None:
-        """Second call replaces the first callback: only the second one sends.
-
-        Read through the handler since leg 7 (it compared _send_email by
-        identity). Mutant run (leg 7): the setter keeping the first callback reddens this.
-        """
+        """Second call replaces the first callback: only the second one sends."""
         first = MagicMock(return_value=True)
         second = MagicMock(return_value=True)
         mod.set_send_email_callback(first)
@@ -834,11 +697,6 @@ class TestSetSendEmailCallback:
         first.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# 14. Observe-only WARNING — records with full fidelity, wakes nobody
-# ---------------------------------------------------------------------------
-
-
 def _wake_mock() -> MagicMock:
     """Return the mocked wake_branch installed by the autouse fixture."""
     return cast(MagicMock, ai_mail_wake.wake_branch)
@@ -855,9 +713,7 @@ def _read_alerts(tmp_path: Path) -> list:
 class TestObserveOnlyWarning:
     """WARNING tier is observe-only: full record, no email, no wake.
 
-    The 100 lines/min threshold predates routine multi-agent fleets and fires
-    on healthy chatty logs, so a WARNING must never pull an agent out of sleep.
-    """
+    The 100 lines/min threshold fires on healthy chatty logs, so a WARNING never wakes an agent."""
 
     def test_warning_never_emails_and_never_wakes(self) -> None:
         """A WARNING sends no email and wakes no branch."""
@@ -891,9 +747,7 @@ class TestObserveOnlyWarning:
     def test_warning_writes_alert_with_full_fidelity(self, tmp_path: Path) -> None:
         """The durable record keeps file, severity, branch, rate and duration.
 
-        Asserts the no-wake half too: writing the alert alone is what the old
-        dispatch path did as well, so only the pair pins observe-only.
-        """
+        Only the pair with the no-wake assert pins observe-only; writing the alert alone does not."""
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
@@ -935,7 +789,6 @@ class TestObserveOnlyWarning:
         assert entries[0]["outcome"] == "observed"
         assert entries[0]["branch"] == "flow"
         assert entries[0]["file"] == RUNAWAY_LOG
-        # Not a suppression (we recorded it) and not a delivery (nobody was told)
         assert entries[0]["outcome"] not in {"suppressed", "delivered"}
 
     def test_warning_records_file_cooldown(self, tmp_path: Path) -> None:
@@ -952,7 +805,6 @@ class TestObserveOnlyWarning:
         )
         assert len(_read_alerts(tmp_path)) == 1
 
-        # Second detection interval for the same file is gated by the cooldown
         mod.handle_runaway_log_detected(
             file_path=file_path,
             branch="flow",
@@ -967,10 +819,7 @@ class TestObserveOnlyWarning:
     def test_warning_records_fully_without_email_callback(self, tmp_path: Path) -> None:
         """REGRESSION: no email callback must not silence the observe-only record.
 
-        The callback guard predates the split and used to return before any
-        record was written; a WARNING no longer sends, so it must not care.
-        """
-        # _send_email stays None (no set_send_email_callback call)
+        A WARNING no longer sends, so the callback guard must not return before the record."""
         file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
@@ -983,17 +832,8 @@ class TestObserveOnlyWarning:
 
         assert len(_read_alerts(tmp_path)) == 1
         assert len(_decision_entries("observe_only")) == 1
-        # Leg 7: read through the handler, not _file_cooldowns
         assert _gated_by_cooldown(file_path), "no cooldown was booked"
         _wake_mock().assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# 15. CRITICAL tier — NO-OVERREACH GUARDS (pass before and after the split)
-#
-# These deliberately pass against both the old and new handler: their whole
-# job is to prove the observe-only split did not touch the CRITICAL path.
-# ---------------------------------------------------------------------------
 
 
 class TestCriticalUnchanged:
@@ -1015,7 +855,6 @@ class TestCriticalUnchanged:
         assert send.call_args.kwargs["to_branch"] == "@flow"
         _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
         assert len(_read_alerts(tmp_path)) == 1
-        # Leg 7: read through the handler, not _file_cooldowns
         assert _gated_by_cooldown(RUNAWAY_LOG), "no cooldown was booked"
 
     def test_critical_bypasses_volume_mute_and_still_wakes(self, tmp_path: Path) -> None:
@@ -1053,7 +892,6 @@ class TestCriticalUnchanged:
         _wake_mock().assert_not_called()
         assert not _read_alerts(tmp_path)
         assert not _decision_entries("observe_only")
-        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
         assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
         calls = _trail.call_args_list
@@ -1074,11 +912,6 @@ class TestCriticalUnchanged:
 
         assert send.call_args.kwargs["to_branch"] == "@prax"
         _wake_mock().assert_called_once_with("@prax", fresh=False, sender="@trigger")
-
-
-# ---------------------------------------------------------------------------
-# 16. Operation log naming — never log a dispatch that did not happen
-# ---------------------------------------------------------------------------
 
 
 class TestOperationLogNaming:
@@ -1151,10 +984,7 @@ class TestVolumeMuteMigration:
     """Volume mutes are read through the legacy-path migration."""
 
     def test_volume_mute_survives_migration(self, tmp_path: Path) -> None:
-        """A volume mute written under the old filename still silences the alert.
-
-        Mutant run: skipping the legacy-file migration in the mute read reddens this.
-        """
+        """A volume mute written under the old filename still silences the alert."""
         mod.LEGACY_MEDIC_STATE_FILE.write_text(
             json.dumps({"config": {"volume_muted_branches": [{"name": "hooks", "expires_at": None}]}}),
             encoding="utf-8",

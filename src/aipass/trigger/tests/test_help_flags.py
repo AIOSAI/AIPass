@@ -3,7 +3,7 @@
 # Description: Unit tests for the whole-sequence help-flag predicate
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py."""
@@ -25,11 +25,6 @@ def test_near_misses_are_not_flags(token):
     """Matching is exact, never prefix or fuzzy, in either token class."""
     assert wants_help([token]) is False
     assert wants_help(["mute", token]) is False
-
-
-# ---------------------------------------------------------------------------
-# wants_help — dashed forms scan the whole sequence
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -58,27 +53,14 @@ def test_dashed_flag_counts_at_any_position(args):
     ],
 )
 def test_no_flag_means_run_the_command(args):
-    """Matching is exact, so a flag-shaped substring inside a value is safe.
-
-    The same list with a real flag appended does ask, so the refusal is about
-    the tokens, not the command. Mutant run: the dashed-flag check removed reddens this.
-    """
+    """Matching is exact, so a flag-shaped substring inside a value is safe."""
     assert wants_help(args) is False
     assert wants_help([*args, "--help"]) is True
 
 
 def test_dashed_flag_inside_a_key_value_pair_is_a_payload():
-    """`message=--help` is event data, not a request for the manual.
-
-    Exact matching is what protects this: the token is `message=--help`,
-    which is not `--help`.
-    """
+    """`message=--help` is event data, not a request for the manual."""
     assert wants_help(["error_detected", "message=--help"]) is False
-
-
-# ---------------------------------------------------------------------------
-# wants_help — the bare word is positional
-# ---------------------------------------------------------------------------
 
 
 def test_bare_word_help_counts_in_the_subcommand_slot():
@@ -98,10 +80,7 @@ def test_bare_word_help_counts_in_the_subcommand_slot():
 def test_bare_word_help_past_position_zero_is_an_operand(args):
     """Later `help` is a reason, a payload or a filter — never a flag.
 
-    This is the whole reason the bare word is treated differently from the
-    dashed forms: it is a legitimate value in this branch's own commands.
-    The same list led by the bare word asks for the manual, so position is
-    the whole difference. Mutant run: the bare-word branch returning False reddens this.
+    The bare word is a legitimate value in this branch's own commands, so position decides.
     """
     assert wants_help(args) is False
     assert wants_help([HELP_BARE_WORD, *args]) is True
@@ -111,11 +90,6 @@ def test_bare_word_can_be_switched_off_entirely():
     """allow_bare_word=False leaves only the unambiguous dashed forms."""
     assert wants_help(["help"], allow_bare_word=False) is False
     assert wants_help(["help", "--help"], allow_bare_word=False) is True
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 
 def test_dashed_constant_excludes_the_bare_word():

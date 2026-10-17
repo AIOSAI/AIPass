@@ -3,17 +3,11 @@
 # Description: Log events module for centralized log watcher public API
 # Version: 1.1.0
 # Created: 2026-01-31
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Log Events Module - Public API for log event watching
-
-Provides start/stop/status commands for the centralized log watcher.
-Trigger owns all log event detection - other branches respond to events.
-
-Commands: start, stop, status
-Architecture: Module orchestrates handlers
 """
 
 import os
@@ -23,7 +17,6 @@ import sys
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.json import json_handler
 
-# Import handler functions
 from aipass.trigger.apps.handlers.watchers.log_watcher import (
     start_log_watcher,
     stop_log_watcher,
@@ -43,7 +36,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
@@ -64,53 +57,28 @@ def print_introspection():
 
 
 def start() -> bool:
-    """
-    Start the centralized log watcher — which declines, by design.
-
-    system_logs/ has one owner: the branch watcher (branch_log_events), which
-    globs it alongside the per-branch logs. This observer always returns None,
-    so this call reports False and the CLI exits 2 rather than telling a
-    caller's && that a watcher is running. It fires no events at all; the
-    branch watcher fires error_detected and warning_logged.
-
-    Returns:
-        True if started successfully, False otherwise (always, since the
-        2026-08-14 ownership ruling)
+    """Start the centralized log watcher — which declines, by design.
+    system_logs/ has one owner (branch_log_events); the observer returns None, so this reports False.
     """
     logger.info("[TRIGGER] Starting log watcher")
     observer = start_log_watcher()
     if observer:
         logger.info(f"[TRIGGER] Log watcher started, monitoring: {SYSTEM_LOGS_DIR}")
         return True
-    # INFO, not ERROR: since the owner's 2026-08-14 ruling the centralized
-    # observer always declines — branch_log_events owns system_logs. Logging a
-    # chosen behaviour at ERROR would feed my own log watcher an error line on
-    # every service start, mint an escalation signature for it, and mail the
-    # operator about a decision. Compass #273: severity follows design intent.
+    # INFO, not ERROR: the decline is design; an ERROR line would feed the watchers an escalation.
     logger.info("[TRIGGER] Centralized observer not started — branch_log_events owns system_logs")
     return False
 
 
 def stop() -> None:
-    """
-    Stop the centralized log watcher.
-    """
+    """Stop the centralized log watcher."""
     logger.info("[TRIGGER] Stopping log watcher")
     stop_log_watcher()
     logger.info("[TRIGGER] Log watcher stopped")
 
 
 def status() -> dict:
-    """
-    Get log watcher status.
-
-    Returns:
-        Dict with status info:
-        {
-            'active': bool,
-            'log_dir': str
-        }
-    """
+    """Get log watcher status."""
     return {"active": is_log_watcher_active(), "log_dir": str(SYSTEM_LOGS_DIR)}
 
 
@@ -143,21 +111,11 @@ def print_help() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """
-    Handle log_events commands - orchestrate handler calls.
-
-    Args:
-        command: Command to execute (start, stop, status)
-        args: Additional arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle log_events commands - orchestrate handler calls."""
     from aipass.cli.apps.modules import console, error, success
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
-    # Handle module-name routing (drone @trigger log_events <subcmd>)
     if command == "log_events":
         if not args:
             print_introspection()
@@ -170,8 +128,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["start", "stop", "status"]:
         return False
 
-    # Whole-sequence gate, AFTER the ownership check: a module that claimed
-    # any command carrying --help would hijack every other module's help.
+    # Gate after the ownership check: claiming any --help command would hijack other modules' help.
     if wants_help(args):
         print_help()
         return True
@@ -181,12 +138,7 @@ def handle_command(command: str, args: list) -> bool:
             success("Log watcher started")
             console.print(f"   Monitoring: {SYSTEM_LOGS_DIR}")
         else:
-            # Still not a fault — but "not a fault" was never a reason to exit
-            # 0. Exiting 0 told `drone @trigger log_events start && <next>`
-            # that a watcher was running, and the caller proceeded without one
-            # (canary's sweep 2026-09-07; @daemon took this line first at
-            # schedule.py:50-52). The message names the reason rather than
-            # inventing a failure: withdrawn by ruling, not broken.
+            # Exit non-zero: a caller's && must not proceed as if a watcher were running.
             error(
                 "Not started — withdrawn by ruling, not failed: system_logs has one owner",
                 suggestion="Run 'drone @trigger branch_log_events status' for the watcher that does cover it",

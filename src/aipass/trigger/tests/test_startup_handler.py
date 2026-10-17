@@ -3,7 +3,7 @@
 # Description: Tests for startup event handler
 # Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -27,18 +27,8 @@ import aipass.trigger.apps.handlers.watchers.log_watcher as system_log_reader
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Put the real startup module's edges on tmp_path and recording stubs.
 
-    The catch-up looks rows up and reports untracked ones. Unstubbed, that
-    reached the LIVE registry: one run on 2026-09-24 wrote 52 FLOW rows into
-    trigger_json/error_registry.json. The catch-up reaches the registry by
-    lazy imports, which read the real module's attributes at call time, so
-    every registry name it imports is a stub here and the registry's files
-    point at tmp_path besides. Every test starts with an empty registry that
-    stores nothing; the registry-linkage tests patch the seams on top.
-
-    The conftest already puts the catch-up state files and the logger on a
-    sandbox. SYSTEM_LOGS_DIR (the live system_logs/ the scan reads) and
-    log_operation are swapped here, and the names the tests assign over
-    directly are setattr'd first so teardown undoes those assignments.
+    Unstubbed, the catch-up's lazy imports reach the LIVE registry, so every registry name is a stub here.
+    Names the tests assign over are setattr'd first so teardown undoes them.
     """
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
@@ -141,9 +131,7 @@ class TestCatchupOccurrenceCounting:
     def test_repeat_lines_are_counted_not_dropped(self, tmp_path: Path) -> None:
         """37 identical lines produce ONE entry carrying count 37.
 
-        Measured live 2026-09-07: a 37-line burst reached the registry as
-        count 2. The dedup key has no timestamp, so every line after the
-        first was skipped outright and the payload said `count=1`.
+        The dedup key has no timestamp, so skipping each repeat line would report count 1.
         """
         mod = _import_startup()
         import time
@@ -214,9 +202,7 @@ class TestCatchupOccurrenceCounting:
     def test_a_hash_from_a_previous_run_stays_dropped(self, tmp_path: Path) -> None:
         """Repeats are counted against THIS scan only — old state still suppresses.
 
-        Nothing collected this scan can be bumped for a hash carried over from
-        persisted state, and re-emitting it would re-dispatch an error the
-        previous run already handled.
+        Re-emitting a carried-over hash would re-dispatch an error the previous run handled.
         """
         mod = _import_startup()
         import time
@@ -254,11 +240,7 @@ class TestCatchupNamesTheRegistryRow:
     """A catch-up dispatch has to name a row the registry verbs accept, and must not
     replay a line the watcher already registered.
 
-    @hooks, 2026-09-24: "drone @trigger errors detail 5a2ac45a answers 'Error not
-    found'... The entry it actually refers to is 6fd3636e", and three entries "came
-    back two days later with a last_seen that had not moved (registry last_seen
-    2026-09-22T04:53:31; your dispatch fired 2026-09-24 22:22:04)". The catch-up
-    fired with no fingerprint at all, which drops the handler to its v1 arm.
+    A catch-up fired with no fingerprint drops the handler to its v1 arm.
     """
 
     @staticmethod
@@ -351,10 +333,7 @@ class TestCatchupNamesTheRegistryRow:
 class TestRowTwelveTimestampGate:
     """last_scan_timestamp advances only after a scan that covered every file.
 
-    Row 12 of DPLAN-0298, re-verified open 2026-09-11 and cured here. It used
-    to advance unconditionally, so any DPLAN-037 limit threw away the window
-    it aborted in: files the scan never reached fell behind the new cutoff and
-    their errors were unrecoverable.
+    Advancing past an aborted window loses the errors of files the scan never reached.
     """
 
     HELD = "2026-09-01T00:00:00"
@@ -402,9 +381,7 @@ class TestRowTwelveTimestampGate:
     def test_held_timestamp_still_persists_processed_hashes(self) -> None:
         """Re-covering the window must not re-dispatch what was already found.
 
-        The hashes are the only thing stopping that, so they are written on the
-        aborted path too — holding the cursor back and dropping the hashes
-        would turn one abort into a duplicate dispatch storm.
+        The hashes are written on the aborted path too, or one abort becomes a duplicate dispatch storm.
         """
         mod = _import_startup()
         self._state(mod, self.HELD)
@@ -424,9 +401,7 @@ class TestRowTwelveTimestampGate:
     def test_size_skipped_file_holds_the_timestamp(self, tmp_path: Path) -> None:
         """A file too large to read is a hole in the window, so the cursor waits.
 
-        @devpulse's wording for row 12 is "aborted OR skipped files". A file
-        over MAX_FILE_SIZE_BYTES is never read at any window width, so
-        advancing past it would lose its errors for good.
+        A file over MAX_FILE_SIZE_BYTES is never read, so advancing past it loses its errors for good.
         """
         mod = _import_startup()
         monkey_dir = tmp_path / "system_logs"
@@ -469,9 +444,7 @@ class TestRowTwelveTimestampGate:
     def test_record_carries_the_completed_verdict(self) -> None:
         """The startup_catchup record says whether the cursor moved and why not.
 
-        Without this the ring cannot distinguish "found nothing" from "never
-        looked at half the tree" — the two readings that matter to an operator
-        are identical at errors_found 0.
+        Otherwise "found nothing" and "never looked at half the tree" both read errors_found 0.
         """
         mod = _import_startup()
         self._state(mod, self.HELD)

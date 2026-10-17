@@ -3,20 +3,11 @@
 # Description: PR event handlers — sync STATUS.md on PR create/merge
 # Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-08-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 PR Status Sync Event Handlers
-
-Handles pr_created and pr_merged events by running
-'drone @prax status sync' in a fire-and-forget subprocess.
-
-Events:
-    pr_created  — fired when a PR is opened
-        data: {branch: str, pr_url: str}
-    pr_merged   — fired when a PR is merged
-        data: {pr_number: str, title: str}
 """
 
 import subprocess
@@ -25,9 +16,7 @@ from typing import Any
 from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
 
-# Deliberately NOT prax: this handler runs on the event path the log watchers
-# read, so a line through prax would be detected and fired straight back at it.
-# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+# Not prax: a prax line would be watched and fired back here; watchers skip `.jsonl`.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "pr_status_sync_handler.jsonl")
 
 
@@ -49,13 +38,7 @@ def handle_pr_created(
     pr_url: str | None = None,
     **kwargs: Any,
 ) -> None:
-    """Handle pr_created event — trigger STATUS.md sync.
-
-    Args:
-        branch: Branch that created the PR
-        pr_url: URL of the created PR
-        **kwargs: Additional event data (ignored)
-    """
+    """Handle pr_created event — trigger STATUS.md sync."""
     _run_status_sync(f"pr_created by {branch or 'unknown'}")
     json_handler.log_operation(
         "pr_created_event",
@@ -71,13 +54,7 @@ def handle_pr_merged(
     title: str | None = None,
     **kwargs: Any,
 ) -> None:
-    """Handle pr_merged event — trigger STATUS.md sync.
-
-    Args:
-        pr_number: PR number that was merged
-        title: PR title
-        **kwargs: Additional event data (ignored)
-    """
+    """Handle pr_merged event — trigger STATUS.md sync."""
     _run_status_sync(f"pr_merged #{pr_number or '?'}")
     json_handler.log_operation(
         "pr_merged_event",

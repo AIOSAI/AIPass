@@ -3,7 +3,7 @@
 # Description: Tests for the trigger operator config loader
 # Version: 1.0.0
 # Created: 2026-08-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for handlers/json/config_loader.py — regenerate when missing, never clobber what the operator wrote."""
@@ -20,17 +20,11 @@ from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers.json import config_loader
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def loader(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The real loader, pointed at a config file under tmp_path.
 
-    Real reads and real writes — the loader's whole job is what it does to a
-    file on disk, so a mocked filesystem would test nothing.
+    Real disk: a mocked filesystem would test nothing.
     """
     monkeypatch.setattr(config_loader, "CONFIG_PATH", tmp_path / "custom_config" / "trigger.config.json")
     monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
@@ -43,11 +37,6 @@ def _write_config(loader, payload: Any) -> bytes:
     text = payload if isinstance(payload, str) else json.dumps(payload)
     loader.CONFIG_PATH.write_text(text, encoding="utf-8")
     return loader.CONFIG_PATH.read_bytes()
-
-
-# ---------------------------------------------------------------------------
-# Missing file -- regeneration
-# ---------------------------------------------------------------------------
 
 
 class TestMissingFile:
@@ -102,16 +91,10 @@ class TestMissingFile:
         assert loader.load()["escalation"]["warning_threshold"] != 999
 
 
-# ---------------------------------------------------------------------------
-# Unreadable file -- never clobbered
-# ---------------------------------------------------------------------------
-
-
 class TestUnreadableFileIsNeverClobbered:
     """A file that exists but will not parse may be one stray comma from correct.
 
-    It carries hand-tuned operator values, so the loader serves defaults in
-    memory and leaves the bytes alone (DPLAN-0206).
+    The loader serves defaults in memory and leaves the operator's bytes alone.
     """
 
     def test_malformed_json_serves_defaults(self, loader) -> None:
@@ -172,11 +155,6 @@ class TestUnreadableFileIsNeverClobbered:
         assert loader.load()["escalation"]["warning_threshold"] == 3
 
 
-# ---------------------------------------------------------------------------
-# Operator overrides
-# ---------------------------------------------------------------------------
-
-
 class TestOperatorOverridesWin:
     """The file on disk is the runtime authority; defaults only fill the gaps."""
 
@@ -231,11 +209,6 @@ class TestOperatorOverridesWin:
         assert loader.load() == loader.DEFAULT_CONFIG
 
 
-# ---------------------------------------------------------------------------
-# deep_merge
-# ---------------------------------------------------------------------------
-
-
 class TestDeepMerge:
     """Merging is recursive and non-destructive."""
 
@@ -273,11 +246,6 @@ class TestDeepMerge:
         assert loader.deep_merge({"a": {"x": 2}}, {"a": 1}) == {"a": 1}
 
 
-# ---------------------------------------------------------------------------
-# section()
-# ---------------------------------------------------------------------------
-
-
 class TestSection:
     """Consumers ask for one section and must always get a usable dict."""
 
@@ -304,11 +272,6 @@ class TestSection:
         assert "escalation" in loader.section("_meta")
 
 
-# ---------------------------------------------------------------------------
-# Write failures
-# ---------------------------------------------------------------------------
-
-
 class TestWriteFailure:
     """A config that cannot be written still has to serve a working config."""
 
@@ -327,11 +290,6 @@ class TestWriteFailure:
         monkeypatch.setattr(loader, "CONFIG_PATH", blocker / "trigger.config.json")
 
         assert loader.section("escalation")["digest_recipient"] == "@devpulse"
-
-
-# ---------------------------------------------------------------------------
-# Shipped defaults
-# ---------------------------------------------------------------------------
 
 
 class TestShippedDefaults:

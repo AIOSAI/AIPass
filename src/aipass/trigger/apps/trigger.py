@@ -3,31 +3,22 @@
 # Description: Entry point CLI for drone @trigger — event bus and error registry
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 TRIGGER Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- No manual imports or routing needed
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
 import os
 import sys
 from pathlib import Path
 
-# Standard library imports
 import importlib
 from typing import List, Any
 
-# Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# CLI services for formatted output
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 
 if sys.platform == "win32":
@@ -37,35 +28,21 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Branch version reported by `drone @trigger --version`.
-# Kept in step with the README header by test_trigger_entry.py — this string sat
-# at 2.2.0 through four documented feature releases (found by the APLAN-0008
-# audit), so the two are now pinned to each other rather than to a human's memory.
+# Pinned to the README header version by test_trigger_entry.py.
 __version__ = "3.0.0"
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
 def discover_modules() -> List[Any]:
-    """
-    Auto-discover modules in modules/ directory
-
-    Modules must implement handle_command(command: str, args: List[str]) -> bool
-
-    Returns:
-        List of module objects with handle_command function
-    """
+    """Auto-discover modules in modules/ directory"""
     modules = []
 
     if not MODULES_DIR.exists():
         logger.warning(f"[TRIGGER] Modules directory not found: {MODULES_DIR}")
         return modules
 
-    # Discover all .py files (except __init__.py and those starting with _)
     for file_path in MODULES_DIR.glob("*.py"):
         if file_path.name.startswith("_"):
             continue
@@ -75,7 +52,6 @@ def discover_modules() -> List[Any]:
         try:
             module = importlib.import_module(module_name)
 
-            # Check if module has handle_command function
             if hasattr(module, "handle_command"):
                 modules.append(module)
                 pass  # Module loaded successfully
@@ -89,17 +65,7 @@ def discover_modules() -> List[Any]:
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """
-    Route command to appropriate module
-
-    Args:
-        command: Command name (e.g., 'create', 'update', 'list')
-        args: Additional arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Route command to appropriate module"""
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -108,11 +74,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             logger.error(f"[TRIGGER] Module {module.__name__} error: {e}")
 
     return False
-
-
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
 
 
 def print_introspection(modules: List[Any]):
@@ -129,7 +90,6 @@ def print_introspection(modules: List[Any]):
     if modules:
         for module in modules:
             module_name = module.__name__.split(".")[-1]
-            # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
@@ -140,11 +100,6 @@ def print_introspection(modules: List[Any]):
     console.print()
     console.print("[dim]Run 'drone @trigger --help' for usage information[/dim]")
     console.print()
-
-
-# =============================================================================
-# DRONE COMPLIANCE - HELP SYSTEM
-# =============================================================================
 
 
 def print_help(modules: List[Any]):
@@ -173,7 +128,6 @@ def print_help(modules: List[Any]):
     if modules:
         for module in modules:
             module_name = module.__name__.split(".")[-1]
-            # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
@@ -203,51 +157,31 @@ def print_help(modules: List[Any]):
     console.print()
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def main(argv: list[str] | None = None):
-    """Main entry point - routes commands or shows help.
-
-    Args:
-        argv: The arguments after the program name; sys.argv[1:] when None
-    """
-
-    # A refusal has to reach the shell. error() sets a process-level failure
-    # flag in cli, but nothing here ever read it, so every module that refused
-    # through error() still exited 0 and no caller's && could branch on it
-    # (canary's fleet sweep 2026-09-07). Reset at the door so a previous
-    # in-process command cannot colour this one, then resolve at the exit.
+    """Main entry point - routes commands or shows help."""
+    # error() only sets a process flag; reset it here so a prior in-process
+    # command cannot colour this one, and resolve_exit turns it into the exit code.
     reset_command_state()
 
-    # Discover available modules
     modules = discover_modules()
 
-    # Parse arguments
     args = sys.argv[1:] if argv is None else list(argv)
 
-    # Show introspection when run with no arguments
     if len(args) == 0:
         print_introspection(modules)
         return 0
 
-    # Show version
     if args[0] in ["--version", "-V"]:
         console.print(f"TRIGGER v{__version__}")
         return 0
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help(modules)
         return 0
 
-    # Extract command and remaining args
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Subcommand --help guard
     if remaining_args and remaining_args[0] in ["--help", "-h"]:
         for module in modules:
             if module.handle_command(command, ["--help"]):
@@ -255,18 +189,11 @@ def main(argv: list[str] | None = None):
         print_help(modules)
         return 0
 
-    # Route to modules
     if route_command(command, remaining_args, modules):
-        # Handled is not the same as succeeded. resolve_exit gives 0 for a
-        # clean run and 2 when the module refused through error() — which is
-        # how `log_events start` now tells a caller the watcher is not there.
+        # Handled is not succeeded: resolve_exit returns 2 when the module refused via error().
         return resolve_exit(True)
     else:
-        # Name the whole invocation, not just the first word. No module claimed
-        # `medic nonsense`, so this branch reported "Unknown command: medic" —
-        # naming a command that plainly exists and hiding the word that did not
-        # (APLAN-0008). Routing cannot tell us which half was wrong; printing
-        # both is the honest answer.
+        # Routing cannot tell which word was unknown, so name the whole invocation.
         attempted = " ".join([command, *remaining_args])
         console.print()
         error(f"Unknown command: {attempted}", suggestion="Run 'drone @trigger --help' for available commands")

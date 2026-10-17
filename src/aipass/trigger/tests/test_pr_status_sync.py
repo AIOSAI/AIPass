@@ -3,7 +3,7 @@
 # Description: Tests for pr_created and pr_merged event handlers
 # Version: 1.0.0
 # Created: 2026-03-30
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/events/pr_status_sync.py."""
@@ -21,12 +21,7 @@ from aipass.trigger.apps.handlers.events import pr_status_sync
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch the handler's two outward writes on the real module.
-
-    logger is a trail logger bound at import to the live logs/ directory, and
-    json_handler writes the live operation log; both are replaced with mocks.
-    Popen is patched per test, so no test launches a real drone.
-    """
+    """Patch the handler's two outward writes on the real module."""
     monkeypatch.setattr(pr_status_sync, "logger", MagicMock())
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
@@ -57,18 +52,13 @@ class TestHandlePrCreated:
         mod = _import_module()
         mod.handle_pr_created(branch="api")
         mock_popen.assert_called_once()
-        # Popen returns immediately — no .wait() or .communicate() called
         mock_popen.return_value.wait.assert_not_called()
 
     @patch("subprocess.Popen", side_effect=FileNotFoundError("drone not found"))
     def test_a_missing_drone_is_named_and_the_event_is_still_logged(self, mock_popen: MagicMock) -> None:
         """No drone on PATH costs the sync, not the event record.
 
-        The sync is fire-and-forget, so its failure has to be survivable — but
-        two things have to survive it. The cause reaches the log (a status sync
-        that silently never runs is the failure nobody notices for weeks), and
-        the handler carries on to record the PR event, which does not depend on
-        the sync at all. Not raising was neither of those.
+        The cause must reach the log too: a sync that silently never runs goes unnoticed.
         """
         mod = _import_module()
         json_handler = mod.json_handler
@@ -98,10 +88,7 @@ class TestHandlePrCreated:
 
     @patch("subprocess.Popen")
     def test_none_defaults(self, mock_popen: MagicMock) -> None:
-        """Handles None parameters gracefully and still launches the sync.
-
-        Mutant run: the sync launched with a truncated command reddens this.
-        """
+        """Handles None parameters gracefully and still launches the sync."""
         mod = _import_module()
         mod.handle_pr_created()  # All defaults
         mock_popen.assert_called_once_with(
@@ -128,11 +115,7 @@ class TestHandlePrMerged:
     def test_an_exec_failure_is_named_and_the_merge_is_still_logged(self, mock_popen: MagicMock) -> None:
         """A refused exec costs the sync, not the merge record.
 
-        Same contract as the pr_created side, and it is pinned separately
-        because the two handlers each build their own payload: a merge that
-        reached the log with a blank pr_number would be indistinguishable from
-        no merge at all. OSError rather than FileNotFoundError so the catch is
-        exercised on a second exception class, not just the obvious one.
+        Pinned apart from pr_created (own payload), and with OSError to exercise a second exception class.
         """
         mod = _import_module()
         json_handler = mod.json_handler
@@ -162,10 +145,7 @@ class TestHandlePrMerged:
 
     @patch("subprocess.Popen")
     def test_none_defaults(self, mock_popen: MagicMock) -> None:
-        """Handles None parameters gracefully and still launches the sync.
-
-        Mutant run: the sync launched with a truncated command reddens this.
-        """
+        """Handles None parameters gracefully and still launches the sync."""
         mod = _import_module()
         mod.handle_pr_merged()  # All defaults
         mock_popen.assert_called_once_with(

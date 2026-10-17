@@ -3,19 +3,11 @@
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
 # Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """
 Escalation Digest Module — inspect the repeat-signature lane
-
-Medic dispatches an error's owner once and then goes quiet. This lane counts
-what keeps happening anyway — repeat WARNING and ERROR signatures — and emails
-the operator when a signature crosses its threshold inside the window.
-
-Commands: status, list, config
-
-Architecture: module renders, handlers/escalation.py owns counting and sending
 """
 
 import os
@@ -39,7 +31,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
@@ -189,15 +181,7 @@ def _handle_config(console) -> None:
 
 
 def _run_subcommand(subcommand: str, args: list) -> bool:
-    """Run an escalation subcommand.
-
-    Args:
-        subcommand: status, list or config
-        args: Remaining arguments
-
-    Returns:
-        True if the subcommand ran
-    """
+    """Run an escalation subcommand."""
     from aipass.cli.apps.modules import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
@@ -206,11 +190,7 @@ def _run_subcommand(subcommand: str, args: list) -> bool:
         print_help()
         return True
 
-    # An unknown subcommand used to print help and return True — help is what a
-    # working command looks like, so `escalation nonsense` exited 0 and never
-    # named the token. Returning False routes it through the ONE gate in
-    # trigger.py, which names the whole invocation and exits 1 (the owner's
-    # standing ruling, FPLAN-0492).
+    # Unknown: return False so trigger.py's one gate names the invocation and exits 1; help would exit 0.
     if subcommand not in _SUBCOMMANDS:
         return False
 
@@ -233,17 +213,8 @@ def handle_command(command: str, args: list) -> bool:
     """
     Handle escalation commands.
 
-    Claims the module name ONLY. Bare 'status', 'list' and 'config' belong to
-    core.py — the router hands a command to whichever module claims it first
-    and glob discovery order is not stable, so claiming them here would
-    randomly hijack `drone @trigger status`.
-
-    Args:
-        command: Command name — handled only when it is 'escalation'
-        args: Additional arguments (first is the subcommand)
-
-    Returns:
-        True if command was handled, False otherwise
+    Claims the module name ONLY: bare status/list/config belong to core.py, and
+    discovery order is unstable, so claiming them would randomly hijack them.
     """
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -254,9 +225,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Intercept help at the entry point, before any subcommand dispatch —
-    # scanning the WHOLE sequence, so `list warning --help` describes the
-    # lane instead of reporting on it.
+    # Whole sequence, so `list warning --help` describes the lane instead of reporting on it.
     if wants_help(args):
         print_help()
         return True
