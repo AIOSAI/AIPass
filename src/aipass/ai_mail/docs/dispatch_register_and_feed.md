@@ -76,8 +76,8 @@ appends fake dispatch events to the real feed BAUD renders.
 
 ## Dispatch Register + Completion Reports
 
-The watchdog knows what is outstanding because it was told, never because it looked
-(DPLAN-0317). Nothing polls. Three files carry it.
+The watchdog knows what is outstanding because it was told, never because it looked.
+Nothing polls. Three files carry it.
 
 ```
 .aipass/dispatch_register.jsonl        # what was promised, append-only
@@ -227,7 +227,7 @@ it is 1–2 KB and would bloat what @api serves to BAUD, so the line carries a
 pointer instead.
 
 `trigger.fire("dispatch_completed", ...)` also fires, and is **in-process only** —
-@trigger cannot cross process boundaries (DPLAN-0314). **The feed file is what
+@trigger cannot cross process boundaries. **The feed file is what
 carries this event to another process.** Anything expecting the trigger to reach a
 separate watchdog will silently never fire.
 

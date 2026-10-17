@@ -14,7 +14,7 @@ Durable reference lives here — write-ups that outlive the session that produce
 that another branch may need to read. Session scratch, research dumps and agent working
 files belong in `docs.local/`.
 
-**The shape of a page here** (DPLAN-0347, the layer contract): one file per module or
+**The shape of a page here**: one file per module or
 handler group, each small enough to read in one go, opened when something breaks rather than
 at startup. The README is the face — purpose, how to reach me, a pointer to the generated
 command surface, and the index of this directory. Depth is here. Breadcrumbs and the

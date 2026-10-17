@@ -8,7 +8,7 @@
 
 ## Admin Lane (`admin=True`)
 
-@devpulse — and only @devpulse — holds an admin grant (DPLAN-0288) that lets a dispatch wake **manager-class** citizens. `wake_branch` takes a
+@devpulse — and only @devpulse — holds an admin grant that lets a dispatch wake **manager-class** citizens. `wake_branch` takes a
 keyword-only `admin` flag that is an *already-decided verdict*, never a request:
 
 ```python
@@ -18,7 +18,7 @@ status, ok = wake_branch(target, sender=..., admin=is_admin)
 - **The check runs in `dispatch.py`, not in `wake.py`.** Leg 1 of the contract needs
   `AIPASS_CALLER_*`, and `wake_branch`'s in-process callers don't carry it — a
   `wake_branch` that verified its own caller would be verifying nobody.
-- **Five legs, all or nothing** (FPLAN-0401): verified caller is
+- **Five legs, all or nothing**: verified caller is
   devpulse · cert path resolved from the *registry* entry, never caller-supplied ·
   cert content (`owner`, `type`, `privileges.admin`) · HMAC-SHA256 signature over
   the canonical cert-minus-signature payload · registry `admin: true`.

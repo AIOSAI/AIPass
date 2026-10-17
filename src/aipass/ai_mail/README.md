@@ -82,7 +82,7 @@ discovers modules and routes to the first one claiming a command. `apps/modules/
 orchestration, one module per surface: `email` (inbox, view, reply, close, contacts),
 `email_send` (direct, interactive and broadcast sending) and `dispatch` (send-plus-wake,
 register, status, daemon). Three doors sit beside them, re-exports for other branches and
-not commands (DPLAN-0404): `door_wake`, `door_verified_caller` and `door_session_pointer`.
+not commands: `door_wake`, `door_verified_caller` and `door_session_pointer`.
 `apps/handlers/` is fenced: another branch that imports it directly is refused at import
 time, and reaches it through a door. `apps/handlers/` holds the implementation, grouped one directory
 per concern: `email/` for the delivery pipeline and the mailbox verbs, `dispatch/` for the
