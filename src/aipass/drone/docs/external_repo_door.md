@@ -5,7 +5,7 @@
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant (decision record: DPLAN-0344). Twelve verbs take
+door, held by @devpulse's admin grant. Twelve verbs take
 `--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, tracked, commit, untrack, push,
 tag, fetch, sync, merge-upstream, and the read side of gh's `run`.
 

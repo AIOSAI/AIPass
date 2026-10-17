@@ -80,7 +80,7 @@ concern — `resolver` and `config` for addressing, `router` for dispatch, `regi
 shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
 daemon that performs them on request. Beside it, `door_broker` is the one modules file a foreign
 branch may import: a re-export of the broker client's identified connection and the daemon, which
-ai_mail's dispatch monitor reaches the broker through (DPLAN-0404). `apps/handlers/` holds the implementation, grouped one
+ai_mail's dispatch monitor reaches the broker through. `apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
 the server-side path resolver), `scanning/`, `command_registry/` and the json shim every branch
 shares. `apps/plugins/devpulse_ops/` sits outside the three layers on purpose: auth-gated
