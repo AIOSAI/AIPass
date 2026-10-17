@@ -3,7 +3,7 @@
 # Description: Tests for canary's entry point routing, help and introspection
 # Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/canary.py, the entry point: routing, help and introspection."""
@@ -20,13 +20,7 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 
-# Covers the four things the entry point promises: no-args shows introspection,
-# --help shows help without executing anything, a subcommand's --help never
-# runs that subcommand, and an unknown command fails loudly with a non-zero code.
-#
-# The exit-code assertions are deliberate. Canary found owner-gate refusals that
-# exited 0 in another branch — a refusal the shell reads as success — so its own
-# refusal path is pinned by test rather than assumed.
+# Exit codes are asserted on purpose: a refusal that exits 0 is one the shell reads as success.
 
 
 class _StubModule:
@@ -58,11 +52,6 @@ def _run(monkeypatch, argv):
     return canary_entry.main()
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
-
-
 def test_print_introspection_renders_identity_and_help_pointer(capsys):
     """print_introspection names the branch, its purpose, and points at --help."""
     canary_entry.print_introspection()
@@ -80,11 +69,6 @@ def test_print_help_has_usage_and_examples(capsys):
     out = capsys.readouterr().out
     assert "Usage:" in out
     assert "Examples:" in out
-
-
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -127,11 +111,6 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     out = capsys.readouterr().out
     assert "CANARY" in out
     assert canary_entry.__version__ in out
-
-
-# =============================================================================
-# COMMAND ROUTING — SUCCESS AND FAILURE PATHS
-# =============================================================================
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
@@ -178,11 +157,6 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
-
-
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     """`canary probe --help` asks the module for help; it never runs bare."""
     assert _run(monkeypatch, ["probe", "--help"]) == 0
@@ -201,10 +175,7 @@ def test_subcommand_help_on_unknown_command_exits_nonzero(monkeypatch, stub_modu
 def test_routed_command_that_refuses_exits_two(monkeypatch, capsys):
     """A module that handles the command but refuses it must not exit 0.
 
-    handle_command returning True means "I handled this", not "it worked" —
-    the refusal travels through cli error()'s failure flag. Before the
-    resolve_exit wiring (2026-09-12) this exited 0.
-    """
+    handle_command's True means "handled", not "it worked"; the refusal travels on error()'s failure flag."""
 
     class _Refusing:
         __name__ = "aipass.canary.apps.modules.refusing"
@@ -225,11 +196,6 @@ def test_failure_flag_from_an_earlier_command_does_not_leak(monkeypatch, stub_mo
     capsys.readouterr()
 
     assert _run(monkeypatch, ["probe"]) == 0
-
-
-# =============================================================================
-# IMPORT-TIME INFRASTRUCTURE
-# =============================================================================
 
 
 def test_a_fresh_import_stamps_the_branch_name_into_an_environment_without_one(tmp_path):

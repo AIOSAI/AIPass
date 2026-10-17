@@ -3,42 +3,13 @@
 # Description: Store command - drone @canary kv FILE set|get|delete|list keeps pairs between runs
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """Key/value store: a pair written in one run, read back in the next.
 
-``kv FILE set KEY VALUE`` files a value, ``kv FILE get KEY`` prints it back,
-``kv FILE delete KEY`` removes it, and ``kv FILE list`` prints every pair sorted
-by key. ``kv --json FILE list`` prints the same pairs as one JSON object.
-
-Anything that is not a store, a verb or a storable key is refused on stderr with
-exit 2 and NOTHING on stdout. This command's stdout is a value somebody is about
-to use, so a partial answer printed beside a refusal would be read as the value.
-
-The rulings made where the contract was silent live in the handler docstring,
-``apps/handlers/kv/store.py``, next to the code that keeps them - except the two
-that belong to this file and are recorded here:
-
-* **``--json`` is only a flag in first position; a help flag is one anywhere.**
-  The contract spells the JSON form ``kv --json FILE list``, and after that
-  first word every argument is the caller's own text: ``kv store.txt set --json
-  red`` files a key named ``--json`` rather than switching output format. Read
-  as a flag anywhere it would still never do the wrong thing quietly - stripped
-  out of a data position it leaves ``set`` with one operand, which refuses - so
-  the first-position reading costs nothing and keeps a caller's own word
-  storable. A HELP flag is the opposite case and is honoured anywhere, because
-  a question must never execute: ``kv store.txt set --help colour`` is somebody
-  who does not know the verb yet, and storing a pair in answer is exactly the
-  harm @seedgo's help_flag_safety standard was written for. The cost is stated
-  rather than hidden: a key or a value spelled ``--help`` or ``-h`` cannot be
-  set or looked up from the command line. The bare word ``help`` stays in first
-  position, because ``help`` is a plausible value.
-* **Bare ``kv`` prints the short map, ``kv --help`` the full page.** The
-  contract says bare kv prints "the usage", and the map does: every routed form
-  is on it. The full page is one command further because that is the shape the
-  house standard enforces and every other module in this branch already has -
-  ``drone @seedgo checklist`` fails a module with no ``print_introspection``.
+A refusal prints NOTHING on stdout: stdout is a value somebody is about to use.
+Reference: docs/kv_module.md.
 """
 
 import json
@@ -116,8 +87,7 @@ def print_help() -> None:
     console.print("[yellow]Examples:[/yellow]")
     console.print("  $ drone @canary kv store.txt set colour red")
     console.print("  $ drone @canary kv store.txt get colour        [dim]-> red[/dim]")
-    # Written as <tab> on purpose: the console renders a real one as spaces,
-    # which is the whole reason list does not print through it.
+    # Written as <tab>: the console renders a real tab as spaces, which is why list bypasses it.
     console.print("  $ drone @canary kv store.txt list              [dim]-> colour<tab>red[/dim]")
     console.print('  $ drone @canary kv --json store.txt list       [dim]-> {"colour": "red"}[/dim]')
     console.print("  $ drone @canary kv store.txt delete colour")
@@ -125,31 +95,15 @@ def print_help() -> None:
 
 
 def _write(line: str) -> None:
-    """Write one line to stdout, byte for byte.
-
-    Deliberately not the shared console: rich expands a tab to the next
-    8-column tab stop, so ``console.print("a\\tb")`` renders 'a' and seven
-    spaces (measured 2026-09-20). The contract says a key, a single tab and a
-    value, and a caller cutting the second field would get nothing. Values print
-    through here too, so both forms carry exactly what the store holds. Refusals
-    and help keep the shared console, so this branch's error contract is
-    unchanged.
-
-    Args:
-        line: The text to write; the newline is added here.
-    """
+    """Write one line to stdout, byte for byte."""
+    # Not the shared console: rich expands a tab to spaces, and a caller cutting the second field gets nothing.
     sys.stdout.write(line + "\n")
 
 
 def _operands(verb: str, operands: List[str]) -> Optional[List[str]]:
     """Check a verb was given the arguments it needs, or refuse by reason.
 
-    Args:
-        verb: The verb, already known to be one of VERBS.
-        operands: Everything after the verb.
-
-    Returns:
-        The operands when the count is right, None when the call was refused.
+    Returns None when the call was refused.
     """
     if verb == "set":
         if not operands:
@@ -172,18 +126,7 @@ def _operands(verb: str, operands: List[str]) -> Optional[List[str]]:
 
 
 def _run(path: Path, verb: str, operands: List[str], as_json: bool) -> None:
-    """Carry out one verb against the store and print whatever it answers.
-
-    Args:
-        path: The store file.
-        verb: One of VERBS.
-        operands: The verb's arguments, already counted.
-        as_json: True for the JSON form of list.
-
-    Raises:
-        StoreInvalid: The store, the key or the value is refused; caught by the
-            caller so the reason reaches stderr rather than a traceback.
-    """
+    """Carry out one verb against the store and print whatever it answers."""
     if verb == "set":
         store.set_value(path, operands[0], operands[1])
         json_handler.log_operation("kv_set", {"key": operands[0]})
@@ -203,9 +146,7 @@ def _run(path: Path, verb: str, operands: List[str], as_json: bool) -> None:
     pairs = store.list_pairs(path)
     json_handler.log_operation("kv_listed", {"pairs": len(pairs)})
     if as_json:
-        # An empty store prints {} rather than nothing: the JSON form is parsed,
-        # and a caller reading zero bytes cannot tell an empty store from a
-        # command that printed nothing at all (canary key learning 31).
+        # An empty store prints {}: zero bytes cannot be told from a command that printed nothing.
         _write(json.dumps(dict(pairs), ensure_ascii=False))
         return
 
@@ -214,12 +155,7 @@ def _run(path: Path, verb: str, operands: List[str], as_json: bool) -> None:
 
 
 def _kv(words: List[str], as_json: bool) -> None:
-    """Read the arguments, then run the verb or refuse by reason.
-
-    Args:
-        words: The arguments with the leading --json already removed.
-        as_json: True when the caller asked for the JSON form.
-    """
+    """Read the arguments, then run the verb or refuse by reason."""
     if not words:
         error("kv refused: no FILE given (the store to read or write)", suggestion=USAGE_HINT)
         return
@@ -251,14 +187,7 @@ def _kv(words: List[str], as_json: bool) -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """Route 'kv'.
 
-    Args:
-        command: The command name drone routed.
-        args: Arguments after the command - the flag, FILE, the verb and its own
-            arguments.
-
-    Returns:
-        True when the command is 'kv' (refusals included - the exit code carries
-        the failure), False for any other command.
+    Returns True for a refusal too: the exit code carries the failure.
     """
     if command != "kv":
         return False
@@ -267,15 +196,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Help ANYWHERE explains and never executes, including in a position that
-    # would otherwise be a key or a value. 'kv FILE set --help x' is a question
-    # from somebody who does not know the verb yet, and answering it with a
-    # write is the failure this rule was written for.
+    # Help anywhere never executes (seedgo help_flag_safety): 'kv FILE set --help x' must not write.
     # The bare word stays in first position: 'help' is a plausible VALUE.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
 
+    # --json only in first position: every later argument is the caller's own, storable text.
     as_json = args[0] == JSON_FLAG
     _kv(args[1:] if as_json else args, as_json)
     return True

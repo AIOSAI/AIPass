@@ -3,18 +3,12 @@
 # Description: Note store command - drone @canary note add|list
 # Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Append-only note store: add a note, list the notes.
 
-``note list --json`` prints every record as one JSON array of
-``{"text", "timestamp"}`` objects, ``[]`` for an empty store. ``--json`` may
-sit anywhere in the arguments but belongs to list only: on add it is refused,
-never stored as note text.
-
-A store that will not parse is refused by file name with a non-zero exit, and
-is never reset or rewritten.
+Reference: docs/note_module.md.
 """
 
 import json
@@ -74,12 +68,7 @@ def print_help() -> None:
 
 
 def _refuse_corrupt(action: str, exc: store.StoreCorrupt) -> None:
-    """Refuse a command because the store will not parse, naming the file.
-
-    Args:
-        action: The subcommand that was refused.
-        exc: The parse failure, carrying the file and the reason.
-    """
+    """Refuse a command because the store will not parse, naming the file."""
     logger.warning("[note] %s refused - store will not parse: %s", action, exc)
     error(
         f"note {action} refused: store will not parse: {exc.path} - {exc.reason}. Store left untouched.",
@@ -88,11 +77,7 @@ def _refuse_corrupt(action: str, exc: store.StoreCorrupt) -> None:
 
 
 def _add(words: List[str]) -> None:
-    """Append one note built from the remaining arguments.
-
-    Args:
-        words: The note text, possibly split across several arguments.
-    """
+    """Append one note built from the remaining arguments."""
     text = " ".join(words)
     if not text.strip():
         error("note add needs text", suggestion='drone @canary note add "remember this"')
@@ -113,12 +98,7 @@ def _add(words: List[str]) -> None:
 
 
 def _list(extra: List[str], as_json: bool) -> None:
-    """Print every note in store order with its index and timestamp.
-
-    Args:
-        extra: Arguments after 'list' - there must be none.
-        as_json: True for one JSON array of the stored records instead.
-    """
+    """Print every note in store order with its index and timestamp."""
     if extra:
         error(f"note list takes no arguments (got: {' '.join(extra)})", suggestion="drone @canary note list")
         return
@@ -142,8 +122,7 @@ def _list(extra: List[str], as_json: bool) -> None:
         console.print(f"No notes yet - store: {store.STORE_PATH}", markup=False, highlight=False)
         return
 
-    # markup/emoji off: note text is user data, and "[bold]" or ":x:" in a note
-    # must print as typed, not be interpreted. soft_wrap keeps one note per line.
+    # markup/emoji off: note text is user data ("[bold]", ":x:") and prints as typed.
     for index, record in enumerate(records, start=1):
         console.print(
             f"{index}. [{record['timestamp']}] {record['text']}",
@@ -157,13 +136,7 @@ def _list(extra: List[str], as_json: bool) -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """Route 'note add' and 'note list'.
 
-    Args:
-        command: The command name drone routed.
-        args: Arguments after the command.
-
-    Returns:
-        True when the command is 'note' (refusals included - the exit code
-        carries the failure), False for any other command.
+    True for 'note' even on a refusal - the exit code carries the failure.
     """
     if command != "note":
         return False

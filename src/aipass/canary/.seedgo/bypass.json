@@ -8,7 +8,7 @@
     {
       "file": "apps/modules/kv.py",
       "standard": "cli",
-      "lines": [141],
+      "lines": [100],
       "reason": "kv list must emit one literal tab byte between key and value; the shared @cli console expands a tab to spaces (console.print and console.out both, measured 2026-09-20), so this one line writes to stdout directly. canary's ruling of the kv build, 2026-09-20; test_kv pins the tab byte."
     }
   ],

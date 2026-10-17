@@ -3,7 +3,7 @@
 # Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
@@ -18,46 +18,19 @@ from pathlib import Path
 
 import pytest
 
-# Pins for the Windows dead-cwd import defect (FPLAN round 4).
-#
-# THE DEFECT. ntpath.realpath reads os.getcwd() UNCONDITIONALLY, while
-# posixpath reads it only for relative paths. Path.resolve() routes through
-# realpath. So on Windows any resolve REACHED AT IMPORT makes the module
-# unimportable in a process whose cwd is unreadable. The discriminator is
-# reached-at-import, not written-at-module-scope — which is why these pins
-# RUN the import in a child rather than grepping for the spelling.
-#
-# TWO WORLDS, because one cannot convict both species:
-#
-#   World A  wraps realpath to read the cwd first (emulating ntpath on this
-#            POSIX box), then denies os.getcwd. Convicts a raw Path.resolve().
-#            It CANNOT convict inspect.stack: denying getcwd also kills
-#            os.path.abspath, so inspect.getmodule dies at getabsfile INSIDE
-#            its own except clause and stack() completes green for the wrong
-#            reason (measured by @daemon, reproduced here).
-#
-#   World B  denies os.path.realpath directly and leaves abspath working.
-#            Convicts inspect.stack() via getmodule's unguarded realpath at
-#            inspect.py:1009.
-#
-# Measured against canary's own tree on 2026-08-31, BEFORE the cure:
-# World A convicted handlers/__init__.py:16 (the raw resolve) and World B
-# convicted handlers/__init__.py:15 (inspect.stack) — two species in one
-# function — with json_handler.py:23 masked underneath both.
-#
-# Every child probe rides a '<string>' pseudo-frame: the source is handed to
-# the interpreter's -c flag (sys.executable, never a shell command). NEVER
-# stdin: linecache caches stdin, and the probe would lie green (@hooks).
+# ntpath.realpath reads os.getcwd() unconditionally (posixpath only for relative paths) and Path.resolve()
+# routes through it, so on Windows a resolve reached at import kills the import under an unreadable cwd.
+# Reached-at-import, not written-at-module-scope, is the test: these pins run the import in a child.
+# World A wraps realpath to read the cwd first, then denies getcwd: it convicts a raw Path.resolve(), not
+# inspect.stack (on POSIX the denial kills abspath, so getmodule fails inside its own except).
+# World B denies realpath and keeps abspath: it convicts inspect.stack() via inspect.py:1009.
+# Probes go through -c, never stdin: linecache caches stdin and the probe lies green.
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BRANCH_ROOT.parents[2]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
-# Every package in canary's tree, then every command module. The command
-# modules are read off apps/modules/ by the rule discover_modules uses (a .py
-# not starting with '_'), so a module added next week is probed without anyone
-# remembering this list; the five that existed on 2026-10-04 were missing from
-# the hand-written one (canary's fleet green leg 2).
+# Command modules are read off apps/modules/ by discover_modules' rule, so a new module is probed unlisted.
 COMMAND_MODULES = sorted(
     f"aipass.canary.apps.modules.{path.stem}"
     for path in (BRANCH_ROOT / "apps" / "modules").glob("*.py")
@@ -75,18 +48,11 @@ CANARY_MODULES = [
     *COMMAND_MODULES,
 ]
 
-# Non-optional cross-branch imports, preloaded in the healthy world so the
-# denial convicts canary's own code rather than a sibling's. None of these
-# sits behind try/except ImportError, so preloading them stops testing
-# nothing that was under test (@flow's rule: a preload is a claim you stop
-# testing).
+# Non-optional sibling imports, preloaded so the denial convicts canary's own code; a preload is a claim
+# you stop testing, so nothing behind try/except ImportError belongs here.
 PRELOAD = [
     "aipass.cli.apps.modules",
     "aipass.prax",
-    # aipass.aipass.shared.json_handler was dropped on 2026-09-04: canary's
-    # handler is the fleet shim over prax's service and imports nothing from
-    # aipass/shared any more (DPLAN-0325; the file itself retires under
-    # FPLAN-0489).
 ]
 
 _WORLD_A = """
@@ -142,12 +108,7 @@ def test_module_imports_with_no_readable_cwd(module, world):
 
 @pytest.mark.parametrize("world", sorted(WORLDS))
 def test_the_injection_is_live(world):
-    """POSITIVE CONTROL: the denial actually denies.
-
-    Without this, a typo in the injection turns every pin above into a
-    vacuous green — the modules would 'survive' a world that was never
-    hostile. Runs the exact construct the defect used.
-    """
+    """Positive control: the denial denies, or every pin above is a vacuous green."""
     body = WORLDS[world] + (
         "from pathlib import Path\n"
         "try:\n"
@@ -165,11 +126,7 @@ def test_the_injection_is_live(world):
 
 @pytest.mark.parametrize("world", sorted(WORLDS))
 def test_control_catches_a_dead_injection(world):
-    """NEGATIVE CONTROL FOR THE POSITIVE CONTROL (@spawn's instrument).
-
-    Kill the injection and the liveness probe must report CONTROL_DEAD. A
-    control that cannot say NO proves nothing when it says YES.
-    """
+    """Negative control for the positive control: with no injection the probe reports CONTROL_DEAD."""
     body = (
         "from pathlib import Path\n"
         "try:\n"
@@ -185,38 +142,16 @@ def test_control_catches_a_dead_injection(world):
     )
 
 
-# The world-A/inspect.stack outcome is PLATFORM-DEPENDENT, and the deciding
-# fact is whether os.path.abspath survives a getcwd denial:
-#
-#   POSIX    posixpath.abspath calls os.getcwd() for a relative path, so the
-#            denial kills it. getabsfile raises inside getmodule's OWN except,
-#            getmodule returns None, and inspect.stack() never reaches the
-#            unguarded realpath at inspect.py:1009 -> STACK SURVIVES.
-#            MEASURED HERE, live, by test_world_a_abspath_outcome below.
-#
-#   WINDOWS  ntpath.abspath rides the Win32 _getfullpathname and never touches
-#            getcwd, so it SURVIVES the denial. getmodule proceeds to realpath
-#            - which world A wraps to read getcwd first - and it dies there
-#            -> STACK DIES. Windows convicts inspect.stack naturally, which is
-#            why the platform found this defect and POSIX did not.
-#            MEASURED ON CI, not here: this pin's own round-4 assertion text
-#            came back red from windows-setup on 28ee90d5 (run 33431848734).
-#            That failure IS the measurement; canary has no Windows box.
-#
-# Neither outcome is a bug. World B exists because the POSIX half cannot
-# convict inspect.stack; on Windows world A already does. Deleting either
-# branch of this table retires a live measurement on one platform.
+# World A's inspect.stack outcome is per-platform, decided by whether abspath survives a getcwd denial.
+# POSIX: abspath reads the cwd for a relative path and dies, getmodule returns None, the stack survives.
+# Windows: abspath (_getfullpathname) never reads it, getmodule reaches the wrapped realpath, the stack dies.
+# Neither is a bug; each row is a live measurement on its platform, so re-derive the table, never delete a row.
 
 STACK_SURVIVES_WORLD_A = os.name != "nt"
 
 
 def test_world_a_abspath_outcome_is_the_mechanism():
-    """The fact the table above turns on, measured on whatever platform runs.
-
-    Asserting the mechanism rather than only the outcome means a future
-    interpreter that changes the abspath/getcwd coupling reds HERE, naming
-    the cause, instead of reding the stack pin with no explanation.
-    """
+    """The fact the table turns on, measured here, so an interpreter change reds naming the cause."""
     body = _WORLD_A + (
         "import os, os.path\n"
         "try:\n"
@@ -236,12 +171,7 @@ def test_world_a_abspath_outcome_is_the_mechanism():
 
 
 def test_world_a_stack_outcome_matches_the_platform_table():
-    """world A convicts inspect.stack on Windows and not on POSIX.
-
-    Round 4 pinned the POSIX half as universal. It is not: windows-setup
-    turned this assertion red on the real platform, which is the pin doing
-    its job on a world it had never run in. The table is per-platform now.
-    """
+    """world A convicts inspect.stack on Windows and not on POSIX."""
     body = _WORLD_A + (
         "import inspect\n"
         "try:\n"
@@ -262,20 +192,7 @@ def test_world_a_stack_outcome_matches_the_platform_table():
 
 
 def test_the_windows_half_of_the_table_reproduces_here():
-    """Run the WINDOWS branch's mechanism on this platform, whatever it is.
-
-    The table's Windows row would otherwise be an untested claim on every
-    machine canary can actually run on — true today because CI said so, and
-    unfalsifiable here forever after. The deciding fact is abspath surviving
-    the getcwd denial, and that is emulable: patch abspath to ignore the cwd
-    exactly as ntpath's _getfullpathname does, keep world A otherwise
-    intact, and inspect.stack() must then die at the unguarded realpath.
-
-    This does NOT make canary a Windows box and is not evidence about the
-    real platform — @daemon and @cli measured the same reconciliation
-    directly. It pins the CAUSAL LINK the table asserts, so the Windows row
-    cannot quietly stop being true between CI runs.
-    """
+    """Run the WINDOWS row's mechanism here: with a cwd-free abspath, inspect.stack() dies at realpath."""
     body = _WORLD_A + (
         "import os, os.path, inspect\n"
         "os.path.abspath = lambda p, *a, **k: p if p.startswith('/') else '/fake/' + p\n"
@@ -319,15 +236,8 @@ def test_world_b_does_convict_inspect_stack():
     )
 
 
-# ---------------------------------------------------------------------------
-# THE PIN-SHAPE HOLE (mandatory AST ban)
-# ---------------------------------------------------------------------------
-# @trigger measured that the deleted second walk is UNREACHABLE from any
-# import-shaped pin — apps/__init__.py always supplies a real-file frame, so
-# restoring the defect leaves every behavioural test green (reproduced in
-# hooks, drone, api and backup). Only a source-shape pin can catch it.
-# It is an AST ban, never a string ban: the docstring above legitimately
-# names inspect.stack while explaining the defect.
+# Only a source-shape pin catches an inspect.stack walk: apps/__init__.py always supplies a real-file
+# frame, so every import-shaped pin stays green. An AST ban, never a string ban: docstrings name it.
 
 
 def _inspect_stack_calls(source: str) -> list:
@@ -348,12 +258,7 @@ def _inspect_stack_calls(source: str) -> list:
 
 
 def test_guard_contains_no_inspect_stack_call():
-    """BAN: the import guard must never call inspect.stack().
-
-    inspect builds a FrameInfo per frame and getmodule() calls
-    os.path.realpath outside any try (inspect.py:1009), so one call makes
-    every consumer's import depend on a readable cwd.
-    """
+    """BAN: the import guard never calls inspect.stack(); its unguarded realpath needs a readable cwd."""
     offenders = _inspect_stack_calls(GUARD_FILE.read_text(encoding="utf-8"))
     assert offenders == [], (
         f"inspect.stack() called at {GUARD_FILE}:{offenders} — walk frames "
@@ -367,11 +272,7 @@ def test_ast_ban_convicts_a_real_call():
 
 
 def test_ast_ban_ignores_the_name_in_a_docstring():
-    """NEGATIVE CONTROL: prose naming inspect.stack() is not a call.
-
-    This is why the ban is an AST walk and not a grep — the guard's own
-    docstring explains the defect by name.
-    """
+    """NEGATIVE CONTROL: prose naming inspect.stack() is not a call."""
     source = '"""Do not call inspect.stack() here."""\nx = 1\n'
     assert _inspect_stack_calls(source) == []
 
@@ -382,38 +283,13 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
     assert _inspect_stack_calls(source) == []
 
 
-# ---------------------------------------------------------------------------
-# THE QUIET SPECIES (live-cwd pins) — RETIRED under DPLAN-0325
-# ---------------------------------------------------------------------------
-# The quiet half of the defect is a path that resolves FINE to the WRONG place
-# (mutant M6: a helper returns Path.cwd() instead of the raw spelling — killed
-# by world A, survives world B where getcwd still works). Both pins that lived
-# here read canary-owned, module-level path machinery that the json sweep
-# retired:
-#   - the json_dir pin read the old handler's _CANARY_ROOT/_JSON_DIR constants;
-#   - the module_file pin exercised apps/handlers/paths.py's guarded resolve.
-# The handler is now the byte-identical fleet shim (prax's cwd-free service, no
-# module-level resolve), and paths.py — whose only importer was that handler —
-# is archived alongside it (apps/handlers/.archive/paths.py). canary no longer
-# computes a cwd-sensitive module-level path constant, so the species is not
-# present to pin. The verbatim tests live in
-# tests/.archive/deleted_2026-09-03_test_dead_cwd_imports_{jsondir,modulefile}.py;
-# the write-destination identity is pinned centrally by seedgo's cross-branch
-# contract (IDENTITY axis).
+# The quiet species (a path resolving fine to the wrong place) has no site here: canary computes no
+# cwd-sensitive module-level path, and seedgo's cross-branch contract pins the json write destination.
 
 
-# ---------------------------------------------------------------------------
-# THE FENCE WITH ITS CWD REMOVED (v2's public shape, DPLAN-0404)
-# ---------------------------------------------------------------------------
-# The old guard's caller-is-None pin called its private walk directly; v2 has
-# no such walk, so that pin retired with the old guard (canary's fence leg,
-# 2026-10-08). What it protected still matters: the fence reads frame paths,
-# and a path read must not kill an import whose process cwd is gone. These
-# pins run test_handlers_fence's own probe (tests/support_fence.py) in a child
-# that chdirs into a directory and removes it, then wraps realpath to read the
-# cwd first, as ntpath's does. Where the platform refuses to remove a cwd
-# (Windows), the child denies getcwd instead, world A's way; either way the
-# child reports ARM_CWD_DEAD before the probe runs, or the pin is vacuous.
+# The fence reads frame paths, and a path read must not kill an import whose cwd is gone. The child runs
+# support_fence.py after removing its cwd (where the OS refuses, it denies getcwd) with realpath reading
+# the cwd as ntpath's does; it reports ARM_CWD_DEAD before the probe runs, or the pin is vacuous.
 
 FENCE_PROBE = BRANCH_ROOT / "tests" / "support_fence.py"
 

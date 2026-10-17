@@ -3,16 +3,12 @@
 # Description: Duration command - drone @canary span TEXT prints the total in seconds
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """Duration parser command: a written duration in, a total in seconds out.
 
-``span TEXT`` prints the number. ``span --json TEXT`` prints one JSON object
-with the single key ``seconds`` and nothing else on stdout, so a caller can
-read it without a parser of its own. Anything that is not a duration is refused
-on stderr with exit 2 and NOTHING on stdout - a refusal that printed a number
-would be read as an answer by the next command in the pipe.
+Reference: docs/span_module.md.
 """
 
 import json
@@ -76,12 +72,7 @@ def print_help() -> None:
 
 
 def _span(text: str, as_json: bool) -> None:
-    """Print one duration as seconds, or refuse it by reason.
-
-    Args:
-        text: The duration as written, already rejoined from the arguments.
-        as_json: True to print the single-key JSON object instead of the bare number.
-    """
+    """Print one duration as seconds, or refuse it by reason."""
     try:
         seconds = parser.parse_duration(text)
     except parser.DurationInvalid as exc:
@@ -91,8 +82,7 @@ def _span(text: str, as_json: bool) -> None:
 
     json_handler.log_operation("span_parsed", {"seconds": seconds, "as_json": as_json})
 
-    # markup/highlight off: the text is caller data and the JSON object must
-    # reach stdout byte for byte, with no Rich colouring or number styling.
+    # markup/highlight off: the JSON reaches stdout byte for byte, no Rich number styling.
     payload = json.dumps({"seconds": seconds}) if as_json else str(seconds)
     console.print(payload, markup=False, highlight=False, soft_wrap=True)
 
@@ -100,13 +90,7 @@ def _span(text: str, as_json: bool) -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """Route 'span'.
 
-    Args:
-        command: The command name drone routed.
-        args: Arguments after the command - the duration text, and --json.
-
-    Returns:
-        True when the command is 'span' (refusals included - the exit code
-        carries the failure), False for any other command.
+    True for 'span' even on a refusal - the exit code carries the failure.
     """
     if command != "span":
         return False

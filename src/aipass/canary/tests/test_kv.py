@@ -3,7 +3,7 @@
 # Description: Tests for the key/value store - drone @canary kv, its JSON form, its file and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/kv.py and the kv store it drives."""
@@ -21,25 +21,11 @@ import pytest
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.kv import store
 
-# Driven through the entry point's main() with real module discovery, so the
-# exit codes asserted here are the ones drone hands back to a caller.
-#
-# This is the first canary command that writes to a caller-named file, so three
-# things are pinned that the read-only commands never had to be:
-#
-# * The bytes on disk, not just what comes back out. `set` then `get` would
-#   pass on a store that kept its pairs in JSON, in reverse, or in memory. The
-#   line format is read raw, with the tab counted.
-# * What a refused call leaves behind. A store that will not parse must come
-#   out of a refused `set` byte for byte unchanged - a command that repairs a
-#   file it cannot read has destroyed whatever was actually in it.
-# * A single tab. The shared console expands one to the next 8-column tab
-#   stop, so `list` writes to stdout directly; an assertion that only looked
-#   for the key and the value would pass on the padded version.
-#
-# Every refusal is asserted as the pair: exit 2 AND nothing on stdout. A value
-# is about to be used by whatever called this, so a half-answer printed beside
-# a refusal would be read as the value.
+# Driven through main() with real discovery, so these exit codes are the ones drone returns.
+# The bytes on disk are read raw, tab counted: set-then-get alone passes on a JSON or in-memory store.
+# A refused set leaves an unparseable store byte for byte: repairing a file it cannot read destroys it.
+# list bypasses the shared console, which expands a tab to spaces, so its tab is asserted as one byte.
+# Every refusal is the pair, exit 2 AND nothing on stdout: a half-answer would be read as the value.
 
 
 def _run(monkeypatch, argv):
@@ -57,14 +43,9 @@ def _store(tmp_path, text=None, name="store.txt"):
 
 
 def _stderr(captured):
-    """Stderr as one line, whitespace flattened.
-
-    @cli renders a refusal through rich, which wraps it at the console width -
-    80 when stdout is not a terminal - so a reason naming a long tmp_path
-    arrives broken at whichever space falls near column 80. Flattening keeps
-    these assertions about the reason. It cannot cure a wrapped long TOKEN,
-    which is why no assertion here names a path.
-    """
+    """Stderr as one line, whitespace flattened."""
+    # Rich wraps a reason at the console width; flattening cannot mend a wrapped long token,
+    # which is why no assertion here names a path.
     return " ".join(captured.err.split())
 
 
@@ -75,11 +56,6 @@ def _refused(monkeypatch, capsys, argv):
     captured = capsys.readouterr()
     assert captured.out == ""
     return _stderr(captured)
-
-
-# =============================================================================
-# WHAT IT STORES
-# =============================================================================
 
 
 def test_a_pair_set_in_one_run_is_read_back_in_the_next(monkeypatch, capsys, tmp_path):
@@ -208,11 +184,6 @@ def test_a_value_is_stored_verbatim(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().out == value + "\n"
 
 
-# =============================================================================
-# WHAT LIST PRINTS
-# =============================================================================
-
-
 def test_list_prints_key_tab_value_one_pair_per_line(monkeypatch, capsys, tmp_path):
     """The separator is one tab byte. The shared console would make it spaces."""
     path = _store(tmp_path, "colour\tred\nsize\tbig\n")
@@ -261,11 +232,6 @@ def test_list_leaves_the_store_alone(monkeypatch, tmp_path):
     assert tmp_path.joinpath("store.txt").read_bytes() == before
 
 
-# =============================================================================
-# THE JSON FORM
-# =============================================================================
-
-
 def test_json_list_prints_one_object_and_nothing_else(monkeypatch, capsys, tmp_path):
     """One line, parseable whole, with every pair in it."""
     path = _store(tmp_path, "colour\tred\nsize\tbig\n")
@@ -311,11 +277,6 @@ def test_json_carries_a_value_a_tab_would_have_broken(monkeypatch, capsys, tmp_p
     assert _run(monkeypatch, ["kv", "--json", path, "list"]) == 0
 
     assert json.loads(capsys.readouterr().out) == {"note": "two words"}
-
-
-# =============================================================================
-# REFUSALS - THE ARGUMENTS
-# =============================================================================
 
 
 def test_no_file_is_refused(monkeypatch, capsys):
@@ -394,11 +355,6 @@ def test_a_refused_call_writes_nothing_to_the_store(monkeypatch, capsys, tmp_pat
     assert not path.exists()
 
 
-# =============================================================================
-# REFUSALS - THE KEY AND THE VALUE
-# =============================================================================
-
-
 @pytest.mark.parametrize("verb", ["set", "get", "delete"])
 def test_an_empty_key_is_refused_on_every_verb_that_takes_one(monkeypatch, capsys, tmp_path, verb):
     """Named by the contract, and checked before the store is even opened."""
@@ -456,11 +412,6 @@ def test_a_failed_delete_leaves_the_store_untouched(monkeypatch, capsys, tmp_pat
 
     capsys.readouterr()
     assert tmp_path.joinpath("store.txt").read_bytes() == before
-
-
-# =============================================================================
-# REFUSALS - THE FILE
-# =============================================================================
 
 
 @pytest.mark.parametrize("verb_args", [["get", "a"], ["delete", "a"], ["list"]])
@@ -542,11 +493,6 @@ def test_set_into_a_directory_that_is_not_there_is_refused(monkeypatch, capsys, 
     assert "the directory" in _refused(monkeypatch, capsys, ["kv", missing, "set", "a", "1"])
 
 
-# =============================================================================
-# THE FILE FORMAT AT ITS EDGES
-# =============================================================================
-
-
 def test_a_store_written_with_crlf_reads_the_same_as_one_with_lf(monkeypatch, capsys, tmp_path):
     """The ruling: one trailing carriage return per line is a line ending, not data."""
     path = _store(tmp_path, "colour\tred\r\nsize\tbig\r\n")
@@ -601,11 +547,6 @@ def test_keys_sort_by_code_point_not_by_locale(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().out.splitlines() == ["z\t2", "ä\t1"]
 
 
-# =============================================================================
-# THE WRITE ITSELF
-# =============================================================================
-
-
 def test_a_write_leaves_no_temporary_file_behind(monkeypatch, tmp_path):
     """The store is swapped in from a sibling temp file; the sibling must not survive."""
     # Its own directory: the conftest seam puts a json sandbox in tmp_path, so
@@ -621,7 +562,7 @@ def test_a_write_leaves_no_temporary_file_behind(monkeypatch, tmp_path):
 
 @pytest.mark.skipif(os.name != "posix", reason="file modes are a posix idea")
 def test_a_created_store_gets_the_mode_the_umask_would_give_it(monkeypatch, tmp_path):
-    """Measured 2026-09-20: without the correction a new store landed 0600."""
+    """The temp file is created 0600; a new store must not inherit that."""
     path = tmp_path / "store.txt"
 
     assert _run(monkeypatch, ["kv", str(path), "set", "a", "1"]) == 0
@@ -641,11 +582,6 @@ def test_an_existing_store_keeps_its_own_mode(monkeypatch, tmp_path):
     assert _run(monkeypatch, ["kv", str(path), "set", "b", "2"]) == 0
 
     assert path.stat().st_mode & 0o777 == 0o640
-
-
-# =============================================================================
-# THE FLAGS: --json IN FIRST POSITION, HELP ANYWHERE
-# =============================================================================
 
 
 def test_bare_kv_prints_the_usage_and_exits_zero(monkeypatch, capsys):
@@ -700,13 +636,8 @@ def test_a_key_spelled_like_a_flag_is_stored_not_obeyed(monkeypatch, capsys, tmp
     ],
 )
 def test_a_help_flag_anywhere_explains_and_never_executes(monkeypatch, capsys, tmp_path, argv_tail):
-    """A question must never execute, including in a position that would be data.
-
-    The opposite ruling - a flag is only a flag in first position - was written
-    first and then withdrawn: 'set --help colour' would have stored a pair in
-    answer to a question, which is the harm @seedgo's help_flag_safety standard
-    exists for. The cost is that a key spelled --help cannot be set from here.
-    """
+    """A question must never execute, including in a position that would be data."""
+    # seedgo's help_flag_safety rule; the cost is that a key spelled --help cannot be set from here.
     path = _store(tmp_path, "colour\tred\n")
     before = tmp_path.joinpath("store.txt").read_bytes()
 
@@ -735,11 +666,6 @@ def test_a_value_spelled_like_a_flag_survives_the_round_trip(monkeypatch, capsys
 
     assert _run(monkeypatch, ["kv", path, "get", "flag"]) == 0
     assert capsys.readouterr().out == "--json\n"
-
-
-# =============================================================================
-# THE HANDLER'S OWN SURFACE
-# =============================================================================
 
 
 def test_the_handler_refusal_carries_its_reason(tmp_path):

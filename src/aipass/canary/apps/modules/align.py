@@ -3,23 +3,12 @@
 # Description: Table command - drone @canary align FILE prints a text table with its columns lined up
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """Column aligner: a ragged text table in, a lined-up one out.
 
-``align FILE`` prints every row with each column padded to the widest value in
-that column, columns exactly two spaces apart, and nothing trailing at the end
-of a line. ``align --json FILE`` prints one JSON array of arrays - every field a
-string, every row in file order - and nothing else on stdout, so a caller can
-read the table without writing a parser of its own.
-
-Anything that is not a table is refused on stderr with exit 2 and NOTHING on
-stdout. A half-aligned table printed beside a refusal would be read as output by
-whatever consumes it, and a table is exactly the kind of thing that gets piped.
-
-The rulings made where the contract was silent live in the handler docstring,
-``apps/handlers/table/aligner.py``, next to the code that keeps them.
+Reference: docs/align_module.md.
 """
 
 import json
@@ -90,16 +79,9 @@ def print_help() -> None:
 
 
 def _render(rows: List[List[str]], as_json: bool) -> None:
-    """Write the table to stdout.
-
-    Args:
-        rows: The rows in file order, every one the same length.
-        as_json: True for one JSON array of arrays, False for aligned lines.
-    """
-    # markup/highlight/emoji off: a field is caller data, so "[bold]" or ":x:"
-    # in one must print as typed rather than be interpreted, and the JSON array
-    # must reach stdout byte for byte. soft_wrap keeps one row per line and
-    # stops rich from folding a wide table at the terminal width.
+    """Write the table to stdout."""
+    # markup/highlight/emoji off: a field is caller data ("[bold]", ":x:") and prints as typed,
+    # the JSON byte for byte. soft_wrap stops rich folding a wide row at the terminal width.
     if as_json:
         payload = json.dumps(rows, ensure_ascii=False)
         console.print(payload, markup=False, highlight=False, emoji=False, soft_wrap=True)
@@ -110,12 +92,7 @@ def _render(rows: List[List[str]], as_json: bool) -> None:
 
 
 def _align(words: List[str], as_json: bool) -> None:
-    """Align one file, or refuse the arguments by reason.
-
-    Args:
-        words: The positional arguments, the --json flag already removed.
-        as_json: True to print the JSON array instead of aligned lines.
-    """
+    """Align one file, or refuse the arguments by reason."""
     if not words:
         error("align refused: no FILE given (write the table you want lined up)", suggestion=USAGE_HINT)
         return
@@ -138,13 +115,7 @@ def _align(words: List[str], as_json: bool) -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """Route 'align'.
 
-    Args:
-        command: The command name drone routed.
-        args: Arguments after the command - FILE and --json.
-
-    Returns:
-        True when the command is 'align' (refusals included - the exit code
-        carries the failure), False for any other command.
+    True for 'align' even on a refusal - the exit code carries the failure.
     """
     if command != "align":
         return False
@@ -153,8 +124,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Help anywhere never aligns: 'align --help table.txt' prints the page and
-    # reads no file.
+    # Help anywhere never aligns: 'align --help table.txt' prints the page, reads no file.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True

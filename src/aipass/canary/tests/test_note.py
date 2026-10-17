@@ -3,7 +3,7 @@
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
 # Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/note.py and the notes store it drives."""
@@ -20,14 +20,8 @@ import pytest
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.notes import store
 
-# Driven through the entry point's main() with real module discovery, so the
-# exit codes asserted here are the ones drone hands back to a caller.
-#
-# The load-bearing tests are the corrupt-store ones: a store that will not
-# parse must be refused by file name with a non-zero exit, and its bytes AND
-# mtime must be exactly what they were. Losing stored notes to one bad read is
-# the failure the contract exists to prevent, so "did not crash" is not the
-# assertion.
+# Driven through main() with real discovery, so these exit codes are the ones drone returns.
+# A refused corrupt store must keep its bytes and mtime: "did not crash" is not the assertion.
 
 VALID_LINE = b'{"text": "kept", "timestamp": "2026-09-12T15:00:00-07:00"}\n'
 
@@ -35,17 +29,12 @@ CORRUPT_STORES = {
     "not_json": b"this is not json\n",
     "torn_final_record": VALID_LINE + b'{"text": "b", "time',
     "record_without_terminator": VALID_LINE.rstrip(b"\n"),
-    # The one unterminated store whose last line is still valid JSON: without
-    # the terminator guard it lists clean and the next add glues two records
-    # onto one line. The two cases above are refused even with the guard
-    # deleted (chopping their final byte breaks the JSON), so only this case
-    # measures the guard - mutant M5, 2026-09-12.
+    # Only this case measures the terminator guard: its last line still parses, so
+    # without the guard it lists clean and the next add glues two records together.
     "valid_record_then_space_no_terminator": VALID_LINE.rstrip(b"\n") + b" ",
     "json_but_not_a_record": VALID_LINE + b"[1, 2, 3]\n",
     "missing_timestamp": b'{"text": "a"}\n',
-    # The superset half of "exactly these keys": a subset check (every
-    # required key present) still refuses missing_timestamp above, so only
-    # an extra key measures exactness - mutant M11, 2026-09-16.
+    # Only an extra key measures "exactly these keys"; a subset check still refuses missing_timestamp.
     "extra_key": b'{"text": "a", "timestamp": "2026-09-12T15:00:00-07:00", "tag": "x"}\n',
     "non_string_text": b'{"text": 7, "timestamp": "2026-09-12T15:00:00-07:00"}\n',
     "blank_line_inside": VALID_LINE + b"\n" + VALID_LINE,
@@ -72,11 +61,6 @@ def _squash(text):
     return "".join(text.split())
 
 
-# =============================================================================
-# WHERE THE STORE LIVES
-# =============================================================================
-
-
 def test_default_store_is_in_this_branch_under_docs_local():
     """The real store path sits inside canary, in docs.local/."""
     branch_root = canary_entry.MODULES_DIR.parent.parent
@@ -86,13 +70,8 @@ def test_default_store_is_in_this_branch_under_docs_local():
 
 
 def test_docs_local_is_ignored_by_the_repo_gitignore():
-    """docs.local/ is what keeps the store out of git - pin the rule itself.
-
-    A repo-level contract read from a branch suite, so the dependency is
-    declared: no repo root above the branch is a skip that says why. The root
-    is known by its .git, not its .gitignore, so a checkout that lost the
-    ignore file still fails here.
-    """
+    """docs.local/ is what keeps the store out of git - pin the rule itself."""
+    # The root is known by its .git, not its .gitignore, so a checkout that lost the ignore file fails.
     repo_root = store.BRANCH_ROOT.parents[2]
     if not (repo_root / ".git").exists():
         pytest.skip(
@@ -103,11 +82,6 @@ def test_docs_local_is_ignored_by_the_repo_gitignore():
     gitignore = repo_root / ".gitignore"
 
     assert "docs.local/" in gitignore.read_text(encoding="utf-8").splitlines()
-
-
-# =============================================================================
-# ADD AND LIST
-# =============================================================================
 
 
 def test_add_then_list_prints_records_in_order_with_index_and_timestamp(monkeypatch, capsys, store_path):
@@ -159,11 +133,6 @@ def test_list_on_a_missing_store_answers_and_creates_nothing(monkeypatch, capsys
 
     assert "No notes yet" in capsys.readouterr().out
     assert not store_path.parent.exists()
-
-
-# =============================================================================
-# THE CONTRACT: A STORE THAT WILL NOT PARSE IS REFUSED, NEVER REWRITTEN
-# =============================================================================
 
 
 @pytest.mark.parametrize("subcommand", [["list"], ["add", "must not land"]])
@@ -237,11 +206,6 @@ def test_list_on_a_disk_that_refuses_the_read_exits_two_and_names_the_store(monk
     assert _squash(f"note list failed: cannot read store {store_path}: stand-in: the disk refused") in _squash(err)
 
 
-# =============================================================================
-# ARGUMENT REFUSALS AND HELP
-# =============================================================================
-
-
 @pytest.mark.parametrize("words", [[], ["   "]], ids=["no_text", "blank_text"])
 def test_add_without_text_is_refused_and_writes_nothing(monkeypatch, capsys, store_path, words):
     """An empty note is a refusal, not an empty record."""
@@ -274,11 +238,6 @@ def test_help_never_writes_a_note(monkeypatch, capsys, store_path, argv):
 
     assert "Usage:" in capsys.readouterr().out
     assert not store_path.exists()
-
-
-# =============================================================================
-# LIST --JSON
-# =============================================================================
 
 
 @pytest.mark.parametrize("argv", [["list", "--json"], ["--json", "list"]], ids=["flag_after", "flag_before"])

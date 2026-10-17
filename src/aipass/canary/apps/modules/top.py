@@ -3,19 +3,12 @@
 # Description: Leaderboard command - drone @canary top N FILE prints the N highest counts
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """Leaderboard reader: a tally file in, the highest counts out.
 
-``top N FILE`` prints the N highest counts, one per line, as the name, a single
-space, and the count. ``top --json N FILE`` prints one JSON array of
-``{"name": ..., "count": ...}`` objects in the same order and nothing else on
-stdout, so a caller can read it without a parser of its own.
-
-Anything that is not a leaderboard is refused on stderr with exit 2 and NOTHING
-on stdout - a refusal that printed a partial ranking would be read as an answer
-by the next command in the pipe.
+Reference: docs/top_module.md.
 """
 
 import json
@@ -86,15 +79,9 @@ def print_help() -> None:
 
 
 def _render(rows: List[tuple], as_json: bool) -> None:
-    """Write the ranked rows to stdout.
-
-    Args:
-        rows: The (name, count) pairs already in their final order.
-        as_json: True for one JSON array, False for one line per row.
-    """
-    # markup/highlight/emoji off: a name is caller data, so "[bold]" or ":x:"
-    # in one must print as typed rather than be interpreted, and the JSON array
-    # must reach stdout byte for byte. soft_wrap keeps one row per line.
+    """Write the ranked rows to stdout."""
+    # markup/highlight/emoji off: a name is caller data ("[bold]", ":x:") and prints as typed,
+    # the JSON byte for byte. soft_wrap keeps one row per line.
     if as_json:
         payload = json.dumps([{"name": name, "count": count} for name, count in rows], ensure_ascii=False)
         console.print(payload, markup=False, highlight=False, emoji=False, soft_wrap=True)
@@ -105,12 +92,7 @@ def _render(rows: List[tuple], as_json: bool) -> None:
 
 
 def _top(words: List[str], as_json: bool) -> None:
-    """Rank one file, or refuse the arguments by reason.
-
-    Args:
-        words: The positional arguments, the --json flag already removed.
-        as_json: True to print the JSON array instead of one line per row.
-    """
+    """Rank one file, or refuse the arguments by reason."""
     if not words:
         error("top refused: no N given (write how many rows you want)", suggestion=USAGE_HINT)
         return
@@ -138,13 +120,7 @@ def _top(words: List[str], as_json: bool) -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """Route 'top'.
 
-    Args:
-        command: The command name drone routed.
-        args: Arguments after the command - N, FILE, and --json.
-
-    Returns:
-        True when the command is 'top' (refusals included - the exit code
-        carries the failure), False for any other command.
+    True for 'top' even on a refusal - the exit code carries the failure.
     """
     if command != "top":
         return False
@@ -153,8 +129,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Help anywhere never ranks: 'top --help 3 scores.txt' prints the page and
-    # reads no file.
+    # Help anywhere never ranks: 'top --help 3 scores.txt' prints the page, reads no file.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
