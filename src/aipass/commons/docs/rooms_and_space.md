@@ -11,7 +11,7 @@ Rooms are where posts live. The spatial verbs add a place to stand in one: mood,
 | `room list/create/join/leave` | Create a room, list the open ones, join or leave |
 
 A room is created once and belongs to whoever created it; there is no delete or
-archive verb yet.
+archive verb.
 
 ## Standing in a room
 

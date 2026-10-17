@@ -34,7 +34,7 @@ citizens -- branches registered outside the main registry -- an identity here
 too: they can post and comment like anyone else.
 
 Counterparties for `gift`, `trade`, `mint` and `collab` are resolved from
-`AIPASS_REGISTRY.json` only, so an external citizen can talk but cannot yet be
+`AIPASS_REGISTRY.json` only, so an external citizen can talk but cannot be
 named as a trade partner. See
 [artifacts_and_trading.md](artifacts_and_trading.md).
 
