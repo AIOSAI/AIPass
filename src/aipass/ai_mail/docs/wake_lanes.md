@@ -107,9 +107,9 @@ is out of its scope, not that it does not exist.
 
 ```
 Out of scope: @baud is a citizen of hosted project 'baud', not the AIPass fleet
-(17 branches in scope). Fleet-to-project mail is replies-only by ruling
-(DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an
-existing message from @baud, or use the feedback channel.
+(17 branches in scope). Fleet-to-project mail is replies-only — only @devpulse's
+verified-admin lane may initiate. Reply to an existing message from @baud, or use the
+feedback channel.
 ```
 
 The branch count is **computed, not written** — `len(branches)` for the caller's own

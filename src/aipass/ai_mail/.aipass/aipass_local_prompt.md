@@ -67,7 +67,7 @@ apps/
       verified_caller.py      # Verified-caller rail + the admin verdict
       user.py                 # Current user detection
     json/
-      json_handler.py         # The fleet's one json service, bound here (DPLAN-0325)
+      json_handler.py         # The fleet's one json service, bound here
 tests/                        # One module per concern; new test files are gated fleet-wide
 docs/                         # The depth — indexed from README.md
 ```
@@ -94,7 +94,7 @@ docs/                         # The depth — indexed from README.md
 ## Gotchas
 
 - `dispatch status` can print "No dispatches recorded yet." while work is running — it reads
-  a different log. `dispatch register` is the trustworthy view (APLAN-0006).
+  a different log. `dispatch register` is the trustworthy view.
 - `--help` anywhere in a command sequence EXPLAINS and never executes; that is a contract,
   pinned by tests.
 - The two ids: a message carries its own id and the sender's `sent_id`. Echo the message's

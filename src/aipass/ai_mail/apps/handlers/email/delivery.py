@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.5.0
+# Version: 3.5.1
 # Created: 2025-12-02
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -487,10 +487,9 @@ def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
 
     An address can fail to resolve for two very different reasons, and saying
     "unknown" for both is a lie in one of them. @baud is a registered citizen of
-    a hosted project; @devpulse reaches it through the admin lane. Telling @api
-    it did not exist sent them debugging an addressing bug that was not there
-    (2026-08-14), when the true answer is a policy: fleet-to-project initiation
-    is walled, replies only (DPLAN-0288).
+    a hosted project; @devpulse reaches it through the admin lane. Telling a
+    caller it does not exist is false when the true answer is a policy:
+    fleet-to-project initiation is walled, replies only.
 
     This runs ONLY once delivery has already failed, so the extra registry read
     costs nothing on any successful send. It returns a **string** and nothing
@@ -522,8 +521,8 @@ def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
     logger.info("[delivery] out-of-scope address refused: %s (hosted project: %s)", to_branch, project)
     return (
         f"Out of scope: {to_branch} is a citizen of hosted project '{project}', not the AIPass "
-        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only by "
-        f"ruling (DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an "
+        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only — "
+        f"only @devpulse's verified-admin lane may initiate. Reply to an "
         f"existing message from {to_branch}, or use the feedback channel."
     )
 
