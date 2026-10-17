@@ -2,13 +2,11 @@
 
 # The Off-Switch
 
-A skill can be disconnected from AIPass and reconnected later. Design record: `DPLAN-0306`.
-
-A skill can be disconnected from AIPass and reconnected later. The setting
+A skill can be disconnected from AIPass and reconnected later. Design record: `DPLAN-0306`. The setting
 persists across restarts and reboots (`skills_json/switch_state.json`).
 
 ```bash
-drone @skills off telegram "retired 2026-08-18"   # disconnect
+drone @skills off telegram "retired"              # disconnect
 drone @skills switch                              # who is on, who is off
 drone @skills on telegram                         # reconnect
 ```

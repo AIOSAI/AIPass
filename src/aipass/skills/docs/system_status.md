@@ -2,56 +2,40 @@
 
 # The system_status Skill
 
-The portable readings, and `machine_vitals()` — the published dict the host API relays and the phone monitor draws.
+The portable readings, and the two published dicts the host API relays and the phone monitor draws: `machine_vitals()` and `machine_processes()`.
 
-## The system_status Skill Off Linux
+## The Portable Readings
 
-`lib/system_status/handler.py` asked `/proc` three times — `meminfo`, `uptime`
-and the process table — so on the macOS runner `memory`, `uptime` and
-`processes` each answered `success: False` every run, and `summary` reported
-`success: True` over a disk line plus an Errors trailer (FPLAN-0554, runs
-34704362515 and 34707099650). The four cases in `tests/test_runner.py` carried
-`skipif(sys.platform == "win32")`, a guard that named the one platform that was
-never the problem.
-
-All three now ask **psutil** — `virtual_memory()`, `boot_time()`, `pids()` —
-which is a declared dependency of this project (`psutil>=5.9`) and answers on
-Linux, macOS and Windows. Disk was always portable (`shutil.disk_usage`) and is
-untouched. Two things that are not obvious:
+Disk comes from `shutil.disk_usage`; memory, uptime and the process count ask
+**psutil** — `virtual_memory()`, `boot_time()`, `pids()` — a declared
+dependency of this project (`psutil>=5.9`) that answers on Linux, macOS and
+Windows. Two things that are not obvious:
 
 - **`summary` fails when a section fails.** It returns `success: False` with
   `error` naming the missing sections, and still hands back the sections that
-  did answer. The old shape put the failures in an `Errors:` trailer inside
-  `output` and kept `success: True`, which is a caller reading a disk line as a
-  system report.
-- **No psutil means a refusal, not a partial.** The three actions return
+  did answer.
+- **No psutil means a refusal, not a partial.** The three psutil actions return
   `success: False` naming the install recipe; `disk` still answers.
 
-The macOS half is manufactured on this Linux box in `tests/test_runner.py`, and
-the psutil stand-in is part of the world rather than a shortcut around it:
-psutil's *Linux* backend reads `/proc` through plain `open()`, so denying
-`/proc` with the real psutil in place would have manufactured a failure no Mac
-can have — there psutil answers from the kernel. The world is
-`sys.platform == "darwin"` + every `/proc` read refused + a stand-in shaped like
-macOS's `virtual_memory` (no `buffers`, no `cached`), with three controls: the
-denial is live, the denial can still say yes, and the process table is gone too.
-Against the pre-cure handler 11 of these cases go red on behaviour; 8 mutants
-were killed.
+The macOS half is manufactured on Linux in `tests/test_runner.py`, and the
+psutil stand-in is part of the world rather than a shortcut around it: psutil's
+*Linux* backend reads `/proc` through plain `open()`, so denying `/proc` with
+the real psutil in place would manufacture a failure no Mac can have — there
+psutil answers from the kernel. The world is `sys.platform == "darwin"` + every
+`/proc` read refused + a stand-in shaped like macOS's `virtual_memory` (no
+`buffers`, no `cached`), with three controls: the denial is live, the denial
+can still say yes, and the process table is gone too.
 
-**Why the audit read 100 over it.** At the time the audit corpus was `apps/`
-(plus `tests/` for the branch-level arms) and never entered `lib/`, where all
-seven built-in skills live — so `Host_Portability` read **100** while the skill
-was red on every macOS run. Reported the same morning; @seedgo ruled that `lib/`
-joins the corpus **for `host_portability` only** (the per-file audit stays
-`apps/`, so tier-2 `handler.py` files are not scored for architecture). The
-widened rule scored this branch 97 — see [telegram.md](telegram.md).
+**What the audit reads.** The per-file audit corpus is `apps/` (plus `tests/`
+for the branch-level arms); `lib/`, where the built-in skills live, joins it
+for `host_portability` only. Tier-2 `handler.py` files are not scored for
+architecture.
 
 ## machine_vitals() — The Published Read
 
 `lib/system_status/handler.py` publishes `machine_vitals()`: one dict of the
-machine's vitals for in-process callers (FPLAN-0561 row 1; every clause was
-ruled in DPLAN-0341). The host API proxies it verbatim on `/v1/machine` and
-BAUD's phone draws it. The meaning lives here and nowhere downstream — which
+machine's vitals for in-process callers (decision record: DPLAN-0341). The
+host API proxies it verbatim on `/v1/machine` and BAUD's phone draws it. The meaning lives here and nowhere downstream — which
 sensor is the CPU, which rows are nonsense, what an absence is called.
 
 ```python
@@ -61,8 +45,8 @@ vitals = handler.machine_vitals()
 
 - **Shape.** `{"ok": True, "schema": 2, "sampled_at": <ISO-8601 UTC>}` plus
   nine sections: `cpu`, `load`, `memory`, `swap`, `temp`, `fan`, `network`,
-  `processes`, `battery` (schema 1 had the first eight). Every section carries `available`, `reason`, `sentence` and
-  `detail` beside its own values, and every value key is always present — `None`
+  `processes`, `battery`. Every section carries `available`, `reason`,
+  `sentence` and `detail` beside its own values, and every value key is always present — `None`
   when the host cannot give it, never a zero. It never raises for a reading: a
   call that raises costs its own section (`read_failed`), never its siblings.
 - **Whole-function refusal** is `{"ok": False, "reason": ..., "detail": ...}`,
@@ -86,13 +70,12 @@ vitals = handler.machine_vitals()
 - **The cpu section carries the cores.** Beside `percent` and `window_s`:
   `cores`, one busy percent per logical CPU in index order; `logical` and
   `physical`, from `cpu_count()` and `cpu_count(logical=False)`; `mhz` and
-  `mhz_max`, the frequency now and its ceiling from `cpu_freq()` (FPLAN-0586).
+  `mhz_max`, the frequency now and its ceiling from `cpu_freq()`.
   One read takes **one** sample, `cpu_times(percpu=True)`, and the headline
   percent is summed from the same per-CPU deltas as the cores — 3 busy seconds
   of 5 ticked is 60, where the mean of the bars would say 37.5 — so the
   headline and the bars agree by construction. Guest time comes back out of
-  each total and iowait is idle, the same accounting as before. `percent` and
-  `cores` are `None` while warming, and also when the CPU count changed between
+  each total and iowait is idle. `percent` and `cores` are `None` while warming, and also when the CPU count changed between
   the two samples (hotplug) or a CPU did not tick between them; the counts and
   the frequency are instant readings, so they are published even then. psutil's
   `/proc/cpuinfo` fallback reports the ceiling as `0.0` and an offline policy as
@@ -109,35 +92,48 @@ vitals = handler.machine_vitals()
 - **An allowlist, not a threshold.** CPU temperature is `coretemp` /
   `Package id 0` (the hottest `Core N` when there is no package row), with
   `high` and `critical` from the sensor. Fans come from `applesmc`. Every other
-  applesmc temperature row stays off — on the MacBook this was built on, five
-  read -127 and a pair drifted from -34.25 to -30.0 inside twenty minutes — and
-  so does `BAT0`, a battery. Keyed by chip and label, never by position; growing
+  applesmc temperature row stays off — on a MacBook, five read -127 and others
+  drift by several degrees inside minutes — and so does `BAT0`, a battery. Keyed by chip and label, never by position; growing
   a list is a change to `TEMP_ALLOWLIST` / `FAN_ALLOWLIST`, never to a face.
 - **The fan range is a read-only sysfs read, Linux only.** psutil reports a
   fan's label and rpm, not its range. The chip is found by the `name` file beside
   its fan input — never a `hwmonN` index, which is boot order — walking the
-  directories the way psutil does (on this box `hwmon2/name` does not exist and
-  the name is at `hwmon2/device/name`). It opens `name`, `fanN_label`,
+  directories the way psutil does (on an applesmc MacBook `hwmonN/name` may not
+  exist and the name is at `hwmonN/device/name`). It opens `name`, `fanN_label`,
   `fanN_min` and `fanN_max`, read-only, and nothing else: `fanN_manual` and
   `fanN_output` are root-writable and never opened. `percent_of_range` is
   clamped to 0–100 and the range is carried beside it, so a fan sitting at its
-  floor (0%, as it does here at idle) is distinguishable from a fan with no scale.
-- **Cost, measured here:** about 19 ms warm, 12 ms of it psutil's own
-  temperature sweep; the fan range adds about 2 ms, and the per-CPU sample,
-  the counts and the frequency add under 1 ms (0.85 ms, 2026-09-13).
+  floor (0%, as an idle MacBook fan does) is distinguishable from a fan with no scale.
+- **The battery section** carries `percent`, `plugged`, `state`, `seconds_left`,
+  `low` and `critical`; its full contract is in
+  [`lib/system_status/SKILL.md`](../lib/system_status/SKILL.md).
+- **Cost:** about 19 ms warm, 12 ms of it psutil's own temperature sweep; the
+  fan range adds about 2 ms, and the per-CPU sample, the counts and the
+  frequency add under 1 ms.
 
-Pinned by `tests/test_machine_vitals.py`, 41 functions expanding to 57 cases,
-against stand-ins only: psutil, the monotonic clock and the hwmon tree are all
+## machine_processes() — The Busiest Processes
+
+`machine_processes(limit=20)` sits beside `machine_vitals()`, behind the same
+switch and the same refusal. It lists the top `limit` processes (clamped to
+1..100) by a real ~0.5 s CPU sample, normalised to the whole machine, ties by
+memory percent; each row is `pid`, `name`, `cpu_pct`, `mem_pct`, `mem_mb`,
+`user`, `state`. It reads the process name only — never the command line,
+arguments, environment or working directory — and leaves out a process that
+vanishes or is denied mid-sample. The host API relays it on
+`/v1/machine/processes`. The shape is in
+[`lib/system_status/SKILL.md`](../lib/system_status/SKILL.md).
+
+## The Pins
+
+`tests/test_machine_vitals.py` pins both doors against stand-ins only: psutil,
+the monotonic clock, the sample's sleep and the hwmon tree are all
 manufactured, so the file is green on a host with no sensor chips. The
 read-only pin records every `open`, `io.open` and `os.open` under the tree and
 raises on a write mode or a fan control file, with a control proving the guard
-is armed and can still say yes. 20 mutants, one per clause, all go red; the
-per-core read added 17 more, all red, and 15 cases in the file fail against
-the handler that read one aggregate. The stand-in psutil is four logical CPUs with
+is armed and can still say yes. The stand-in psutil is four logical CPUs with
 different loads, CPU 2 spending half its idle time in iowait, and the Windows
-field set (no guest, no iowait) is manufactured beside it. The text
-actions and their 29 `test_runner.py` functions are unchanged; making them
-renderings of this dict is a later row.
+field set (no guest, no iowait) is manufactured beside it. The text actions
+are pinned in `tests/test_runner.py`.
 
 ---
 
