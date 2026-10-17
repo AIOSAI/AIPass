@@ -3,7 +3,7 @@
 # Description: Integration tests for CLI main() flow
 # Version: 2.1.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/cli.py main() and the package's cli_entry — the routed flow end to end."""
@@ -23,23 +23,9 @@ from aipass.cli.apps.modules import display
 from .conftest import make_capture_console
 
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
 def _make_capture_console():
-    """Return (console, get_output) for capturing Rich output.
-
-    Console pinned against FORCE_COLOR/NO_COLOR/TERM; get_output() returns only
-    the VISIBLE characters, so assertions never depend on the calling shell.
-    """
+    """Return (console, get_output) for capturing Rich output."""
     return make_capture_console(highlight=False)
-
-
-# =============================================================================
-# main() flow tests — mock sys.argv to simulate CLI invocation
-# =============================================================================
 
 
 class TestMainFlow:
@@ -113,10 +99,6 @@ class TestMainFlow:
         ):
             result = main()
         assert result == 0
-
-    # =============================================================================
-    # cli entry point test
-    # =============================================================================
 
     def test_cli_entry_callable(self):
         """cli_entry() is the console_scripts entry point — verify it's callable."""

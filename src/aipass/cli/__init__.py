@@ -1,10 +1,6 @@
 """CLI - Display formatting for AIPass.
 
-The display names below load on first attribute access (PEP 562), not at
-package import: an eager import here ran apps/modules/display, and through it
-this branch's handlers, on behalf of whoever imported aipass.cli first, so a
-foreign importer of the handlers always found kin already standing in the
-stack (DPLAN-0404). `from aipass.cli import console` works as before.
+Names load on first access (PEP 562): an eager import here puts kin in every stack and opens the handlers fence.
 """
 
 import importlib
