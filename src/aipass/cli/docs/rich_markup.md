@@ -32,18 +32,16 @@ the statement that prints it.
 - `markup=False` is per-call and absolute: it turns the parser off for the whole
   string, so every style tag on that line becomes literal text too. It is the
   right answer in exactly one case — a block of pre-formatted text that carries
-  no styling at all and is printed verbatim, which is why it fixed `drone`'s
-  returned help literal. Used on a styled line, it does not just fail to help;
+  no styling at all and is printed verbatim. Used on a styled line, it does not just fail to help;
   it prints the tags.
 - A hand-written `\[` is what `escape()` produces. For a runtime value it is the
   wrong spelling, because it cannot be applied to a value the author never sees.
-- **The one exception, found by @seedgo:** a *styled literal that also carries a
+- **The one exception:** a *styled literal that also carries a
   literal bracket* — `"[dim]  console.print('\\[bold]Hello\\[/bold]')[/dim]"`. The
   data and the styling live in the same string, so `escape()` on it eats the
   styling too, and `markup=False` prints the style tags. Neither tool can tell the
   two apart. Escape that one bracket by hand; it is the only spelling that renders
-  both. This branch's own `--help` page carried exactly this shape and printed
-  `console.print('Hello')` until 2026-09-17.
+  both. This branch's own `--help` page carries exactly this shape.
 
 The rule in one line: **escape the data, do not disarm the line — and where the
 data and the styling share one literal, escape the bracket by hand.**

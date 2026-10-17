@@ -13,8 +13,8 @@ VISIBLE.
 That helper is the one capture seam for this branch: a suite that builds its own
 console re-acquires the environment dependency the helper exists to remove.
 
-Two failure shapes this rule prevents, both found here by mutation runs rather
-than by reading:
+Two failure shapes this rule prevents, both of which survive a read and fall to a
+mutation run:
 
 - A test named for a behaviour it never exercises holds the slot the real one
   wants. Check the test name against the call it actually makes.

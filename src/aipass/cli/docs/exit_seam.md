@@ -32,10 +32,8 @@ Why each line is load-bearing:
   that proceed. Swapping the colour without the flag changes nothing an exit
   code can see.
 - **`return resolve_exit(handled)`, never a bare `0`.** A `main()` that returns
-  0 on any truthy route discards the only thing the flag was recorded for. This
-  is what made refusals exit 0 across the fleet (@canary's sweep): the machinery
-  existed, three branches consulted it, and everywhere else `error()` printed
-  red and the shell read success.
+  0 on any truthy route discards the only thing the flag was recorded for:
+  `error()` prints red and the shell reads success.
 - **A caller's own `1` is never overwritten.** `resolve_exit()` checks
   `handled` *before* it looks at the flag, so a command that was never routed is
   a 1 whether or not `error()` also tripped the flag.
@@ -49,9 +47,8 @@ and the crash path (`1`) can be pinned by test.
 it runs `main()` and maps a `KeyboardInterrupt` to 130 and an escaped exception
 to 1.
 
-Owning this API is not the same as using it. This branch owned all four names
-while its own `main()` called none of them, and most of the fleet was the same
-way — measure your own doors rather than assuming the seam is wired.
+Importing these names does not wire them. Check that your own `main()` carries
+all three lines rather than assuming the seam is in place.
 
 ---
 [← Back to the cli README](../README.md)
