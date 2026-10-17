@@ -2,8 +2,8 @@
 
 # Docs
 
-Tracked public reference for the `API` branch — the depth that used to sit in the branch
-README, one file per surface or handler group (DPLAN-0347, the layer contract). The README
+Tracked public reference for the `API` branch — the depth behind the branch README, one
+file per surface or handler group (DPLAN-0347, the layer contract). The README
 is the face; these are what you open when something breaks.
 
 | Doc | What it covers |
@@ -15,7 +15,6 @@ is the face; these are what you open when something breaks.
 | [git_surface.md](git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [git_remote.md](git_remote.md) | The remote lane, its two fields, and why credentials never travel |
 | [internals.md](internals.md) | Import safety without a working directory, and the settings conformance corpus |
-| [decisions.md](decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
 | [SECURITY.md](SECURITY.md) | The security posture of the host API and the credential store |
 
 Work in progress, research and dated one-offs belong in `docs.local/`, not here: this

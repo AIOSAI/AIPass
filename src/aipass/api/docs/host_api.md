@@ -6,8 +6,8 @@
 
 ---
 
-The server the BAUD phone face talks to. **Bound to the tailnet since 2026-08-14**,
-after the Phase 5 security review — the first network-listening service in AIPass.
+The server the BAUD phone face talks to, **bound to the tailnet** — the first
+network-listening service in AIPass.
 
 ```bash
 drone @api host-api issue-token pixel-8 --scope read   # receipt -> ~/.secrets/aipass/host_api/
@@ -31,19 +31,14 @@ host stops honouring it. Refused requests are audited with the peer address, so
 differently.** Both get the same 401 and the same sentence, because a response
 that distinguished them would let a prober learn which of its guesses was once
 real. The trail records `token_revoked` (with the token's id) or
-`token_unrecognised` (with none). This was one line of aspiration in a comment
-until 2026-08-16, when the owner's phone was refused for nine minutes and the log
-could not say whether it had presented a credential this host once issued or
-garbage — the store was provably intact, so that missing distinction *was* the
-gap between the evidence and an answer.
+`token_unrecognised` (with none), so the log can say whether a refused device
+presented a credential this host once issued or garbage.
 
-**The store answers three questions about every credential**, added after an
-operate-scoped token appeared on this machine and nobody could say who minted it:
-`minted_by` (best-effort, from the branch drone names in the child environment —
+**The store answers three questions about every credential:** `minted_by`
+(best-effort, from the branch drone names in the child environment —
 **provenance, never permission**, since the value comes from the caller's own
 environment), `revoked_at`, and `last_used`, which separates a live token from one
-that is merely un-revoked. `drone @api host-api list-tokens` prints all three, so
-the question can be answered where it actually gets asked.
+that is merely un-revoked. `drone @api host-api list-tokens` prints all three.
 
 `last_used` means a write on every authenticated request, so the store is written
 atomically (temp file, `fsync`, `os.replace`, created `0o600` rather than
@@ -54,6 +49,11 @@ a lock it cannot take means the timestamp is dropped, never raised — and write
 are coalesced to one per minute per token, so feed polling does not rewrite the
 store every few seconds. The envelope is versioned; records predating the fields
 still verify, and read back as `unknown`.
+
+**A raw token is never printed.** `issue-token` writes its receipt to
+`~/.secrets/aipass/host_api/<label>.token` (dir `0700`, file `0600`; `--out`
+overrides). The label is a filename, so it passes the routes' two-gate name fence.
+An existing receipt is refused, never truncated: its token is still live in the store.
 
 **The bind rule:** the server binds the address it was configured for or refuses
 to start. No fallback, ever. Wildcards (`0.0.0.0`, `::`), hostnames, and addresses
@@ -118,23 +118,19 @@ a kill whose seam does not exist is 503.
 another program's stderr or another branch's JSON, so a denial caused by a caught
 exception answers `{code, message, ref}`: the code's fixed sentence from
 `denials.py`, and a `ref` that names the host-log line holding the words and the
-traceback (CodeQL `py/stack-trace-exposure`, PR #774). Branch on `code`, read the log by `ref`.
+traceback (CodeQL `py/stack-trace-exposure`). Branch on `code`, read the log by `ref`.
 
-**The memory-config lane reads a document, not a screen.** It shipped scraping
-@memory's rendered text, because their config verbs had no machine surface — the
-most fragile handler in this branch, where a heading they reworded was a field it
-lost. It asked them for one; they shipped `--json` on all five verbs the same
-evening. The scraper is gone: nothing here reads a glyph, a marker or a column
-position, every command is sent with `--json` appended in **one** place, and the
+**The memory-config lane reads a document, not a screen.** @memory's five config
+verbs answer `--json`, and nothing here reads a glyph, a marker or a column
+position: every command is sent with `--json` appended in **one** place, and the
 verdict is the `ok` boolean they emit. `raw` still rides on every response —
 their payload verbatim — so a caller is never trapped behind my reading of it.
 
 Two of their conventions remain load-bearing: their refusals **exit 0**, so the
 exit code is still never the verdict here; and `set-default` **changes only the
 default** — until `push` runs, all 17 branches keep their existing values. That
-surprise is @memory's design and is passed through untouched. It is now also
-*reported* rather than remembered: `pushed` comes from their payload, as does
-the `branches` count a push answers with.
+surprise is @memory's design and is passed through untouched, and *reported*:
+`pushed` comes from their payload, as does the `branches` count a push answers with.
 
 **What is not one parseable object is `503`, never a verdict.** If `--json` ever
 stops being honoured — an older @memory on a fresh clone, a renamed flag, a
@@ -144,18 +140,15 @@ the owner's configuration.
 
 **A refusal has one shape on this lane, wherever it was decided:** `400
 memory_config_refused`, the code's fixed sentence and a `ref`; their sentence,
-remedy line and whole payload go to this host's log under that ref. It shipped with two — an argument this server rejected before routing was
-a 400, while a refusal @memory *spoke* came back `200 {ok: false}` — so a client
-had to check the status code **and** a flag to learn one fact. Both now answer
-identically. Note this is deliberately **not** the verb lane's rule (see
+remedy line and whole payload go to this host's log under that ref. An argument
+this server rejects before routing and a refusal @memory *speaks* answer
+identically, so a client learns one fact from one status code. Note this is deliberately **not** the verb lane's rule (see
 [host_surfaces.md](host_surfaces.md)): a
 refused wake is a normal outcome of asking and the phone renders it, but a
 refused write to fleet configuration is a caller error.
 
 **The git-changes lane answers @baud's question, not a second one.** The
-AgentSheet git tile had never made a network request — the phone transport
-listed `git_changes` in its not-yet table and threw before reaching the wire.
-The contract is theirs, read from their tree rather than invented here:
+contract is theirs, read from their tree rather than invented here:
 `GitChanges { files, count }`, filled by `git diff HEAD --relative --name-only
 -- .`. Two consequences are reproduced deliberately. **Tracked files only** — a
 brand-new module does not move a card's badge, because `diff HEAD` cannot see a
@@ -169,53 +162,63 @@ Matching a contract is not a reason to discard something already measured —
 @baud's own argument for their whole-project total is that a count hiding a new
 module reads as false calm, and that does not stop being true here.
 
-**This lane read a rendered surface until 08-18, and that was the bug.** Git is
-drone-only, servers included, so it shells `drone @git status` — but it used to
-read the *screen* output and pass the porcelain codes through verbatim, which
-was faithful to a surface that had already flattened them. `get_branch_status()`
-existed under `apps/handlers` and returning to it would have meant reaching into
-another branch's internals, the layering mistake this package has made once
-already, so the ask was for a `--json` instead. **It shipped**, and it took
-every line of the parsing with it: the lane now reads
-`{ok, branch, scope, files[{status, path, index, worktree}], total, message}`
-and the two columns arrive as two columns. Asking for the right door beat
-parsing the wrong one more carefully, which is the whole lesson of the round.
+**It reads drone's document, never its screen.** Git is drone-only, servers
+included, so the lane shells `drone @git status --json` and reads
+`{ok, branch, scope, files[{status, path, index, worktree}], total, message}`;
+the two porcelain columns arrive as two columns. It does not reach into another
+branch's `apps/handlers` for a status function: that is the layering mistake an
+owned `--json` door exists to prevent.
 
-**It serves foreign projects, and a wrong belief here hid a real bug.** This
-section previously said no drone-routed lane could measure a foreign project:
-drone verifies its caller by finding a passport in the cwd hierarchy, and a
-refusal had been measured in `projects/baud/src/baud`. @baud's live sweep then
-served five foreign projects with real data. The reconciliation is that the
-probe path was never a census-known **branch** — the registered one sits a level
-deeper and, like every census branch, carries its own passport, so the caller
-check passes. The command measurement was true; the inference from it to the
-route was not. What remains true is narrower: drone cannot be invoked *from* a
-cwd with no passport above it, which affects agents working inside external
-trees, not this lane.
+**It serves foreign projects.** drone verifies its caller by finding a passport in
+the cwd hierarchy, and every census-known branch carries its own passport, so the
+caller check passes for any project in @baud's census. What drone cannot do is be
+invoked *from* a cwd with no passport above it, which affects agents working inside
+external trees, not this lane.
 
-The bug that belief concealed: paths were stripped against **the seat's** repo
-root, so a foreign branch fell out of `relative_to` and its rows kept the prefix
-drone printed — `src/vera_studio/vera/CLAUDE.md` where the contract says
-`CLAUDE.md`. Nested tenants were wrong the same way and worse: `projects/baud`
-carries its own `.git`, so the seat-relative prefix *resolves cleanly* and is
-still the wrong one — nothing raises, and every row silently keeps its prefix.
-The prefix is now the repository **discovered** by walking up for a `.git`
-marker, which is the only one guaranteed to match what was printed; the seat is
-a fallback. Two mutations — restoring seat-first, and requiring the marker to
-be a directory rather than the file a worktree carries — survived the suite
-before the tests that now catch them.
+Paths are stripped against the repository **discovered** by walking up from the
+branch for a `.git` marker (a directory, or the file a worktree carries), which is
+the only root guaranteed to match what drone printed; the seat's repo root is a
+fallback. Stripping against the seat first would be wrong for every foreign branch
+(`src/vera_studio/vera/CLAUDE.md` where the contract says `CLAUDE.md`) and silently
+wrong for nested tenants: `projects/baud` carries its own `.git`, so the
+seat-relative prefix *resolves cleanly* and is still the wrong one.
 
 A genuinely unreachable project still refuses honestly: a non-git one answers
 `503` with git's own sentence, *not a git repository*. An empty change list
 would paint it clean when nothing was measured.
 
+**A root that cannot be read is not re-asked every poll.** A phone polls every
+5 seconds, and for an external project whose branch carries no passport drone
+refuses the caller before the door runs. `refusals.py` remembers that refusal per
+root and lane for 60 seconds. What is kept is drone's **answer**, never drone's
+rule — checking for a passport here would reimplement another branch's
+authentication and drift from it. The window is the recovery: a root that gains a
+passport works again within a minute.
+
+---
+
+## The read lane and its cache
+
+**Blocking routes are plain `def`** and run in the threadpool, so a slow read never
+freezes the single worker's loop. `/v1/ping` and `/v1/whoami` stay `async` (no
+blocking work); write routes stay `async` deliberately, the loop being their only
+serialization. The citizen registry is pinned once at boot.
+
+**Expensive reads are single-flight with a short TTL** (`read_cache.py`: the change
+list at 1.5 s, machine vitals, lock state): N concurrent callers share one
+subprocess, a re-poll hits the TTL, and a failure is never cached. `fleet.py`
+coalesces @baud's snapshot the same way, one exec per 1.5 s for `/v1/fleet` and
+`/v1/rooms`.
+
+**Terminal sockets pump on their own 16-thread pool** (`PUMP_WORKERS`, `attach.py`);
+attach seventeen is refused with a sentence naming the cap.
+
 ---
 
 ## Pairing
 
-**The token's hop to the phone was the weak link** (owner, 2026-10-13, after
-signing his phone in by hand): a receipt file the user has to carry is a
-credential typed by eye or mailed. DPLAN-0406 replaced the hop with a QR.
+**A receipt file the user has to carry is a credential typed by eye or mailed**,
+so the token's hop to the phone is a QR (DPLAN-0406).
 
 `host-api pair <label> [--scope read|operate] [--ttl SECONDS]` mints a one-use
 code (`pairings.py`), stores only its sha256 in `host_api/pairings.json` beside

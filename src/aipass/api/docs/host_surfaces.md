@@ -7,14 +7,9 @@
 ---
 
 **Browsing is free; the terminal binds to the seat.** Every READ route serves any
-project @baud's census knows — `files`, `dir`, `diff`, and the fleet routes that
-already did. It used to refuse all but the seated project: `/v1/fleet?project=BAUD`
-painted the cards; every file under them then refused with *"This server is seated in
-AIPass and does not serve project BAUD"* — one surface answering two questions about
-the same project. The owner's ruling, 2026-08-16: *"I should be able to open another
-project via the project tab drop down, and view other agent project files, open any
-passport and view watch read files. no restriction."* **Operate routes are untouched**
-— attach is the only takeover, and binds to the seat.
+project @baud's census knows — `files`, `dir`, `diff` and the fleet routes — so the
+files under a card answer for the same project the card does. **Operate routes keep
+their own rules** — attach is the only takeover.
 
 The seat is the default *and the fast path*: an omitted `project`, or the seat's own
 name in any case, resolves through the local citizen registry with no subprocess.
@@ -22,28 +17,25 @@ Anything else goes through @baud's census, source of the branch's real path — 
 server never composes a filesystem path for a project it is not seated in. A foreign
 name travels **verbatim**, so their census keeps the one ruling on how a name is
 matched (case-sensitive there, the seat not — see the verb lane below for the third
-variant, and no, those three have not been reconciled). The per-branch name fence is
+variant; the three are not reconciled). The per-branch name fence is
 unchanged: free browsing is free browsing of *branches*, not of the disk.
 
 **`project` travels on every verb that names a target, and is never inferred** from
-this server's seat — @baud's rule, paid for with a killed session: a room name
-resolved against the wrong project names a *different* room. Deliberately stricter
+this server's seat — @baud's rule: a room name resolved against the wrong project
+names a *different* room, and a verb sent there acts on it. Deliberately stricter
 than the read lane, where an omitted project means the seated one. The seat is matched
 case-insensitively: the wire says `AIPASS`, the directory `AIPass`, and a
 case-sensitive check would refuse every verb the phone sends.
 
-**The verbs reach any project too — one terminal, any agent.** The owner's ruling,
-2026-08-16: *"the flow is ONE terminal; it hosts the agent I choose, no matter where I
-spawn it… Baud is an aipass tenant in `projects/`, vera is outside, external - that
-should NOT matter. When you block you create friction."* So the seat check is gone from
-`wake` and `kill`, and a foreign branch resolves through the **read lane's** resolver —
-one implementation of where a branch lives, inherited by the operate lane, not copied.
-**Attach already did this**: its external door shipped with the attach train, so that
-half was regression pins, not a fix. `lock` has no project — it locks *this* machine.
+**The verbs reach any project too — one terminal, any agent**, wherever it lives: a
+tenant in `projects/` or an external tree. `wake` and `kill` carry no seat check, and a
+foreign branch resolves through the **read lane's** resolver — one implementation of
+where a branch lives, inherited by the operate lane, not copied. Attach reaches external
+projects through its own external door, pinned by regression tests. `lock` has no
+project — it locks *this* machine.
 
-**Requiring the project got MORE important, not less:** an inferred seat was merely
-sloppy when only one project could be meant. The ruling widens *who* can be reached,
-never *what a request may contain* — operate scope everywhere, garbage refused before
+**Requiring the project matters more because any project can be meant.** Reach widens
+*who* can be reached, never *what a request may contain* — operate scope everywhere, garbage refused before
 any spawn, unknown branch or project refused in the census's own words, per-branch path
 fences untouched.
 
@@ -60,13 +52,10 @@ edits the line; `drone @ai_mail dispatch wake` holds structurally, parsing `--fr
 reaches a privilege-bearing parameter behind a verified-caller check), and `--model`
 never exists — the phone contract carries zero vendor words by ruling.
 
-**Kill goes through the one door, and the gate is why.** For one day this verb answered
-503 naming a seam that did not exist: @baud's binary opted into headless mode for
-`--snapshot` and nothing else, and `tmux kill-session` was one line away. The owner ruled
-`room_kill` the ONE door that ends a session, so it waited. @baud shipped `baud
---end-room <branch> --project <name>` the same evening, proving the single-mechanism
-claim instead of asking to be trusted on it: the flag and the desktop button reach the
-same kill, the resolved project passed as an argument to the shared half.
+**Kill goes through the one door.** `room_kill` is the ONE door that ends a session, by
+the owner's ruling, so the verb execs @baud's `baud --end-room <branch> --project <name>`
+and never `tmux kill-session`: the flag and the desktop button reach the same kill, the
+resolved project passed as an argument to the shared half.
 
 **`ended` is a fact, not a success flag.** `ended: true`: a live session was ended.
 `ended: false` with `ok: true`: nothing to end — the goal state, not a failure. Both
@@ -91,7 +80,15 @@ nothing else. Every byte of data stays behind `/v1/*`. The bundle is served prec
 `/assets` mounted, each bundle-root file routed by name — never a catch-all that could
 shadow the API.
 
-**Where the face comes from (FPLAN-0587).** An installed AIPass has no checkout to build
+**Every stable-named file revalidates.** `phone.html` (the manifest's `start_url`), the
+manifest and the icons are replaced in place by a build and carry `cache-control:
+no-cache`; with no cache-control a browser guesses a heuristic freshness, and a stale
+un-hashed entry fetches stale hashed assets. Those routes answer `If-None-Match` and
+`If-Modified-Since` with starlette's own comparison, since `no-cache` only means "ask
+first" when the server answers the question. `/assets` keeps its caching: a hashed name
+cannot go stale.
+
+**Where the face comes from.** An installed AIPass has no checkout to build
 the phone in, so the directory is a setting: `face_dir` in the host config, set by `drone
 @api host-api set-config --face-dir <dir>` or by @aipass's `aipass baud install` via
 `config.set_face_dir()`. Unset, the server serves @baud's checkout build
@@ -122,7 +119,7 @@ served raw, not joined to the branch list. Which BAUD binary runs is below.
 `fleet.SNAPSHOT_READY` remains a kill switch: off means **503 with a reason**, never a
 synthesised fleet.
 
-**Which baud binary the host lanes exec (FPLAN-0589).** The desktop `baud` links GTK and
+**Which baud binary the host lanes exec.** The desktop `baud` links GTK and
 webkit even for `--snapshot`, so a headless host has nothing to run; @baud's `baud-cli` is
 the same crate's six verbs with no GTK. Every fleet, census, roster and room exec resolves
 the binary **per request** — a config read and a few stats — so a binary installed while
@@ -153,8 +150,8 @@ the one that means it — pinned by test at @baud's request.
 **The terminal lane gives you the room, not a picture of it.** `WS /v1/room/attach` spawns
 a PTY running `tmux new-session -A -s baud-<branch>`, the desktop's argv. The phone becomes
 a real tmux client: scrollback, colour, cursor position and full-screen programs all work
-because nobody reimplements them. A first build, capture-and-repaint polling, was cut before
-shipping — a repaint shows a picture that updates, an attach shows the room. `-A` is
+because nobody reimplements them. There is no capture-and-repaint polling — a repaint
+shows a picture that updates, an attach shows the room. `-A` is
 attach-*or-create*, so a phone and a desk never land in two rooms with one agent's name.
 
 **A room born here matches one born at the desk.** The attach command chains `set-option -t
@@ -172,8 +169,8 @@ it evaluates contains "kill". Ending a room stays one door: `/v1/verbs/kill` →
 **The child takes the PTY as its CONTROLLING terminal — that is what makes resize work at
 all.** `TIOCSWINSZ` delivers `SIGWINCH` to the foreground process group of the *controlling*
 tty, and inheriting an already-open descriptor never acquires one, so `start_new_session=True`
-left the room deaf: every resize landed in the kernel and reached nobody while `tmux
-list-clients` sat at 80x24 forever. The `preexec_fn` does the `setsid` itself, keeping that
+alone leaves the room deaf: every resize lands in the kernel and reaches nobody while `tmux
+list-clients` sits at 80x24. The `preexec_fn` does the `setsid` itself, keeping that
 flag's signal isolation and gaining the terminal. The initial size is stamped on the master
 *before* the child exists: `openpty` hands back 0x0, and a client reading that has already
 chosen its fallback.
@@ -197,10 +194,7 @@ token a lie.
 **A watch with no branch is global mission control**, the one lane here where an absent
 branch is a real answer, not the bug that killed a live session. `drone @prax monitor run`
 with nothing after it watches every branch — the desktop's default pane — and names no
-session to take over. Until 2026-08-16 that form was *unreachable*: the charset fence refused
-an empty string and the argv builder always appended a target, so @baud shipped the phone's
-door **disabled** rather than aiming it at one branch's monitor, which would have rendered
-perfectly and been a lie. The fence is mirrored from their `pty.rs` character for character
+session to take over. The fence is mirrored from their `pty.rs` character for character
 and still refuses the empty string; whether a target was *named at all* is a different
 question, asked once before the fence is consulted. @prax also documents `run all` for the
 same thing; this lane deliberately does not use it — the desktop's argv is what is mirrored.
@@ -218,7 +212,10 @@ established socket, and a pre-accept refusal would put a fixable sentence where 
 cannot show it.
 
 **The stream is never logged.** Room output is the operator's screen and client bytes may be
-a password; attach and detach are recorded, their contents are not.
+a password; attach and detach are recorded, their contents are not. Every detach names the
+room, how long the socket lived and the code it closed on — `room ended` when the room ended
+first (close `4000` to the client), a different detach from any a client can cause. Typing
+into a read-only watch closes the socket `1008` and leaves a `host_api_input_refused` record.
 
 **The pump waits for the FIRST direction to end, not both.** Waiting for both deadlocks on a
 quiet room: the phone closes the sheet, the socket reader ends, and the PTY reader stays
@@ -282,16 +279,8 @@ the door is a `failed` job with drone's sentence in `error`.
 dropped after an hour. A forgotten id is **404 `job_unknown`**, and the phone then reads
 `/v1/backup/status`, whose answer comes from @backup's store and survives everything.
 
-Push (`/v1/notify`) is reserved, not built. See FPLAN-0411.
-
 Requires the optional `[host]` extra (`fastapi`, `uvicorn`); commands fail with install
 instructions if it is absent.
-
----
-
----
-
-[← api README](../README.md)
 
 ---
 
