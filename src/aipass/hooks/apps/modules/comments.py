@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: comments.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: The comments verb — the comment budget's ledger, trend and on-demand scan
 # Branch: hooks
 # Layer: apps/modules
@@ -170,6 +170,10 @@ def handle_command(command: str, args: list) -> bool:
     """Route `drone @hooks comments`; exit 1 on a form it cannot answer."""
     if command != "comments":
         return False
+    if not args:
+        print_introspection()
+        _show_recent()
+        return True
     if wants_help(args):
         _print_help()
         return True

@@ -3,7 +3,7 @@
 # Description: Tests for windows_compat_check.py
 # Version: 1.4.0
 # Created: 2026-05-14
-# Modified: 2026-10-15
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/windows_compat_check.py."""

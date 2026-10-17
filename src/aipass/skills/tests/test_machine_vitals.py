@@ -1084,7 +1084,7 @@ class _Proc:
     refused, so the list can only be built from the name and the five numbers.
     """
 
-    def __init__(self, pid, name, load, mem_pct, rss, user="patrick", state="running", fails=None):
+    def __init__(self, pid, name, load, mem_pct, rss, user: str | None = "someone", state="running", fails=None):
         self.pid = pid
         self._name = name
         self._load = load
@@ -1213,7 +1213,7 @@ class TestTheProcessList:
                     "cpu_pct": 42.5,
                     "mem_pct": 3.1,
                     "mem_mb": 512,
-                    "user": "patrick",
+                    "user": "someone",
                     "state": "running",
                 },
                 {

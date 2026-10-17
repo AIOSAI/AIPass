@@ -272,9 +272,10 @@
       "file": "lib/system_status/handler.py",
       "standard": "unused_function",
       "functions": [
-        "machine_vitals"
+        "machine_vitals",
+        "machine_processes"
       ],
-      "reason": "FPLAN-0561 row 1 (2026-09-12) - the published in-process door for @api's /v1/machine route (row 2), the screen_lock pattern. Its consumer lives in src/aipass/api, outside this per-branch scan, which states it cannot see cross-branch callers. Pinned by tests/test_machine_vitals.py (45 cases). Remove if a branch-local caller lands (text actions as renderings of the dict, a later row)."
+      "reason": "FPLAN-0561 row 1 (2026-09-12) - the published in-process door for @api's /v1/machine route (row 2), the screen_lock pattern. Its consumer lives in src/aipass/api, outside this per-branch scan, which states it cannot see cross-branch callers. Pinned by tests/test_machine_vitals.py (45 cases). Remove if a branch-local caller lands (text actions as renderings of the dict, a later row). machine_processes (DPLAN-0414 T3, 2026-10-16) is the same door's sibling: its only caller is @api's handlers/host/machine_route.py (/v1/machine/processes), pinned by the same test file."
     }
   ],
   "notes": {

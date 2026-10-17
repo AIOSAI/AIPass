@@ -3,7 +3,7 @@
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
 # Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-10-15
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
