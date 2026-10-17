@@ -3,16 +3,12 @@
 # Description: DAEMON Scheduled Follow-ups Module (RETIRED)
 # Version: 2.0.0
 # Created: 2026-02-04
-# Modified: 2026-06-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 RETIRED — the old fire-and-forget follow-up CLI.
-
-Superseded by the decentralized .daemon/schedule.json model (DPLAN-0204).
-Author jobs directly in a branch's .daemon/schedule.json file.
-See: drone @daemon run --help (full schema + schedule types)
-"""
+Author jobs in a branch's .daemon/schedule.json; see drone @daemon run --help."""
 
 from typing import List
 
@@ -46,9 +42,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # The migration notice is still the right GUIDANCE, so it prints - but a
-    # retired subcommand did not do what the caller asked, and exiting 0 told
-    # their `&&` that it did. Notice first, then refuse by name.
+    # Notice first, then refuse by name: exiting 0 would tell the caller's `&&` the retired verb worked.
     json_handler.log_operation("schedule_command_retired", {"args": args[:2]})
     logger.info("[schedule] Retired CLI invoked with %r", args[0])
     print_introspection()

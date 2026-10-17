@@ -3,35 +3,20 @@
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
 # Version: 1.3.1
 # Created: 2026-08-11
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Inbox sweep — the fleet's unread-mail backstop (drone @daemon inbox-sweep).
 
-Replies never wake their recipient, so a reply landing in a sleeping branch's
-inbox stays invisible indefinitely. This sweep looks at every branch mailbox
-and wakes the owner of any inbox holding NEW mail older than 24h.
+Replies never wake their recipient, so the sweep wakes the owner of any inbox holding NEW mail older than 24h.
+Hand tool only: nothing scheduled calls it (the nightly rotation takes each inbox to zero); --dry-run is the cheap look.
 
-HAND TOOL ONLY since 2026-09-10 (DPLAN-0337 R2). Nothing scheduled calls this:
-The owner deleted the daily 09:00 job - up to five wakes a morning was token
-waste, and the nightly rounds (drone @daemon rotation) now take each citizen's
-inbox to zero, one citizen a night. The command stays for anyone to run by hand;
---dry-run is the cheap look.
+Rules: one wake per branch per sweep; managers are never woken (reported as skipped);
+MAX_WAKES caps a pass and deferred branches are named.
 
-Rules:
-  - at most one wake per branch per sweep
-  - managers are never woken (they read mail live) — reported as skipped
-  - MAX_WAKES caps a single pass; deferred branches are named, not dropped
-
-SCOPE — A CITIZEN IS A CITIZEN. The sweep looks wherever the fleet definition
-looks: src/aipass/* framework branches, projects/*/ residents and the federated
-externals alike, because find_stale_inboxes() walks discovery's active branch
-map and that map is @memory's fleet.fleet_branches(). It is NOT a read of
-AIPASS_REGISTRY.json, which is what this docstring and the introspection panel
-used to say — FPLAN-0460 widened the scope and left both texts describing the
-narrow version. Measured 2026-09-07: 28 citizens, 18 core + 4 under projects/ +
-6 external. Pinned by TestSweepScopeIsTheWholeFleet.
+Scope is the whole fleet (framework branches, projects/*/ residents, externals), because
+find_stale_inboxes() walks discovery's branch map, not AIPASS_REGISTRY.json.
 """
 
 import time
@@ -51,9 +36,7 @@ HANDLED_COMMANDS = {"inbox-sweep", "inbox_sweep"}
 # Skip reason owned here — the blocklist is wake policy, not mailbox state.
 SKIP_BLOCKLIST = "wake-blocklist"
 
-# Wakes spawn Claude sessions — capping one pass keeps a fleet-wide backlog from
-# starting a dozen at once. Entries are oldest-first, so the cap defers the
-# freshest stale mailboxes to tomorrow's sweep (and says so).
+# Wakes spawn Claude sessions; entries are oldest-first, so the cap defers the freshest stale mailboxes.
 MAX_WAKES = 5
 
 # Seconds between wakes — staggers process spawns, same guard as the run tick.
@@ -118,9 +101,7 @@ def _apply_wake_policy(entries: List[dict]) -> None:
     """
     try:
         from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
-    # OSError, not only ImportError: MEASURED 2026-08-31 - this import raises
-    # FileNotFoundError under a dead working directory, and the sweep must degrade
-    # rather than crash on an optional consult.
+    # OSError, not only ImportError: the import raises FileNotFoundError under a dead working directory.
     except (ImportError, OSError) as e:
         logger.warning("[inbox_sweep] Wake blocklist unavailable, skipping policy check: %s", e)
         return
@@ -144,7 +125,6 @@ def _wake_message(entry: dict) -> str:
 
 def _wake_owner(entry: dict) -> tuple:
     """Wake one branch owner. Returns (ok: bool, detail: str)."""
-    # Through ai_mail's published door (DPLAN-0404), as run.py and rotation.py
     from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
     owner = entry["owner"]
@@ -158,8 +138,7 @@ def _wake_owner(entry: dict) -> tuple:
             auto=True,
             sender="@daemon",
             model=WAKE_MODEL,
-            # A nudge, not a dispatch: the woken branch owes @daemon no reply, so
-            # nothing may wake @daemon back to read one (ai_mail ruling (a), 2026-09-10).
+            # A nudge, not a dispatch: the woken branch owes @daemon no reply.
             wake_back=False,
         )
     except Exception as e:

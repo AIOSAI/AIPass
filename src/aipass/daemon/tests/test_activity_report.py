@@ -3,7 +3,7 @@
 # Description: Tests for the activity_report CLI module
 # Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -27,11 +27,6 @@ from aipass.daemon.apps.modules.activity_report import handle_command
 from aipass.memory.apps.modules import health as memory_health
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
-
-
-# =============================================
-# handle_command -- routing basics
-# =============================================
 
 
 class TestHandleCommandRouting:
@@ -64,11 +59,6 @@ class TestHandleCommandRouting:
 
         assert result is True
         mock_gen.assert_called_once_with(since_hours=48.0, verbosity="normal")
-
-
-# =============================================
-# handle_command -- activity-report
-# =============================================
 
 
 class TestActivityReportCommand:
@@ -106,11 +96,6 @@ class TestActivityReportCommand:
         mock_json.assert_called_once()
 
 
-# =============================================
-# handle_command -- activity_report alias
-# =============================================
-
-
 class TestActivityReportAlias:
     """Tests for 'activity_report' underscore alias."""
 
@@ -124,19 +109,10 @@ class TestActivityReportAlias:
     def test_activity_report_alias_help(self, capsys):
         result = handle_command("activity_report", ["--help"])
         assert result is True
-        # Shows introspection (module info)
         assert "activity_report Module" in capsys.readouterr().out
 
 
-# =============================================
-# handle_command -- branch-health
-# =============================================
-
-
-# The roster branch-health resolves against. `_known_branch_names` reads the
-# live registry on disk; a CI checkout has none, so every "known branch" test
-# went red there with SystemExit 1 on b681c085 while passing on the dev
-# machine (devpulse, 2026-09-07). Pin the roster instead of the machine.
+# _known_branch_names reads the live registry, which a CI checkout lacks: pin the roster.
 ROSTER = ["DAEMON", "drone"]
 ROSTER_TARGET = f"{MODULE}._known_branch_names"
 
@@ -162,10 +138,7 @@ class TestBranchHealthCommand:
                 result = handle_command("branch-health", ["DRONE"])
 
         assert result is True
-        # The CANONICAL name, not the token typed. Resolution moved ahead of the
-        # report so an unknown branch can be refused once with a non-zero exit;
-        # a side effect is that the registry's own spelling is what travels on.
-        # generate_branch_report already re-derived the same name internally.
+        # The registry's canonical spelling travels on, not the token typed.
         mock_br.assert_called_once_with("drone", since_hours=24.0)
 
     def test_branch_health_with_branch_and_hours(self):
@@ -177,30 +150,17 @@ class TestBranchHealthCommand:
         mock_br.assert_called_once_with("drone", since_hours=48.0)
 
     def test_branch_health_only_flags_refuses_non_zero(self):
-        """A missing branch name is a refusal, and a refusal exits non-zero.
-
-        Was `assert result is True` — the command printed "requires a branch
-        name" and handed its caller a 0, so `daemon branch-health --hours 48 &&
-        next-thing` ran next-thing.
-        """
+        """A missing branch name is a refusal, and a refusal exits non-zero (or `&&` runs on)."""
         with pytest.raises(UnknownArgument) as exc:
             handle_command("branch-health", ["--hours", "48"])
         assert exc.value.verb == "branch-health"
 
     def test_unknown_branch_refuses_non_zero_and_names_the_token(self):
-        """@devpulse's 2026-09-07 fleet sweep, row 21: EXIT-0-ON-FAILURE.
-
-        `branch-health not_a_real_subarg_xyz` printed "Branch not found" twice —
-        once from the report, once from the entry-health block — and exited 0.
-        The owner's standing ruling: an unknown argument FAILS non-zero with the
-        token named. The token has to appear, or the caller cannot tell WHICH
-        argument was rejected.
-        """
+        """An unknown branch fails non-zero with the token named, before any report is generated."""
         with patch(f"{MODULE}.generate_branch_report") as mock_br:
             with pytest.raises(UnknownArgument) as exc:
                 handle_command("branch-health", ["not_a_real_subarg_xyz"])
 
-        # Refused BEFORE any report is generated — one refusal, not two blocks.
         mock_br.assert_not_called()
         assert exc.value.token == "not_a_real_subarg_xyz"
 
@@ -209,11 +169,6 @@ class TestBranchHealthCommand:
             with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
                 assert handle_command("branch-health", ["dRoNe"]) is True
         mock_br.assert_called_once_with("drone", since_hours=24.0)
-
-
-# =============================================
-# --hours / -t parsing, through the activity command
-# =============================================
 
 
 class TestParseHoursArg:
@@ -243,11 +198,6 @@ class TestParseHoursArg:
         assert any("abc" in c for c in warned)
 
 
-# =============================================
-# branch name extraction, through branch-health
-# =============================================
-
-
 class TestExtractBranchName:
     """Which token branch-health takes as the branch, around its flags."""
 
@@ -266,15 +216,9 @@ class TestExtractBranchName:
         assert exc.value.token == "-t 12"
 
 
-# =============================================
-# _render_entry_health -- @memory's wrapped health API
-# =============================================
-
 HEALTH_TARGET = "aipass.memory.apps.modules.health.get_branch_health"
 
-# SGR escape sequences (colour AND attributes such as bold). Rich's
-# ReprHighlighter injects these around brackets and numbers whenever it
-# believes it is writing to a terminal.
+# SGR codes, colour AND attributes: Rich's ReprHighlighter wraps brackets and numbers on a terminal.
 ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -299,12 +243,7 @@ def _clean_payload(**overrides):
 
 
 def _render(branch="DAEMON"):
-    """The entry-health block as `branch-health <branch>` prints it, escape codes stripped.
-
-    Through the command, not the private renderer (daemon, fleet green leg 5): the
-    roster is pinned to the one branch and the base report is empty, so what is
-    printed is the entry-health block alone.
-    """
+    """The entry-health block alone, as `branch-health <branch>` prints it, escape codes stripped."""
     with patch(ROSTER_TARGET, return_value=[branch]):
         with patch(f"{MODULE}.generate_branch_report", return_value=""):
             with cli_console.capture() as captured:
@@ -386,8 +325,7 @@ class TestRenderEntryHealthDegradation:
 
     def test_memory_branch_unavailable_is_visible(self, monkeypatch):
         """Mutant killed: the ImportError branch returns "" instead of the UNAVAILABLE line."""
-        # A module without the name makes the renderer's from-import raise
-        # ImportError — @memory absent, with the real module still imported.
+        # Deleting the name makes the from-import raise ImportError, as if @memory were absent.
         monkeypatch.delattr(memory_health, "get_branch_health")
         out = _render()
 
@@ -395,7 +333,7 @@ class TestRenderEntryHealthDegradation:
 
 
 class TestBranchHealthWiring:
-    """branch-health must actually call @memory's API — the todo's whole point."""
+    """branch-health must actually call @memory's API."""
 
     def test_branch_health_prints_entry_health(self, capsys):
         with patch(ROSTER_TARGET, return_value=ROSTER):
@@ -427,33 +365,13 @@ class TestBranchHealthWiring:
 
 
 class TestMarkersSurviveRichMarkup:
-    """The live-output gap: console.print() eats lowercase bracket tags as styles.
-
-    Asserting on the returned string cannot see this — the marker is present in
-    the string and absent on screen. These render through Rich the way the CLI
-    does, so a lowercase marker regression fails here instead of silently
-    blanking the report.
-    """
+    """console.print() eats lowercase bracket tags as styles; a returned-string assert cannot see it."""
 
     def _rendered(self, payload, force_terminal=True):
         """Render through Rich the way the shared cli console does, ANSI stripped.
 
-        force_terminal=True pins the HOSTILE case deliberately. Rich decides
-        whether to emit escape codes from is_terminal, and FORCE_COLOR in the
-        environment makes even a StringIO count as a terminal — so ReprHighlighter
-        wraps every bracket and every number in bold. Left to the environment this
-        test passes or fails depending on which shell ran it: it was green in the
-        morning and red the same evening on byte-identical code.
-
-        no_color is deliberately NOT used here. It strips colour and leaves
-        attributes, so bold survives it and a plain substring assert still fails.
-        Stripping the escape codes outright is what answers the question this test
-        actually asks: is the marker TEXT on screen. A marker eaten by markup
-        parsing is absent from the stripped text too, so the guard still bites.
-
-        color_system is pinned too: force_terminal alone is not enough, because
-        TERM=dumb makes Rich resolve no colour system and emit plain text anyway.
-        Naming it keeps the hostile case hostile in every shell.
+        force_terminal and color_system are both pinned so the hostile case holds in every shell
+        (FORCE_COLOR, TERM=dumb); no_color would leave bold in place, so codes are stripped instead.
         """
         import io
 
@@ -514,16 +432,7 @@ class TestMarkersSurviveRichMarkup:
         assert "221" in out
 
     def test_highlighted_path_is_genuinely_exercised(self):
-        """Proof the hostile case is real, not a test that passes trivially.
-
-        If Rich ever stopped emitting attributes for a forced terminal, every
-        assertion above would still pass while no longer testing anything. This
-        fails instead, so the guard cannot quietly go inert.
-
-        Both settings are named explicitly. Relying on the ambient shell is what
-        caused the original defect — and cost a second one: an earlier draft of
-        this very test passed under FORCE_COLOR and failed under TERM=dumb.
-        """
+        """Proof the hostile case is real: if Rich stopped emitting codes, the tests above would go inert."""
         import io
 
         from rich.console import Console
@@ -540,14 +449,7 @@ class TestMarkersSurviveRichMarkup:
 
 
 class TestSharedConsoleContract:
-    """Pin the cli console behaviour the uppercase-marker convention rests on.
-
-    The convention exists because the shared console parses markup, which eats a
-    lowercase bracket tag as a style name. This asserts that hazard behaviourally
-    against the REAL console rather than trusting a private attribute, so a cli
-    change that removes or reverses it surfaces here instead of silently blanking
-    daemon's report.
-    """
+    """Pin, against the REAL cli console, the markup parsing the uppercase-marker convention rests on."""
 
     def test_shared_console_still_eats_lowercase_tags(self):
         with cli_console.capture() as captured:
@@ -560,15 +462,10 @@ class TestSharedConsoleContract:
 
 
 class TestCollectorSkipsSandboxes:
-    """The activity scan never reads a dropbox or an .archive (owner's ruling 2026-09-27 20:42, paraphrased:
-    a dropbox is a sandbox like .archive; nothing looks into it)."""
+    """The activity scan never reads a dropbox or an .archive: both are sandboxes."""
 
     def test_a_file_in_a_dropbox_or_an_archive_is_not_activity(self, tmp_path):
-        """Only the branch's own file counts; the skip is judged below the branch, whose root stands in a dropbox.
-
-        Red first: the scan walked into dropbox/ and counted dropbox/stray.py (leg 3 code).
-        Mutant killed: the dropbox name dropped from the skip.
-        """
+        """Only the branch's own file counts; the skip is judged below the branch, whose root stands in a dropbox."""
         branch = tmp_path / "dropbox" / "branch"
         for rel in ("apps/kept.py", "dropbox/stray.py", ".archive/old.py", "apps/dropbox/stray.py"):
             (branch / rel).parent.mkdir(parents=True, exist_ok=True)

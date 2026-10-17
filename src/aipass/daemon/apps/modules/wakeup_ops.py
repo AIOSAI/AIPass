@@ -3,14 +3,11 @@
 # Description: Wake-Up Cron Operations Module
 # Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-31
+# Modified: 2026-10-17
 # =============================================
 
 """
 Wake-up operations module -- facade for cron entry point.
-
-Provides a clean module-layer interface over handler functions
-used by daemon_wakeup.py.
 """
 
 from aipass.prax import logger
@@ -19,18 +16,12 @@ from aipass.daemon.apps.handlers.json import json_handler
 
 try:
     from aipass.cli.apps.modules.display import console
-# OSError as well: an optional cross-branch import can fail on the filesystem,
-# not only on absence. @cli imports clean under a dead cwd today (measured
-# 2026-08-31); the guard catches the condition rather than today's measurement.
+# OSError as well: an optional cross-branch import can fail on the filesystem, not only on absence.
 except (ImportError, OSError):
     from rich.console import Console
 
     console = Console()
     logger.info("Optional: aipass.cli.apps.modules.display not available, using rich.console fallback")
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -43,11 +34,6 @@ def print_introspection():
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [dim](notifications archived — Telegram moving to skills system)[/dim]")
     console.print()
-
-
-# =============================================
-# DRONE ROUTING
-# =============================================
 
 
 def handle_command(command: str, args: list) -> bool:

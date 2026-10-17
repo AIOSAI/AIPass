@@ -3,7 +3,7 @@
 # Description: DAEMON Data Loading Handler
 # Version: 1.1.1
 # Created: 2026-01-29
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -17,17 +17,9 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
 
-# =============================================
-# CONSTANTS
-# =============================================
-
 _DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
 INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
 LOCAL_PATH = _DAEMON_ROOT / "DAEMON.local.json"
-
-# =============================================
-# DATA LOADING
-# =============================================
 
 
 def load_inbox() -> Dict[str, Any]:
@@ -57,18 +49,8 @@ def load_local() -> Dict[str, Any]:
         return {"sessions": [], "active_tasks": {}}
 
 
-# =============================================
-# DIGEST ANALYSIS
-# =============================================
-
-
 def categorize_messages(messages: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Categorize inbox messages by status.
-
-    Returns:
-        Dict with keys: new, opened, actionable, informational
-    """
+    """Categorize inbox messages into new, opened, actionable and informational."""
     categories: Dict[str, List[Dict[str, Any]]] = {"new": [], "opened": [], "actionable": [], "informational": []}
 
     for msg in messages:

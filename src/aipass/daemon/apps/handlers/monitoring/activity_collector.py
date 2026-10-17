@@ -3,15 +3,11 @@
 # Description: Branch Activity Data Collector
 # Version: 0.3.0
 # Created: 2026-01-30
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Activity Data Collector Handler
-
-Collects activity data from all branches in the AIPass system.
-Scans for code files (.py) and memory files (.trinity/*.json, README.md, DASHBOARD.local.json).
-Provides file modification timestamps for activity tracking.
 """
 
 import os
@@ -25,7 +21,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
 
 
-# Constants — find registry: env var > repo root > ~/.aipass/
+# Registry lookup order: env var > repo root > ~/.aipass/
 _REPO_ROOT = module_file(__file__).parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
 _REGISTRY_CANDIDATES = [
     Path(os.environ.get("AIPASS_REGISTRY", "")),
@@ -38,13 +34,8 @@ CODE_FILE_EXTENSION = ".py"
 
 
 def load_branch_registry() -> Dict[str, Any]:
-    """
-    Load the AIPASS_REGISTRY.json file.
-
-    Returns:
-        Dict containing registry data with 'metadata' and 'branches' keys.
-        Returns empty dict with empty branches list on error.
-    """
+    """Load the AIPASS_REGISTRY.json file.
+    Missing or unreadable answers {"metadata": {}, "branches": []}."""
     if not REGISTRY_PATH.exists():
         return {"metadata": {}, "branches": []}
 
@@ -57,15 +48,8 @@ def load_branch_registry() -> Dict[str, Any]:
 
 
 def get_branch_paths() -> List[Dict[str, str]]:
-    """
-    Get all branch names and absolute paths from the registry.
-
-    Registry stores relative paths (e.g. 'src/aipass/daemon').
-    This resolves them against the repo root so consumers get absolute paths.
-
-    Returns:
-        List of dicts with 'name' and 'path' keys for each branch.
-    """
+    """Get all branch names and absolute paths from the registry.
+    Registry paths are repo-relative; they are resolved against the repo root."""
     registry = load_branch_registry()
     branches = registry.get("branches", [])
 
@@ -75,7 +59,6 @@ def get_branch_paths() -> List[Dict[str, str]]:
         raw_path = b.get("path", "")
         if not name or not raw_path:
             continue
-        # Resolve relative registry paths against repo root
         resolved = Path(raw_path)
         if not resolved.is_absolute():
             resolved = _REPO_ROOT / raw_path
@@ -84,15 +67,7 @@ def get_branch_paths() -> List[Dict[str, str]]:
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:
-    """
-    Get modification time of a file.
-
-    Args:
-        file_path: Path to the file.
-
-    Returns:
-        datetime of last modification, or None if file doesn't exist.
-    """
+    """Get modification time of a file, or None if it is missing or unreadable."""
     try:
         if file_path.exists():
             return datetime.fromtimestamp(file_path.stat().st_mtime)
@@ -102,26 +77,10 @@ def _get_file_mtime(file_path: Path) -> Optional[datetime]:
 
 
 def _is_memory_file(file_path: Path) -> bool:
-    """
-    Check if a file is a memory file for this branch.
-
-    Memory files follow patterns:
-    - .trinity/local.json
-    - .trinity/observations.json
-    - .trinity/passport.json
-    - README.md
-    - DASHBOARD.local.json
-
-    Args:
-        file_path: Path to check.
-
-    Returns:
-        True if file is a memory file.
-    """
+    """Check if a file is a memory file for this branch."""
     name = file_path.name
     parent_name = file_path.parent.name
 
-    # Check for .trinity/ memory files
     if parent_name == ".trinity" and name in ("local.json", "observations.json", "passport.json"):
         return True
     if name == "README.md":
@@ -135,17 +94,7 @@ def _is_memory_file(file_path: Path) -> bool:
 def _scan_directory_files(
     directory: Path, since: Optional[datetime] = None, max_depth: int = 5
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Scan a directory for code and memory files.
-
-    Args:
-        directory: Directory to scan.
-        since: Only include files modified since this time.
-        max_depth: Maximum directory depth to scan.
-
-    Returns:
-        Dict with 'code_files' and 'memory_files' lists.
-    """
+    """Scan a directory for code and memory files."""
     code_files: List[Dict[str, Any]] = []
     memory_files: List[Dict[str, Any]] = []
 
@@ -154,11 +103,8 @@ def _scan_directory_files(
 
     def _should_skip_dir(item: Path) -> bool:
         """Check if a directory should be skipped during scanning.
-
-        A dropbox is a sandbox like .archive (owner's ruling 2026-09-27 20:42,
-        paraphrased): nothing looks into it. Judged by the directory's own name,
-        below the scanned root, so a branch that lives under a dropbox is read.
-        """
+        A dropbox is a sandbox like .archive; judged by its own name below the root,
+        so a branch that lives under a dropbox is still read."""
         if item.name in ("__pycache__", "dropbox"):
             return True
         return item.name.startswith(".") and item.name != ".trinity"
@@ -206,42 +152,19 @@ def _scan_directory_files(
 
 
 def scan_branch_activity(branch_name: str, branch_path: str, since: Optional[datetime] = None) -> Dict[str, Any]:
-    """
-    Scan a single branch directory and collect file modification times.
-
-    Args:
-        branch_name: Name of the branch (e.g., "DRONE").
-        branch_path: Absolute path to the branch directory.
-        since: Only include files modified since this time.
-               Defaults to last 24 hours if not specified.
-
-    Returns:
-        Dict with structure:
-        {
-            "branch_name": str,
-            "path": str,
-            "code_files": [{"path": str, "name": str, "mtime": str}],
-            "memory_files": [{"path": str, "name": str, "mtime": str}],
-            "last_activity": str (ISO format) or None,
-            "total_files": int,
-            "scan_time": str
-        }
-    """
-    # Default to last 24 hours
+    """Scan a single branch directory and collect file modification times."""
     if since is None:
         since = datetime.now() - timedelta(hours=24)
 
     directory = Path(branch_path)
     scan_result = _scan_directory_files(directory, since)
 
-    # Find the most recent activity
     all_files = scan_result["code_files"] + scan_result["memory_files"]
     last_activity = None
     if all_files:
         most_recent = max(all_files, key=lambda f: f["mtime_datetime"])
         last_activity = most_recent["mtime"]
 
-    # Clean up internal datetime objects before returning
     for f in scan_result["code_files"]:
         del f["mtime_datetime"]
     for f in scan_result["memory_files"]:
@@ -259,26 +182,7 @@ def scan_branch_activity(branch_name: str, branch_path: str, since: Optional[dat
 
 
 def get_all_branch_activity(since: Optional[datetime] = None) -> Dict[str, Any]:
-    """
-    Collect activity data for ALL branches in the system.
-
-    Args:
-        since: Only include files modified since this time.
-               Defaults to last 24 hours if not specified.
-
-    Returns:
-        Dict with structure:
-        {
-            "scan_time": str,
-            "time_window_hours": float,
-            "branches_scanned": int,
-            "branches_with_activity": int,
-            "total_files_modified": int,
-            "branches": {
-                "BRANCH_NAME": {branch activity dict}
-            }
-        }
-    """
+    """Collect activity data for ALL branches in the system."""
     if since is None:
         since = datetime.now() - timedelta(hours=24)
 
@@ -312,7 +216,6 @@ def get_all_branch_activity(since: Optional[datetime] = None) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # Simple test
     print("Testing activity_collector...")
     print(f"Registry path: {REGISTRY_PATH}")
     print(f"Registry exists: {REGISTRY_PATH.exists()}")
@@ -321,7 +224,6 @@ if __name__ == "__main__":
     print(f"Found {len(branches)} branches")
 
     if branches:
-        # Test scanning one branch
         first = branches[0]
         print(f"\nScanning {first['name']}...")
         activity = scan_branch_activity(first["name"], first["path"])

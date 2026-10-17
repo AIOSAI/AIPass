@@ -3,18 +3,13 @@
 # Description: Entry point CLI for drone @daemon
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 DAEMON Branch - Main Orchestrator
-
-Explicit module imports:
-- Imports known modules from modules/ directory
-- Routes commands to discovered modules automatically
 """
 
-# Standard library imports
 import os
 import sys
 from typing import List, Any
@@ -26,10 +21,8 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# Console
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
@@ -52,18 +45,8 @@ def _header(text):
     console.print(f"[bold cyan]{'=' * 70}[/bold cyan]")
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
-
 def get_modules() -> List[Any]:
-    """
-    Return list of known modules that implement handle_command().
-
-    Returns:
-        List of module objects with handle_command function
-    """
+    """Return list of known modules that implement handle_command()."""
     modules = []
     for mod in [update, schedule, activity_report, actions, run, timer_install, queue, inbox_sweep, rotation]:
         if hasattr(mod, "handle_command"):
@@ -72,48 +55,25 @@ def get_modules() -> List[Any]:
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """
-    Route command to appropriate module
+    """Route command to appropriate module. True if handled.
 
-    Args:
-        command: Command name (e.g., 'create', 'update', 'list')
-        args: Additional arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
-
-    Exits:
-        An exception raised by a module stops routing: no later module is asked,
-        error() names the verb ("<command> failed: <exception>"), and the process
-        exits 1 (sys.exit). An UnknownArgument refusal names the verb and the
-        token and exits 1 the same way.
+    A module exception or UnknownArgument stops routing: error() names the verb, exit 1.
     """
     for module in modules:
         try:
             if module.handle_command(command, args):
                 return True
-        # Caught BEFORE the generic handler below, which logs and moves on to the
-        # next module: swallowing a refusal here would turn "queue: unknown
-        # argument 'x'" into "unknown command: queue", naming the wrong thing and
-        # then falling through to a verb that never asked for these arguments.
+        # Before the generic handler, so the refusal names the argument, not "unknown command".
         except UnknownArgument as refusal:
             error(f"{refusal.verb}: unknown argument '{refusal.token}'", refusal.usage or None)
             sys.exit(1)
-        # Every module refuses a verb it does not own before doing any work, so an
-        # exception here comes from the module that owns the verb: name it and stop.
-        # Moving on to the next module reported the verb as "Unknown command".
+        # Modules refuse unowned verbs before any work, so this exception is the owner's: stop.
         except Exception as e:
             logger.error(f"[DAEMON] Module {module.__name__} error: {e}", exc_info=True)
             error(f"{command} failed: {e}")
             sys.exit(1)
 
     return False
-
-
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
 
 
 def print_introspection(modules: List[Any]):
@@ -130,7 +90,6 @@ def print_introspection(modules: List[Any]):
     if modules:
         for module in modules:
             module_name = module.__name__.split(".")[-1]
-            # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
@@ -141,11 +100,6 @@ def print_introspection(modules: List[Any]):
     console.print()
     console.print("[dim]Run 'drone @daemon --help' for usage information[/dim]")
     console.print()
-
-
-# =============================================================================
-# DRONE COMPLIANCE - HELP SYSTEM
-# =============================================================================
 
 
 def print_help(modules: List[Any]):
@@ -171,7 +125,6 @@ def print_help(modules: List[Any]):
     console.print("[bold cyan]AVAILABLE COMMANDS:[/bold cyan]")
     console.print()
 
-    # Show actual routable commands, not module names
     _COMMAND_HELP = [
         ("update", "Returns digest of DAEMON activity for check-ins."),
         ("queue", "Unified job queue view (--json for frozen schema)."),
@@ -218,52 +171,33 @@ def print_help(modules: List[Any]):
     console.print()
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def main():
     """Main entry point - routes commands or shows help.
 
-    The exit seam: the failed flag error() sets is reset on entry, so a run never
-    inherits an earlier command's verdict, and a routed command answers
-    resolve_exit(handled): 0 clean, 2 routed but a failure went through error(),
-    1 not routed. The systemd tick's red exit for a failed job is run's own
-    sys.exit(1), and a tick calls no error() on a job failure, so this seam does
-    not turn an ordinary failed job into a failing unit.
+    Returns resolve_exit(handled): 0 clean, 2 routed but error() was called, 1 not routed.
     """
     reset_command_state()
 
-    # Get available modules
     modules = get_modules()
 
-    # Parse arguments
     args = sys.argv[1:]
 
-    # Show introspection when run with no arguments
     if len(args) == 0:
         print_introspection(modules)
         return 0
 
-    # Version flag
     if args[0] in ["--version", "-V"]:
         console.print("DAEMON v1.1.0")
         return 0
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help(modules)
         return 0
 
-    # Extract command and remaining args
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Subcommand --help guard — intercept before dispatch.
-    # Scans EVERY remaining arg, not just the first: daemon fires scheduled jobs
-    # and wakes branches, so a help flag that lands after a flag or a stray token
-    # ('inbox-sweep --hours 48 --help') must never fall through and execute.
+    # Scans EVERY arg: a help flag after other tokens must never fall through and fire jobs.
     if any(arg in ("--help", "-h") for arg in remaining_args):
         for module in modules:
             if module.handle_command(command, ["--help"]):
@@ -273,7 +207,6 @@ def main():
 
     json_handler.log_operation("daemon_command", {"command": command})
 
-    # Route to modules
     handled = route_command(command, remaining_args, modules)
     if handled:
         logger.info("[DAEMON] Command routed successfully: %s", command)

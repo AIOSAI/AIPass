@@ -13,67 +13,67 @@
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [91, 107, 159, 186, 210, 318],
+      "lines": [77, 89, 129, 154, 176, 231],
       "reason": "Due checks of the live tick (daemon, fleet green leg 5). Each answer IS the scheduler's decision for an unreadable field, written in each function's docstring: an unreadable last_run reads not-yet-run or due (the fire writes a fresh stamp, so one bad row costs one fire); an unreadable time or due_date reads not due (no fire can repair the owner's schedule, so due would fire every tick or fire a one-shot early). The caller, is_job_due, needs exactly that bool; a raise would stop the tick for every job in the fleet, which the tick's contract forbids (one bad job costs that one job)."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [553, 590],
+      "lines": [396, 419],
       "reason": "Holds of the live tick (daemon, fleet green leg 5): an unreadable last_failure_at or last_blocked_at answers no hold, because a hold that cannot be measured could never expire and would stall the job for good, while releasing it costs at most one early attempt whose own outcome writes a fresh stamp. False is the decision, not a stand-in; a raise would stop the tick for every job."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [427],
+      "lines": [307],
       "reason": "_slot_anchor (daemon, fleet green legs 3 and 5): None is 'no anchor to seed', the documented answer for an unreadable slot and for an interval that is not a positive number; the one caller, seed_interval_slot, warns and leaves the job unseeded. A raise here stopped the whole tick (leg 3, item 2), which this answer cured."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [721, 726, 737, 742, 762],
+      "lines": [489, 494, 504, 509, 523],
       "reason": "_calc_next_run is display (daemon, fleet green leg 5): None means 'no next run to advertise', which is the true answer when the schedule or last_run cannot be read; the queue shows it blank and nothing fires from next_run (is_job_due reads the schedule and last_run itself). A raise would land in update_job_runstate after a fire and lose that fire's record."
     },
     {
       "file": "apps/handlers/schedule/recovery.py",
       "standard": "logged_fallback",
-      "lines": [181, 286, 350, 354, 563],
+      "lines": [110, 197, 241, 245, 401],
       "reason": "Catch-up lane, built and OFF (RECOVERY_LANE_LIVE False) (daemon, fleet green leg 5). Each answer is the documented decision: an unparseable last_tick is no history, so no gap (181, as a missing one); an unreadable hourly time enumerates no windows, as the due check refuses the same value (286); an unreadable max-age bound or instant is unlimited, since one late wake with an honest header costs less than a window dropped unreported (350, 354); an unreadable instant has no age to print, '' (563, a header suffix)."
     },
     {
       "file": "apps/handlers/monitoring/inbox_scanner.py",
       "standard": "logged_fallback",
-      "lines": [60, 74],
+      "lines": [53, 64],
       "reason": "Inbox sweep, a hand tool (daemon, fleet green leg 5): an unparseable stamp answers None like a missing one, so the message is not aged, because a sweep that cannot tell a message's age must not wake a branch over it (60); an unreadable inbox answers None like a malformed one, so the branch is not reported, because the woken agent could not read that inbox either, and the warning names the file (74)."
     },
     {
       "file": "apps/handlers/monitoring/red_flag_detector.py",
       "standard": "logged_fallback",
-      "lines": [64],
+      "lines": [41],
       "reason": "Report parsing (daemon, fleet green leg 5): an unreadable ISO stamp answers None like a missing one, and every caller treats None as 'no known activity time' for a report line; nothing is fired or written from it, and a raise would take the whole activity report down over one bad stamp."
     },
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [304, 310],
+      "lines": [167, 173],
       "reason": "citizen_class_for (daemon, fleet green legs 2 and 3): None means 'unreadable' on every path that returns it (an unreadable .trinity or passport, a passport or identity that is not a dict); no passport can hold None, and an absent passport answers ''. The checker reads the guard returns as a success path, but they are the same answer for the same case. Callers (inbox sweep, rounds roster) leave a None citizen out."
     },
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [394],
+      "lines": [251],
       "reason": "_load_schedule_file (daemon, fleet green leg 5): None means 'this schedule file cannot be used', for an unreadable file and a malformed one alike; the one caller, discover_jobs, skips that file with a warning naming it, so one bad file cannot stop the fleet's tick. A raise would stop discovery for every citizen."
     },
     {
       "file": "apps/handlers/schedule/command_job.py",
       "standard": "logged_fallback",
-      "lines": [144],
+      "lines": [99],
       "reason": "command_job_problem (daemon, fleet green leg 5): only ValueError is caught, and command_argv raises ValueError on purpose as its refusal, with a message that is never empty; every other exception, the 'check broke' case, propagates. So the string is the refusal reason, the same kind as every other return of the function, and the caller refuses the job and names why."
     },
     {
       "file": "apps/modules/timer_install.py",
       "standard": "logged_fallback",
-      "lines": [109, 113],
+      "lines": [100, 104],
       "reason": "_run_systemctl (daemon, fleet green leg 5): every False this seam returns is a failure the user was already shown through cli error(), the non-zero exit on the success path included, so the caller cannot mistake it for an answer; True only on success (or not loaded, when asked) and None only for not found, when asked (leg 4b)."
     },
     {

@@ -3,14 +3,11 @@
 # Description: Branch Memory Health Checker
 # Version: 0.2.1
 # Created: 2026-01-30
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Memory Health Checker Handler
-
-Validates memory file existence, structure, and freshness for branches.
-Provides health status reporting for the Branch Activity Monitoring System.
 """
 
 import json
@@ -22,31 +19,19 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
 
-# Health status constants
 STATUS_OK = "OK"
 STATUS_WARNING = "WARNING"
 STATUS_RED = "RED"
 
-# Required memory files (branch cannot function properly without these)
-# These live inside the .trinity/ subdirectory of each branch
 REQUIRED_FILES = [".trinity/local.json", "README.md"]
 
-# Optional memory files (nice to have, warning if missing)
 OPTIONAL_FILES = [".trinity/observations.json"]
 
-# Freshness thresholds (in days)
 FRESHNESS_WARNING_DAYS = 7
 FRESHNESS_RED_DAYS = 30
 
-# Structural containers a .trinity file must carry (schema 3.0.0), keyed by filename.
-# A file missing one of these is genuinely broken — the entries have nowhere to land.
-#
-# Caps are deliberately NOT checked here. Schema 3.0.0 moved limits out of every
-# .trinity file into @memory's memory.config.json, where defaults are deep-merged
-# with per-branch overrides. A copy of the caps in this handler would be a snapshot
-# that drifts, and re-implementing the merge is how @memory and @daemon end up
-# disagreeing about "over cap". Entry-count and entry-size health are @memory's
-# read-only APIs to answer, not ours to re-derive (@memory, 2026-08-13).
+# Containers a .trinity file must carry (schema 3.0.0). Caps are NOT checked here:
+# they live in @memory's memory.config.json (merged per branch); a copy here would drift.
 TRINITY_CONTAINERS: Dict[str, Sequence[str]] = {
     "local.json": ("sessions", "key_learnings", "todos"),
     "observations.json": ("observations",),
@@ -54,34 +39,10 @@ TRINITY_CONTAINERS: Dict[str, Sequence[str]] = {
 
 
 def check_memory_files_exist(branch_path: str) -> Dict[str, Any]:
-    """
-    Check if required memory files exist for a branch.
-
-    Required files (actual .trinity/ structure):
-    - .trinity/local.json
-    - README.md
-
-    Optional files:
-    - .trinity/observations.json
-    - DASHBOARD.local.json
-
-    Args:
-        branch_path: Absolute path to the branch directory.
-
-    Returns:
-        Dict with structure:
-        {
-            "required": {"filename": bool, ...},
-            "optional": {"filename": bool, ...},
-            "missing_required": [str],
-            "missing_optional": [str],
-            "all_required_present": bool
-        }
-    """
+    """Check if required memory files exist for a branch."""
     directory = Path(branch_path)
     trinity_dir = directory / ".trinity"
 
-    # Build expected file paths
     required_checks = {
         ".trinity/local.json": trinity_dir / "local.json",
         "README.md": directory / "README.md",
@@ -92,7 +53,6 @@ def check_memory_files_exist(branch_path: str) -> Dict[str, Any]:
         "DASHBOARD.local.json": directory / "DASHBOARD.local.json",
     }
 
-    # Check required files
     required_results = {}
     missing_required = []
     for name, path in required_checks.items():
@@ -101,7 +61,6 @@ def check_memory_files_exist(branch_path: str) -> Dict[str, Any]:
         if not exists:
             missing_required.append(name)
 
-    # Check optional files
     optional_results = {}
     missing_optional = []
     for name, path in optional_checks.items():
@@ -120,33 +79,7 @@ def check_memory_files_exist(branch_path: str) -> Dict[str, Any]:
 
 
 def validate_memory_structure(file_path: str, expected_containers: Optional[Sequence[str]] = None) -> Dict[str, Any]:
-    """
-    Validate memory file structure — is this .trinity file usable at all?
-
-    Checks the three things that make a memory file structurally sound:
-    - a metadata section exists ("document_metadata" or "metadata")
-    - that metadata carries a readable schema_version
-    - the entry containers for this filename exist and are lists
-
-    Caps are NOT checked here — see TRINITY_CONTAINERS for why.
-
-    Args:
-        file_path: Absolute path to the memory file.
-        expected_containers: Container names to require. Defaults to the
-            TRINITY_CONTAINERS entry for the filename (empty for unknown names).
-
-    Returns:
-        Dict with structure:
-        {
-            "valid": bool,
-            "has_metadata": bool,
-            "schema_version": str or None,
-            "containers": {"name": bool, ...},
-            "missing_containers": [str],
-            "issues": [str],
-            "metadata_fields": [str] (if metadata exists)
-        }
-    """
+    """Validate memory file structure — is this .trinity file usable at all?"""
     path = Path(file_path)
 
     if expected_containers is None:
@@ -179,8 +112,6 @@ def validate_memory_structure(file_path: str, expected_containers: Optional[Sequ
 
     issues = []
 
-    # Check for metadata section
-    # Memory files use either "document_metadata" or "metadata"
     has_metadata = False
     metadata_fields: List[str] = []
     metadata_section = None
@@ -195,7 +126,7 @@ def validate_memory_structure(file_path: str, expected_containers: Optional[Sequ
     if not has_metadata:
         issues.append("No metadata section found (expected 'document_metadata' or 'metadata')")
 
-    # Check schema_version — an unversioned file cannot be interpreted safely
+    # An unversioned file cannot be interpreted safely.
     schema_version = None
     if isinstance(metadata_section, dict):
         metadata_fields = list(metadata_section.keys())
@@ -205,7 +136,6 @@ def validate_memory_structure(file_path: str, expected_containers: Optional[Sequ
         else:
             issues.append("No readable 'schema_version' in metadata")
 
-    # Check entry containers — a missing container means entries have nowhere to land
     containers: Dict[str, bool] = {}
     missing_containers: List[str] = []
     for name in expected_containers:
@@ -215,7 +145,6 @@ def validate_memory_structure(file_path: str, expected_containers: Optional[Sequ
             missing_containers.append(name)
             issues.append(f"Missing entry container: '{name}'")
 
-    # Overall validity
     valid = has_metadata and len(issues) == 0
 
     return {
@@ -232,24 +161,7 @@ def validate_memory_structure(file_path: str, expected_containers: Optional[Sequ
 def check_freshness(
     file_path: str, warning_days: int = FRESHNESS_WARNING_DAYS, red_days: int = FRESHNESS_RED_DAYS
 ) -> Dict[str, Any]:
-    """
-    Check when a file was last modified and determine freshness status.
-
-    Args:
-        file_path: Absolute path to the file.
-        warning_days: Days after which status becomes WARNING.
-        red_days: Days after which status becomes RED.
-
-    Returns:
-        Dict with structure:
-        {
-            "exists": bool,
-            "last_modified": str (ISO format) or None,
-            "days_ago": float or None,
-            "status": "OK" | "WARNING" | "RED",
-            "message": str
-        }
-    """
+    """Check when a file was last modified and determine freshness status."""
     path = Path(file_path)
 
     if not path.exists():
@@ -294,39 +206,11 @@ def check_freshness(
 
 
 def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, Any]:
-    """
-    Get comprehensive memory health status for a branch.
-
-    Combines file existence, structure validation, and freshness checks
-    into an overall health assessment.
-
-    Health Status Levels:
-    - OK: All required files present, valid structure, recent activity
-    - WARNING: Missing optional files or stale (7+ days)
-    - RED: Missing required files or very stale (30+ days)
-
-    Args:
-        branch_path: Absolute path to the branch directory.
-        branch_name: Name of the branch (uppercase, e.g., "DRONE").
-
-    Returns:
-        Dict with structure:
-        {
-            "branch_name": str,
-            "branch_path": str,
-            "overall_status": "OK" | "WARNING" | "RED",
-            "file_check": {file existence results},
-            "structure_checks": {filename: validation result},
-            "freshness_checks": {filename: freshness result},
-            "issues": [str],
-            "check_time": str
-        }
-    """
+    """Get comprehensive memory health status for a branch."""
     json_handler.log_operation("memory_health_check", {"branch": branch_name})
     directory = Path(branch_path)
     issues: List[str] = []
 
-    # Step 1: Check file existence
     file_check = check_memory_files_exist(branch_path)
 
     if not file_check["all_required_present"]:
@@ -336,7 +220,6 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
     for missing in file_check["missing_optional"]:
         issues.append(f"Missing optional file: {missing}")
 
-    # Step 2: Validate structure of existing memory files (.trinity/ paths)
     structure_checks = {}
     trinity_dir = directory / ".trinity"
     local_file = trinity_dir / "local.json"
@@ -356,7 +239,6 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
             for issue in obs_validation["issues"]:
                 issues.append(f".trinity/observations.json: {issue}")
 
-    # Step 3: Check freshness
     freshness_checks = {}
     files_to_check = [
         (".trinity/local.json", local_file),
@@ -369,13 +251,11 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
             freshness = check_freshness(str(path))
             freshness_checks[name] = freshness
 
-            # Track worst freshness status
             if freshness["status"] == STATUS_RED:
                 worst_freshness = STATUS_RED
             elif freshness["status"] == STATUS_WARNING and worst_freshness != STATUS_RED:
                 worst_freshness = STATUS_WARNING
 
-    # Step 4: Determine overall status
     if not file_check["all_required_present"]:
         overall_status = STATUS_RED
     elif worst_freshness == STATUS_RED:
@@ -385,7 +265,6 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
     else:
         overall_status = STATUS_OK
 
-    # Filter out structure check issues from issues list for WARNING-only items
     has_structure_issues = any(not check.get("valid", True) for check in structure_checks.values())
     if has_structure_issues and overall_status == STATUS_OK:
         overall_status = STATUS_WARNING
@@ -403,22 +282,18 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
 
 
 if __name__ == "__main__":
-    # Simple test
     print("Testing memory_health...")
 
-    # Test with a sample branch path
     test_path = "."
     test_name = "EXAMPLE"
 
     print(f"\nChecking {test_name} at {test_path}")
 
-    # Test file existence
     existence = check_memory_files_exist(test_path)
     print(f"  Required files present: {existence['all_required_present']}")
     print(f"  Missing required: {existence['missing_required']}")
     print(f"  Missing optional: {existence['missing_optional']}")
 
-    # Test structure validation
     local_path = f"{test_path}/.trinity/local.json"
     structure = validate_memory_structure(local_path)
     print(f"  Structure valid: {structure['valid']}")
@@ -426,11 +301,9 @@ if __name__ == "__main__":
     print(f"  Schema version: {structure['schema_version']}")
     print(f"  Missing containers: {structure['missing_containers']}")
 
-    # Test freshness
     freshness = check_freshness(local_path)
     print(f"  Freshness: {freshness['status']} ({freshness['message']})")
 
-    # Test overall health
     health = get_memory_health_status(test_path, test_name)
     print(f"\n  Overall status: {health['overall_status']}")
     print(f"  Issues: {len(health['issues'])}")

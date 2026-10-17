@@ -3,29 +3,12 @@
 # Description: Single-instance lock for the scheduler tick
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """One tick at a time: the advisory lock the scheduler runs under.
 
-The systemd timer fires every ~2 minutes and a slow tick can still be firing
-wakes when the next one starts. Two ticks at once would each read the runstate,
-each decide the same job is due, and each wake its owner — the double-fire this
-lock exists to prevent.
-
-Lives in a handler because it is the only thing in the tick lane that TOUCHES THE
-FILESYSTEM: the lock directory and the lock file itself. A module may not do
-direct file operations (seedgo's modules rule), and ``run.py`` was doing both
-inline.
-
-**The path is an argument, never a constant read from here.** ``run.py`` owns
-``LOCK_FILE`` and passes it in, so a test that seams the path on the module still
-seams what actually gets opened. A copy of the constant in this file would have
-quietly re-pointed the suite at the live lock.
-
-Advisory, not mandatory: on a host without ``fcntl`` (Windows) ``available()``
-answers False and the caller runs unlocked rather than refusing to tick at all —
-stated in the log, never silent.
+Reference: docs/scheduler_tick.md
 """
 
 import errno
@@ -40,8 +23,6 @@ except ImportError:
     fcntl = None  # type: ignore[assignment]
     logger.info("[tick_lock] fcntl unavailable (Windows) — ticks run unlocked")
 
-# The errnos a non-blocking flock raises when ANOTHER holder has the lock. Only
-# these mean "a tick is already running"; any other OSError is a broken lock.
 _CONTENDED = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
 
 
@@ -58,12 +39,7 @@ def prepare(lock_path) -> None:
 def acquire(lock_path) -> Optional[object]:
     """Take the tick lock. Returns a handle to release, or None if another tick holds it.
 
-    None is the ordinary answer, not an error: the previous tick is still
-    working, and this one simply steps aside until the next timer fire.
-
-    Raises OSError when flock fails for any reason OTHER than contention
-    (EAGAIN/EWOULDBLOCK/EACCES) — e.g. ENOLCK or EBADF. Answering None there
-    would report "another tick is running" on every fire while no tick ever ran.
+    Raises OSError on a non-contention flock failure: None there would report a running tick forever.
     """
     if fcntl is None:
         return None

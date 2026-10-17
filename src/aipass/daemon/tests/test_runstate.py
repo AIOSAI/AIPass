@@ -3,7 +3,7 @@
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
@@ -38,17 +38,11 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
 )
 
 
-# ── Fixtures ──────────────────────────────────────────
-
-
 @pytest.fixture(autouse=True)
 def _mute_log_operation(monkeypatch):
     """Keep every test here off the real daemon_json log file.
 
-    update_job_runstate/record_job_failure call json_handler.log_operation,
-    which read-modify-writes a shared repo file — xdist workers racing on it
-    produce empty-read JSONDecodeError flakes. Patched on the runstate module
-    object so the functions imported above resolve the mock via their globals.
+    xdist workers racing on that shared file produce empty-read JSONDecodeError flakes.
     """
     monkeypatch.setattr(runstate_mod, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
@@ -85,9 +79,6 @@ def daily_job():
     }
 
 
-# ── job_key / get_job_state ──────────────────────────
-
-
 class TestJobKey:
     def test_composite_key(self):
         assert job_key("@commons", "wake-test") == "@commons/wake-test"
@@ -101,9 +92,6 @@ class TestJobKey:
         runstate = {"jobs": {}}
         state = get_job_state(runstate, "@commons", "wake-test")
         assert state == {}
-
-
-# ── load/save runstate ───────────────────────────────
 
 
 class TestRunstateIO:
@@ -125,24 +113,11 @@ class TestRunstateIO:
     def test_a_read_modify_write_cycle_does_not_overwrite_the_other_jobs(self, tmp_runstate):
         """Recording one job's run must leave every other job's history alone.
 
-        The no_overwrite claim daemon actually owns. load_runstate() returns
-        the empty default when the file is absent, and the whole runstate is
-        rewritten on every save — so if the load handed back that default for
-        a file that already_exists, the next save would silently erase every
-        other job's last_run. Nothing else would notice: the file would still
-        parse, the scheduler would just re-fire jobs it had already run.
-
-        Written here after the sweep (DPLAN-0325). The item used to be scored
-        off tests/test_json_handler.py, a DPLAN-0059 stamp file that had
-        stopped RUNNING — it skipped module-wide on a JSON_DIR the shim does
-        not have — so daemon was credited for a no-clobber claim nothing was
-        executing. This one executes, and it is about daemon's own state.
+        Every save rewrites the whole runstate, so a load that answered the empty default would erase it.
         """
         first = {"version": 1, "jobs": {"@commons/wake": {"last_run": "2026-01-01T00:00:00"}}}
         assert save_runstate(first) is True
 
-        # The cycle a caller performs: load what already_exists, add one job,
-        # write the whole structure back.
         current = load_runstate()
         current["jobs"]["@memory/sweep"] = {"last_run": "2026-02-02T00:00:00"}
         assert save_runstate(current) is True
@@ -155,12 +130,7 @@ class TestRunstateIO:
         )
 
 
-# ── Due-logic, per schedule type, through is_job_due ──
-#
-# Every schedule is asked the way the tick asks it: is_job_due(job, runstate,
-# now) with a stated instant. catch_up is pinned False on the windowed jobs so
-# only the in-window arm answers — the late arm has its own classes below.
-
+# catch_up is pinned False on these windowed jobs so only the in-window arm answers.
 AT = datetime(2026, 9, 7, 4, 0)
 
 
@@ -253,18 +223,13 @@ class TestIntervalDue:
     def test_an_unreadable_interval_is_not_due(self, interval):
         """An interval that is not a positive number is not due, whatever last_run says.
 
-        It answered due on every tick: no fire can repair the owner's schedule, so the
-        job fired every two minutes for as long as the file stayed wrong.
-        Mutant killed: the interval check removed (the TypeError answered due, the code before 2026-09-27).
+        No fire can repair the owner's schedule, so answering due would fire it on every tick.
         """
         recent = (AT - timedelta(minutes=1)).isoformat()
         assert due({"type": "interval", "interval_minutes": interval}, AT, last_run=recent) is False
 
     def test_an_unreadable_last_run_is_due(self):
-        """An unparseable last_run answers due: the fire writes a fresh stamp, so the job recovers.
-
-        Mutant killed: the parse failure answering not due (the job would never run again).
-        """
+        """An unparseable last_run answers due: the fire writes a fresh stamp, so the job recovers."""
         assert due(INTERVAL, AT, last_run="not-a-timestamp") is True
 
 
@@ -284,9 +249,6 @@ class TestOnceDue:
         assert due({"type": "once"}, AT) is False
 
 
-# ── is_job_due (integration) ─────────────────────────
-
-
 class TestIsJobDue:
     def test_interval_no_runstate(self, interval_job):
         runstate = {"jobs": {}}
@@ -304,9 +266,6 @@ class TestIsJobDue:
     def test_unknown_schedule_type(self):
         job = {"owner": "@x", "id": "y", "enabled": True, "schedule": {"type": "biweekly"}, "prompt": "z"}
         assert is_job_due(job, {"jobs": {}}) is False
-
-
-# ── rotation schedule type (DPLAN-0287 piece 1) ──────
 
 
 def rotation_job(time_str: str) -> dict:
@@ -348,9 +307,6 @@ class TestRotationDue:
         assert datetime.fromisoformat(next_run) > datetime.now()
 
 
-# ── update_job_runstate ──────────────────────────────
-
-
 class TestUpdateRunstate:
     def test_creates_entry(self):
         runstate = {"jobs": {}}
@@ -362,10 +318,7 @@ class TestUpdateRunstate:
 
     @pytest.mark.parametrize("minutes", [0, -30], ids=["zero", "negative"])
     def test_a_non_positive_interval_advertises_no_next_run(self, minutes):
-        """A non-positive interval is never due, so no next run may be shown (DPLAN-0354 leg 3, item 3).
-
-        Mutant killed: _calc_next_run's interval guard removed (next_run = last_run + 0 or minus minutes).
-        """
+        """A non-positive interval is never due, so no next run may be shown."""
         runstate = {"jobs": {}}
         schedule = {"type": "interval", "interval_minutes": minutes}
         update_job_runstate(runstate, "@commons", "wake-test", schedule, timestamp="2026-09-27T22:00:00")
@@ -377,9 +330,6 @@ class TestUpdateRunstate:
         update_job_runstate(runstate, "@x", "y", schedule)
         entry = runstate["jobs"]["@x/y"]
         assert "completed" in entry
-
-
-# ── prune_orphans ────────────────────────────────────
 
 
 class TestPruneOrphans:
@@ -396,8 +346,6 @@ class TestPruneOrphans:
         assert pruned == 0
 
 
-# ── closed windows: catch_up + the MISSED record (FPLAN-0492 ruling 6) ──
-
 DAY = "2026-09-07"
 
 
@@ -411,13 +359,10 @@ def windowed_job(time_str="03:00", catch_up=None, owner="@seedgo", job_id="night
 
 class TestWindowClosedUnrun:
     def test_inside_the_window_is_not_closed(self):
-        # 03:10 is inside 03:00 +/-15, so the window is still open and the job
-        # has not missed anything yet.
         assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 3, 10)) is False
 
     def test_on_the_closing_edge_is_not_closed(self):
-        # 03:15 is the last minute INSIDE the window. Off-by-one here would
-        # accuse a job in the same minute it is still allowed to fire.
+        # 03:15 is the last minute INSIDE the window.
         assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 3, 15)) is False
 
     def test_one_minute_past_the_edge_is_closed(self):
@@ -435,8 +380,7 @@ class TestWindowClosedUnrun:
         assert window_closed_unrun({"time": "03:00"}, ran, datetime(2026, 9, 7, 9, 0)) is True
 
     def test_window_crossing_midnight_never_closes(self):
-        # 23:50 +/-15 runs to 00:05 the NEXT day, so no instant inside 09-07
-        # proves the miss. Refused rather than guessed.
+        # 23:50 +/-15 runs into the next day, so no instant today proves the miss.
         for hour in (0, 12, 23):
             assert window_closed_unrun({"time": "23:50"}, None, datetime(2026, 9, 7, hour, 30)) is False
 
@@ -446,18 +390,9 @@ class TestWindowClosedUnrun:
 
 class TestCatchUpDueness:
     def test_on_by_default_a_closed_window_fires_late(self):
-        """DPLAN-0332 flipped this, and the flip is the whole point of the plan.
+        """A job that states nothing about catch_up catches up whenever RECOVERY_LANE_LIVE is on.
 
-        Was test_off_by_default_a_closed_window_does_not_fire, pinning ruling 6
-        of 2026-09-07 (catch-up opt-in). The owner superseded it on 09-08 after
-        the 23h gap: every enabled job in the fleet had left catch_up unset, so
-        opt-in meant nothing recovered. A job that states nothing now catches up.
-
-        The pin READS THE FLAG rather than hard-coding one world. The lane is
-        gated by RECOVERY_LANE_LIVE while @devpulse and the owner run the
-        controlled live proof, and a pin that asserted the flipped world would
-        go red on a tree that is behaving exactly as ruled. What must always
-        hold is that the flag and the default agree.
+        The pin reads the flag rather than hard-coding one world: the flag and the default must agree.
         """
         job = windowed_job()
         assert job["schedule"].get("catch_up") is None, "this job must state nothing about catch_up"
@@ -470,11 +405,7 @@ class TestCatchUpDueness:
         assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is False
 
     def test_opted_in_a_closed_window_fires_late(self):
-        """A late daily fire is due, is named a catch-up, and still reports the miss.
-
-        Mutant killed: missed_window answering False for a job with catch_up on
-        (the late fire would hide that the window was ever missed).
-        """
+        """A late daily fire is due, is named a catch-up, and still reports the miss."""
         job = windowed_job(catch_up=True)
         late = datetime(2026, 9, 7, 9, 0)
         assert is_job_due(job, {"jobs": {}}, now=late) is True
@@ -482,8 +413,6 @@ class TestCatchUpDueness:
         assert missed_window(job, {"jobs": {}}, now=late) is True, "catching up does not unmiss the window"
 
     def test_catch_up_cannot_double_fire_the_same_day(self):
-        # The bound is _already_ran_today: once today's catch-up has run, the
-        # rest of the day's ticks must not fire it again.
         job = windowed_job(catch_up=True)
         runstate = {
             "jobs": {
@@ -535,8 +464,7 @@ class TestCaughtUpStamp:
         assert runstate["jobs"]["@seedgo/nightly"]["caught_up"] == "2026-09-07T09:00:00"
 
     def test_an_ordinary_run_clears_a_stale_marker(self):
-        # A marker left from last week's catch-up would report a healthy job as
-        # chronically late for as long as nobody looked at the timestamp.
+        # A stale marker would report a healthy job as chronically late.
         runstate = {"jobs": {"@seedgo/nightly": {"caught_up": "2026-08-30T09:00:00"}}}
         update_job_runstate(
             runstate, "@seedgo", "nightly", {"type": "daily", "time": "03:00"}, timestamp="2026-09-07T03:02:00"
@@ -561,8 +489,7 @@ class TestMissedWindowRecord:
         assert note_missed_window(runstate, "@seedgo", "nightly", datetime(2026, 9, 7, 9, 0)) is True
 
     def test_the_marker_does_not_make_a_job_look_run(self):
-        # note_missed_window creates a runstate row. If that row read as a run,
-        # a catch_up job would be silenced by the very line reporting its miss.
+        # note_missed_window creates a row; read as a run, it would silence the catch-up it reports.
         runstate = {"jobs": {}}
         now = datetime(2026, 9, 7, 9, 0)
         note_missed_window(runstate, "@seedgo", "nightly", now)
@@ -571,8 +498,6 @@ class TestMissedWindowRecord:
     def test_window_label_names_the_window(self):
         assert window_label({"time": "03:00"}) == f"03:00 +/-{WINDOW_MINUTES}m"
 
-
-# ── interval slots (FPLAN-0492 ruling 6, the seedgo weekly lesson) ──
 
 WEEK_MINUTES = 7 * 24 * 60
 
@@ -588,8 +513,7 @@ class TestSlotAnchor:
     """The anchor a slot seeds, read off seed_interval_slot's answer."""
 
     def test_a_past_slot_rolls_forward_by_whole_intervals(self):
-        # The anchor names a RHYTHM, so a slot left in the past keeps its phase
-        # instead of making the job instantly overdue.
+        # A past slot keeps its phase instead of making the job instantly overdue.
         job = slotted_job(slot="2026-08-02T03:00:00")
         assert seed_interval_slot({"jobs": {}}, job, now=datetime(2026, 9, 7, 9, 0)) == "2026-09-06T03:00:00"
 
@@ -618,10 +542,7 @@ class TestNeedsSlotSeed:
         assert needs_slot_seed(slotted_job(), runstate) is False
 
     def test_a_blocked_job_still_needs_seeding(self):
-        # THE DEFECT, pinned. record_job_blocked creates a row carrying
-        # last_blocked_at and no last_run, so a "no row" test would refuse to
-        # seed exactly the job that most needs it - @seedgo's weekly cycle,
-        # enabled unseeded and blocked twice at 01:34 and 01:40 on 2026-09-07.
+        # record_job_blocked creates a row with no last_run; a "no row" test would never seed it.
         runstate = {
             "jobs": {
                 "@seedgo/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
@@ -640,8 +561,7 @@ class TestNeedsSlotSeed:
 
 class TestSeedIntervalSlot:
     def test_seeding_moves_the_first_fire_to_the_next_slot(self):
-        # The lesson in one test: enabled 01:34 Monday, seeded from a Sunday
-        # 03:00 slot, first fire is the NEXT Sunday 03:00 - not 01:34.
+        # Enabled 01:34 Monday from a Sunday 03:00 slot: first fire is the NEXT Sunday 03:00.
         runstate = {"jobs": {}}
         job = slotted_job(slot="2026-09-06T03:00:00")
         seeded = seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34))

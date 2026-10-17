@@ -3,17 +3,13 @@
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
 # Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Inbox scanner — reads every active branch's .ai_mail.local/inbox.json and
 reports which branches are sitting on NEW (unread) mail older than a threshold.
-
-Pure read-only detection: no waking, no mutation. The inbox_sweep module owns
-the wake decision. Replies never wake their recipient, so unread mail is
-invisible until something looks — this is the thing that looks.
-"""
+Read-only: the inbox_sweep module owns the wake decision. Reference: docs/inbox_sweep.md"""
 
 import json
 from datetime import datetime
@@ -41,10 +37,7 @@ SKIP_PASSPORT_UNREADABLE = "passport_unreadable"
 
 def _parse_timestamp(raw: str) -> Optional[datetime]:
     """Parse an ai_mail message timestamp. Returns None if unparseable.
-
-    Unparseable answers None like a missing stamp, so the message is not aged:
-    a sweep that cannot tell a message's age must not wake a branch over it.
-    """
+    None means the message is not aged: a sweep that cannot tell its age must not wake over it."""
     if not raw:
         return None
 
@@ -62,10 +55,7 @@ def _parse_timestamp(raw: str) -> Optional[datetime]:
 
 def _load_inbox(inbox_file: Path) -> Optional[dict]:
     """Read an inbox.json. Returns parsed dict or None on any failure.
-
-    Unreadable answers None like malformed, so the branch is not reported: the
-    woken agent could not read that inbox either, and the warning names the file.
-    """
+    None skips the branch: a woken agent could not read that inbox either."""
     try:
         with open(inbox_file, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -82,15 +72,8 @@ def _load_inbox(inbox_file: Path) -> Optional[dict]:
 
 def _skip_reason(branch_path: Path, owner: str) -> Optional[str]:
     """Return why this branch must not be woken, or None if it is wakeable.
-
-    Managers are never woken — their mail lands live in an open session. The
-    @daemon sender bypasses ai_mail's own manager gate (self-scheduled wakes),
-    so the sweep has to enforce the rule itself or it would spawn interactive
-    sessions on managers.
-
-    Only passport-local reasons are decided here. ai_mail's wake blocklist is a
-    wake-policy concern and is applied by the inbox_sweep module.
-    """
+    The @daemon sender bypasses ai_mail's manager gate, so managers are refused here.
+    Passport-local reasons only: ai_mail's wake blocklist is applied by inbox_sweep."""
     citizen_class = citizen_class_for(branch_path)
     if citizen_class is None:
         # A passport that exists but cannot be read may be a manager's: not woken.
@@ -109,11 +92,8 @@ def scan_branch_inbox(
     now: Optional[datetime] = None,
     stale_hours: int = DEFAULT_STALE_HOURS,
 ) -> Optional[dict]:
-    """
-    Scan one branch mailbox for unread mail older than `stale_hours`.
-
-    Returns an entry dict when the branch has stale unread mail, else None.
-    """
+    """Scan one branch mailbox for unread mail older than `stale_hours`.
+    Returns an entry dict when the branch has stale unread mail, else None."""
     if now is None:
         now = datetime.now()
 
@@ -161,12 +141,8 @@ def find_stale_inboxes(
     stale_hours: int = DEFAULT_STALE_HOURS,
     now: Optional[datetime] = None,
 ) -> List[dict]:
-    """
-    Scan every active, registered branch for stale unread mail.
-
-    Returns entries sorted oldest-first, so the stalest mailbox is served first
-    when the sweep caps how many branches it wakes in one pass.
-    """
+    """Scan every active, registered branch for stale unread mail.
+    Sorted oldest-first so the stalest mailbox is served first when the sweep caps wakes."""
     branch_map = active_branch_map()
     if not branch_map:
         logger.warning("[inbox_scanner] No active branches found in registry")

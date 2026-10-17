@@ -3,30 +3,13 @@
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Schedule recovery — what the scheduler owes the fleet after it was away.
 
-DPLAN-0332, The owner 2026-09-08. The scheduler's timer was uninstalled for 23
-hours on 09-07; @vera's 10:00 window and @daemon's 09:00 inbox-sweep closed
-unrun and nothing noticed, because a MISSED line needs a tick to write it.
-
-THE RULE THIS FILE ENCODES, in the owner's words: "a missed schedule gets
-identified, added to a queued run, then reissued one by one, not all at once -
-imagine 10 missed events all firing at once." And: "down 10 days, Vera misses
-10 events - she does ONE, is told we have been away 10 days with the list, and
-figures out the rest herself."
-
-So: **the system informs, the agent reasons.** Ten missed windows become ONE
-wake carrying ten dates. Nothing is replayed.
-
-WHY THIS IS NOT IN runstate.py. runstate owns due-ness: given a job and a
-clock, should it fire. This file owns a different subject — given a gap, what
-did the fleet miss and in what order should it be repaid. Keeping them apart is
-what lets the drain be tested with no schedule in sight, and due-ness with no
-gap. runstate keeps ``last_tick`` itself, because a tick is a fact about a run.
+Reference: docs/recovery_and_catch_up.md
 """
 
 from datetime import datetime, timedelta
@@ -37,58 +20,24 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule import runstate as rs
 
-# =============================================
-# GAP DETECTION
-# =============================================
-
-#: A gap wider than this means windows may have closed unseen. One window
-#: (2 * WINDOW_MINUTES) is the smallest interval in which a daily job's whole
-#: firing opportunity can pass, so anything wider is worth inspecting. Ticks are
-#: ~2 min apart, so this is ~15 missed ticks — never a normal hiccup.
+#: One window (2 * WINDOW_MINUTES), the smallest span a daily job's whole firing chance can pass in.
 GAP_THRESHOLD_MINUTES = 30
 
-#: Runstate key holding the instant of the last completed tick.
 LAST_TICK_FIELD = "last_tick"
 
-#: Cause vocabulary. THREE values, and @devpulse ruled on the shape 2026-09-08:
-#: "Boot inside the gap reports both facts, naming the boot instant and that the
-#: gap opened before it. That sentence is the one that points at yesterday's real
-#: defect; keep it."
-#:
-#: The DPLAN as agreed was two-valued — boot-after meant machine_off, boot-before
-#: meant scheduler_stopped. Measuring 09-07 showed the real incident was BOTH:
-#: the timer was removed at 11:46 while the machine was up, and the machine then
-#: rebooted at 16:14 inside the same gap. Two values would have reported only the
-#: reboot and hidden the defect that actually mattered.
-#:
-#: ``machine_off`` is deliberately NOT a value here. Boot-inside-the-gap cannot
-#: be told apart from "shut down for the night" without positive evidence the
-#: host was up during the gap, and no cross-platform source provides it — so the
-#: cause names what is KNOWN (the gap opened, then the host booted inside it) and
-#: the sentence states both instants rather than picking a story.
+#: No ``machine_off``: a boot inside the gap cannot be told from a night's shutdown
+#: without proof the host was up, so the cause names only what is known.
 CAUSE_SCHEDULER_STOPPED = "scheduler_stopped"
 CAUSE_STOPPED_THEN_REBOOTED = "scheduler_stopped_then_rebooted"
 CAUSE_UNKNOWN = "unknown"
 
 
 class BootTimeUnavailable(Exception):
-    """The host could not be asked when it booted.
-
-    Raised rather than returning a default, because a guessed boot time turns
-    into a confident sentence in an agent's wake header about why the system was
-    away. Refused by name is the honest answer; the gap is still reported, with
-    its cause named ``unknown``.
-    """
+    """The host could not be asked when it booted. Never defaulted: a guess becomes a false header."""
 
 
 def boot_time() -> datetime:
-    """When did this host last boot? Raises BootTimeUnavailable if it cannot be known.
-
-    psutil first because it is the cross-platform answer and this fleet runs a
-    Windows job; /proc/stat second because it is always right on Linux and costs
-    nothing when psutil is absent. No third guess: uptime parsing differs per
-    distro and a wrong boot time is worse than no boot time.
-    """
+    """When did this host last boot? Raises BootTimeUnavailable if it cannot be known."""
     try:
         import psutil
 
@@ -110,19 +59,12 @@ def boot_time() -> datetime:
 
 
 def _classify_cause(gap_start: datetime, boot: Optional[datetime]) -> Tuple[str, str]:
-    """Name why the scheduler was away. Returns (cause, human sentence).
-
-    ``boot`` is None when the host refused to say, and the caller must not
-    invent one — the gap is still real and still reported.
-    """
+    """Name why the scheduler was away. Returns (cause, human sentence)."""
     if boot is None:
         return CAUSE_UNKNOWN, "the cause could not be read from this host"
 
     if boot <= gap_start:
-        # A BOOT THAT PRECEDES THE LAST TICK DID NOT CAUSE THE GAP, and the
-        # sentence has to say so rather than merely mention the instant — naming
-        # a boot next to a gap reads as cause to anyone skimming it. @devpulse,
-        # 2026-09-08, on a header that named a boot a day older than the gap.
+        # Say the earlier boot did not cause it: a boot named beside a gap reads as cause.
         return (
             CAUSE_SCHEDULER_STOPPED,
             f"the scheduler stopped ticking at {gap_start:%Y-%m-%d %H:%M} while the machine was up "
@@ -151,26 +93,13 @@ def format_duration(delta: timedelta) -> str:
 def detect_gap(runstate: dict, now: Optional[datetime] = None) -> Optional[dict]:
     """Was the scheduler away since its last tick? Returns a gap record or None.
 
-    The trigger is the GAP, never "a reboot": 09-07 was no reboot at the point
-    it broke — the machine was up and the timer was simply gone. Asking "did I
-    tick recently" catches both shapes with one question.
-
-    Returns None when there is no last_tick at all. That is the first tick after
-    this lands, and it has no history to reason from; queueing off an unknown
-    past would invent windows the fleet never actually missed.
-
-    An unparseable last_tick also answers None, for the same reason: a stamp
-    nobody can read is no history, and this tick's record_tick overwrites it.
+    None when last_tick is missing or unreadable: never fall back to an older stamp, that invents a gap.
     """
     if now is None:
         now = datetime.now()
 
     raw = runstate.get(LAST_TICK_FIELD)
     if not raw:
-        # NO last_tick IS NOT A GAP. The first tick after this lands has no
-        # history to reason from, and reaching for some older timestamp instead
-        # would invent an absence the fleet never had — then queue catch-ups for
-        # windows nobody missed. @devpulse's rule, 2026-09-08.
         logger.info("[recovery] no %s yet — no gap can be known on this tick", LAST_TICK_FIELD)
         return None
 
@@ -205,8 +134,7 @@ def detect_gap(runstate: dict, now: Optional[datetime] = None) -> Optional[dict]
 def record_tick(runstate: dict, now: Optional[datetime] = None) -> str:
     """Stamp this tick. Returns the instant written.
 
-    Called at the END of a tick, after detection has read the previous value —
-    stamping first would erase the very gap the tick exists to notice.
+    Call at the END of a tick: stamping before detection erases the gap.
     """
     if now is None:
         now = datetime.now()
@@ -215,28 +143,16 @@ def record_tick(runstate: dict, now: Optional[datetime] = None) -> str:
     return stamp
 
 
-# =============================================
-# MISSED WINDOW ENUMERATION
-# =============================================
-
-#: Schedule types that fire inside a window and can therefore miss one.
-#: ``hourly`` is here and was NOT in runstate's catch-up path before DPLAN-0332
-#: — is_job_due mapped it to _is_hourly_due alone, so an hourly job had no
-#: catch-up at all. This is a build, not a flag flip.
 WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly"})
 
-#: Ceiling on how many instants one entry carries into a header. A three-month
-#: gap on an hourly job is ~2000 windows, and a wake header naming all of them
-#: is not information, it is a denial of service on the agent's attention.
+#: Header list cap: a months-long gap on an hourly job is thousands of windows.
 MAX_LISTED_INSTANTS = 50
 
 
 def enumerate_missed(job: dict, gap_start: datetime, gap_end: datetime) -> List[str]:
     """Every window of *job* that closed inside the gap. Returns ISO instants, oldest first.
 
-    Walks the calendar rather than dividing the gap, because a daily window is a
-    wall-clock time and DST makes "every 24h" and "every day at 08:00" different
-    sequences. The walk is bounded by the gap itself.
+    Walks the calendar, not 24h steps: across DST those are different sequences.
     """
     schedule = job.get("schedule", {})
     sched_type = schedule.get("type")
@@ -260,8 +176,7 @@ def _enumerate_daily(schedule: dict, gap_start: datetime, gap_end: datetime) -> 
     while day <= last_day:
         fire_at = datetime.combine(day, datetime.min.time()) + timedelta(minutes=target)
         close_at = fire_at + timedelta(minutes=rs.WINDOW_MINUTES)
-        # Both edges inside the gap: a window still open at gap_end has not been
-        # missed, it is about to fire on this very tick through the ordinary path.
+        # A window still open at gap_end is not missed: it fires this tick the ordinary way.
         if fire_at >= gap_start and close_at <= gap_end:
             missed.append(fire_at.isoformat())
         day += timedelta(days=1)
@@ -271,13 +186,9 @@ def _enumerate_daily(schedule: dict, gap_start: datetime, gap_end: datetime) -> 
 def _enumerate_hourly(schedule: dict, gap_start: datetime, gap_end: datetime) -> List[str]:
     """Hourly windows that both opened and closed inside the gap.
 
-    An unreadable ``time`` answers [] (no windows), because runstate's hourly
-    due check refuses the same value, so the job could never have fired then either.
+    An unreadable ``time`` answers [], as runstate's hourly due check refuses the same value.
     """
-    # An hourly job spells its target as ``time``, an INT MINUTE past the hour
-    # ("30"), not "HH:MM" — the same field name as daily carrying a different
-    # shape. Read it the way _is_hourly_due reads it or the enumeration and the
-    # due check would disagree about when the window even was.
+    # Hourly ``time`` is an int minute past the hour ("30"), not "HH:MM"; read it as _is_hourly_due does.
     raw = schedule.get("time", "0")
     try:
         minute = int(raw)
@@ -296,35 +207,20 @@ def _enumerate_hourly(schedule: dict, gap_start: datetime, gap_end: datetime) ->
     return missed
 
 
-# =============================================
-# THE CATCH-UP QUEUE — one entry per job, never a replay
-# =============================================
-
-#: Runstate key holding the FIFO of catch-up entries, oldest missed window first.
 QUEUE_FIELD = "catch_up_queue"
 
-#: Runstate key holding the one catch-up currently in flight fleet-wide.
 IN_FLIGHT_FIELD = "catch_up_in_flight"
 
-#: The owner's ceiling: "I think 60min cool down then it retires the next." The
-#: COMPLETION of the previous catch-up is the trigger; this is the backstop for
-#: when nothing ever reports (dead monitor, reboot mid-drain).
+#: Backstop only: the previous catch-up completing is the trigger, this covers one that never reports.
 DRAIN_CEILING_MINUTES = 60
 
-#: Attempts before a refused entry stops blocking the head of the queue.
 MAX_ATTEMPTS = 3
 
-#: Per-job opt-out and age bound, read from the job's ``schedule`` block.
 CATCH_UP_MAX_AGE_FIELD = "catch_up_max_age_hours"
 
 
 def catch_up_enabled(schedule: dict) -> bool:
-    """Is catch-up on for this job? Default ON since DPLAN-0332.
-
-    Supersedes ruling 6 of 2026-09-07, which made it opt-in — and every enabled
-    job in the fleet left it unset, which is exactly why nothing recovered on
-    09-08. A job whose late run is worthless sets ``"catch_up": false``.
-    """
+    """Is catch-up on for this job? Default ON; a job opts out with ``"catch_up": false``."""
     if schedule.get("type") not in WINDOWED_TYPES:
         return False
     return schedule.get(rs.CATCH_UP_FIELD, True) is not False
@@ -333,12 +229,7 @@ def catch_up_enabled(schedule: dict) -> bool:
 def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
     """Is this missed window young enough to be worth firing?
 
-    Unlimited by default: The owner's ten-day case wants exactly one wake however
-    long it has been. A job that sets the bound is saying its own late run stops
-    being useful after N hours.
-
-    An unreadable bound or instant answers True, the same as an unset bound:
-    one late wake with an honest header costs less than a window dropped unreported.
+    Unset or unreadable bound/instant answers True: a late wake costs less than a dropped window.
     """
     limit = schedule.get(CATCH_UP_MAX_AGE_FIELD)
     if limit is None:
@@ -364,10 +255,7 @@ def queue_catch_up(
 ) -> Optional[dict]:
     """Record that *job* owes one catch-up covering *instants*. Returns the entry, or None.
 
-    IDEMPOTENT BY KEY, which is what makes a second reboot mid-drain lose
-    nothing: an entry already queued for this job absorbs any newly discovered
-    instants rather than becoming a second entry. Ten days off is one Vera wake
-    with ten dates, and detecting it twice is still one wake.
+    Idempotent by key: an existing entry absorbs new instants, so re-detection is still one wake.
     """
     if now is None:
         now = datetime.now()
@@ -404,23 +292,12 @@ def queue_catch_up(
 
 
 def drop_from_queue(runstate: dict, owner: str, job_id: str) -> Optional[dict]:
-    """Remove a job's catch-up entry and return it.
-
-    Called on supersession — the regular window arrived before the catch-up
-    fired — and after a successful catch-up fire. The missed list travels on
-    with the caller, because the truth about time rides whichever wake goes
-    first.
-    """
+    """Remove a job's catch-up entry and return it, so its missed list rides whichever wake goes first."""
     return runstate.get(QUEUE_FIELD, {}).pop(rs.job_key(owner, job_id), None)
 
 
 def queue_order(runstate: dict) -> List[dict]:
-    """The queue, FIFO by oldest missed window. Entries at the tail sort last.
-
-    A tail-parked entry (3 failed attempts) carries ``parked_at``, and sorting
-    on that first is what stops it blocking the head forever while still keeping
-    it in the queue rather than silently dropping work.
-    """
+    """The queue, FIFO by oldest missed window. Entries at the tail sort last."""
     entries = list(runstate.get(QUEUE_FIELD, {}).values())
     return sorted(entries, key=lambda e: (e.get("parked_at") or "", e.get("oldest") or ""))
 
@@ -433,23 +310,8 @@ def in_flight(runstate: dict) -> Optional[dict]:
 def _branch_is_awake(owner: str) -> bool:
     """Is this branch already busy? Asks ai_mail's dispatch register, never guesses.
 
-    ``outstanding()`` is the register's public read and is what the DPLAN names
-    as the completion signal: an entry disappears from it when the dispatch
-    closes, which is precisely "the previous catch-up completed".
-
-    UNREADABLE ANSWERS "AWAKE", and that direction is deliberate. The register's
-    own contract says a missing file yields [] but an unreadable one RAISES,
-    because "nothing is outstanding" and "I cannot tell what is outstanding" are
-    opposite answers. For a drain the asymmetry is stark: refusing to fire costs
-    one tick of delay, and firing onto a live agent is the collision the whole
-    one-at-a-time rule exists to prevent. So a read we cannot trust holds the
-    queue rather than releasing it.
+    Unreadable answers awake: holding costs a tick, firing onto a live agent is the collision.
     """
-    # The OWNER'S package door, not their handler. @ai_mail confirmed it on
-    # 2026-09-08: aipass.ai_mail.__init__ exports outstanding_dispatches beside
-    # feed_path and register_path, built for @devpulse under FPLAN-0452 for this
-    # exact reason, and it is a thin delegation to the same function — one
-    # implementation, imported at call time, so the values cannot drift.
     try:
         from aipass.ai_mail import outstanding_dispatches
 
@@ -465,10 +327,7 @@ def _branch_is_awake(owner: str) -> bool:
 def drain_ready(runstate: dict, now: Optional[datetime] = None) -> Optional[dict]:
     """The one catch-up entry that may fire on this tick, or None.
 
-    THE TWO GATES, both of them the owner's. One catch-up in flight fleet-wide,
-    because "imagine 10 missed events all firing at once". And the next fires
-    when the previous COMPLETED, with 60 minutes as the ceiling rather than the
-    rhythm — his event-driven rule of 09-07.
+    One in flight fleet-wide; the next fires when it completes, DRAIN_CEILING_MINUTES at most.
     """
     if now is None:
         now = datetime.now()
@@ -520,13 +379,7 @@ def mark_in_flight(runstate: dict, entry: dict, now: Optional[datetime] = None) 
 def record_attempt(entry: dict, now: Optional[datetime] = None) -> bool:
     """Count a refused catch-up fire. True when the entry has just been parked at the tail.
 
-    Takes the ENTRY, not the runstate: the entry is a live reference into the
-    queue, so mutating it is the persist. A runstate parameter here was unused
-    and would have read as though this function decided something fleet-wide.
-
-    Three attempts, then it stops blocking the head — but it stays in the queue.
-    Dropping it would turn "we could not reach this branch" into "this branch
-    owed nothing", and those are not the same sentence.
+    Parked, never dropped: "could not reach this branch" is not "this branch owed nothing".
     """
     if now is None:
         now = datetime.now()
@@ -538,23 +391,8 @@ def record_attempt(entry: dict, now: Optional[datetime] = None) -> bool:
     return False
 
 
-# =============================================
-# THE WAKE HEADER — why you are awake
-# =============================================
-#
-# The owner, 2026-09-08: "temporal awareness is a thing ... in the information
-# provided to the agent say: you have missed 10 days, the machine was off. A
-# reboot is different." And the principle this adds to the culture: THE SYSTEM
-# INFORMS, THE AGENT REASONS. The header states facts about time and stops. It
-# never tells the agent what to conclude, and it never replays history at it.
-
-
 def _humanise_ago(then: Optional[str], now: datetime) -> str:
-    """ " (2 days ago)" for a header, or "" when the instant is unknown/unreadable.
-
-    Unreadable answers "" like unknown, because the header still prints the raw
-    instant beside it and a guessed age would be a false fact about time.
-    """
+    """ " (2 days ago)" for a header, or "" when the instant is unknown/unreadable."""
     if not then:
         return ""
     try:
@@ -581,9 +419,7 @@ def scheduled_header(
 ) -> str:
     """The SCHEDULED header: an on-time wake, and what it still owes the agent.
 
-    After a gap even an on-time wake carries the missed list, because a job whose
-    catch-up was superseded by its own next window would otherwise never learn
-    it was away — the truth about time rides whichever wake goes first.
+    Carries the missed list: a superseded catch-up would otherwise never tell the job it was away.
     """
     if now is None:
         now = datetime.now()
@@ -606,9 +442,7 @@ def scheduled_header(
 def catch_up_header(entry: dict, job: dict, state: dict, now: Optional[datetime] = None) -> str:
     """The CATCH-UP header: one run covering every window the gap swallowed.
 
-    The last sentence is the load-bearing one. Without "do not replay each day"
-    an agent handed ten dates may reasonably try to do ten days of work, which
-    is the exact failure the owner named: "it's not gonna just run each one".
+    Keep "do not replay each one": without it an agent handed ten dates does ten runs of work.
     """
     if now is None:
         now = datetime.now()
@@ -637,10 +471,7 @@ def compose_prompt(header: str, prompt: str) -> str:
 def _branch_daemon_dir(owner: str):
     """The target branch's ``.daemon/`` directory, or None if it cannot be resolved.
 
-    Resolved through discovery's own citizen roster, keyed on EMAIL — the same
-    key discovery uses to address jobs and wakes. Inventing a second path
-    convention here is how a wake gets filed under a branch that does not exist,
-    or worse, under a different citizen who happens to share a directory name.
+    Keyed on email through discovery's roster, never a path convention of its own.
     """
     try:
         from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
@@ -654,12 +485,7 @@ def _branch_daemon_dir(owner: str):
 
 
 def _write_atomic(target, text: str) -> None:
-    """Write via a sibling tmp file then replace. Never a partial read.
-
-    @devpulse's ruling 2026-09-08: "Write it atomically (tmp then replace), never
-    partial." A branch waking up mid-write would otherwise read half a header and
-    reason about a gap that the other half described.
-    """
+    """Write via a sibling tmp file then replace. Never a partial read."""
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -669,25 +495,7 @@ def _write_atomic(target, text: str) -> None:
 def record_wake_prompt(owner: str, job_id: str, prompt: str) -> None:
     """File the exact text a wake was sent, header and all. Two places, both ours.
 
-    @devpulse ruled on 2026-09-08, after I asked whether this was a cross-branch
-    write: "the daemon composes the prompt, so the daemon writes what it sent to
-    the target branch's .daemon/last_wake_prompt.txt before firing — the .daemon/
-    directory is the scheduler's surface in every branch (the owner writes
-    schedule.json into it, the scheduler writes its outputs beside it), so this
-    is not a cross-branch edit of somebody's code, it is the daemon's own
-    artifact in the daemon's own directory. Also keep the daemon_json record
-    since it costs nothing."
-
-    ai_mail's write at wake.py:802 stays for the tmux manager lane. That file now
-    has a SECOND writer, for the headless scheduled lane it never covered, so
-    ai_mail can retire theirs later.
-
-    Lives in a handler rather than run.py because a handler may touch the
-    filesystem and a module may not.
-
-    Fail-soft, and per-destination: a wake must never be lost because its
-    transcript could not be filed, and an unwritable target branch must not cost
-    us the local record too.
+    Fail-soft per destination: a wake is never lost to an unwritable transcript.
     """
     branch_dir = _branch_daemon_dir(owner)
     if branch_dir is not None:

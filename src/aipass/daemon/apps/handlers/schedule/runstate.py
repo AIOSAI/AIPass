@@ -3,16 +3,11 @@
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
 # Version: 1.6.0
 # Created: 2026-06-15
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Daemon runstate — tracks last_run/next_run per job and evaluates due-ness.
-
-Due-logic lifted verbatim from actions_registry.py (DPLAN-043), re-keyed
-to composite 'owner/id' strings for the decentralized .daemon/ model.
-
-Part of the DPLAN-0204 decentralized scheduler redesign.
 """
 
 import json
@@ -70,17 +65,8 @@ def get_job_state(runstate: dict, owner: str, job_id: str) -> dict:
     return runstate.get("jobs", {}).get(job_key(owner, job_id), {})
 
 
-# =============================================
-# DUE CHECKING (lifted from actions_registry.py)
-# =============================================
-
-
 def _already_ran_today(last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job already ran today.
-
-    An unreadable last_run answers not-yet-run: the fire writes a fresh stamp,
-    so one bad row costs one early fire, never a stuck job or a failed tick.
-    """
+    """Check if a daily job already ran today; an unreadable last_run answers no (one early fire)."""
     if not last_run:
         return False
     try:
@@ -92,11 +78,7 @@ def _already_ran_today(last_run: Optional[str], now: datetime) -> bool:
 
 
 def _already_ran_this_hour(last_run: Optional[str], now: datetime) -> bool:
-    """Check if an hourly job already ran this hour.
-
-    An unreadable last_run answers not-yet-run: the fire writes a fresh stamp,
-    so one bad row costs one early fire, never a stuck job or a failed tick.
-    """
+    """Check if an hourly job already ran this hour; an unreadable last_run answers no (one early fire)."""
     if not last_run:
         return False
     try:
@@ -107,21 +89,14 @@ def _already_ran_this_hour(last_run: Optional[str], now: datetime) -> bool:
         return False
 
 
-# Half-width of a windowed schedule's firing window, in minutes. Daily, rotation
-# and hourly all fire inside +/-this, and _window_closed_today() measures the far
-# edge from the same name — so widening the window cannot move the fire while
-# leaving the catch-up reading the old edge.
+# Firing-window half-width; window_closed_unrun reads the same name, so fire and catch-up edge move together.
 WINDOW_MINUTES = 15
 
 MINUTES_PER_DAY = 1440
 
 
 def _target_minutes(schedule: dict) -> Optional[int]:
-    """Minutes past midnight of a daily/rotation job's target time.
-
-    Returns None when the field cannot be read, which every caller treats as
-    "this schedule states no window" rather than as a window at 00:00.
-    """
+    """Minutes past midnight of a daily/rotation job's target time; None (unreadable) means no window."""
     target_time = schedule.get("time", "00:00")
     try:
         target_h, target_m = map(int, target_time.split(":"))
@@ -145,12 +120,7 @@ def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> boo
 
 
 def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if an hourly job is due (within +/-15 min window).
-
-    An unreadable ``time`` answers not due, as _target_minutes does for daily:
-    no fire rewrites the owner's schedule, so firing would guess a minute every
-    hour forever, while refusing costs this one job and never the tick.
-    """
+    """Check if an hourly job is due (within +/-15 min window). An unreadable time is never due."""
     target_m_str = schedule.get("time", "0")
     try:
         target_m = int(target_m_str)
@@ -167,9 +137,7 @@ def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bo
 def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
     """Check if an interval job is due (elapsed >= interval_minutes since last_run).
 
-    An interval that is not a positive number answers not due: no fire can repair
-    the owner's schedule, so due would fire the job on every tick. An unreadable
-    last_run answers due: the fire writes a fresh stamp, so one bad row costs one fire.
+    A non-positive interval is never due (it would fire every tick); an unreadable last_run is due (one fire).
     """
     interval = schedule.get("interval_minutes", 60)
     if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
@@ -189,9 +157,7 @@ def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
 def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> bool:
     """Check if a one-shot job is due (due_date <= today, not completed).
 
-    An unreadable due_date answers not due: a one-shot fired on a date nobody
-    can read may land before the owner meant it and cannot be taken back, so it
-    waits for the owner to fix the date while the tick goes on for every other job.
+    An unreadable due_date is never due: a one-shot fired early cannot be taken back.
     """
     if completed:
         return False
@@ -210,68 +176,26 @@ def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> boo
         return False
 
 
-# =============================================
-# CLOSED WINDOWS — catch-up and the MISSED record
-# =============================================
-
-# Per-job, read from the job's ``schedule`` block alongside ``type`` and
-# ``time``. ABSENT NOW MEANS ON (DPLAN-0332, The owner 2026-09-08), superseding
-# ruling 6 of 09-07 which made it opt-in: every enabled job in the fleet left it
-# unset, so when the timer vanished for 23h on 09-07 nothing recovered. A job
-# whose late run is worthless sets it to false.
+# Per-job schedule field; a job whose late run is worthless sets it false.
 CATCH_UP_FIELD = "catch_up"
 
-# DPLAN-0332 build gate. The systemd tick runs this WORKING TREE every two
-# minutes, so a half-built recovery lane is production: on 2026-09-08 at
-# 11:31:42 the flipped default fired @vera/release-watch out of window, with no
-# header, mid-build. @devpulse's rule for the rest of the build — "keep the new
-# lane inert until the piece is whole (a flag you flip in the last edit)".
-#
-# False  = pre-DPLAN-0332 behaviour exactly: catch_up is opt-IN, no gap
-#          detection, no queue, no drain.
-# True   = the DPLAN-0332 lane.
-#
-# FALSE, and it stays False until the owner and @devpulse run the controlled live
-# proof from their seat. @devpulse's ruling 2026-09-08 12:15, after I flipped it
-# and the very next timer tick (12:04:30-12:04:39) fired @vera a second time that
-# day with a header whose "Last run 2026-09-07 09:46" was FALSE — she had run at
-# 11:31:42 — and labelled Scheduled rather than catch-up:
-#
-#   "the tree is production while the timer is installed, so nothing under the
-#    flag may be True at any moment you are not personally watching a tick."
+# The systemd tick runs this working tree, so nothing under this flag may be True unless someone watches a tick.
+# False: catch_up is opt-in, no gap detection, no queue, no drain. Reference: docs/recovery_and_catch_up.md
 RECOVERY_LANE_LIVE = False
 
-# Schedule types that fire inside a daily window and can therefore MISS one.
 _DAILY_TYPES = frozenset({"daily", "rotation"})
 
-# Every type that fires inside a window. ``hourly`` joined at DPLAN-0332: before
-# it, is_job_due mapped hourly to _is_hourly_due alone, so an hourly job had no
-# catch-up path at ALL — not an opt-in it declined, an arm that did not exist.
 _WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly"})
 
-# Runstate key: the calendar date whose miss has already been reported, so the
-# MISSED line is written once per job per day rather than on every tick for the
-# rest of the day.
+# Runstate key: the date whose miss was already reported, so MISSED logs once per job per day.
 MISSED_MARKER = "missed_logged_for"
 
 
 def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
     """True when TODAY's daily window has closed with nothing run inside it.
 
-    This is the single fact both new behaviours read. The MISSED line reports
-    it for every daily job; ``catch_up`` additionally makes it a reason to fire.
-    Keeping them on one predicate is what guarantees a caught-up run and its log
-    line can never disagree about whether the window was actually missed.
-
-    MEASURED FROM THE SAME TIMESTAMP AS DUE-NESS. Callers pass ``_due_from()``,
-    so a fire that FAILED inside the window leaves the window genuinely unrun -
-    which is the honest reading, and the one that lets catch_up retry it.
-
-    A WINDOW WHOSE TAIL CROSSES MIDNIGHT NEVER CLOSES inside its own calendar
-    day (``time`` later than 23:44), so there is no instant at which today's
-    miss is certain. Those are refused rather than guessed: a false MISSED line
-    accuses a job that may still fire in the next few minutes, and a false
-    catch-up double-fires it.
+    MISSED and catch-up both read this one predicate, so they never disagree; callers pass _due_from().
+    A window whose tail crosses midnight answers False: no instant makes the miss certain.
     """
     target_minutes = _target_minutes(schedule)
     if target_minutes is None:
@@ -288,11 +212,7 @@ def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) 
 
 
 def catch_up_on(schedule: dict) -> bool:
-    """Is catch-up enabled for this schedule? Default ON since DPLAN-0332.
-
-    ``is False`` rather than falsiness: a job that has never heard of the field
-    must be ON, and only an explicit false opts out.
-    """
+    """Is catch-up enabled for this schedule? Opt-in while RECOVERY_LANE_LIVE is False, else ON unless false."""
     if not RECOVERY_LANE_LIVE:
         return schedule.get(CATCH_UP_FIELD) is True
     return schedule.get(CATCH_UP_FIELD) is not False
@@ -301,14 +221,7 @@ def catch_up_on(schedule: dict) -> bool:
 def _hourly_window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
     """True when THIS HOUR's window has closed with nothing run inside it.
 
-    The hourly twin of window_closed_unrun, and it refuses the same edge for the
-    same reason: a window whose tail crosses the hour boundary (minute > 44)
-    never closes inside its own hour, so there is no instant at which the miss
-    is certain.
-
-    An unreadable ``time`` answers False, the same as _is_hourly_due: a schedule
-    with no readable window cannot have missed one, so it writes no MISSED line
-    and fires no catch-up, and the rest of the tick is untouched.
+    False for an unreadable time or a tail crossing the hour, as window_closed_unrun refuses midnight.
     """
     raw = schedule.get("time", "0")
     try:
@@ -335,13 +248,7 @@ def _is_catch_up_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
 
 
 def is_catch_up_fire(job: dict, runstate: dict, now: Optional[datetime] = None) -> bool:
-    """Would firing *job* at *now* be a catch-up rather than a window run?
-
-    Asked by the scheduler immediately before it fires, so the runstate row can
-    record WHICH kind of run it was. A reader that only sees ``last_run`` cannot
-    tell a job that ran at its slot from one that ran nine hours late, and those
-    two say very different things about the health of the host.
-    """
+    """Would firing *job* at *now* be a catch-up rather than a window run?"""
     schedule = job.get("schedule", {})
     if schedule.get("type") not in _WINDOWED_TYPES:
         return False
@@ -352,12 +259,7 @@ def is_catch_up_fire(job: dict, runstate: dict, now: Optional[datetime] = None) 
 
 
 def missed_window(job: dict, runstate: dict, now: Optional[datetime] = None) -> bool:
-    """Did *job* miss today's window, catch_up or not?
-
-    Independent of the opt-in on purpose: a job nobody chose to catch up still
-    missed its window, and the operator needs to be told. Reports state only -
-    :func:`note_missed_window` owns the once-per-day bookkeeping.
-    """
+    """Did *job* miss today's window, catch_up or not?"""
     schedule = job.get("schedule", {})
     sched_type = schedule.get("type")
     if sched_type not in _WINDOWED_TYPES:
@@ -371,12 +273,7 @@ def missed_window(job: dict, runstate: dict, now: Optional[datetime] = None) -> 
 
 
 def note_missed_window(runstate: dict, owner: str, job_id: str, now: Optional[datetime] = None) -> bool:
-    """Stamp today's miss as reported. True when this call is the FIRST for today.
-
-    The scheduler ticks about every two minutes, so an unguarded MISSED line
-    would repeat ~500 times between a closed window and midnight and drown the
-    log it exists to inform.
-    """
+    """Stamp today's miss as reported. True when this call is the FIRST for today."""
     if now is None:
         now = datetime.now()
     key = job_key(owner, job_id)
@@ -393,32 +290,15 @@ def window_label(schedule: dict) -> str:
     return f"{schedule.get('time', '??:??')} +/-{WINDOW_MINUTES}m"
 
 
-# =============================================
-# INTERVAL SLOTS — a rhythm before the first run
-# =============================================
-
-# Per-job, in the ``schedule`` block. An ISO instant naming ONE occurrence of the
-# rhythm the owner wants ("2026-09-06T03:00:00"); the interval supplies the rest.
-# Chosen over a weekday+time shape because it needs no vocabulary of its own, it
-# is exactly what a hand-seeded runstate row already holds, and it stays correct
-# for intervals that are not a whole number of days.
+# Per-job ISO instant naming one occurrence of an interval job's rhythm. Reference: docs/schedule_contract.md
 SLOT_FIELD = "slot"
 
 
 def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
     """The slot occurrence to seed ``last_run`` with, or None if unreadable.
 
-    Rolled forward by whole intervals rather than used verbatim, so a slot left
-    in the past keeps its PHASE without making the job instantly overdue: the
-    anchor names the rhythm, not a one-off date. A slot still in the future is
-    seeded one interval BEHIND itself, so the first fire lands exactly on it.
-
-    None on an unreadable slot: the caller warns and the job fires on this tick,
-    and that fire writes the last_run that gives it a rhythm, so one bad slot
-    costs one off-slot fire. None on an interval that is not a positive number
-    (text, null, zero, negative): the caller warns and the job never fires,
-    because _is_interval_due refuses the same interval; one bad job costs that
-    one job, never the tick.
+    A past slot rolls forward by whole intervals to keep its phase; a future one is seeded one interval behind.
+    None also for a non-positive interval, which _is_interval_due never fires.
     """
     try:
         anchor = datetime.fromisoformat(slot)
@@ -440,13 +320,7 @@ def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
 def needs_slot_seed(job: dict, runstate: dict) -> bool:
     """True for an enabled interval job that has never actually RUN.
 
-    KEYED ON ``last_run``, NOT ON THE PRESENCE OF A ROW, and the difference is
-    the whole defect. A blocked fire creates a runstate row carrying
-    ``last_blocked_at`` and no ``last_run`` (see :func:`record_job_blocked`), so
-    a "no row" test would refuse to seed exactly the job that most needs it -
-    @seedgo's weekly cycle was enabled unseeded, blocked twice at 01:34 and
-    01:40, and only its own branch lock kept the week from locking to 01:34
-    Monday. A job that has never run has no rhythm to preserve.
+    Keyed on last_run, not row presence: a blocked fire writes a row with no last_run.
     """
     if not job.get("enabled", True):
         return False
@@ -458,10 +332,7 @@ def needs_slot_seed(job: dict, runstate: dict) -> bool:
 def seed_interval_slot(runstate: dict, job: dict, now: Optional[datetime] = None) -> Optional[str]:
     """Seed a never-run interval job's ``last_run`` from its declared slot.
 
-    Returns the seeded ISO timestamp, or None when the job declares no readable
-    slot - in which case today's behaviour stands and the job fires on the next
-    tick - or no positive interval_minutes, which never fires. Callers warn on
-    None; the decision to fire immediately is not silent.
+    None for no readable slot (fires next tick) or no positive interval (never fires); callers warn on None.
     """
     schedule = job.get("schedule", {})
     slot = schedule.get(SLOT_FIELD)
@@ -487,42 +358,20 @@ def seed_interval_slot(runstate: dict, job: dict, now: Optional[datetime] = None
     return seeded
 
 
-# A failed fire buys a short pause, not the rest of the period. The scheduler
-# ticks about every two minutes and the windowed schedules allow +/-15, so
-# without a bound a permanently-broken daily job would spawn ~8 agents a day.
-# Ten minutes leaves room for a couple of honest retries inside one window.
+# Without a bound a broken windowed job would spawn an agent on every ~2-minute tick of its window.
 _FAILURE_BACKOFF_MINUTES = 10
 
-# A BLOCKED fire never started anything, so it buys an even shorter pause than a
-# failure: the target is busy, which is a transient fact about the world and the
-# retry is the point. The bound still has to exist. An interval job measures from
-# its last ATTEMPT and a block writes no attempt, so with no hold at all a
-# blocked-forever interval job would re-attempt on every ~2-minute tick for as
-# long as the target stayed occupied. Five minutes still leaves ~5 attempts
-# inside a windowed schedule's +/-15.
+# A block writes no attempt, so without this hold a blocked interval job would retry every tick.
 _BLOCKED_RETRY_MINUTES = 5
 
-# Statuses record_job_failure() writes. Anything else - "success", "blocked", or
-# a legacy entry with no status at all - is read as a completed run.
-#
-# "blocked" is deliberately NOT here. A block leaves last_run untouched, so
-# _due_from() falls through to whatever the last real run wrote; listing it here
-# would make the read say "never ran" for a job that ran fine yesterday.
+# Not "blocked": a block leaves last_run untouched, so listing it would read "never ran".
 _FAILURE_STATUSES = frozenset({"failed", "error", "timeout"})
 
 
 def _due_from(state: dict) -> Optional[str]:
     """The timestamp a WINDOWED schedule should measure its period from.
 
-    ``last_run`` means "when did this last ATTEMPT" - the failure path stamps
-    it too, and the queue display depends on that. Due-ness asks a different
-    question: has this period's work been DONE? So it measures from the last
-    SUCCESS, and a failed fire no longer consumes the day it failed in.
-
-    Legacy entries predating ``last_success_at`` carry only ``last_run`` and a
-    status. Those are read as runs: absence of a failure marker is not evidence
-    of a failure, and treating them as never-succeeded would re-fire every
-    already-done job on the machine the moment this landed.
+    The last SUCCESS, since last_run also stamps failures; a legacy row with no failure status reads as a run.
     """
     success = state.get("last_success_at")
     if success:
@@ -535,13 +384,7 @@ def _due_from(state: dict) -> Optional[str]:
 def _in_failure_backoff(state: dict, now: datetime) -> bool:
     """True while a recent failure should hold off the next attempt.
 
-    An unreadable last_failure_at answers no hold: a hold that cannot be measured
-    could never expire and would stall the job for good, while releasing it costs
-    at most one early retry, whose own failure writes a fresh stamp.
-
-    An unreadable last_success_at cancels nothing: both stamps are parsed, never
-    compared as text, because any string sorting after "2026-..." would read as
-    a later success and lift the hold on a job that is still failing.
+    An unreadable last_failure_at answers no hold (it could never expire); an unreadable success lifts nothing.
     """
     failed_at = state.get("last_failure_at")
     if not failed_at:
@@ -551,8 +394,6 @@ def _in_failure_backoff(state: dict, now: datetime) -> bool:
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Failure backoff parse failed for %r: %s", failed_at, e)
         return False
-    # A later success clears the hold - the old last_failure_at stays in the
-    # record as history and must not keep braking a job that recovered.
     success = state.get("last_success_at")
     if success:
         try:
@@ -566,19 +407,7 @@ def _in_failure_backoff(state: dict, now: datetime) -> bool:
 def _in_blocked_hold(state: dict, now: datetime) -> bool:
     """True while a recent BLOCK should space out the next attempt.
 
-    Separate from the failure backoff because it answers a different question.
-    A failure means the wake ran and went wrong; a block means it never started
-    at all - the target was busy, paused, or already held the lock. The job's
-    period is untouched either way, but the block is both cheaper to retry (no
-    agent spawns) and likelier to clear on its own, so it holds for less time.
-
-    An unreadable last_blocked_at answers no hold: a hold that cannot be measured
-    could never expire and would stall the job for good, while releasing it costs
-    at most one early attempt, whose own block writes a fresh stamp.
-
-    An unreadable last_success_at or last_failure_at lifts nothing: the stamps are
-    parsed, never compared as text, because any string sorting after "2026-..."
-    would read as a later event and end a hold that is still due (DPLAN-0354 leg 4).
+    An unreadable last_blocked_at answers no hold (it could never expire); an unreadable later stamp lifts nothing.
     """
     blocked_at = state.get("last_blocked_at")
     if not blocked_at:
@@ -588,9 +417,7 @@ def _in_blocked_hold(state: dict, now: datetime) -> bool:
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Blocked hold parse failed for %r: %s", blocked_at, e)
         return False
-    # Anything that happened AFTER the block ends the hold: a success means the
-    # target freed up, and a failure hands the job to the longer failure
-    # backoff. The old last_blocked_at stays in the record as history.
+    # A later failure ends the hold too: the longer failure backoff takes over.
     for key in ("last_success_at", "last_failure_at"):
         later = state.get(key)
         if not later:
@@ -604,16 +431,7 @@ def _in_blocked_hold(state: dict, now: datetime) -> bool:
 
 
 def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> bool:
-    """
-    Check if a discovered job should fire now.
-
-    Merges job schedule info with runstate tracking data.
-
-    ``now`` is injectable so due-ness can be asserted against a stated instant.
-    Every helper below already took its clock as an argument; this function was
-    the one that reached for datetime.now() itself, which made the behaviour
-    around a window boundary untestable except by luck of the wall clock.
-    """
+    """Check if a discovered job should fire now."""
     if not job.get("enabled", True):
         return False
 
@@ -629,32 +447,18 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
     if _in_blocked_hold(state, now):
         return False
 
-    # Windowed schedules measure from the last SUCCESS; interval measures from
-    # the last ATTEMPT. That split is deliberate, not an oversight: an interval
-    # job measured from its last success would be due on EVERY tick forever
-    # once it started failing, because the elapsed time only grows. Its
-    # interval is already the bound it needs.
+    # Interval measures from the last attempt, not success: measured from success, a failing one is due every tick.
     since_success = _due_from(state)
 
     schedule = job.get("schedule", {})
     sched_type = schedule.get("type", "")
 
-    # Both daily forms gain the OPT-IN catch-up: due inside the window as
-    # always, and additionally due once the window has closed unrun for a job
-    # whose owner asked for that. _already_ran_today bounds both arms, so a
-    # caught-up run can never double-fire the day it lands in.
+    # _already_ran_today bounds both arms, so a caught-up run never double-fires its day.
     checkers = {
         "daily": lambda: _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now),
-        # A rotation job is a daily job that picks a different target each night.
-        # It opts in the same way: a missed night woken late still hands the
-        # night to a steward, which is the point of the rotation.
         "rotation": lambda: (
             _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
         ),
-        # Hourly gained its catch-up arm at DPLAN-0332. It had none before —
-        # not an opt-in it declined, an arm that did not exist — so an hourly
-        # job that missed its window waited a full hour however long the
-        # scheduler had been away.
         "hourly": lambda: (
             _is_hourly_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
         ),
@@ -668,47 +472,11 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
     return checker()
 
 
-# =============================================
-# RUNSTATE UPDATES
-# =============================================
-
-
 def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
     """Calculate the next run time given schedule and a last_run timestamp.
 
-    Every branch answers from LAST_RUN_TS, never from the wall clock. That is
-    the fix for a live defect, not a refactor: @vera's `daily @ 10:00` fired at
-    09:45:11 - the legitimate leading edge of the +/-15min window - and the old
-    daily branch, reading now(), advertised next_run = 10:00 THE SAME DAY. But
-    _already_ran_today consumes the whole calendar day, so is_job_due answered
-    False right through 10:14 and True only the next morning. The field named a
-    wake that could not happen.
-
-    The rule the windowed branches follow is the one is_job_due enforces: firing
-    consumes the PERIOD, not the instant. A daily fire consumes its calendar day
-    whenever in the window it landed, so the next one is the following day at
-    target; an hourly fire consumes its clock hour. Interval already did this
-    correctly - it was the only branch using the argument it was handed, which
-    is the whole tell.
-
-    KNOWN AND DELIBERATE SLACK: this returns the TARGET time, while the
-    scheduler will actually fire up to 15 minutes earlier, at the leading edge
-    of the window. Returning target-15min was considered and rejected - "daily @
-    10:00" is what the owner configured and what the queue should echo, and the
-    alternative puts window arithmetic into a field whose readers are humans.
-    The pin in test_next_run_agrees_with_due.py allows exactly that much
-    earliness and no more, so under-reporting by a whole PERIOD stays red.
-
-    Args:
-        schedule: The job's schedule block.
-        last_run_ts: ISO timestamp of the firing this next_run follows.
-
-    Returns:
-        ISO timestamp of the next run, or None if the schedule cannot be parsed.
-        Every unreadable field answers None, the same "no instant to advertise"
-        as an unknown type: next_run is only displayed (queue, SEED log, wake
-        header) and is_job_due never reads it, so a bad field blanks one cell
-        and never moves a fire or fails the tick.
+    From last_run_ts, never the wall clock: a fire consumes its whole period, as is_job_due enforces.
+    Returns the target time, not the window's early edge; None for any unreadable field (display only).
     """
     sched_type = schedule.get("type", "")
 
@@ -724,7 +492,6 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, TypeError) as e:
             logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
             return None
-        # The day of last_run is spent, whenever in its window the fire landed.
         next_dt = (last_dt + timedelta(days=1)).replace(hour=target_h, minute=target_m, second=0, microsecond=0)
         return next_dt.isoformat()
 
@@ -740,14 +507,11 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, TypeError) as e:
             logger.info("[runstate] calc_next_run hourly last_run parse failed: %s", e)
             return None
-        # The clock hour of last_run is spent, same rule one unit down.
         next_dt = (last_dt + timedelta(hours=1)).replace(minute=target_m, second=0, microsecond=0)
         return next_dt.isoformat()
 
     if sched_type == "interval":
         interval = schedule.get("interval_minutes", 60)
-        # The same refusal as _is_interval_due: an interval that is not a positive
-        # number is never due, so there is no next run to advertise.
         if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
             logger.info("[runstate] calc_next_run: interval_minutes %r is not a positive number", interval)
             return None
@@ -755,9 +519,6 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()
         except (ValueError, TypeError) as e:
-            # None, like every other parse failure here. The old form returned
-            # now(), which advertises "due immediately" for a job whose schedule
-            # could not be read - the loudest possible wrong answer.
             logger.info("[runstate] calc_next_run interval parse failed: %s", e)
             return None
 
@@ -777,10 +538,7 @@ def update_job_runstate(
 ) -> None:
     """Update runstate for a job after successful firing.
 
-    ``caught_up`` records that this run happened AFTER its window closed rather
-    than inside it. Written on every success, cleared to None on the ordinary
-    path, because a stale marker left over from last week's catch-up would
-    report a healthy job as chronically late.
+    caught_up is cleared to None on an ordinary run, or a stale marker would report a healthy job as late.
     """
     if timestamp is None:
         timestamp = datetime.now().isoformat()
@@ -831,16 +589,7 @@ def record_job_blocked(
 ) -> None:
     """Record a fire that never STARTED - the target was busy, not broken.
 
-    BLOCKED IS NOT RAN. Unlike both other writers this one leaves ``last_run``
-    alone, because ``last_run`` means "when did this last attempt actually
-    happen" and a refused wake is not an attempt that happened. Stamping it was
-    the reported defect: a leftover interactive session in a branch made the
-    scheduler record a run it never made, and the next day's fire was suppressed
-    by a room nobody was sitting in.
-
-    ``last_failure_at`` is left alone too - a block is not a failure and must
-    not arm the failure backoff. ``last_blocked_at`` carries its own, shorter
-    hold (see ``_in_blocked_hold``).
+    Leaves last_run and last_failure_at alone: a refused wake is no attempt and must not arm the failure backoff.
     """
     if timestamp is None:
         timestamp = datetime.now().isoformat()

@@ -17,9 +17,6 @@
 
 """
 Schedule handlers for daemon's decentralized .daemon/ scheduler.
-
-task_registry (fire-and-forget follow-ups) has been archived — superseded
-by the per-branch .daemon/schedule.json model (DPLAN-0204).
 """
 
 from aipass.daemon.apps.handlers.schedule.runstate import (

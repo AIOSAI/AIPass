@@ -3,7 +3,7 @@
 # Description: Tests for the timer_install module (systemd user timer installer)
 # Version: 1.1.1
 # Created: 2026-06-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -25,9 +25,7 @@ from aipass.daemon.apps.modules.timer_install import (
     HANDLED_COMMANDS,
 )
 
-# install and uninstall are reached the way a user reaches them: through
-# handle_command, inside conftest's session-wide seal on _run_systemctl,
-# _UNIT_DIR and _STATE_DIR. A failed install is sys.exit(1) at the router.
+# Verbs are reached through handle_command, inside conftest's seal; a failed install is sys.exit(1).
 TI = "aipass.daemon.apps.modules.timer_install"
 
 
@@ -50,23 +48,14 @@ def _exit_of(verb: str) -> int:
 
 
 def _systemd_that_knows_no_timer(*args: str, not_loaded_ok: bool = False, not_found_ok: bool = False) -> bool:
-    """A recorder in the place of _run_systemctl for a host where systemd does not know the timer.
-
-    The stop answers not loaded (exit 5), which _run_systemctl reads as True only
-    when the caller says not loaded is nothing to stop; a disable finds no unit
-    and fails; a daemon-reload holds. systemctl is found, so not_found_ok changes nothing.
-    """
+    """A recorder in the place of _run_systemctl for a host where systemd does not know the timer."""
     if args[0] == "stop":
         return not_loaded_ok
     return args[0] != "disable"
 
 
 def _host_with_no_systemctl(*args: str, not_loaded_ok: bool = False, not_found_ok: bool = False) -> bool | None:
-    """A recorder in the place of _run_systemctl for a host where systemctl is not found.
-
-    Answers None (not found) to a caller that passed not_found_ok, and False,
-    the failure, to every other call - as _run_systemctl does after its error().
-    """
+    """A recorder in the place of _run_systemctl for a host where systemctl is not found."""
     return None if not_found_ok else False
 
 
@@ -87,18 +76,10 @@ class TestHandleCommand:
 
     def test_help_flag(self, capsys):
         """install-timer --help prints this module's own usage and returns True."""
-        # The seam, named here even though --help returns before the gate and
-        # before _install() ever runs. conftest's autouse seal already covers
-        # this, but both guards live outside the unit, and a reader arriving at
-        # "handle_command('install-timer', ...)" has to prove the short-circuit
-        # for themselves before they can believe nothing happened.
         with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
             result = handle_command("install-timer", ["--help"])
         out = capsys.readouterr().out
         assert result is True
-        # The capture was requested and never read, so the docstring's "prints
-        # usage" half was never checked. The heading names both verbs this
-        # module owns; another module's help would not carry it.
         assert "install-timer / uninstall-timer — Daemon Scheduler Timer" in out, (
             f"install-timer --help printed: {out[:200]!r}"
         )
@@ -118,11 +99,7 @@ if said:
 sys.exit(code)
 """
 
-# systemd is Linux's. Windows has no systemctl, and CreateProcess finds a bare
-# name on PATH only as name.exe (subprocess does not read PATHEXT), so no stub
-# laid here can be run there by the wrapper. The install verb's answer on
-# Windows is test_systemctl_not_found's (exit 1, systemd not available), which
-# lays no stub and runs on every host, Windows included.
+# Windows CreateProcess finds a bare name on PATH only as name.exe, so no stub here can run there.
 _NEEDS_A_STUB_ON_PATH = pytest.mark.skipif(
     sys.platform == "win32",
     reason="systemd does not exist on Windows; the verb's answer there is pinned by test_systemctl_not_found",
@@ -133,17 +110,8 @@ _NEEDS_A_STUB_ON_PATH = pytest.mark.skipif(
 def systemctl_on_path(tmp_path, monkeypatch):
     """Lay a systemctl stub as the only one on PATH; answer the path of the log of every argv it receives.
 
-    Asking for this fixture is what keeps the real _run_systemctl: conftest's
-    seal sees the name, leaves the wrapper alone and empties PATH. The stub is
-    a real executable the wrapper finds and runs, exiting with the code each
-    verb is given in `answers` (verb -> (exit code, stderr line); every other
-    verb exits 0). `answers=None` lays nothing: PATH stays an empty directory,
-    a host with no systemctl.
-
-    The host is asked whether a bare-named stub runs at all, by running it the
-    way the wrapper does. Windows, where it cannot, is declared by
-    _NEEDS_A_STUB_ON_PATH on each case that lays one; on any other host where
-    it cannot run, that is what the test reports, never a skip.
+    Asking for it keeps the real _run_systemctl (conftest's seal empties PATH instead).
+    `answers` is verb -> (exit code, stderr line); None lays nothing, a host with no systemctl.
     """
 
     def lay(answers: dict | None) -> Path:
@@ -177,10 +145,7 @@ def _argv(log: Path) -> list:
 class TestTheCommandsReadSystemctlsAnswers:
     """install-timer and uninstall-timer against a real systemctl on PATH: each answer the wrapper can give.
 
-    The wrapper is reached through the two commands only. The stub is a real
-    process; the one exception is the timeout, which a stub cannot give inside
-    a suite's time (the wrapper waits 15 s), so that case alone patches
-    subprocess.run, a process edge the stdlib_patch standard acquits.
+    Only the timeout patches subprocess.run: a stub cannot outwait the wrapper's 15 s in a suite.
     """
 
     @pytest.fixture(autouse=True)
@@ -194,10 +159,7 @@ class TestTheCommandsReadSystemctlsAnswers:
 
     @_NEEDS_A_STUB_ON_PATH
     def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
-        """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start.
-
-        Mutant killed: enable and start swapped in _install.
-        """
+        """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start."""
         log = systemctl_on_path({})
         assert handle_command("install-timer", []) is True
         assert _argv(log) == [
@@ -220,9 +182,7 @@ class TestTheCommandsReadSystemctlsAnswers:
     def test_not_loaded_on_a_stop_is_nothing_to_stop(self, systemctl_on_path, tmp_path, capsys):
         """stop exits 5 (not loaded): uninstall-timer goes on to disable, removes the files and exits 0, with no FAIL.
 
-        Exit 5 is the stub's answer, the one systemctl gives a stop of a unit it
-        does not know (measured by @devpulse, 2026-09-28).
-        Mutant killed: the stop asked without not_loaded_ok.
+        Exit 5 is what systemctl gives a stop of a unit it does not know.
         """
         unit_dir = tmp_path / "_sealed_unit_dir"
         unit_dir.mkdir()
@@ -240,10 +200,7 @@ class TestTheCommandsReadSystemctlsAnswers:
 
     @_NEEDS_A_STUB_ON_PATH
     def test_a_stop_refused_for_another_reason_fails_the_uninstall(self, systemctl_on_path, tmp_path):
-        """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files.
-
-        Mutant killed: the exit 5 check reading any non-zero exit as not loaded.
-        """
+        """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files."""
         unit_dir = tmp_path / "_sealed_unit_dir"
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
@@ -254,10 +211,7 @@ class TestTheCommandsReadSystemctlsAnswers:
 
     @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_anywhere_but_a_stop_is_a_failure(self, systemctl_on_path, capsys):
-        """enable exits 5: install-timer does not pass not_loaded_ok, so the install fails at enable and never starts.
-
-        Mutant killed: the wrapper reading exit 5 as success without not_loaded_ok.
-        """
+        """enable exits 5: install-timer passes no not_loaded_ok, so the install fails at enable and never starts."""
         log = systemctl_on_path({"enable": [5, "Unit daemon-tick.timer not loaded."]})
         assert _exit_of("install-timer") == 1
         assert "FAIL: systemctl --user enable daemon-tick.timer" in "".join(capsys.readouterr())
@@ -266,10 +220,7 @@ class TestTheCommandsReadSystemctlsAnswers:
     def test_systemctl_not_found(self, systemctl_on_path, capsys):
         """No systemctl on PATH: uninstall-timer (not_found_ok) says not installed and exits 0; install-timer fails.
 
-        Only uninstall's stop passes not_found_ok, and its None is how the
-        uninstall tells nothing installed apart from a failed stop. install-timer
-        passes it nowhere, so its daemon-reload is a failure that names systemd.
-        Mutant killed: the not-found arm answering False where None is owed.
+        Only uninstall's stop passes not_found_ok; its None tells nothing installed from a failed stop.
         """
         systemctl_on_path(None)
         assert _exit_of("uninstall-timer") == 0
@@ -281,18 +232,10 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert "systemctl not found — systemd not available" in said, said
 
     def test_a_timeout_is_a_failure_never_not_found(self, systemctl_on_path, capsys):
-        """systemctl times out: install-timer exits 1 naming the timeout, and uninstall's stop is a failure, not None.
-
-        subprocess.run is patched to raise TimeoutExpired: the one answer a stub
-        cannot give quickly, reached through the commands all the same.
-        Mutant killed: the TimeoutExpired branch printing the not-found message.
-        Mutant killed: the timeout answering None with not_found_ok.
-        """
+        """systemctl times out: install-timer exits 1 naming the timeout; uninstall's stop is a failure, not None."""
         systemctl_on_path(None)
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=15)):
-            # The uninstall first, while no unit file stands: there a None from
-            # the stop reads as nothing installed and exits 0, so only a timeout
-            # answered False exits 1. After the install, copied files would hide it.
+            # Uninstall first, with no unit file standing: only there does None (exit 0) differ from False (exit 1).
             assert _exit_of("uninstall-timer") == 1
             assert "uninstall-timer: systemctl --user stop daemon-tick.timer failed" in capsys.readouterr().err
             assert _exit_of("install-timer") == 1
@@ -304,16 +247,7 @@ class TestTheCommandsReadSystemctlsAnswers:
 class TestInstall:
     @pytest.fixture(autouse=True)
     def _no_real_home(self, tmp_path_factory):
-        """Redirect the shared state dir for EVERY test in this class.
-
-        Autouse rather than a per-test patch, deliberately. Adding the
-        _STATE_DIR seam fixed nothing on its own: the pre-existing
-        test_install_success still patched only _DAEMON_ROOT and _UNIT_DIR, so
-        the re-run artifact still showed the same single os.mkdir on the real
-        ~/.aipass. A seam a test can forget to use is not a fix — the next
-        _install() test would reach the real home again and the suite would
-        stay green while doing it.
-        """
+        """Redirect the shared state dir for EVERY test in this class: a seam a test can forget is no fix."""
         with patch(
             "aipass.daemon.apps.modules.timer_install._STATE_DIR",
             tmp_path_factory.mktemp("state"),
@@ -336,11 +270,7 @@ class TestInstall:
 
     @patch(f"{TI}._run_systemctl", return_value=True)
     def test_install_success(self, mock_systemctl, tmp_path):
-        """A good install copies both units into the unit dir and runs reload, enable, start.
-
-        Mutant killed: the shutil.copy2 line in _install dropped (the copy was
-        mocked before, so nothing looked at the files).
-        """
+        """A good install copies both units into the unit dir and runs reload, enable, start."""
         service, timer = _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
@@ -361,10 +291,7 @@ class TestInstall:
 
     @patch(f"{TI}._run_systemctl", return_value=False)
     def test_install_systemctl_fails(self, mock_systemctl, tmp_path):
-        """install-timer exits 1 when systemctl fails, and stops at the first refusal.
-
-        Mutant killed: _install ignoring a failed daemon-reload and going on to enable.
-        """
+        """install-timer exits 1 when systemctl fails, and stops at the first refusal."""
         _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
@@ -382,23 +309,12 @@ class TestInstall:
 class TestUninstall:
     """Tests for the uninstall flow.
 
-    Installed is a unit file in _UNIT_DIR (conftest seals it under tmp_path) or a
-    unit systemd knows. The stop is always asked and not loaded is nothing to
-    stop; disable is asked when the timer unit file stands; daemon-reload closes.
-    Each must answer True, or the verb names the step with error() and exits 1.
+    Installed is a unit file in _UNIT_DIR or a unit systemd knows, so the stop is always asked.
     """
 
     @patch(f"{TI}._run_systemctl", side_effect=_systemd_that_knows_no_timer)
     def test_uninstall_files_not_present(self, mock_systemctl, tmp_path, capsys):
-        """uninstall-timer of a timer that is not installed is a success: stop answers not loaded, nothing to remove.
-
-        daemon's decision (DPLAN-0354 leg 4): installed is a unit file that stands
-        or a unit systemd knows, so the stop is always asked, and a stop answered
-        not loaded (exit 5) is nothing to stop. Leg 3 asked systemctl nothing when
-        no file stood, and a timer still loaded after its files were deleted by
-        hand kept ticking.
-        Mutant killed: the stop asked without not_loaded_ok (exit 1 at stop).
-        """
+        """uninstall-timer of a timer that is not installed is a success: stop answers not loaded, nothing to remove."""
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         with patch(f"{TI}._UNIT_DIR", unit_dir):
@@ -415,9 +331,7 @@ class TestUninstall:
     def test_a_timer_still_loaded_after_its_files_were_deleted_is_stopped(self, mock_systemctl, tmp_path):
         """A timer systemd still runs, whose unit files were deleted by hand, is stopped and reloaded away.
 
-        Leg 3 said not installed, asked systemctl nothing, and the timer kept
-        ticking. Disable is not asked: it needs the unit file, which is gone.
-        Mutant killed: the stop skipped when no unit file stands.
+        Disable is not asked: it needs the unit file, which is gone.
         """
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
@@ -430,12 +344,7 @@ class TestUninstall:
 
     @patch(f"{TI}._run_systemctl", side_effect=_systemd_that_knows_no_timer)
     def test_a_half_install_systemd_does_not_know_is_removed(self, mock_systemctl, tmp_path):
-        """One unit file stands and systemd does not know the timer: the file goes and the verb exits 0.
-
-        Leg 3 stopped at stop (exit 5, not loaded, read as a failure), exited 1
-        and left the file every time, so the verb could never remove it.
-        Mutant killed: the disable asked with no timer unit file standing.
-        """
+        """One unit file stands and systemd does not know the timer: the file goes and the verb exits 0."""
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         service, _ = _units(tmp_path)
@@ -456,13 +365,7 @@ class TestUninstall:
 
     @patch(f"{TI}._run_systemctl", side_effect=_host_with_no_systemctl)
     def test_no_systemctl_and_no_unit_file_is_not_installed(self, mock_systemctl, tmp_path, capsys):
-        """No systemctl and no unit file: nothing is installed, exit 0, and nothing more is asked.
-
-        daemon's decision (DPLAN-0354 leg 4b): installed is a unit file that stands
-        or a unit systemd knows, and where systemctl is not found systemd knows
-        nothing. Leg 4 read the not-found stop as a failed step and exited 1.
-        Mutant killed: the not-found answer read as a failed stop.
-        """
+        """No systemctl and no unit file: nothing is installed, exit 0, and nothing more is asked."""
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         with patch(f"{TI}._UNIT_DIR", unit_dir):
@@ -475,10 +378,7 @@ class TestUninstall:
 
     @patch(f"{TI}._run_systemctl", side_effect=_host_with_no_systemctl)
     def test_no_systemctl_with_a_unit_file_fails_and_keeps_it(self, mock_systemctl, tmp_path, capsys):
-        """No systemctl while a unit file stands: the stop is named as the failed step, exit 1, the file stays.
-
-        Mutant killed: not found read as nothing installed whatever stands in the unit dir.
-        """
+        """No systemctl while a unit file stands: the stop is named as the failed step, exit 1, the file stays."""
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
@@ -494,11 +394,7 @@ class TestUninstall:
     def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
         """uninstall-timer stops, disables, removes both unit files, reloads, and fires file_deleted per file.
 
-        The fire is patched where _uninstall binds it: the function imports the
-        module-level `trigger` object of aipass.trigger.apps.modules.core at call
-        time, so the object's `fire` at that home is the one it calls. Unpatched,
-        this test reached the real trigger bus twice (bus probe, 2026-09-27).
-        Mutant killed: _uninstall's stop call dropped.
+        fire is patched on the core `trigger` object _uninstall imports at call time; unpatched it hits the real bus.
         """
         service, timer = _units(tmp_path)
 
@@ -524,13 +420,7 @@ class TestUninstall:
     def test_a_failed_step_while_installed_exits_nonzero_and_names_it(
         self, failing, _seal_timer_host_state, tmp_path, capsys
     ):
-        """A stop, disable or daemon-reload that fails while the timer is installed exits 1 and names the step.
-
-        Driven through the seal's own fake_systemctl, answering False for the one
-        step. The uninstall used to print "removed" whatever systemctl answered and
-        exit 0, so a timer still ticking read as gone.
-        Mutant killed: _uninstall ignoring the answer of the failing step.
-        """
+        """A stop, disable or daemon-reload that fails while the timer is installed exits 1 and names the step."""
         unit_dir = tmp_path / "_sealed_unit_dir"
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
@@ -558,29 +448,10 @@ class TestUninstall:
 
 
 class TestNoRealHomeWrites:
-    """The suite must not touch the user's real home.
-
-    Found by `drone @seedgo audit tests @daemon` and confirmed by @seedgo as
-    the ONE hygiene record in daemon's artifact that genuinely left the copy —
-    everything else in that 1097 is real prax logging firing under an
-    unrebindable module-scope binding, which is not this branch's to fix.
-
-    `~/.aipass` is not a scratch directory: it holds `admin_grant.key`,
-    `commons.db` with its -shm/-wal siblings, and `telegram_bots/`. The mkdir
-    itself was harmless (`exist_ok=True` against a directory that already
-    exists), so this is a seam defect rather than damage — but the next write
-    added after that line would land in real state on every machine that runs
-    the suite, and no test could have noticed.
-    """
+    """The suite must not touch the user's real home: `~/.aipass` holds real keys and databases."""
 
     def test_install_does_not_touch_the_real_home(self, tmp_path):
-        """Red-first: fails while the path is computed inline at call time.
-
-        The two existing patches (_DAEMON_ROOT, _UNIT_DIR) reach module
-        constants. The .aipass mkdir was `Path.home().joinpath(...)` evaluated
-        inside _install(), so no patch could reach it and this assertion caught
-        a real os.mkdir on the real home.
-        """
+        """Red-first: fails while the path is computed inline at call time."""
         recorded = []
 
         def watch(event, args):
@@ -601,15 +472,8 @@ class TestNoRealHomeWrites:
         ):
             assert handle_command("install-timer", []) is True
 
-        # Scoped to the user's HOME STATE, deliberately, and not to "anything
-        # outside tmp_path". A broader assertion also catches the prax/trigger/
-        # daemon_json logging writes into the repo checkout — real, measured
-        # (66 in this one test), and NOT this branch's to fix: they come from
-        # `from aipass.prax import logger` binding the logger object at import,
-        # which no conftest can rebind. @seedgo owns that standard and has
-        # widened it; @prax has the contract question. Asserting on them here
-        # would make this pin fail for a reason it is not testing, and a test
-        # that goes red for someone else's open defect gets muted, not fixed.
+        # Scoped to home state, not "outside tmp_path": the import-bound prax logger also writes into the
+        # repo checkout, a defect this pin does not test and must not go red for.
         repo_root = Path(__file__).resolve().parents[4]
         home_state = [
             p
