@@ -7,8 +7,8 @@
 ## What It Is
 
 A standard that ensures Python code runs on both Linux and Windows by detecting
-POSIX-only APIs used without platform guards.  Windows CI (GitHub Actions on
-Windows Server 2022) validates compliance end-to-end.
+POSIX-only APIs used without platform guards.  No CI runner exercises Windows:
+this standard is the only guard, and nothing proves the Windows paths at runtime.
 
 ---
 
@@ -16,8 +16,7 @@ Windows Server 2022) validates compliance end-to-end.
 
 AIPass is pip-installable and must work cross-platform.  POSIX-only patterns
 like bare `import fcntl` or `os.waitpid(-1, os.WNOHANG)` crash immediately on
-Windows with `ImportError` or `WinError 87`.  The Windows CI caught 71 failures
-from these systemic patterns.  This standard prevents regressions.
+Windows with `ImportError` or `WinError 87`.  This standard prevents regressions.
 
 ---
 
@@ -135,10 +134,13 @@ because the POSIX value is a degenerate case of the thing being handled.
   treats it as an escape. On a POSIX path each of those is the identity — there
   is nothing to double, turn or escape — so the test passes by having no input
   for the bug.
+- **Bytes Windows writes and POSIX does not.** Text mode writes each `\n` as
+  `\r\n` on Windows and unchanged on POSIX, so a fixture written with
+  `write_text` and checked as bytes holds on Linux by having no `\r` to add.
 
 A green Linux run proves nothing about either. When a behaviour only differs on
 Windows, the rule that guards it reads the SHAPE statically; it cannot wait for
-a run to go red. The two advisories below are that rule, one per class.
+a run to go red. The three advisories below are that rule.
 
 One half of the spelling class CAN be made observable on Linux: a literal
 backslash in pytest's base temp (`pytest --basetemp='<tmp>/x\probe'`) puts one
@@ -229,6 +231,16 @@ arrives through a parameter not named `tmp_path` / `tmpdir`; `%` / `.format()`
 of a path; `p.as_posix() in logged` (also red on Windows when the product
 logged `str(p)` — which spelling the product used is not in the test).
 
+Second mechanism, same shape (CI 38843541023, 2026-10-15, checker
+`mock_repr_path` 1.2.0): api's `test_host_lifetime` asserted
+`str(home) in str(log.info.call_args_list[0])` where the product logged `home`
+as a Path ARGUMENT. The call's repr spells it `WindowsPath('C:/Users/.../home')`
+— forward slashes — while `str(home)` is `C:\Users\...\home`. Already flagged
+by this arm (it convicts the pre-cure line 720); it never tripped the gate
+because the arm is advisory. The message now names both mechanisms and the
+cure: compare the argument itself, `log.info.call_args_list[0].args[1] == home`,
+or the message text in `args[0]`.
+
 Same mechanism, not detected: `str()` of an `OSError` built with a filename
 (`PermissionError(13, msg, path)`) renders that filename with repr, so
 `str(path) in str(exc)` is red on Windows the same way. Measured 2026-09-19: 20
@@ -256,6 +268,49 @@ across 570 test files with 238 helpers now read. A name-guessing arm would have
 caught `home` but not `foreign`, and fixture reading converts none of the 19.
 Path needles into haystacks the pass cannot read: 105, of which 9 sit in a
 function that touches `call_args`; all 9 read the real args (the cure).
+
+### Advisory — a text-mode fixture with a newline meets a bytes oracle
+Not scored. Info channel, as
+`windows_compat text fixture bytes oracle (advisory): tests/<file>:<line> ...`.
+Detector: `text_fixture_bytes_oracle.py` 1.0.0 (2026-10-15).
+
+CI 38843541023: hooks' settings-backup fixture wrote
+`(claude / "settings.json").write_text('{"model": "before"}\n', encoding="utf-8")`
+and the test asserted the backup's `read_bytes() == b'{"model": "before"}\n'`.
+The product copied the file byte for byte; on Windows the file held `\r\n`.
+
+Flagged, per test function: a FIXTURE — `P.write_text(<str literal / f-string
+with \n>)` with `P` a path, or `open(x, "w"/"a"/"x"/"+")` / `P.open(...)` given
+`.write` / `.writelines` of such a literal (names bound to the literal carry it)
+— in the test, in a same-module `@pytest.fixture` it names as a parameter, or in
+a same-module function it calls by name, transitively; and an ORACLE in the test:
+`==` / `!=` of `X.read_bytes()` against a bytes literal (or a literal's
+`.encode()`), of `hashlib.<algo>(...read_bytes()).hexdigest()` / `.digest()`
+against a str / bytes literal or a digest of a bytes literal, or of
+`len(...read_bytes())` against an int literal or `len(b"...")`. The oracle may
+read any path (the incident read the backup copy). The line is the oracle's.
+
+Not flagged: `write_bytes(...)` or `newline=""` / `newline="\n"` (the cures); a
+`read_text` oracle; a bytes oracle with no text-mode newline fixture reachable;
+a literal with no `\n`; bytes compared with bytes the test did not spell
+(`== src.read_bytes()`, a digest the product recorded); a platform-guarded test.
+
+Known misses: opaque content (`json.dumps`, `textwrap.dedent`, a parameter —
+canary's `_store(tmp_path, "a\t1\n")` helper would be one if it lacked its
+`newline=""`), `print(..., file=f)`, a receiver the flow pass cannot read as a
+path, a conftest / other-module / `name=`-renamed fixture, an oracle inside a
+helper, `open(p, "rb").read()`, `in` / `.startswith` on bytes, a literal held
+in a module constant.
+
+Fix — write the bytes the oracle names:
+```python
+(claude / "settings.json").write_bytes(b'{"model": "before"}\n')
+```
+
+Measured at introduction (2026-10-15): 931 test files, 8 bytes-vs-literal
+oracles fleet-wide, 0 with a text-mode newline fixture (hooks is cured; its
+pre-cure mutant is convicted at the oracle line); a relaxed receiver (any
+`write_text`) also gives 0.
 
 ---
 
@@ -346,5 +401,5 @@ Line-level bypass (specific line has a valid reason):
 - **Scope:** all_files
 - **Entry point:** check_module()
 - **Standard label:** WINDOWS_COMPAT
-- **Windows CI:** .github/workflows/windows-test.yml
+- **Windows CI:** none; `windows-test.yml(windows_disabled)` is the retired lane, unread by Actions
 - **Issue:** #326 (Input-X Windows platform report)

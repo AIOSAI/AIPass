@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_repr_path.py
 # Description: Windows compat - a path asserted against the repr of a mock call (advisory arm, tests)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-18
-# Modified: 2026-09-19
+# Modified: 2026-10-15
 # =============================================
 
 r"""
@@ -16,6 +16,17 @@ escapes a backslash, so the Windows path ``C:\Users\...`` is spelled
 ``C:\\Users\\...`` in that text and the substring check fails.  A POSIX path
 has no backslash for repr to escape -- the text is a fixed point there -- so no
 Linux or macOS run can go red on it.
+
+A second mechanism, same shape (CI 38843541023, Windows, 2026-10-15): api's
+``test_host_lifetime`` asserted ``str(home) in str(log.info.call_args_list[0])``
+where the product logged ``home`` as a Path ARGUMENT.  repr of a Path is
+``WindowsPath('C:/Users/.../home')`` -- forward slashes -- while ``str(home)``
+is ``C:\Users\...\home``, so the substring is never there.  On POSIX the
+``PosixPath(...)`` repr and ``str()`` spell the path alike.  Two ways to the same red: a str
+argument has its backslashes doubled by repr, a Path argument is re-rendered
+with forward slashes.  The cure for both is to compare the argument itself --
+``log.info.call_args_list[0].args[1] == home`` for a Path argument, the
+message text in ``args[0]`` for a string -- never the call's repr.
 
 The shape, read per function with a small name-flow pass:
 
@@ -35,9 +46,9 @@ The shape, read per function with a small name-flow pass:
 
 Deliberately NOT flagged:
 
-* A real message string: ``c.args[0]``, ``m.call_args[0][0]``,
-  ``c.kwargs["msg"]`` -- one level inside the args container, the value itself.
-  That is the cure.
+* A real message string or argument: ``c.args[0]``, ``m.call_args[0][0]``,
+  ``c.kwargs["msg"]``, ``c.args[1] == path`` -- one level inside the args
+  container, the value itself.  That is the cure.
 * A path side that repr cannot change: ``.name`` / ``.stem`` / ``.suffix``,
   ``.as_posix()`` / ``.as_uri()``, ``Path("one_part")``.
 * A path side the test already escaped: ``repr(str(p))``, ``str(p).replace(...)``,
@@ -359,15 +370,20 @@ def _pairs(node: ast.Compare) -> Iterator[tuple[ast.expr, ast.cmpop, ast.expr]]:
         yield operands[index], op, operands[index + 1]
 
 
+#: Both mechanisms and the cure, shared by every verdict.
+_WHY = "repr doubles each Windows backslash of a str arg and spells a Path arg WindowsPath('C:/...')"
+_CURE = "compare the arg itself: call_args.args[i] == path, or the message text in args[0]"
+
+
 def _judge_compare(node: ast.Compare, env: dict[str, str]) -> str | None:
     for left, op, right in _pairs(node):
         kinds = (classify(left, env), classify(right, env))
         if isinstance(op, ast.In) and kinds == (PATH, REPR):
-            return "a path is searched for in a mock call's repr - repr doubles each Windows backslash, red on Windows"
+            return f"a path is searched for in a mock call's repr - {_WHY}, red on Windows; {_CURE}"
         if isinstance(op, ast.NotIn) and kinds == (PATH, REPR):
-            return "a path is ruled out of a mock call's repr - repr doubles each Windows backslash, vacuous on Windows"
+            return f"a path is ruled out of a mock call's repr - {_WHY}, vacuous on Windows; {_CURE}"
         if isinstance(op, (ast.Eq, ast.NotEq)) and set(kinds) == {PATH, REPR}:
-            return "a path is compared with a mock call's repr - repr doubles each Windows backslash"
+            return f"a path is compared with a mock call's repr - {_WHY}; {_CURE}"
     return None
 
 
@@ -376,7 +392,7 @@ def _judge_search(node: ast.Call, env: dict[str, str]) -> str | None:
     if not (isinstance(func, ast.Attribute) and func.attr in _SEARCH_METHODS and node.args):
         return None
     if classify(func.value, env) == REPR and classify(node.args[0], env) == PATH:
-        return f"a path is searched for with .{func.attr}() in a mock call's repr - repr doubles each Windows backslash"
+        return f"a path is searched for with .{func.attr}() in a mock call's repr - {_WHY}; {_CURE}"
     return None
 
 
@@ -402,10 +418,10 @@ def _functions(node: ast.AST, outer: dict[str, str], skipped: bool) -> Iterator[
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.ClassDef):
             helpers = {k: v for k, v in outer.items() if k.endswith(_HELPER_SUFFIX)}
-            yield from _functions(child, helpers, skipped or _platform_skipped(child.decorator_list))
+            yield from _functions(child, helpers, skipped or platform_skipped(child.decorator_list))
         elif isinstance(child, _SCOPES):
             env = function_env(child, outer)
-            here = skipped or _platform_skipped(child.decorator_list)
+            here = skipped or platform_skipped(child.decorator_list)
             yield child, env, here
             yield from _functions(child, env, here)
         elif not isinstance(child, ast.Lambda):
@@ -416,7 +432,7 @@ def _references_platform(node: ast.expr) -> bool:
     return any(_dotted(n) in (("sys", "platform"), ("os", "name")) for n in ast.walk(node) if isinstance(n, ast.expr))
 
 
-def _platform_skipped(decorators: list[ast.expr]) -> bool:
+def platform_skipped(decorators: list[ast.expr]) -> bool:
     """A skipif naming sys.platform / os.name, or a bare skip."""
     for dec in decorators:
         target = dec.func if isinstance(dec, ast.Call) else dec

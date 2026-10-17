@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_content.py
 # Description: Windows Compatibility Standards Content Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-10
-# Modified: 2026-10-10
+# Modified: 2026-10-15
 # =============================================
 
 """
@@ -136,6 +136,13 @@ def get_windows_compat_standards() -> str:
         "  [dim]str(lock) in ' '.join(str(c) for c in m.call_args_list)[/dim] -- a call's repr",
         "  doubles each backslash, so a Windows path is never in it (CI 35416653326).",
         "  [green]Fix:[/green] compare against the args: [dim]str(arg) for c in ... for arg in c.args[/dim]",
+        "  A Path arg renders [dim]WindowsPath('C:/...')[/dim] in that repr (CI 38843541023):",
+        "  [green]Fix:[/green] compare the arg itself: [dim]call_args.args[1] == home[/dim]",
+        "",
+        "[bold cyan]ADVISORY (not scored) -- text fixture bytes oracle, tests/:[/bold cyan]",
+        "  [dim]p.write_text('x\\n')[/dim] then [dim]read_bytes() == b'x\\n'[/dim] (or a sha256 / byte",
+        "  length) -- text mode writes \\r\\n on Windows (CI 38843541023).",
+        "  [green]Fix:[/green] [dim]p.write_bytes(b'x\\n')[/dim] or [dim]write_text(..., newline='')[/dim]",
         "",
         "[bold cyan]WHY BY SHAPE:[/bold cyan]",
         "  A Linux run cannot observe a state POSIX lacks (delete pending) or a",
