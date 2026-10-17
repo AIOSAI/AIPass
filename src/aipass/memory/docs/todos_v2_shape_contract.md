@@ -3,8 +3,8 @@
 # todos v2 shape contract
 
 What @memory's code enforces and renders for the todo pad: the canonical todo, the todos tab, how
-`next #N` is derived, where the numbers come from, the backlog file and the template. Decision record:
-DPLAN-0345. Paths are relative to `src/aipass/memory/` unless stated otherwise.
+`next #N` is derived, where the numbers come from, the backlog file and the template.
+Paths are relative to `src/aipass/memory/` unless stated otherwise.
 
 ## 1. The canonical todo
 

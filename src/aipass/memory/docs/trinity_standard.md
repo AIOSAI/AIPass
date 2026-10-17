@@ -6,8 +6,9 @@
 
 The standard has one rule: **numbers come from `memory.config.json`, prose comes from
 `memory/templates/*.template.json`, entry content comes from the agent**, and nothing holds a fact
-it can derive. The contract lives in `@devpulse dropbox/trinity_pattern.md`; this document is what
-the code does.
+it can derive. This page is that rule as @memory's code holds it. The file shape it guards (sections,
+entry fields, the checker's scan groups and weights) is @seedgo's `trinity` standard,
+`seedgo/apps/handlers/aipass_standards/trinity.md`, enforced by `trinity_check.py`.
 
 ---
 
