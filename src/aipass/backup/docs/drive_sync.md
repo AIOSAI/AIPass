@@ -98,9 +98,41 @@ line. A run with nothing to upload never asks for the quota.
 fit ends on the same sentence, exits 2, and keeps what its snapshot and
 versioned steps wrote. `all` does not repeat the sentence (`error_shown`).
 Under `all --registered` the per-project summary still follows it, as it
-follows every project. The wire shape is the "Drive headroom" section of
-`src/aipass/devpulse/docs.local/backup_door_contract.md`; it is not retyped
-here.
+follows every project. Through the host API's backup door, a refused run is a
+`failed` job, not an HTTP error: the lane exits 2, the job read answers 200, and
+the job's `summary`, the tail of the lane's output, carries the sentence.
+
+## On the host API's backup door
+
+The host API (@api) runs these lanes for the phone through four routes. A lane is
+one of the four drone verb names, `snapshot`, `versioned`, `all` or `drive_sync`,
+and runs as `drone @backup <lane> <root>`, with `--quiet` for all but
+`drive_sync`, which has none.
+
+| Route | Scope | Sends | Answers |
+|---|---|---|---|
+| `POST /v1/backup/run` | operate | `{project, lane}` | **202**, the job with `state: "running"` |
+| `GET /v1/backup/job?id=<job>` | read | the job id | the job |
+| `GET /v1/backup/status?project=<name>[&sizes=1]` | read | the project, `sizes=1` for the store sizes | the status |
+| `POST /v1/backup/cancel` | operate | `{project, lane}`, the lane pressed | **200**, `{project, lane, stopped: true, message}` |
+
+- **The status** is `status <root> --json [--sizes]` (see [the CLI](cli.md#status---json))
+  passed through, with `project` as asked and `root` as resolved added, and each
+  `running` entry given `job`: the server's id when it started that run, else null.
+- **A job** carries `job`, `project`, `lane`, `state` and `started_at`; once it
+  ends, also `finished_at`, `exit`, `summary` (the tail of the lane's output,
+  verbatim, at most 600 characters) and `error`. `state` is `running`, `done`
+  (exit 0), `stopped` (exit 130) or `failed` (any other exit, the 30-minute
+  timeout, or a routing error mid-run, whose sentence is in `error`). Jobs live in
+  the server's memory: a finished one is kept an hour, and a restart forgets all.
+- **Four error codes.** **400 `verb_refused`**: no project or an unknown one, a
+  lane outside the four, or that lane already running for that project
+  (`<lane> already running for <project> since <iso>`). **404 `job_unknown`**: a
+  job the server does not hold. **404 `not_running`**: cancel found nothing of
+  that lane running; the message is `stop`'s line verbatim. **503
+  `verb_unavailable`**: @backup, drone or the project resolver cannot answer, or
+  `status --json` is missing; the message is a fixed sentence with a `ref` into
+  the host's log.
 
 ## The tracker is saved while the upload runs
 

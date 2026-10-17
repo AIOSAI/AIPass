@@ -81,8 +81,8 @@ with no `.backup/` store is refused on stderr with a non-zero exit. Any other
 ## `status --json`
 
 `status <project_path|@name> --json [--sizes]` prints the object the backup door
-reads, exactly the shape pinned in devpulse's `backup_door_contract.md`
-("@backup: status --json"), as one JSON object on stdout with nothing else there.
+reads and passes through unchanged (drive_sync.md, "On the host API's backup
+door"), as one JSON object on stdout with nothing else there.
 `store` is present only with `--sizes`, which walks both stores. `running`
 lists the lanes in flight, `[]` when none; see
 [Running lanes and `stop`](#running-lanes-and-stop) below. Each lane's
@@ -99,8 +99,7 @@ stderr. `--sizes` without `--json` is refused.
 
 Every lane that does work (snapshot, versioned, drive_sync) announces itself in
 `<project>/.backup/running/<lane>.json` for as long as it runs, whoever started
-it. The document is the contract's `running` entry (devpulse's
-`backup_door_contract.md`, "running"): `verb`, `lane`, `pid`, `started_at` and
+it. The document is the `running` entry the door reports: `verb`, `lane`, `pid`, `started_at` and
 `progress` (`done`, `total`, `failed`, `bytes_done`, `bytes_total`, `current`,
 `updated_at`). `progress` is null while the lane scans; after that the file is
 rewritten from the lane's per-file callback at most once a second, atomically,
