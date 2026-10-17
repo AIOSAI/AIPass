@@ -33,7 +33,7 @@ several exist, but `remote` travels either way: refusing a repository that named
 its remote otherwise invents a rule that does not exist; choosing silently hides
 the choice from the caller.
 
-**A repository with no remote answers 200 with `remote: null`** (contract C-D):
+**A repository with no remote answers 200 with `remote: null`**:
 the same shape, with `remote`, `url` and `web` all `null` and `redacted` false.
 Projects in the real tree have none, and the phone reads `remote === null` as "no
 remote configured". A repository the door cannot read stays a refusal, and a named

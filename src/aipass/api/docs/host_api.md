@@ -92,7 +92,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
-| `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
+| `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
 | `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line verbatim. Nothing running: **404** `not_running`, @backup's line |
 | `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
@@ -113,6 +113,11 @@ mechanism **ran and said no**, with the owning branch's own sentence in `detail`
 mechanism was never reached — seam missing, door unreachable — that is a status
 code, not an `ok`. A wake refused by @ai_mail's blocklist is `200 {ok: false}`;
 a kill whose seam does not exist is 503.
+
+**New-project calls @aipass's `create_project`.** A name is a letter then up to 63
+letters, digits, `_` or `-`; `template` is `empty` (default) or `python`; `project` is
+the census name the switcher keys on. The name, template and exists refusals say their
+sentence; `project_refused` and `project_door_failed` give a fixed one and a `ref`.
 
 **An exception's words never reach the client.** They can carry a host path,
 another program's stderr or another branch's JSON, so a denial caused by a caught
@@ -218,7 +223,7 @@ attach seventeen is refused with a sentence naming the cap.
 ## Pairing
 
 **A receipt file the user has to carry is a credential typed by eye or mailed**,
-so the token's hop to the phone is a QR (DPLAN-0406).
+so the token's hop to the phone is a QR.
 
 `host-api pair <label> [--scope read|operate] [--ttl SECONDS]` mints a one-use
 code (`pairings.py`), stores only its sha256 in `host_api/pairings.json` beside

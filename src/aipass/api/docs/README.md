@@ -3,7 +3,7 @@
 # Docs
 
 Tracked public reference for the `API` branch — the depth behind the branch README, one
-file per surface or handler group (DPLAN-0347, the layer contract). The README
+file per surface or handler group. The README
 is the face; these are what you open when something breaks.
 
 | Doc | What it covers |

@@ -38,7 +38,7 @@ green — so an **AST ban** convicts any `inspect.stack` call in the guard file.
 AST ban and not a string ban because the guard's own docstring names `inspect.stack` while
 explaining the defect, and a spelling ban would convict the explanation.
 
-## The settings conformance corpus (FPLAN-0438)
+## The settings conformance corpus
 
 The settings lane is a faithful mirror of @baud's `settings.rs`, and a mirror
 drifts: a divergence is a place where the two faces would write the operator's

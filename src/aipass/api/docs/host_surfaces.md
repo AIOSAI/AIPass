@@ -255,9 +255,15 @@ nothing else: a run is `drone @backup <lane> <root>` (`--quiet` on every lane bu
 status is `drone @backup status <root> --json [--sizes]`, passed through with `project`
 and `root` added.
 The root comes from the read lane's resolver, the seat in any case or a census name, so
-@backup is handed a path this server did not compose and never a `@name`. Every shape is
-devpulse's backup door contract (DPLAN-0411, DPLAN-0412). A status answer that is not one
-JSON object is a 503 saying `--json` is not on this machine; the Rich panel is never scraped.
+@backup is handed a path this server did not compose and never a `@name`. A status answer
+that is not one JSON object is a 503 saying `--json` is not on this machine; the Rich panel
+is never scraped.
+
+**A job is `{job, project, lane, state, started_at}`**; a finished one adds `finished_at`,
+`exit` (`null` when the lane never answered), `summary` and `error`. Refusals ride the
+`{error: {code, message}}` envelope: **400 `verb_refused`** (no or unknown lane or
+project, the lane already running) says its sentence; **503 `verb_unavailable`** gives a
+fixed sentence and a `ref` into this host's log.
 
 **`running` is @backup's list** (its running files: terminal and daemon runs too), entry
 for entry, each with `job`: this server's id for a run it started there under the entry's
@@ -268,7 +274,7 @@ log line. Not a list of objects: 503.
 over @backup's 30 s wait); the job closes when its lane exits.
 
 **Start and poll, because a lane outlives a request.** A lane can take minutes and its
-timeout is 30, longer than a phone keeps a request open. So the run answers **202** with the job at once and runs the lane on a worker
+timeout is 30 minutes, longer than a phone keeps a request open. So the run answers **202** with the job at once and runs the lane on a worker
 thread; the phone polls the job every few seconds. One job per project and lane runs at a
 time, the second a 400 naming who started first and when; different lanes overlap and
 @backup's own locks decide the rest. `summary` is the last 600 characters of the output,

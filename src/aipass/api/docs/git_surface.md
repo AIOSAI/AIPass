@@ -6,7 +6,7 @@
 
 ---
 
-## The git surface (DPLAN-0303)
+## The git surface
 
 *Where it lives: repository reads, the remote lane included, are in `git_reads.py`;
 files, directories and the name fence are in `reads.py`. The split follows the
