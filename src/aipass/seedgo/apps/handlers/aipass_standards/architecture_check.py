@@ -3,15 +3,13 @@
 # Description: Architecture Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Architecture Standards Checker Handler
+"""Architecture Standards Checker Handler
 
-Validates module compliance with AIPass architecture standards.
-Checks 3-layer pattern, handler independence, file size, domain organization.
-For entry points, also verifies entire branch structure against template baseline.
+Checks 3-layer pattern, handler independence, file size, domain organization; for the
+primary entry point, also the branch structure against spawn's template baseline.
 """
 
 import json
@@ -23,36 +21,26 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Spawn's modules gateway — the public door, and the ONLY source for the
-# class->template question. Imported at module scope with no fallback on
-# purpose: if this door moves, the architecture checker must die at import
-# with spawn's name in the traceback, not quietly score the fleet against a
-# guess. The mirror this replaces is retired (DPLAN-0319 wave 3, FPLAN-0454).
+# Spawn's modules gateway is the ONLY source for the class->template question. No
+# fallback on purpose: if this door moves, the checker must die at import with spawn's
+# name in the traceback, not quietly score the fleet against a guess.
 from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
 from aipass.seedgo.apps.handlers.module_root import module_file
 
-# Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
-# Applies to production source only: this checks the apps/handlers/modules layering
-# a branch is built from. A test file has no such layering, and enforcing it there
-# failed 439 of the fleet's 456 test files (96%, every branch) -- noise, not findings.
+# Applies to production source only: a test file has no apps/handlers/modules layering.
 APPLIES_TO = "production"
 
 PACK_ROOT = module_file(__file__).parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> seedgo/
 
-# Spawn templates root — live-scanned. The SUBDIRECTORY under it is never
-# guessed from citizen_class: passport 2.0 (DPLAN-0319) made the class a
-# behavioural label that does NOT name a directory, so only spawn's gateway
-# may answer it. Keeping the ROOT here (rather than reading spawn's own
-# constant) leaves one seam a test can point at a fixture tree —
-# tests/test_citizen_class_resolution.py pins it against spawn.
-# PACK_ROOT = seedgo/apps/, so .parent.parent = src/aipass/
+# Spawn templates root. The SUBDIRECTORY under it is never guessed from citizen_class
+# (the class does not name a directory); only spawn's gateway may answer it. The ROOT
+# stays here as the seam tests/test_citizen_class_resolution.py points at a fixture tree.
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> seedgo/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
 
-# shared/ beside apps/ is a branch's pre-install library (aipass keeps project_home.py
-# there: it runs before prax can be imported). branch_audit reads it as product since
-# DPLAN-0404 leg 1, so this checker names it a layer rather than a stray.
+# shared/ beside apps/ is a branch's pre-install library (it runs before prax can be
+# imported); branch_audit reads it as product, so this checker names it a layer.
 LIBRARY_LAYER = "Library layer (shared/, beside apps/)"
 
 # Template subtrees that are local-only and therefore never scored — see _is_local_only()
@@ -60,34 +48,13 @@ LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows architecture standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules for this file
-
-    Returns:
-        dict: {
-            'passed': bool,           # Overall pass/fail
-            'checks': [               # Individual check results
-                {
-                    'name': str,      # Check name
-                    'passed': bool,   # Pass/fail
-                    'message': str,   # Details
-                }
-            ],
-            'score': int,             # 0-100 percentage
-            'standard': str           # Standard name
-        }
-    """
+    """Check if module follows architecture standards"""
     checks = []
     path = Path(module_path)
 
     # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "architecture", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -96,7 +63,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ARCHITECTURE",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -105,7 +71,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ARCHITECTURE",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -119,49 +84,41 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ARCHITECTURE",
         }
 
-    # Determine file location and type
     is_entry_point = path.name.endswith(".py") and "apps/" in module_path and path.parent.name == "apps"
     is_module = "apps/modules/" in module_path
     is_handler = "apps/handlers/" in module_path
     is_init = path.name == "__init__.py"
     is_library = is_library_file(path)
 
-    # Check 1: 3-Layer Pattern - File location
     if not is_init:
         layer_check = check_layer_location(is_entry_point, is_module, is_handler, is_library)
         checks.append(layer_check)
 
-    # Check 2: File size
     size_check = check_file_size(lines, module_path)
     checks.append(size_check)
 
-    # Check 3: Handler independence (handlers must not import parent modules)
     if is_handler:
         independence_check = check_handler_independence(lines, module_path)
         if independence_check:
             checks.append(independence_check)
 
-    # Check 4: Domain organization (handlers should be in domain folders)
     if is_handler:
         domain_check = check_domain_organization(module_path)
         if domain_check:
             checks.append(domain_check)
 
-    # Check 5: Template baseline verification (primary entry point only — {branch}.py)
-    # Secondary entry points (e.g. daemon_wakeup.py, scheduler_cron.py) skip this
-    # to avoid duplicate branch-level template checks.
+    # Check 5: Template baseline, primary entry point only ({branch}.py); secondary
+    # entry points skip it to avoid duplicate branch-level template checks.
     if is_entry_point:
         branch_dir = path.parent.parent  # apps/ -> branch/
         if path.stem == branch_dir.name:
             baseline_checks = check_template_baseline(module_path, bypass_rules=bypass_rules)
             checks.extend(baseline_checks)
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
-    # Overall pass if score >= 75%
     overall_passed = score >= 75
 
     json_handler.log_operation(
@@ -176,17 +133,7 @@ def is_library_file(path: Path) -> bool:
 
 
 def check_layer_location(is_entry_point: bool, is_module: bool, is_handler: bool, is_library: bool = False) -> Dict:
-    """
-    Check if file is in correct architectural layer. The caller decides the
-    layer from the path; the `module_path` this also took was never read and
-    was dropped (seedgo, fleet green leg 8).
-
-    3-Layer Pattern:
-    - apps/branch.py (entry point)
-    - apps/modules/ (orchestration)
-    - apps/handlers/ (implementation)
-    - shared/ beside apps/ (the pre-install library, LIBRARY_LAYER)
-    """
+    """Check if file is in correct architectural layer; the caller decides it from the path."""
     if is_entry_point:
         return {"name": "3-layer pattern", "passed": True, "message": "Entry point layer (apps/branch.py)"}
     elif is_module:
@@ -204,16 +151,7 @@ def check_layer_location(is_entry_point: bool, is_module: bool, is_handler: bool
 
 
 def check_file_size(lines: List[str], module_path: str) -> Dict:
-    """
-    Check file size compliance.
-
-    Bands:
-    - Under 300 lines: perfect
-    - 300-500 lines: good
-    - 500-700 lines: getting heavy
-    - 700-1500 lines: advisory warning (does not dock score)
-    - 1500+ lines: hard fail (docks score)
-    """
+    """Check file size compliance."""
     line_count = len(lines)
 
     if line_count < 300:
@@ -237,15 +175,7 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
 
 
 def check_handler_independence(lines: List[str], module_path: str) -> Optional[Dict]:
-    """
-    Check that handlers don't import from parent branch modules
-
-    Handlers must be independent and transportable.
-    Allowed: from prax.apps.modules import ... (service)
-    Allowed: from cli.apps.modules import ... (service)
-    Forbidden: from <parent_branch>.apps.modules import ...
-    """
-    # Detect parent branch from module path
+    """Check that handlers don't import from parent branch modules (prax and cli services allowed)"""
     parent_branch = None
     if module_path:
         path_parts = Path(module_path).parts
@@ -258,36 +188,27 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Track docstrings (handle both single-line and multi-line)
         if stripped.startswith('"""') or stripped.startswith("'''"):
             quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            # Count occurrences of the quote marker
             quote_count = stripped.count(quote_marker)
             if quote_count >= 2:
-                # Single-line docstring (opening and closing on same line)
                 continue  # Skip this line but don't toggle state
             else:
-                # Multi-line docstring boundary
                 in_docstring = not in_docstring
 
-        # Skip docstrings, comments and empty lines
         if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
-        # Check for forbidden module imports
         if ".apps.modules" in line and ("from " in line or "import " in line):
-            # Extract the import statement
             if "#" in line:
                 code_part = line.split("#")[0]
             else:
                 code_part = line
 
             if ".apps.modules" in code_part:
-                # Allowed service imports
                 if "prax.apps.modules" in code_part or "cli.apps.modules" in code_part:
                     continue
 
-                # Check if importing from parent branch
                 if parent_branch and f"{parent_branch}.apps.modules" in code_part:
                     return {
                         "name": "Handler independence",
@@ -295,7 +216,6 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
                         "message": f"Handler importing from parent module on line {i} (violates independence)",
                     }
 
-                # Generic check if no parent branch detected
                 if not parent_branch:
                     return {
                         "name": "Handler independence",
@@ -307,17 +227,9 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
 
 
 def check_domain_organization(module_path: str) -> Optional[Dict]:
-    """
-    Check if handler is organized by domain (not technical role)
-
-    Good: handlers/json/, handlers/error/, handlers/branch/
-    Bad: handlers/utils/, handlers/helpers/, handlers/operations/
-    """
-    # Extract handler domain from path
-    # e.g., src/aipass/seedgo/apps/handlers/standards/file.py -> domain is 'standards'
+    """Check if handler is organized by domain (not technical role)"""
     path_parts = Path(module_path).parts
 
-    # Find 'handlers' in path and get next directory
     handler_domain = None
     for i, part in enumerate(path_parts):
         if part == "handlers" and i + 1 < len(path_parts):
@@ -327,7 +239,6 @@ def check_domain_organization(module_path: str) -> Optional[Dict]:
     if not handler_domain:
         return {"name": "Domain organization", "passed": False, "message": "Could not detect handler domain from path"}
 
-    # Check for technical (bad) organization
     technical_names = ["utils", "helpers", "operations", "common", "shared", "lib"]
     if handler_domain.lower() in technical_names:
         return {
@@ -336,7 +247,6 @@ def check_domain_organization(module_path: str) -> Optional[Dict]:
             "message": f"Technical organization ({handler_domain}/) - use business domains instead",
         }
 
-    # Domain-based organization detected
     return {"name": "Domain organization", "passed": True, "message": f"Domain-based organization ({handler_domain}/)"}
 
 
@@ -360,11 +270,9 @@ def _should_ignore(item: Path, ignore_config: Dict) -> bool:
     """Check if a template item should be ignored during baseline check"""
     name = item.name
 
-    # Check exact filename matches
     if name in ignore_config["ignore_files"]:
         return True
 
-    # Check patterns
     for pattern in ignore_config["ignore_patterns"]:
         if pattern.startswith("*"):
             if name.endswith(pattern[1:]):
@@ -383,12 +291,9 @@ def _should_ignore(item: Path, ignore_config: Dict) -> bool:
 def check_branch_info(branch_path: str) -> list[str]:
     """Non-scored signpost lines for the architecture standard.
 
-    The template baseline needs .trinity/passport.json to resolve a citizen
-    class, and .trinity/ is permanently gitignored — so in a clean checkout or
-    in CI the baseline cannot run at all. Announcing that on the audit's info
-    channel keeps a skipped check visible instead of letting it vanish, while
-    never failing a branch whose checkout is legitimately clean. Returns plain
-    strings on the info channel, so it can never reach a score by construction.
+    The baseline needs the branch passport, which is gitignored, so in a clean checkout
+    or CI it cannot run; announcing that on the info channel keeps a skipped check visible
+    without ever reaching a score.
     """
     passport = Path(branch_path) / ".trinity" / "passport.json"
     if passport.exists():
@@ -417,26 +322,9 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
 def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
     """Ask spawn's gateway which template directory a citizen_class mints from.
 
-    Two questions, because spawn publishes two and they answer different things.
-    ``refuse_legacy_class`` is asked FIRST and alone: a retired name is a
-    passport waiting on the migration — expected, temporary, cured by a fleet
-    run — and telling that branch "unknown class" would send it hunting for a
-    typo it does not have. Everything else goes to ``get_template_dir``, whose
-    own refusal already separates the permanent privilege ("admin" is not a
-    class and never will be, DPLAN-0288) from a name nobody registered. Spawn's
-    sentence is carried through verbatim rather than paraphrased, so the three
-    lanes stay apart in the words the branch actually reads.
-
-    Nothing is mirrored here any more and nothing may be: the previous version
-    of this function kept a local copy of spawn's class table, which made the
-    auditor's copy a second source of truth for facts it does not own.
-
-    Args:
-        citizen_class: The value read from identity.citizen_class.
-
-    Returns:
-        (template_dir_name, "") when the class resolves, else (None, refusal) —
-        the refusal is a complete sentence naming the value.
+    ``refuse_legacy_class`` is asked FIRST and alone: a retired name is a passport waiting
+    on the migration, not a typo. Everything else goes to ``get_template_dir``; spawn's
+    refusal sentence is carried through verbatim. Nothing of spawn's class table is mirrored.
     """
     legacy = refuse_legacy_class(citizen_class)
     if legacy:
@@ -455,24 +343,14 @@ def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
 def _relative_spelling(item: PurePath, root: PurePath) -> str:
     """One template entry's path relative to the template root, spelled in posix.
 
-    ALWAYS FORWARD SLASHES, ON EVERY PLATFORM, and it is not cosmetic. This
-    string becomes the check name a branch reads ("File: apps/something.py") and
-    the text a bypass rule is matched against, and bypass rules are written with
-    forward slashes. Rendered with `str()` it followed the host: the Windows CI
-    leg produced "apps\\something.py", which failed the name and silently failed
-    the bypass match with it, so a deliberate exception stopped being honoured on
-    one platform only. `_transform_path` already returned posix on its rename
-    branch, so the two spellings disagreed inside one module.
+    Always forward slashes on every platform: this string is the check name a branch reads
+    and the text a bypass rule (written with forward slashes) is matched against.
     """
     return item.relative_to(root).as_posix()
 
 
 def _scan_template(template_path: Path) -> Dict:
-    """Scan spawn template directory and return expected structure.
-
-    Returns dict with 'directories' and 'files' — relative paths
-    with {{BRANCH}} placeholders intact.
-    """
+    """Scan spawn template directory and return expected structure."""
     ignore_config = _load_ignore_patterns(template_path)
     structure = {"directories": [], "files": []}
 
@@ -485,7 +363,6 @@ def _scan_template(template_path: Path) -> Dict:
         if item.is_dir():
             structure["directories"].append(relative)
         elif item.is_file():
-            # Skip template-only files (from ignore_handler)
             if item.name in get_template_ignore_patterns():
                 continue
             structure["files"].append(relative)
@@ -496,29 +373,22 @@ def _scan_template(template_path: Path) -> Dict:
 def _is_local_only(template_relative: str) -> bool:
     """True when a template path belongs to a gitignored, local-only subtree.
 
-    .trinity/ is permanently gitignored — agent memory is local-only and never
-    shipped. Scoring its contents would demand a branch commit exactly what it
-    must not. The directory itself is excluded too: the baseline only runs once
-    .trinity/passport.json has been read, so a ".trinity/ exists" check could
-    never fail and would only pad the denominator with a guaranteed pass.
+    The trinity directory is gitignored, local-only agent memory: scoring its contents would
+    demand a branch commit what it must not, and "it exists" could never fail once the
+    passport has been read.
     """
     parts = Path(template_relative).parts
     return bool(parts) and parts[0] in LOCAL_ONLY_TEMPLATE_ROOTS
 
 
 def _transform_path(template_relative: str, branch_name: str) -> str:
-    """Transform a template path for a specific branch.
-
-    Replaces {{BRANCH}} placeholder and renames known template files
-    to their branch-specific names.
-    """
+    """Transform a template path for a specific branch."""
     branch_lower = branch_name.lower().replace("-", "_")
     entry_point_name = branch_name.lstrip(".").lower()
 
     # {{BRANCH}} in directory names uses lowercase (e.g., {{BRANCH}}_json → seedgo_json)
     result = template_relative.replace("{{BRANCH}}", branch_lower)
 
-    # Known file renames from spawn's create_branch convention
     FILE_RENAMES = {
         f"{branch_lower}.py": f"{entry_point_name}.py",  # already lowercase from placeholder
     }
@@ -531,24 +401,9 @@ def _transform_path(template_relative: str, branch_name: str) -> str:
 
 
 def check_template_baseline(module_path: str, bypass_rules: list | None = None) -> List[Dict]:
-    """
-    Verify branch structure against spawn template (live scan, class-aware).
-
-    Reads .trinity/passport.json → citizen_class → asks spawn's class_registry
-    which template directory that class mints from (both classes: templates/citizen/).
-    Scans the template directory live (no static registry needed).
-    Transforms {{BRANCH}} placeholders and compares against actual branch.
-
-    Args:
-        module_path: Path to entry point file (e.g., src/aipass/api/apps/api.py)
-        bypass_rules: Optional bypass rules
-
-    Returns:
-        List of check dicts for each template item
-    """
+    """Verify branch structure against spawn template (live scan, class-aware)."""
     checks = []
 
-    # Detect branch path from module path
     path = Path(module_path)
     branch_path = None
     current = path.parent
@@ -565,9 +420,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
 
     branch_name = branch_path.name
 
-    # Read citizen class from passport
-    # .trinity/ is gitignored — absent in clean checkouts / CI.
-    # Skip the template baseline check entirely when passport is unavailable.
+    # The trinity directory is gitignored: skip the template baseline when the passport is absent.
     citizen_class = _get_citizen_class(branch_path)
     if not citizen_class:
         passport_path = branch_path / ".trinity" / "passport.json"
@@ -581,7 +434,6 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
             }
         ]
 
-    # Find the matching template directory
     if not SPAWN_TEMPLATES_DIR.exists():
         return [
             {
@@ -591,10 +443,8 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
             }
         ]
 
-    # Resolve class -> template directory through the mirrored registry, never
-    # by joining the class name onto the path. A refused class is a SCORED
-    # violation naming the value, so an un-migrated passport reads as "migrate
-    # this" and never as a silent pass.
+    # A refused class is a SCORED violation naming the value, so an un-migrated passport
+    # reads as "migrate this" and never as a silent pass.
     template_dir_name, refusal = _resolve_template_dir(citizen_class)
     if not template_dir_name:
         logger.info("Template baseline: unusable citizen_class %r for %s", citizen_class, branch_name)
@@ -617,10 +467,8 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
             }
         ]
 
-    # Scan template live
     template_structure = _scan_template(template_path)
 
-    # Check directories
     for template_dir in template_structure["directories"]:
         if _is_local_only(template_dir):
             continue
@@ -643,7 +491,6 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                     }
                 )
 
-    # Check files
     for template_file in template_structure["files"]:
         if _is_local_only(template_file):
             continue
@@ -667,7 +514,6 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                     }
                 )
 
-    # Summary check
     missing_count = sum(1 for c in checks if not c["passed"])
     total_count = len(checks)
     checks.insert(

@@ -3,17 +3,13 @@
 # Description: Diagnostics Orchestrator
 # Version: 2.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Diagnostics Orchestrator
 
-Shared diagnostics orchestrator that discovers runner configurations from
-standards packs (handlers/*_standards/diagnostics.json) and dispatches to
-the appropriate runner handlers in handlers/diagnostics/.
-
-Falls back to python/pyright if no runner config is found (backwards compatible).
+Runners come from handlers/*_standards/diagnostics.json; none enabled falls back to pyright.
 """
 
 import sys
@@ -32,16 +28,9 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 
 AUDIT_SCOPE = "branch_level"
 
-# Diagnostics handler directory (where this file lives)
 DIAGNOSTICS_DIR = module_file(__file__).parent
 
-# Handlers root (parent of diagnostics/)
 HANDLERS_DIR = DIAGNOSTICS_DIR.parent
-
-
-# =============================================
-# FILE / DIRECTORY HELPERS (used by runners)
-# =============================================
 
 
 def should_ignore_file(file_path: str, branch_root: Path) -> bool:
@@ -55,20 +44,7 @@ def should_ignore_file(file_path: str, branch_root: Path) -> bool:
 
 
 def check_file(file_path: str) -> Dict:
-    """
-    Run pyright on a single file and return diagnostics
-
-    Args:
-        file_path: Path to Python file to check
-
-    Returns:
-        dict: {
-            'file': str,
-            'errors': int,
-            'warnings': int,
-            'diagnostics': [{'line': int, 'severity': str, 'message': str}]
-        }
-    """
+    """Run pyright on a single file and return its diagnostics."""
     path = Path(file_path)
 
     if not path.exists():
@@ -84,7 +60,6 @@ def check_file(file_path: str) -> Dict:
         return {"file": str(file_path), "errors": 0, "warnings": 0, "diagnostics": [], "skipped": "Not a Python file"}
 
     try:
-        # Run pyright with JSON output
         result = subprocess.run(
             [sys.executable, "-m", "pyright", "--pythonpath", sys.executable, "--outputjson", str(path)],
             capture_output=True,
@@ -92,7 +67,6 @@ def check_file(file_path: str) -> Dict:
             timeout=30,
         )
 
-        # Parse JSON output
         try:
             output = json.loads(result.stdout)
         except json.JSONDecodeError:
@@ -155,22 +129,7 @@ def check_file(file_path: str) -> Dict:
 
 
 def check_directory(directory: str) -> Dict:
-    """
-    Run pyright on all Python files in a directory
-
-    Args:
-        directory: Directory to scan. Its glob `pattern` parameter was never
-            read and no caller passed it; dropped (seedgo, fleet green leg 8).
-
-    Returns:
-        dict: {
-            'total_files': int,
-            'files_with_errors': int,
-            'total_errors': int,
-            'total_warnings': int,
-            'results': [file_result, ...]
-        }
-    """
+    """Run pyright on all Python files in a directory."""
     path = Path(directory)
 
     if not path.exists():
@@ -183,7 +142,6 @@ def check_directory(directory: str) -> Dict:
             "error": f"Directory not found: {directory}",
         }
 
-    # Run pyright on entire directory for efficiency
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pyright", "--pythonpath", sys.executable, "--outputjson", str(path)],
@@ -222,13 +180,11 @@ def check_directory(directory: str) -> Dict:
         # The directory is a branch's apps/: the ignore list reads branch-relative paths.
         branch_root = path.parent
 
-        # Group diagnostics by file (filtering ignored files)
         file_diagnostics = {}
 
         for diag in output.get("generalDiagnostics", []):
             file_path = diag.get("file", "unknown")
 
-            # Skip files matching ignore patterns
             if should_ignore_file(file_path, branch_root):
                 continue
             if file_path not in file_diagnostics:
@@ -298,21 +254,8 @@ def check_directory(directory: str) -> Dict:
         }
 
 
-# =============================================
-# RUNNER DISCOVERY & DISPATCH
-# =============================================
-
-
 def _discover_pack_configs() -> List[Dict]:
-    """
-    Find diagnostics.json files in handlers/*_standards/ directories.
-
-    Scans HANDLERS_DIR for subdirectories matching *_standards/ pattern
-    and loads any diagnostics.json found within.
-
-    Returns:
-        List of dicts: [{'pack_name': str, 'pack_path': Path, 'config': dict}]
-    """
+    """Find diagnostics.json files in handlers/*_standards/ directories."""
     configs = []
 
     if not HANDLERS_DIR.exists():
@@ -340,18 +283,7 @@ def _discover_pack_configs() -> List[Dict]:
 
 
 def _get_enabled_runners_from_config(config: Dict) -> List[str]:
-    """
-    Extract enabled runner names from a diagnostics.json config.
-
-    Handles both simple format ({"python": true}) and detailed format
-    ({"python": {"enabled": true, ...}}).
-
-    Args:
-        config: Parsed diagnostics.json content
-
-    Returns:
-        List of enabled runner names (e.g. ["python"])
-    """
+    """Enabled runner names from a diagnostics.json, as ``{"python": true}`` or ``{"python": {"enabled": true}}``."""
     enabled = []
     runners = config.get("runners", {})
 
@@ -365,22 +297,8 @@ def _get_enabled_runners_from_config(config: Dict) -> List[str]:
 
 
 def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list] = None) -> Optional[Dict]:
-    """
-    Dispatch to a runner handler in handlers/diagnostics/.
-
-    Looks for a module named {runner_name}_diagnostics.py (or
-    {runner_name}_diognostics.py for backwards compat) with a
-    check_branch(branch_path, bypass_rules) function.
-
-    Args:
-        runner_name: Runner identifier (e.g. "python", "typescript")
-        branch_path: Path to branch root
-        bypass_rules: Optional bypass rules for audit compatibility
-
-    Returns:
-        Runner result dict, or None if runner not found/empty
-    """
-    # Try canonical name first, then known typo variant for backwards compat
+    """Dispatch to ``{runner_name}_diagnostics.check_branch``; None when no runner answers."""
+    # The misspelt "_diognostics" stem is still accepted for older runner files.
     candidate_names = [
         f"{runner_name}_diagnostics",
         f"{runner_name}_diognostics",
@@ -391,11 +309,9 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
         if not runner_path.exists():
             continue
 
-        # Skip empty files
         if runner_path.stat().st_size == 0:
             continue
 
-        # Check if file has actual content (not just whitespace/comments)
         try:
             content = runner_path.read_text(encoding="utf-8").strip()
             if not content:
@@ -404,7 +320,6 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
             logger.info("Cannot read runner file: %s", runner_path)
             continue
 
-        # Dynamically import the runner module
         module_name = f"aipass.seedgo.apps.handlers.diagnostics.{module_file_stem}"
         try:
             runner_module = importlib.import_module(module_name)
@@ -412,7 +327,6 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
             logger.info("Failed to import runner module: %s", module_name)
             continue
 
-        # Call check_branch if it exists
         check_fn = getattr(runner_module, "check_branch", None)
         if check_fn is None:
             continue
@@ -426,28 +340,8 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
     return None
 
 
-# =============================================
-# BRANCH-LEVEL CHECK (audit pipeline entry)
-# =============================================
-
-
 def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
-    """
-    Run diagnostics on a branch by discovering pack configs and dispatching runners.
-
-    Flow:
-        1. Scan handlers/*_standards/ for diagnostics.json files
-        2. For each enabled runner, call the corresponding handler in handlers/diagnostics/
-        3. If no runner configs found, fall back to python/pyright (backwards compatible)
-        4. Merge results into audit-pipeline-compatible format
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo)
-        bypass_rules: Optional bypass rules (audit pipeline compatibility)
-
-    Returns:
-        dict: {passed, score, checks, standard: 'DIAGNOSTICS', ...}
-    """
+    """Run diagnostics on a branch by discovering pack configs and dispatching runners."""
     apps_path = Path(branch_path) / "apps"
 
     if not apps_path.exists():
@@ -461,10 +355,8 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
             "error": f"No apps/ directory found in {branch_path}",
         }
 
-    # Step 1: Discover pack configs
     pack_configs = _discover_pack_configs()
 
-    # Step 2: Collect enabled runners across all packs
     all_runners = []
     for pack_info in pack_configs:
         runners = _get_enabled_runners_from_config(pack_info["config"])
@@ -472,11 +364,9 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
             if runner not in all_runners:
                 all_runners.append(runner)
 
-    # Step 3: Fall back to python if no runner config found
     if not all_runners:
         all_runners = ["python"]
 
-    # Step 4: Dispatch to each runner and merge results
     merged_checks = []
     total_errors = 0
     total_warnings = 0
@@ -494,9 +384,7 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
             total_files += runner_result.get("total_files", 0)
             merged_checks.extend(runner_result.get("checks", []))
             all_results.extend(runner_result.get("results", []))
-        # If runner doesn't exist or is empty, skip gracefully
 
-    # Step 5: If no runner executed, fall back to direct pyright check
     if not runner_executed:
         result = check_directory(str(apps_path))
 
@@ -505,7 +393,6 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
         total_files = result.get("total_files", 0)
         all_results = result.get("results", [])
 
-        # Build checks from file results
         for file_result in all_results:
             if file_result["errors"] > 0:
                 merged_checks.append(
@@ -516,13 +403,11 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
                     }
                 )
 
-    # Default passing check if nothing failed
     if not merged_checks:
         merged_checks.append(
             {"name": "Type check", "passed": True, "message": f"No type errors ({total_files} files analyzed)"}
         )
 
-    # Calculate score
     score = 100 if total_errors == 0 else max(0, 100 - (total_errors * 5))
 
     json_handler.log_operation(
@@ -542,10 +427,7 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
 
 
 def format_summary(results: Dict) -> str:
-    """Format results as a summary string.
-
-    Note: Used by tests/test_diagnostics.py — not called in production audit pipeline.
-    """
+    """Format results as a summary string; tests are its only caller."""
     if "error" in results and results["error"]:
         return f"Error: {results['error']}"
 
@@ -564,10 +446,9 @@ if __name__ == "__main__":
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # Built when run, not at import: Rich fixes colour in __init__ (windows_compat 1.5.0, cli b6655280)
+    # Built when run, not at import: Rich fixes colour in __init__.
     console = Console()
 
-    # CLI usage: drone @seedgo diagnostics [file_or_directory]
     if len(sys.argv) < 2:
         console.print("[yellow]Usage:[/yellow] drone @seedgo diagnostics <file_or_directory>")
         sys.exit(1)
@@ -580,7 +461,6 @@ if __name__ == "__main__":
     else:
         result = check_directory(target)
 
-        # Summary header
         console.print()
         console.print("[bold cyan]TYPE ERROR DIAGNOSTICS[/bold cyan]")
         console.print(f"  Files analyzed:     {result['total_files']}")
@@ -594,7 +474,6 @@ if __name__ == "__main__":
         if result["total_warnings"] > 0:
             console.print(f"  Total warnings:     {result['total_warnings']}")
 
-        # File details
         for file_result in result.get("results", [])[:20]:  # Top 20
             if file_result["errors"] > 0:
                 console.print()

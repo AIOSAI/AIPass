@@ -3,18 +3,13 @@
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
 # Version: 1.5.0
 # Created: 2026-07-31
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py's audit_branch_incremental and incremental_cache.py beside it."""
 
-# Equivalence tests for the incremental audit cache (DPLAN-0275).
-#
-# Proves audit_branch_incremental() output is byte-equivalent to audit_branch()
-# across the full re-run matrix: cold cache, unchanged branch (cache hit),
-# mutated/added/deleted files, checker-pack edits, and bypass/ignore rule
-# edits. This is the hard acceptance bar from Compass #136/#147 — incremental
-# must never mean approximate.
+# audit_branch_incremental() output must be byte-equivalent to audit_branch() across the re-run matrix:
+# cold cache, cache hit, file edits, checker-pack edits, bypass/ignore edits. Incremental never means approximate.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(standard) — a row's verdict; apps/handlers/aipass_standards/trinity_check.py has its own tests
@@ -31,38 +26,17 @@ from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs, trinity_chec
 from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
 from aipass.seedgo.apps.handlers.bypass import ignore_handler
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Patch branch_audit's own seams directly, at the edge of the real modules.
-
-    branch_audit and incremental_cache are imported for real, once, at module
-    top, rather than force-deleted and reimported against a sys.modules stub
-    per test. What was a whole-package replacement now patches only the two
-    names branch_audit reads that reach outside the branch under test:
-    ``dead_rules``/``inert`` (left unconfigured, same as every call fleet-wide
-    got from the old auto-mocked bypass package) and the real ignore_handler's
-    three list-shaping functions (emptied here, so the equivalence tests never
-    trip over this repo's own ignore rules -- ``is_seedgo_ignored`` and
-    ``load_ignore_entries`` stay real, exactly as the old fixture also kept
-    them real).
-    """
+    """Patch branch_audit's own seams directly, at the edge of the real modules."""
     monkeypatch.setattr(branch_audit, "dead_rules", MagicMock())
     monkeypatch.setattr(branch_audit, "inert", MagicMock())
     monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
     monkeypatch.setattr(ignore_handler, "get_audit_ignore_patterns", MagicMock(return_value=[]))
-    # The ignore list removes nothing here, as the empty pattern list above says.
     monkeypatch.setattr(ignore_handler, "audit_ignore_match", MagicMock(return_value=None))
     monkeypatch.setattr(ignore_handler, "ignored_tracked_source", MagicMock(return_value=[]))
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 _CHECKER_TEMPLATE = """
 CALL_LOG = "__CALL_LOG__"
@@ -110,13 +84,7 @@ def _setup_branch(tmp_path: Path, files: dict) -> tuple:
 
 
 def _audit_output(result: dict) -> dict:
-    """One audit's output minus the cache's own private annotations.
-
-    ``_cache_hit`` and ``_cache_partial`` are how the cache tells the display
-    what it served; they are not part of the audit result the equivalence bar
-    is about, and every private key is stripped rather than named so a future
-    annotation cannot quietly break these comparisons.
-    """
+    """One audit's output minus the cache's own private annotations."""
     return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
@@ -238,12 +206,7 @@ def check_module(path, bypass_rules=None):
 
 
 def _write_bypass_aware_checker(pack_dir: Path, call_log: Path) -> None:
-    """Write an all_files checker whose verdict depends on the bypass rules.
-
-    Any rule at all makes the BAD marker vanish -- the one-line stand-in for
-    what a real .seedgo/bypass.json rule does to a violation. Same filename as
-    _write_checker's so it replaces it in the pack.
-    """
+    """Write an all_files checker whose verdict depends on the bypass rules."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "naming_check.py").write_text(
@@ -281,11 +244,7 @@ def check_branch_observe(branch_path, bypass_rules=None):
 
 
 def _write_observe_checker(pack_dir: Path, call_log: Path) -> None:
-    """Write an all_files checker exposing an observe-only branch hook.
-
-    Each reading is numbered, so a replayed one is distinguishable from a
-    fresh one — the whole point of the lane is that it reads runtime state.
-    """
+    """Write an all_files checker exposing an observe-only branch hook."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "observing_check.py").write_text(
@@ -318,11 +277,7 @@ def check_branch(branch_path, bypass_rules=None):
 
 
 def _write_second_checker(pack_dir: Path, call_log: Path) -> None:
-    """Write a SECOND all_files checker, tagging its calls so one checker's work is legible.
-
-    A one-checker pack cannot tell "only the edited checker re-ran" from "the
-    whole pack re-ran" — both look identical in the log. Two can.
-    """
+    """Write a SECOND all_files checker, tagging its calls so one checker's work is legible."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "imports_check.py").write_text(
@@ -331,11 +286,7 @@ def _write_second_checker(pack_dir: Path, call_log: Path) -> None:
 
 
 def _write_branch_level_checker(pack_dir: Path, call_log: Path) -> None:
-    """Write a branch_level checker logging every check_branch() call.
-
-    Stands in for ruff and pyright: one call per branch, and most of a real
-    branch's audit cost sits in exactly this lane.
-    """
+    """Write a branch_level checker logging every check_branch() call."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "ruffish_check.py").write_text(
@@ -346,11 +297,6 @@ def _write_branch_level_checker(pack_dir: Path, call_log: Path) -> None:
 def _append_comment(path: Path) -> None:
     """Append a comment line — a real byte change that cannot move any verdict."""
     path.write_text(path.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Equivalence tests -- the DPLAN-0275 acceptance bar
-# ---------------------------------------------------------------------------
 
 
 class TestEquivalence:
@@ -499,14 +445,8 @@ class TestEquivalence:
         assert result["_cache_hit"] is False
         assert touched == {"good.py", "main.py"}
 
-    # -- Blocker-fix regressions (DPLAN-0275 second review) --------------
-
     def test_readme_only_edit_busts_cache_hit(self, tmp_path, monkeypatch):
-        """Editing only README.md (no .py change) must not serve a stale
-        cache-hit output -- readme_check/readme_quality_check read README.md
-        even though it lives outside apps/ and outside the entry file
-        (Blocker 1: the fingerprint set must be a superset of what checkers
-        actually read, not just apps/**/*.py)."""
+        """Editing only README.md must not serve a stale cache hit: readme checkers read it outside apps/."""
         branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
         )
@@ -524,10 +464,7 @@ class TestEquivalence:
         assert _audit_output(second) == _audit_output(full_result)
 
     def test_tests_dir_only_addition_busts_cache_hit(self, tmp_path, monkeypatch):
-        """Adding a file under tests/ (no apps/ change) must not serve a
-        stale cache-hit output -- test_map's scan_branch reads
-        tests/**/test_*.py, a path outside apps/ and outside the
-        fingerprinted .py set (Blocker 1)."""
+        """Adding a file under tests/ must not serve a stale cache hit: test_map reads tests/**/test_*.py."""
         branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
         )
@@ -547,9 +484,7 @@ class TestEquivalence:
         assert _audit_output(second) == _audit_output(full_result)
 
     def test_custom_config_addition_busts_cache_hit(self, tmp_path, monkeypatch):
-        """Adding an operator file under {branch}_json/custom_config/ must not
-        serve a stale cache-hit output -- the audit's custom_config info line
-        names those files, so a cached run would keep reporting the old list."""
+        """Adding a custom_config/ operator file must not serve a stale cache hit: the audit names those files."""
         branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
         )
@@ -568,10 +503,7 @@ class TestEquivalence:
         assert _audit_output(second) == _audit_output(full_result)
 
     def test_bypass_content_edit_busts_full_rescan(self, tmp_path, monkeypatch):
-        """Editing bypass.json's CONTENT (not just creating it) must also
-        bust the whole-branch cache to a full re-scan -- compute_bypass_stamp()
-        fingerprints the file's (mtime, size), so any edit changes the stamp,
-        not just the file's initial appearance."""
+        """Editing bypass.json's CONTENT busts the cache: compute_bypass_stamp() fingerprints (mtime, size)."""
         branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
         )
@@ -592,11 +524,7 @@ class TestEquivalence:
         assert touched == {"good.py", "main.py"}
 
     def test_file_filter_skipped_denominator_matches_full_audit(self, tmp_path, monkeypatch):
-        """A FILE_FILTER-scoped checker whose check_module() sometimes
-        returns a 'skipped'/'not applicable' check (excluded from the
-        score-averaging denominator by _run_all_files) must reproduce the
-        exact same scores/average whether some files are cache-reused and
-        others freshly recomputed."""
+        """A FILE_FILTER checker's skipped checks average the same whether files are cache-reused or fresh."""
         branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
             tmp_path, monkeypatch, {"special_ok.py": "print('GOOD')\n", "special_skip.py": "SKIP_ME\n"}
         )
@@ -616,10 +544,7 @@ class TestEquivalence:
         assert incremental_result["scores"]["filterthing"] == full_result["scores"]["filterthing"]
 
     def test_check_branch_post_blend_matches_full_audit(self, tmp_path, monkeypatch):
-        """A checker implementing check_branch_post() blends its fresh
-        post-scan scores with the (possibly cache-reused) per-file scores
-        identically whether the per-file part came from cache or a fresh
-        recompute."""
+        """check_branch_post() blends post-scan scores the same whether per-file scores came from cache or fresh."""
         branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n", "other.py": "print('GOOD')\n"}
         )
@@ -639,15 +564,7 @@ class TestEquivalence:
         assert incremental_result["scores"]["postcheck"] == full_result["scores"]["postcheck"]
 
     def test_cache_hit_takes_a_fresh_observation(self, tmp_path, monkeypatch):
-        """A cached audit still takes a FRESH observe reading, and still scores identically.
-
-        Observe readings are of live runtime state — log files that appear and
-        rotate with nothing edited — so a replayed one is a reading of a
-        moment that has passed, presented as if current. Same reasoning that
-        recomputes _deprecated_patterns on every cache hit. The scores, by
-        contrast, must be exactly the cached ones: an observation is evidence,
-        never a number.
-        """
+        """A cached audit still takes a FRESH observe reading, and still scores identically."""
         branch_audit, _cache, branch, _path, pack_dir, _call_log = _prepare(
             tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
         )
@@ -675,13 +592,7 @@ class TestEquivalence:
         )
 
     def test_entry_point_checker_reruns_when_other_file_changes(self, tmp_path, monkeypatch):
-        """Blocker 2 regression: an entry_point-scope checker must re-run
-        on the entry file whenever the branch is dirty, even if the entry
-        file itself is unchanged -- AUDIT_SCOPE says where a result is
-        REPORTED, not what the checker reads (e.g. readme_check reads
-        README.md, not entry_file). Without the fix, the cached entry-file
-        result would be served forever once entry_file itself stops
-        changing, regardless of what else in the branch changed."""
+        """An entry_point-scope checker re-runs whenever the branch is dirty, even if the entry file is unchanged."""
         branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
             tmp_path, monkeypatch, {"other.py": "print('GOOD')\n"}
         )
@@ -704,14 +615,7 @@ class TestEquivalence:
 
 
 class TestNoBypassCacheIsolation:
-    """A --no-bypass run and a normal run must never share a cached result.
-
-    The cache stamp fingerprints the bypass.json FILE, not whether the rules
-    in it were applied -- so both runs read the same tree, the same pack and
-    the same (unmodified) bypass.json. Without the bypass STATE in the stamp,
-    whichever runs second is served the other one's answer: the honest score
-    published as the normal one, or the bypassed score published as honest.
-    """
+    """A --no-bypass run and a normal run must never share a cached result."""
 
     RULES = [{"file": "apps/good.py", "standard": "naming", "reason": "test rule"}]
 
@@ -745,11 +649,7 @@ class TestNoBypassCacheIsolation:
         assert bypassed["average"] == 100, "a normal run was served the --no-bypass cached score"
 
     def test_no_bypass_ignores_rules_handed_to_it(self, tmp_path, monkeypatch):
-        """no_bypass=True means no rules, whatever the caller passed alongside it.
-
-        The flag and the rule list cannot disagree — otherwise the stamp says
-        'no bypasses' while the audit under it applied them.
-        """
+        """no_bypass=True means no rules, whatever the caller passed alongside it."""
         branch_audit, _cache, branch, _path, pack_dir, _log = self._prepare_bypass_aware(tmp_path, monkeypatch)
 
         result = branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir, no_bypass=True)
@@ -769,13 +669,7 @@ class TestNoBypassCacheIsolation:
         assert first == second
 
     def test_no_bypass_run_does_not_evict_the_normal_cache(self, tmp_path, monkeypatch):
-        """A --no-bypass run must not cost the next normal run a full re-scan.
-
-        Publishing both numbers is routine (every APLAN carries them), so the
-        two runs keep separate cache entries rather than overwriting each
-        other's — a shared key would mean a guaranteed full fleet re-scan
-        every single time either number is refreshed.
-        """
+        """A --no-bypass run must not cost the next normal run a full re-scan."""
         branch_audit, _cache, branch, _path, pack_dir, call_log = self._prepare_bypass_aware(tmp_path, monkeypatch)
 
         branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir)
@@ -788,19 +682,8 @@ class TestNoBypassCacheIsolation:
         assert again["average"] == 100
 
 
-# ---------------------------------------------------------------------------
-# Unit tests -- incremental_cache.py primitives
-# ---------------------------------------------------------------------------
-
-
 class TestThePerCheckerStampScopesAReRun:
-    """The pack stamp used to cover every file in the pack directory, so one
-    comment line in ONE checker threw away every branch's whole entry. Measured
-    on @memory before the split: a clean run 1.5s, the same run after touching
-    one checker 76.9s; across the fleet, 9.7s against 1261.3s. Each checker now
-    carries its own stamp, and the shared helpers keep a pack-wide one that
-    still busts everything.
-    """
+    """Each checker carries its own stamp; the shared helpers keep a pack-wide one that busts everything."""
 
     @staticmethod
     def _split(call_log: Path) -> tuple:
@@ -988,13 +871,7 @@ class TestThePerCheckerStampScopesAReRun:
         assert first == {"good.py", "main.py"}
 
     def test_a_drive_letter_path_is_the_first_checkers_call_not_a_tagged_one(self, tmp_path):
-        """A Windows absolute path carries a colon, and the split told calls apart by colon.
-
-        Every untagged call on Windows reads C:\\...\\good.py, so "no colon" kept
-        none of them: first came back set() and three rows of this class went red
-        on Windows only (PR #774, round two). A tagged call is told by its tag.
-        The proof on Windows itself is the next CI run.
-        """
+        """A Windows absolute path carries a colon, and the split told calls apart by colon."""
         call_log = tmp_path / "calls.log"
         call_log.write_text(
             "C:/runner/work/apps/good.py\nsecond:C:/runner/work/apps/good.py\nbranchlevel:C:/runner/work\n",
@@ -1032,18 +909,7 @@ class TestDiffFileset:
 
 
 class TestTheCacheKeyDiscriminatesThePack:
-    """One slot per (branch, pack, bypass mode) — never one slot per branch.
-
-    THE LIVE DEFECT: the key was `branch_name` while `current_stamp` folds the
-    pack in. Two packs therefore shared one slot per branch: the stamp caught
-    the mismatch so the OUTPUT was never wrong, but each run evicted the
-    other's entry, making every alternating `audit aipass` / `audit
-    pytest_quality` a cold full fleet scan. Measured live — restoring
-    last_audit.json after a shadow cycle took a full cold scan.
-
-    `no_bypass` had already solved exactly this by putting the mode in the key;
-    the pack never got the same treatment.
-    """
+    """One slot per (branch, pack, bypass mode) — never one slot per branch."""
 
     def test_two_packs_do_not_share_one_slot(self, tmp_path):
         """The key differs by pack for the same branch, so neither evicts the other."""
@@ -1055,11 +921,7 @@ class TestTheCacheKeyDiscriminatesThePack:
         )
 
     def test_the_default_pack_keeps_the_bare_branch_key(self, tmp_path):
-        """`aipass` and an unstated pack both answer the plain branch name.
-
-        The counter-arm: suffixing every key would orphan every cached entry in
-        the fleet and buy one guaranteed cold scan for nothing.
-        """
+        """`aipass` and an unstated pack both answer the plain branch name."""
         assert branch_audit.cache_key_for("prax", None, no_bypass=False) == "prax"
         assert branch_audit.cache_key_for("prax", tmp_path / "aipass_standards", no_bypass=False) == "prax"
 
@@ -1085,13 +947,7 @@ def cache_dir(tmp_path, monkeypatch):
 
 
 class TestOneFilePerCacheKey:
-    """Load and save are O(one branch), and one key cannot reach another's file.
-
-    The flat doc this replaced was loaded whole, held for the length of an
-    audit, and written back whole — so every save reverted whatever another
-    process had written in that window. The owner met it on 2026-09-21: a fleet
-    run straight after a cold one re-scanned 14 of 18 branches.
-    """
+    """Load and save are O(one branch), and one key cannot reach another's file."""
 
     def test_a_missing_entry_reads_as_empty(self, cache_dir):
         assert cache_dir.load_branch_entry("memory") == {}
@@ -1216,27 +1072,12 @@ class TestTheLegacyFlatDocMigrates:
         assert cache.load_branch_entry("memory")["stamp"] == "m"
 
 
-# ---------------------------------------------------------------------------
-# Ruling 6 -- branch_level checkers whose inputs live OUTSIDE apps/
-# ---------------------------------------------------------------------------
-
-
 class TestBranchLevelCheckerInputsInvalidateTheCache:
-    """The defect: the watch set covered apps/**/*.py, README.md, tests/**/*.py
-    and {branch}_json/custom_config/ -- but NOT the inputs branch_level
-    checkers actually score. trinity reads .trinity/; json_handler reads the
-    {branch}_json/ triplets. Edit one and the branch never looks dirty, so a
-    stale score is served until --full.
-
-    Same species the module docstring already names for README-only edits, one
-    lane over. The fix is declarative: a checker states BRANCH_INPUTS and the
-    watch set resolves them, so the cache hardcodes no path.
-    """
+    """A checker's declared BRANCH_INPUTS join the watch set, so an edit to one outside apps/ busts the cache."""
 
     @staticmethod
     def _branch_and_audit(tmp_path, monkeypatch, inputs):
-        """A branch whose pack's one checker declares inputs as BRANCH_INPUTS
-        (None: declares nothing), and the public audit_branch_incremental on it."""
+        """A branch whose pack's one checker declares inputs as BRANCH_INPUTS, and audit_branch_incremental on it."""
         _, cache, branch, branch_path, pack_dir, _ = _prepare(tmp_path, monkeypatch, {})
         if inputs is not None:
             with (pack_dir / "naming_check.py").open("a", encoding="utf-8") as f:
@@ -1262,17 +1103,11 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         return audit()["_cache_hit"] is False
 
     def test_a_declared_input_is_watched(self, tmp_path, monkeypatch):
-        """An edit to a declared input busts the cache.
-
-        Mutant: _collect_watch_files reads BRANCH_INPUTZ instead of BRANCH_INPUTS — killed.
-        """
+        """An edit to a declared input busts the cache."""
         assert self._an_edit_busts_the_cache(tmp_path, monkeypatch, (".trinity/*",), ".trinity/local.json")
 
     def test_the_branch_placeholder_is_substituted(self, tmp_path, monkeypatch):
-        """json_handler's inputs are named after the branch, not a fixed dir.
-
-        Mutant: _declared_input_files leaves {branch} unsubstituted — killed.
-        """
+        """json_handler's inputs are named after the branch, not a fixed dir."""
         edited = "mybranch_json/thing_config.json"
         assert self._an_edit_busts_the_cache(tmp_path, monkeypatch, ("{branch}_json/*.json",), edited)
 
@@ -1283,33 +1118,17 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         return set(incremental_cache.load_branch_entry(key)["files"])
 
     def test_a_checker_declaring_nothing_adds_nothing(self, tmp_path, monkeypatch):
-        """Over-refusal guard: the watch set must not widen for every checker.
-
-        The whole saved watch set is asserted, beside the content-edit probe
-        (seedgo, fleet green leg 4). Mutant: the README.md entry added whether
-        or not the file exists — killed.
-        """
+        """Over-refusal guard: the watch set must not widen for every checker."""
         assert not self._an_edit_busts_the_cache(tmp_path, monkeypatch, None, ".trinity/local.json")
         assert self._saved_watch_set(tmp_path) == {Path("apps", "main.py").as_posix()}
 
     def test_an_undeclared_path_is_still_not_watched(self, tmp_path, monkeypatch):
-        """The declaration is the whole allow-list -- no incidental widening.
-
-        The path's absence from the saved watch set is asserted, beside the
-        content-edit probe (seedgo, fleet green leg 4).
-        """
+        """The declaration is the whole allow-list -- no incidental widening."""
         assert not self._an_edit_busts_the_cache(tmp_path, monkeypatch, (".trinity/*",), "random/file.json")
         assert Path("random", "file.json").as_posix() not in self._saved_watch_set(tmp_path)
 
     def test_directories_matched_by_a_glob_are_watched(self, tmp_path, monkeypatch):
-        """REVERSED 2026-08-27. This test previously asserted the opposite --
-        that directories are skipped -- and that was the defect @daemon found
-        hours later: the File set group scores stray DIRECTORIES, so excluding
-        them made the one stray shape the ruling is about invisible to the
-        cache. Reversed rather than deleted, so the history stays readable.
-        Directories are watched by PRESENCE -- see
-        TestTheCacheSeesStrayDirectories for why not by content.
-        """
+        """Directories matched by a glob are watched by PRESENCE (see TestTheCacheSeesStrayDirectories)."""
         branch_path, audit = self._branch_and_audit(tmp_path, monkeypatch, (".trinity/*",))
         (branch_path / ".trinity").mkdir()
         assert audit()["_cache_hit"] is False
@@ -1336,14 +1155,7 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         ],
     )
     def test_the_two_real_checkers_declare_their_inputs(self, module_name, attribute, expected):
-        """Mutant: trinity_check's BRANCH_INPUTS renamed away in
-        apps/handlers/aipass_standards/trinity_check.py — killed.
-
-        The shipped declarations, not a fixture: this is what closes ruling 6.
-        Read from SOURCE rather than imported: this module's autouse fixture
-        stubs the bypass package, so importing a real checker here fails for
-        reasons that have nothing to do with the declaration.
-        """
+        """The shipped checkers declare BRANCH_INPUTS; read from SOURCE because this module stubs the bypass package."""
         import ast
 
         source = (
@@ -1360,10 +1172,7 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         assert expected in declared[0]
 
     def test_editing_a_trinity_file_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        """End to end: the cache serves a hit, then must NOT after a .trinity edit.
-
-        Mutant: _collect_watch_files marks every BRANCH_INPUTS match presence_only (if True:) — killed.
-        """
+        """End to end: the cache serves a hit, then must NOT after a .trinity edit."""
         branch_path, audit = _watching(tmp_path, monkeypatch, _TRINITY_INPUTS)
         trinity_dir = branch_path / ".trinity"
         trinity_dir.mkdir()
@@ -1383,11 +1192,9 @@ _TRINITY_INPUTS = 'BRANCH_INPUTS = (".trinity/*",)'
 
 
 def _watching(tmp_path, monkeypatch, declaration):
-    """A branch whose pack's one checker also carries declaration (Python source),
-    and the public audit_branch_incremental on it.
+    """A branch whose pack's one checker carries declaration, and audit_branch_incremental on it.
 
-    Each audit() answers (cache hit, the watch set's fingerprints as the audit
-    saved them). A hit saves nothing, so its fingerprints are the last miss's.
+    Each audit() answers (cache hit, saved fingerprints); a hit saves nothing, so its fingerprints are the last miss's.
     """
     _, cache, branch, branch_path, pack_dir, _ = _prepare(tmp_path, monkeypatch, {})
     with (pack_dir / "naming_check.py").open("a", encoding="utf-8") as f:
@@ -1405,16 +1212,7 @@ def _watching(tmp_path, monkeypatch, declaration):
 
 
 class TestPresenceOnlyInputsDoNotChurnTheCache:
-    """Found by running the real thing, not by a test: declaring
-    ``{branch}_json/*.json`` as a CONTENT input made the branch dirty on every
-    run, because the checkers write their own *_log.json files while the audit
-    is running. The audit disturbs what it measures.
-
-    json_handler scores triplet COMPLETENESS -- which filenames exist -- and
-    never reads a byte of them. So presence is the whole signal: add or delete
-    must bust the cache, a content write must not. Two channels, each named
-    for what it means.
-    """
+    """{branch}_json/*.json is watched by PRESENCE: checkers write their own logs mid-audit, json_handler reads names."""
 
     _NAMES = 'BRANCH_INPUT_NAMES = ("{branch}_json/*.json",)'
 
@@ -1462,10 +1260,7 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
         assert hit is False and "mybranch_json/thing_config.json" in deleted
 
     def test_content_inputs_still_react_to_content(self, tmp_path, monkeypatch):
-        """The two channels must not collapse into one another.
-
-        Mutant: _collect_watch_files marks every BRANCH_INPUTS match presence_only (if True:) — killed.
-        """
+        """The two channels must not collapse into one another."""
         branch_path, audit = _watching(tmp_path, monkeypatch, _TRINITY_INPUTS)
         (branch_path / ".trinity").mkdir()
         target = branch_path / ".trinity" / "local.json"
@@ -1480,23 +1275,11 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
 
 
 class TestNotApplicableStandardsLeaveTheGatingAverage:
-    """A standard that reports ``not_applicable`` measured nothing, so it must
-    not appear in scores[] at all -- a 0 would blame the branch for the
-    environment and a 100 would claim a measurement that never happened.
-
-    This is what turned CI red: trinity refused every group on a fresh clone
-    (memories are gitignored) and branch_audit converted that into 0/FAILED
-    for all 18 branches.
-    """
+    """A not_applicable standard measured nothing, so it never appears in scores[]: neither 0 nor 100 is true."""
 
     @staticmethod
     def _run(tmp_path, monkeypatch, result):
-        """One standard under test alongside a healthy one.
-
-        The healthy peer is not decoration: in CI the other 44 standards still
-        measure and score, so the realistic question is whether the average
-        reflects THEM once trinity stands down.
-        """
+        """One standard under test alongside a healthy one."""
         branch, branch_path = _setup_branch(tmp_path, {})
         checker = types.SimpleNamespace(
             AUDIT_SCOPE="branch_level",
@@ -1576,21 +1359,7 @@ class TestNotApplicableStandardsLeaveTheGatingAverage:
 
 
 class TestTheCacheSeesStrayDirectories:
-    """@daemon's finding: _declared_input_files ended with ``if
-    match.is_file()``, so the cache fingerprinted files only -- while the File
-    set group scores stray DIRECTORIES (_stray_names appends a slash to them).
-    The one stray shape the cache could not see was the exact shape the File
-    set ruling is about.
-
-    Their repro, both directions: after removing .trinity/.recovery the cached
-    audit still said 98 naming the gone directory, and after creating a stray
-    directory the cached audit said 100 in 0.3s. --full disagreed with both.
-
-    A directory is watched by PRESENCE, never content: its mtime moves every
-    time a child changes, so content-watching it would churn the cache for
-    edits that are already tracked file by file. The cache and the checker
-    must see the same world, and now they do.
-    """
+    """The cache watches stray DIRECTORIES by presence, because the File set group scores them."""
 
     def test_a_new_stray_directory_makes_the_branch_dirty(self, tmp_path, monkeypatch):
         """Mutant: _declared_input_files keeps files only (the old if match.is_file()) — killed."""
@@ -1618,11 +1387,7 @@ class TestTheCacheSeesStrayDirectories:
         assert hit is False and ".trinity/.recovery" in deleted
 
     def test_a_directorys_own_churn_does_not_dirty_the_branch(self, tmp_path, monkeypatch):
-        """Presence, not content: a child write already shows as its own file,
-        and a directory mtime would double-report it.
-
-        Mutant: _collect_watch_files drops presence_only from a matched directory — killed.
-        """
+        """Presence, not content: a child write already shows as its own file."""
         branch_path, audit = _watching(tmp_path, monkeypatch, 'BRANCH_INPUTS = (".trinity/*", ".trinity/sub/*")')
         sub = branch_path / ".trinity" / "sub"
         sub.mkdir(parents=True)
@@ -1636,10 +1401,7 @@ class TestTheCacheSeesStrayDirectories:
         assert ".trinity/sub/child.json" in added and ".trinity/sub" not in changed
 
     def test_files_are_still_watched_by_content(self, tmp_path, monkeypatch):
-        """Over-refusal guard: adding directories must not blind the file lane.
-
-        Mutant: _collect_watch_files marks every BRANCH_INPUTS match presence_only (if True:) — killed.
-        """
+        """Over-refusal guard: adding directories must not blind the file lane."""
         branch_path, audit = _watching(tmp_path, monkeypatch, _TRINITY_INPUTS)
         (branch_path / ".trinity").mkdir()
         target = branch_path / ".trinity" / "local.json"
@@ -1653,10 +1415,7 @@ class TestTheCacheSeesStrayDirectories:
         assert hit is False and ".trinity/local.json" in changed
 
     def test_the_cache_and_the_checker_see_the_same_strays(self, tmp_path, monkeypatch):
-        """The invariant the defect broke, asserted directly.
-
-        Mutant: _declared_input_files keeps files only (the old if match.is_file()) — killed.
-        """
+        """The invariant the defect broke, asserted directly."""
         branch_path, audit = _watching(tmp_path, monkeypatch, _TRINITY_INPUTS)
         trinity_dir = branch_path / ".trinity"
         trinity_dir.mkdir()
@@ -1672,24 +1431,10 @@ class TestTheCacheSeesStrayDirectories:
         assert seen_by_checker <= watched, f"checker sees {seen_by_checker - watched} that the cache cannot"
 
 
-# ===========================================================================
-# A FAILED CACHE SAVE MUST NOT LEAVE ITS STAGING FILE BEHIND
-# ===========================================================================
-
-
 class TestAFailedSaveLeavesNoStagingFile:
-    """save_cache stages through tempfile.mkstemp then os.replace. The cleanup
-    lived in `except Exception`, which has a real hole: BaseException --
-    KeyboardInterrupt, SystemExit, GeneratorExit -- passes straight through it
-    and the staging file survives on disk. That is not theoretical; a 4.3MB
-    truncated tmp2ay2d070.tmp has been sitting in seedgo_json/ since
-    2026-08-14, ending mid-token, exactly the shape of a save interrupted
-    between write and replace.
+    """save_cache removes its staging file on any unwind, BaseException included (try/finally).
 
-    try/finally closes the interpreter-level hole. Stated honestly and NOT
-    claimed by these tests: it does not survive SIGKILL, nor default-disposition
-    SIGTERM, because neither unwinds the stack. Those still orphan, and no
-    finally clause can change that.
+    Not claimed: SIGKILL and default-disposition SIGTERM do not unwind the stack, so they still orphan it.
     """
 
     def test_a_keyboard_interrupt_mid_write_leaves_no_tmp(self, tmp_path, monkeypatch, cache_dir):
@@ -1721,9 +1466,7 @@ class TestAFailedSaveLeavesNoStagingFile:
         assert list(tmp_path.glob("*.tmp")) == []
 
     def test_the_success_path_leaves_no_tmp_and_does_not_double_unlink(self, tmp_path, monkeypatch, cache_dir):
-        """os.replace consumes the staging file, so the finally clause must
-        tolerate its absence rather than raise over it.
-        """
+        """os.replace consumes the staging file, so the finally clause tolerates its absence."""
         incremental_cache = cache_dir
         monkeypatch.setattr(incremental_cache, "CACHE_DIR", tmp_path)
 
@@ -1750,16 +1493,7 @@ def check_branch(branch_path, bypass_rules=None):
 
 
 class TestExternalInputsInvalidateTheCache:
-    """@seedgo's finding, 2026-09-15: trinity scores every branch against
-    @memory's memory.config.json and gold templates, but the watch set held
-    only ``.trinity/*`` and the pack stamp hashes seedgo's own checkers. In the
-    fleet audit before the todos v2 landing, CANARY, aipass and drone were cache
-    hits scored from before memory's template change -- drone's 100 included.
-
-    The cure is a third declaration channel: a checker's ``external_inputs()``
-    names the files outside the branch it reads, and they are content-watched
-    under their resolved absolute path.
-    """
+    """A checker's external_inputs() files outside the branch are content-watched under their absolute path."""
 
     @staticmethod
     def _declaring(config):

@@ -3,23 +3,16 @@
 # Description: Unentered Assert Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unentered Assert Standards Content Handler
-
-Provides formatted unentered_assert standards content.
-Module orchestrates, handler implements.
 """
 
 
 def get_unentered_assert_standards() -> str:
-    """Return formatted unentered_assert standards content with Rich markup.
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted unentered_assert standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  An assertion proves nothing until it runs. A test whose only",

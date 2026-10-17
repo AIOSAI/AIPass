@@ -3,25 +3,16 @@
 # Description: Gateway Boundary Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Gateway Boundary Standards Content Handler
-
-Provides formatted gateway boundary standards content.
-Module orchestrates, handler implements.
-"""
+"""Gateway Boundary Standards Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_gateway_boundary_standards() -> str:
-    """Return formatted gateway_boundary standards content with Rich markup.
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted gateway_boundary standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A branch may write its OWN storage. It may ask another branch to write",

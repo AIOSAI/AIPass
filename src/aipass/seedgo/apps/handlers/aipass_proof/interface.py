@@ -3,7 +3,7 @@
 # Description: Verify checker interface (AUDIT_SCOPE + function signature)
 # Version: 1.0.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-17
 # =============================================
 
 """Interface Proof -- Verify each checker declares AUDIT_SCOPE and correct function signature.
@@ -12,13 +12,6 @@ Every *_check.py in a standards pack must:
   1. Declare AUDIT_SCOPE at module level (one of: all_files, entry_point, branch_level)
   2. Implement the correct entry function (check_module or check_branch)
   3. Have the correct first parameter (module_path or branch_path) plus bypass_rules
-
-Interface:
-    scan(pack_dir: Path) -> dict
-    Returns: {"passed": bool, "total": int, "pass_count": int, "fail_count": int,
-              "results": list[dict], "issues": list, "summary": str}
-
-Reference: tools/interface_scanner.py (original prototype)
 """
 
 from __future__ import annotations
@@ -32,11 +25,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 
 VALID_SCOPES = {"all_files", "entry_point", "branch_level"}
 
-# Directories / files to skip inside the pack
 _SKIP_DIRS = SOURCE_SKIP_DIRS
-
-
-# -- AST helpers ---------------------------------------------------------------
 
 
 def _extract_audit_scope(tree: ast.Module) -> str | None:
@@ -60,10 +49,7 @@ def _find_function(tree: ast.Module, name: str) -> ast.FunctionDef | None:
 
 
 def _check_params(func: ast.FunctionDef, expected_first: str) -> tuple[bool, str]:
-    """Verify the function has (expected_first, bypass_rules=None).
-
-    Returns (ok, detail_message).
-    """
+    """Verify the function has (expected_first, bypass_rules=None)."""
     args = func.args
     positional = [a.arg for a in args.posonlyargs] + [a.arg for a in args.args]
 
@@ -74,7 +60,6 @@ def _check_params(func: ast.FunctionDef, expected_first: str) -> tuple[bool, str
         return False, f"first param is '{positional[0]}', expected '{expected_first}'"
 
     if len(positional) < 2 or positional[1] != "bypass_rules":
-        # Also accept bypass_rules as a keyword-only arg
         kw_names = [a.arg for a in args.kwonlyargs]
         if "bypass_rules" not in kw_names:
             return False, "missing 'bypass_rules' parameter"
@@ -82,14 +67,10 @@ def _check_params(func: ast.FunctionDef, expected_first: str) -> tuple[bool, str
     return True, "ok"
 
 
-# -- Skip logic ----------------------------------------------------------------
-
-
 def _should_skip(path: Path) -> bool:
     """Return True if the file should be excluded from scanning."""
     if path.name == "__init__.py":
         return True
-    # Skip underscore-prefixed files (but not dunder)
     if path.name.startswith("_") and not path.name.startswith("__"):
         return True
     for part in path.parts:
@@ -98,18 +79,8 @@ def _should_skip(path: Path) -> bool:
     return False
 
 
-# -- Core scan -----------------------------------------------------------------
-
-
 def scan(pack_dir: Path) -> dict:
-    """Scan all *_check.py files in *pack_dir* and verify interface compliance.
-
-    Args:
-        pack_dir: Path to the standards pack directory (e.g. handlers/aipass_standards/).
-
-    Returns:
-        Dict with keys: passed, total, pass_count, fail_count, results, issues, summary.
-    """
+    """Scan all *_check.py files in *pack_dir* and verify interface compliance."""
     results: list[dict] = []
     issues: list[str] = []
 
@@ -148,7 +119,6 @@ def scan(pack_dir: Path) -> dict:
             "issues": [],
         }
 
-        # Parse the file
         try:
             source = check_file.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(check_file))
@@ -160,7 +130,6 @@ def scan(pack_dir: Path) -> dict:
             results.append(entry)
             continue
 
-        # 1. Check AUDIT_SCOPE
         scope = _extract_audit_scope(tree)
         entry["audit_scope"] = scope
 
@@ -175,7 +144,6 @@ def scan(pack_dir: Path) -> dict:
         else:
             entry["scope_valid"] = True
 
-        # 2. Determine expected function based on scope
         if scope in ("all_files", "entry_point", None):
             expected_func = "check_module"
             expected_first_param = "module_path"
@@ -185,7 +153,6 @@ def scan(pack_dir: Path) -> dict:
 
         entry["expected_function"] = expected_func
 
-        # 3. Check function exists
         func_node = _find_function(tree, expected_func)
 
         if func_node is None:
@@ -196,7 +163,6 @@ def scan(pack_dir: Path) -> dict:
         else:
             entry["has_function"] = True
 
-            # 4. Check parameters
             ok, detail = _check_params(func_node, expected_first_param)
             entry["params_ok"] = ok
             entry["params_detail"] = detail
@@ -205,7 +171,6 @@ def scan(pack_dir: Path) -> dict:
                 entry["issues"].append(err)
                 issues.append(err)
 
-        # Final compliance
         entry["compliant"] = entry["scope_valid"] and entry["has_function"] and entry["params_ok"]
         results.append(entry)
 

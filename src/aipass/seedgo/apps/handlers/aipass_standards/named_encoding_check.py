@@ -3,64 +3,13 @@
 # Description: Named Encoding Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Named Encoding Standards Checker Handler
 
-Test template v1, item 21: every file read or write in a test names its
-encoding.
-
-``open()``, ``Path.read_text()`` and ``Path.write_text()`` all default to
-``locale.getpreferredencoding(False)``. On this fleet's Linux and macOS hosts
-that is UTF-8 and the omission is invisible; on Windows through Python 3.12 it
-is cp1252, and the product's output is not ASCII -- the audit prints box
-characters, the plan templates carry em dashes, @commons posts arrive with
-whatever a citizen typed. A test that writes a fixture without naming utf-8
-therefore passes on the machine it was written on and raises
-UnicodeDecodeError in the Windows CI lane, which is a failure of the TEST, not
-of the product it was meant to measure. PR#774's Windows leg is the proof:
-that is where this rule comes from.
-
-Three shapes, all convicted, in files under ``tests/``:
-
-  * ``open(path)`` or ``open(path, "w")`` -- any TEXT mode, no encoding.
-  * ``path.read_text()`` -- no encoding.
-  * ``path.write_text(body)`` -- no encoding.
-
-Never convicted, each for its own reason:
-
-  * A binary mode -- ``open(p, "rb")``, ``open(p, mode="wb")`` -- and
-    ``read_bytes`` / ``write_bytes``. Bytes have no encoding to name; asking
-    for one would be asking for something the call cannot accept.
-  * An encoding named POSITIONALLY. ``open(p, "w", -1, "utf-8")`` and
-    ``p.write_text(body, "utf-8")`` name it in the slot the signature gives
-    it, which is the rule satisfied, not evaded.
-  * AN ENCODING THAT IS NOT UTF-8. ``p.read_text(encoding="latin-1")`` is
-    COUNTED and reported, never convicted: a test of latin-1 handling has to
-    name latin-1, and a rule that convicted it would be demanding the test lie
-    about its own subject. The count is carried in the passing message so the
-    number is visible without being a verdict.
-  * ``encoding=SOMETHING`` where SOMETHING is not a literal. The encoding is
-    named; which one it is, is the test's business.
-
-Two measured limits, stated rather than guessed at:
-
-  * A mode that is not a literal -- ``p.open(mode)`` -- is skipped, because
-    whether it is text cannot be read from the statement. Two sites fleet-wide
-    (``api/tests/test_settings_conformance.py``, ``skills/tests/
-    test_machine_vitals.py``), both 2026-09-21.
-  * ``x.open(...)`` on an ARBITRARY receiver is not convicted, only the
-    builtin ``open``. ``ZipFile.open`` is binary-only and ``gzip.open`` takes a
-    different mode vocabulary, so convicting every attribute named ``open``
-    would charge two APIs with a rule that does not apply to them. Zero of the
-    553 fleet test files contain a bare ``open()`` or ``path.open()`` missing
-    an encoding today, so this limit costs nothing measured; the day it does,
-    this is where it goes.
-
-The whole rule, measured 2026-09-21: 918 hits in 82 of 553 test files, every
-one of them a ``read_text`` (215) or ``write_text`` (703).
+Reference: named_encoding.md
 """
 
 import ast
@@ -77,10 +26,8 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "NAMED_ENCODING"
 STANDARD_KEY = "named_encoding"
 
-# Where `encoding` sits as a POSITIONAL argument in each signature.
-# open(file, mode, buffering, encoding, ...) -- Path.read_text(encoding, ...)
-# -- Path.write_text(data, encoding, ...). A caller who fills the slot has
-# named the encoding; only the keyword form is idiomatic, but both are legal.
+# Where `encoding` sits POSITIONALLY: open(file, mode, buffering, encoding), read_text(encoding),
+# write_text(data, encoding). Filling the slot names the encoding.
 _ENCODING_SLOT: Dict[str, int] = {"open": 3, "read_text": 0, "write_text": 1}
 
 # The text-mode calls whose encoding argument this rule is about. read_bytes
@@ -184,9 +131,7 @@ def _describe(shape: str) -> str:
 def scan(source: str) -> List[Tuple[int, str, str]]:
     """(line, name, fix) for every unnamed encoding in one test file.
 
-    A file that does not parse yields nothing: ruff already convicts the
-    syntax error, and a line number invented for a statement Python cannot
-    read would send its author to the wrong place.
+    A file that does not parse yields nothing: ruff already convicts the syntax error.
     """
     try:
         tree = ast.parse(source)
@@ -210,9 +155,7 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
 def named_other_encodings(source: str) -> List[Tuple[int, str]]:
     """(line, encoding) for every call that names an encoding other than utf-8.
 
-    Counted, never convicted. A test of latin-1 handling has a right to name
-    latin-1, and this is how that right stays visible in the numbers instead of
-    disappearing into a pass.
+    Counted, never convicted: a latin-1 test has to name latin-1, and the count keeps that visible.
     """
     try:
         tree = ast.parse(source)
@@ -266,15 +209,7 @@ def _clean_message(others: List[Tuple[int, str]]) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for a file read or write with no encoding named.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for a file read or write with no encoding named."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -291,9 +226,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, _clean_message(named_other_encodings(source))), 100)
 
-    # One line per hit, all inside ONE check rather than one check each --
-    # checklist._format_failure prints the FIRST failed check and appends
-    # "(+N more)", so N checks would show one hit and hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {name} - {fix}" for line, name, fix in hits)
 
     json_handler.log_operation(

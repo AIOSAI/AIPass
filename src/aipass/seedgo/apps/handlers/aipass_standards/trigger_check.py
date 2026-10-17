@@ -3,24 +3,13 @@
 # Description: Trigger Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-09-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 Trigger Standards Checker Handler
 
-Validates compliance with AIPass Trigger event bus standards:
-- Correct import patterns for trigger
-- No logger imports in event handlers
-- No print statements in event handlers
-- Proper event naming conventions
-
-Valid bypass categories for .seedgo/bypass.json:
-- handler_layer: Function in handlers/ layer (orchestrator fires instead)
-- initialization: One-time setup/config creation
-- internal_ops: Same-module internal operation
-- high_frequency: Would create event spam
-- utility: Helper called by event-firing function
+Reference: trigger.md
 """
 
 import ast
@@ -31,17 +20,12 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import matching_rule
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
-# Production only. All 19 test-file hits fleet-wide are a fixture unlinking its own
-# scratch file without firing an event -- 18 of them literally that, the 19th a test
-# that asserts on trigger.fire(). A test harness deleting its own temp file is not a
-# system state change, and a test that fired real events would pollute the bus for
-# everyone else. Spawn's one bypass rule here says the same thing in prose.
+# Production only: a test deleting its own temp file is not a system state change,
+# and a test that fired real events would pollute the bus for everyone else.
 APPLIES_TO = "production"
 
-# Valid bypass categories for trigger standard
 BYPASS_CATEGORIES = {
     "handler_layer": "Function in handlers/ layer (orchestrator fires instead)",
     "initialization": "One-time setup/config creation",
@@ -54,8 +38,7 @@ BYPASS_CATEGORIES = {
 def is_handler_layer(file_path: str) -> bool:
     """Check if file is in the handlers/ layer
 
-    Handler layer functions are typically called by modules which fire events.
-    The handler itself shouldn't fire - that would be double-firing.
+    The calling module fires; a handler firing too would double-fire.
     """
     return "/handlers/" in file_path or "\\handlers\\" in file_path
 
@@ -66,31 +49,12 @@ def is_trigger_handler(file_path: str) -> bool:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows Trigger standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules for specific violations
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [...],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if module follows Trigger standards"""
     checks = []
     path = Path(module_path)
 
-    # Check if entire standard is bypassed. The shared matcher decides; this
-    # standard reads category/reason off the rule it matched, which is the only
-    # reason this module used to carry a private copy of the matcher -- and that
-    # copy never received the FPLAN-0382 scope fix, so a 'lines' rule still
-    # fall-through-matched here and muted the whole file. No line is passed: this
-    # is a file-wide gate, and a forwarded line= would advertise scope support to
-    # the inert-rule map that no caller ever exercises.
+    # File-wide gate, so no line= is passed: forwarding one would advertise scope
+    # support to the inert-rule map that no caller exercises.
     rule = matching_rule(module_path, "trigger", bypass_rules=bypass_rules)
     if rule is not None:
         category, reason = rule.get("category"), rule.get("reason")
@@ -129,33 +93,26 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     is_handler = is_trigger_handler(module_path)
 
-    # Check 1: For trigger handlers - no logger imports
     if is_handler:
         logger_check = check_no_logger_imports(content, lines, module_path)
         checks.append(logger_check)
 
-    # Check 2: For trigger handlers - no print statements
     if is_handler:
         print_check = check_no_print_statements(content, lines, module_path)
         checks.append(print_check)
 
-    # Check 3: For any file using trigger - correct import pattern
     trigger_import_check = check_trigger_import_pattern(content, lines, module_path)
     if trigger_import_check:
         checks.append(trigger_import_check)
 
-    # Check 4: For trigger handlers - handler function naming
     if is_handler:
         naming_check = check_handler_naming(content, lines, module_path)
         if naming_check:
             checks.append(naming_check)
 
-    # Check 5: Detect event patterns that should use trigger.fire() but don't
-    # Skip trigger branch itself (it's the event bus)
-    # Skip handler layer files - they are called by modules which fire events (handler_layer bypass category)
+    # The trigger branch is the event bus itself; handler-layer files are fired for by their module.
     if "trigger/" not in module_path and "trigger\\" not in module_path:
         if is_handler_layer(module_path):
-            # Handler layer auto-bypass - modules fire events, not handlers
             checks.append(
                 {
                     "name": "Missing trigger events",
@@ -168,7 +125,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             if event_pattern_check:
                 checks.append(event_pattern_check)
 
-    # If no checks apply, file is compliant
     if not checks:
         return {
             "passed": True,
@@ -190,8 +146,7 @@ def check_no_logger_imports(_content: str, lines: List[str], _module_path: str) 
     """
     Check that trigger handlers don't import Prax logger
 
-    Logger imports in handlers cause infinite recursion:
-    logger -> trigger -> handler -> logger -> ...
+    Logger imports in handlers recurse: logger -> trigger -> handler -> logger.
     """
     violations = []
 
@@ -200,7 +155,6 @@ def check_no_logger_imports(_content: str, lines: List[str], _module_path: str) 
         if stripped.startswith("#"):
             continue
 
-        # Check for prax logger imports
         if "from prax" in stripped and "logger" in stripped:
             violations.append(i)
         elif "import prax" in stripped and "logger" in stripped:
@@ -247,7 +201,6 @@ def check_no_print_statements(_content: str, lines: List[str], _module_path: str
         if stripped.startswith("#"):
             continue
 
-        # Check for print statements
         if re.search(r"(?<![.\w])print\s*\(", line):
             violations.append(i)
 
@@ -264,29 +217,17 @@ def check_no_print_statements(_content: str, lines: List[str], _module_path: str
 def _is_trigger_branch(file_path: str) -> bool:
     """Check if a file belongs to the trigger branch itself.
 
-    The trigger module is the source of trigger.fire() — it defines the
-    event bus rather than consuming it, so it must not be required to
-    import itself.
+    It defines trigger.fire(), so it must not be required to import itself.
     """
-    # Normalise Windows separators for a single check
     normalized = file_path.replace("\\", "/")
-    # Match anything under the trigger branch's own tree
     return "/trigger/apps/" in normalized
 
 
 def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: str) -> Optional[Dict]:
-    """
-    Check for correct trigger import patterns
-
-    Valid patterns:
-    - from trigger import trigger
-    - from trigger.apps.modules.core import trigger
-    """
-    # Only check files that use trigger
+    """Check for correct trigger import patterns"""
     if "trigger" not in content.lower():
         return None
 
-    # The trigger branch IS the event bus — it cannot import itself
     if _is_trigger_branch(_module_path):
         return {
             "name": "Trigger import pattern",
@@ -294,11 +235,9 @@ def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: 
             "message": "Trigger branch file — self-reference, import not required",
         }
 
-    # Check if trigger is imported
     has_trigger_import = False
     has_trigger_fire = "trigger.fire(" in content
 
-    # Valid import patterns (with optional aipass. prefix)
     valid_patterns = [
         r"from\s+(?:aipass\.)?trigger\s+import\s+trigger",
         r"from\s+(?:aipass\.)?trigger\.apps\.modules\.core\s+import\s+trigger",
@@ -310,7 +249,6 @@ def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: 
             has_trigger_import = True
             break
 
-    # Also check lazy-load pattern
     if "_trigger" in content and "trigger.apps.modules.core" in content:
         has_trigger_import = True
 
@@ -337,17 +275,13 @@ def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> 
     bad_handlers = []
 
     for i, line in enumerate(lines, 1):
-        # Look for function definitions
         match = re.match(r"^def\s+(\w+)\s*\(", line)
         if match:
             func_name = match.group(1)
-            # Skip private/internal functions
             if func_name.startswith("_"):
                 continue
-            # Check if it's a handler function
             if "handle" in func_name.lower():
                 handler_functions.append(func_name)
-                # Check naming pattern
                 if not func_name.startswith("handle_"):
                     bad_handlers.append(func_name)
 
@@ -371,13 +305,8 @@ def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> 
 def _fires_trigger(node: ast.AST) -> bool:
     """Whether this AST subtree contains a trigger.fire(...) call.
 
-    A nested def counts as inside its parent: the fire still happens on the
-    outer function's watch, which is what the standard asks about.
-
-    The receiver is matched by name, not by identity, because the fleet
-    reaches the bus by several spellings -- ``trigger.fire(...)``, the
-    lazy-load ``_trigger.fire(...)``, ``get_trigger().fire(...)``. All of
-    them are the same promise.
+    A nested def counts as its parent's fire. The receiver is matched by name
+    because the bus is reached as ``trigger``, ``_trigger`` and ``get_trigger()``.
     """
     for sub in ast.walk(node):
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "fire":
@@ -407,24 +336,9 @@ def _called_names(node: ast.AST) -> set:
 def _function_index(content: str) -> Optional[List[Dict]]:
     """Every def in the module with its line span and whether it satisfies the standard.
 
-    This is the fix for a file-level flag that was answering a per-function
-    question: one ``trigger.fire(`` anywhere in a file used to exempt every
-    pattern in it. Prax's initialize_logging_system/shutdown_logging_system
-    fired nothing for months and passed, because an unrelated hot-path
-    ``trigger.fire("startup")`` lived in the same file; the day that fire was
-    removed the lint finally surfaced. The checker had been passing code that
-    never met the standard.
-
-    ``satisfied`` is True when the function fires in its OWN body (nested defs
-    included, see _fires_trigger) or when it calls -- in ONE hop -- another
-    function defined in the same module that does. The one-hop acquittal is
-    measured, not generous: swept over the whole audit corpus (18 branches,
-    839 files), delegation was the only shape the per-function rule newly
-    convicted, and all of it was correct code (aipass install.py's two lock
-    helpers, which both delegate to the local _fire_lock_removed).
-
-    Returns None when the file does not parse, and the caller then keeps the
-    old file-level behaviour rather than dropping the check entirely.
+    ``satisfied``: the function fires in its own body or calls, in ONE hop, a
+    same-module function that does; delegation to a local firer is correct code.
+    None when the file does not parse: the caller falls back to the file-level flag.
     """
     try:
         tree = ast.parse(content)
@@ -480,21 +394,8 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
     """
     Detect event-like patterns that should use trigger.fire() but don't.
 
-    Catches:
-    - watchdog FileSystemEventHandler with on_created/on_deleted/on_modified
-    - Lifecycle functions in modules AND handlers
-    - Email/messaging patterns (deliver_*, send_*)
-    - State change patterns (mark_*)
-
-    THE EXEMPTION IS PER FUNCTION BODY. Patterns 1-9 are rules about specific
-    functions, so each one is answered by its own body (plus a one-hop
-    delegation to a firing function in the same module -- see _function_index).
-    A fire in function A no longer exempts function B. Pattern 10 is about
-    inline .unlink()/.rename() calls rather than a def, so its unit is the
-    enclosing function; a call at module level keeps the file-level answer,
-    as does any file that fails to parse.
-
-    Returns violations with line numbers for easy navigation.
+    The exemption is per function body: a fire in A never exempts B. Pattern 10's
+    unit is the enclosing function; module level and unparseable files stay file-level.
     """
     violations = []
     has_trigger_fire = "trigger.fire(" in content
@@ -515,11 +416,8 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
                 matched_lines.append(i)
         return matched_lines
 
-    # Pattern 1: watchdog FileSystemEventHandler without trigger
-    # The class marker stays a file-level gate (it only says "this file plugs
-    # into watchdog"), but the exemption is per METHOD: on_created firing is no
-    # reason to let on_deleted stay silent. A method that hands the event to a
-    # local dispatcher which fires is acquitted by the one-hop rule.
+    # Pattern 1: watchdog FileSystemEventHandler. The class marker gates the file;
+    # the exemption is per METHOD, so on_created firing does not excuse on_deleted.
     if "FileSystemEventHandler" in content:
         event_methods = ["on_created", "on_deleted", "on_modified", "on_moved"]
         for method in event_methods:
@@ -528,8 +426,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
             if matched:
                 violations.append(f"FileSystemEventHandler.{method}() on lines {matched}")
 
-    # Pattern 2: Lifecycle functions - check BOTH modules AND handlers
-    # These are significant state changes that other systems care about
     lifecycle_patterns = [
         (r"def\s+create_\w+\s*\(", "create_*"),
         (r"def\s+close_\w+\s*\(", "close_*"),
@@ -542,7 +438,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_type} function on lines {matched}")
 
-    # Pattern 3: Email/messaging patterns (common in ai_mail, other branches)
     messaging_patterns = [
         (r"def\s+deliver_\w+\s*\(", "deliver_*"),
         (r"def\s+send_(?!notification)\w+\s*\(", "send_*"),  # Exclude send_notification
@@ -553,7 +448,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_type} function on lines {matched}")
 
-    # Pattern 4: State change patterns (mark_as_*, archive_*)
     state_patterns = [
         (r"def\s+mark_as_\w+\s*\(", "mark_as_*"),
         (r"def\s+archive_\w+\s*\(", "archive_*"),
@@ -564,8 +458,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_type} function on lines {matched}")
 
-    # Pattern 5: Registry/JSON update patterns (significant state changes)
-    # These modify shared state that other systems care about
     registry_patterns = [
         (r"def\s+save_registry\s*\(", "save_registry"),
         (r"def\s+add_registry_entry\s*\(", "add_registry_entry"),
@@ -581,7 +473,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_name} on lines {matched}")
 
-    # Pattern 6: Central file operations (cross-branch shared state)
     central_patterns = [
         (r"def\s+update_central\s*\(", "update_central"),
         (r"def\s+write_central\w*\s*\(", "write_central_*"),
@@ -594,7 +485,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_name} on lines {matched}")
 
-    # Pattern 7: Auto-repair and recovery operations
     repair_patterns = [
         (r"def\s+_?auto_close_\w+\s*\(", "auto_close_*"),
         (r"def\s+recover_\w+\s*\(", "recover_*"),
@@ -606,7 +496,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_name} on lines {matched}")
 
-    # Pattern 8: Cleanup and backup operations (state deletion/preservation)
     cleanup_patterns = [
         (r"def\s+cleanup_\w+\s*\(", "cleanup_*"),
         (r"def\s+backup_\w+\s*\(", "backup_*"),
@@ -617,7 +506,6 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_name} on lines {matched}")
 
-    # Pattern 9: System lifecycle (initialize/shutdown entire systems)
     lifecycle_system_patterns = [
         (r"def\s+initialize_\w+_system\s*\(", "initialize_*_system"),
         (r"def\s+shutdown_\w+_system\s*\(", "shutdown_*_system"),
@@ -628,15 +516,11 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         if matched:
             violations.append(f"{func_name} on lines {matched}")
 
-    # Pattern 10: Inline filesystem operations (method calls, not function defs)
-    # These directly modify filesystem state - file deletions and moves.
-    # The unit here is the ENCLOSING function, since there is no def to anchor on.
-    # .unlink() - file deletion
+    # Pattern 10: Inline .unlink()/.rename(); no def to anchor on, so the unit is the enclosing function.
     unlink_lines = find_pattern_lines(r"\.\s*unlink\s*\(", inline=True)
     if unlink_lines:
         violations.append(f".unlink() file deletion on lines {unlink_lines}")
 
-    # .rename() - file move/rename
     rename_lines = find_pattern_lines(r"\.\s*rename\s*\(", inline=True)
     if rename_lines:
         violations.append(f".rename() file move on lines {rename_lines}")

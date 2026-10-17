@@ -3,102 +3,13 @@
 # Description: Mock Console Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 Mock Console Standards Checker Handler
 
-Test template v1, item 14: the edge is real, not mocked. The product's consoles
-write to ``sys.stdout`` and ``sys.stderr`` AT PRINT TIME, so pytest's ``capsys``
-captures every one of them -- the cli header channel included. A test asserts on
-``capsys``, by channel.
-
-WHAT A MOCK CONSOLE COSTS. ``console.print.assert_called_with("[red]Refused")``
-passes when the product hands Rich a string. It passes when that string never
-reaches a terminal, when the console was the wrong one, when the markup is
-malformed, when stderr went to stdout. The assertion measures the CALL, and the
-thing the user reads is the CHANNEL. @prax's ``test_display_resilience.py``
-carries the receipt in its header: the live monitor died on a line Rich could
-not render, and every mock-console test in that branch stayed green.
-
-THE RULE IS THE INSTALL SITE, NOT THE VALUE'S SPELLING. A Mock that sits in a
-test is a Mock; a Mock the test puts WHERE THE PRODUCT LOOKS is an oracle. Same
-restriction ``literal_path`` took from ``host_portability`` ARM A -- a thing that
-merely sits somewhere is data, and only a thing HANDED to the product is in use.
-Four install sites and one hand-off site, measured 2026-09-22 by this checker
-over the 580 fleet test files:
-
-    patch(f"{MOD}.console")                297 -- 284 of them given no
-                                                  replacement at all
-    setattr(mod, "console", Mock())         70 -- 2-arg and 3-arg forms
-    cli_mod.console = MagicMock()           30
-    patch.object(display, "CONSOLE", cons)  26
-    product_call(console=MagicMock())        9 -- handed, not installed
-
-WHAT IS INSTALLED, and what each spelling is called in the message:
-
-  * A MOCK (415 hits) -- ``Mock``, ``MagicMock``, ``AsyncMock``,
-    ``PropertyMock``, ``create_autospec``, or a ``patch`` given no replacement
-    at all, which is the same MagicMock arriving by default. The default form
-    is 284 of the 432 and the single biggest habit in the fleet.
-  * A RICH CONSOLE ON A BUFFER (16 hits) -- ``Console(file=buf)`` installed
-    over the product's. It renders for real, which is why it looks innocent,
-    and it still takes the product's words out of the channel ``capsys`` reads.
-  * A FAKE WITH A ``print`` METHOD (1 hit) -- seedgo's own ``_Recorder``.
-    Convicted as a third shape, against the dispatch's default of two, because
-    the install site makes it unambiguous: a class defined in the test file,
-    carrying a ``print``, put where the product looks for its console. It is
-    item 14's oracle with a different spelling.
-
-The patch TARGET may be a product attribute (``{MOD}.console``), a product
-function that returns one (drone's ``git_module._get_console``) or Rich's class
-itself (prax's ``patch("rich.console.Console")``). All three end with the
-product holding a Mock, so all three are the same finding.
-
-NEVER CONVICTED, each for a measured reason:
-
-  * ``capsys`` and ``capfd``. 79 of the 580 files already read the channel.
-    They are the fix, not the offence.
-  * A CONSOLE THE PRODUCT BUILDS. This checker never reads ``apps/``.
-  * A RESTORE -- ``setattr(module, "console", original)``, where ``original``
-    came from ``getattr(module, "console")``. 5 sites. Putting the real console
-    BACK is the opposite of the habit.
-  * A MOCK FOR SOMETHING THAT IS NOT A CONSOLE. The install site is the whole
-    test: the attribute, the patch target or the keyword has to be console-named,
-    and console-named means ONE qualifier at most. @prax mocks the helper
-    ``_print_event_to_console``; a first cut that took any name ending in the
-    word convicted it twice, and mocking a helper is not item 14's offence.
-  * A RENDERER TEST -- a ``Console(file=...)`` the test builds and prints to
-    ITSELF, never installing it anywhere (8 consoles in 4 files: ai_mail
-    ``test_format``, seedgo ``test_rich_markup``, seedgo ``test_bypass``, cli
-    ``conftest``). The subject there is what RICH does to a string, no product
-    console is in the picture, and ``capsys`` cannot capture an output the
-    product never wrote. COUNTED in the passing message, the device
-    ``named_encoding`` uses for latin-1, so the number stays visible without
-    being a verdict.
-
-A NAME IS RESOLVED ONE HOP, and through a same-file helper's ``return``: @prax
-binds ``real_console = Console(file=buffer)`` and installs the name, @devpulse's
-``_real_console()`` returns ``(console, buffer)`` and the caller installs the
-first. A name assigned anything else anywhere in the file is dropped -- which
-value reaches the install is a question one pass cannot answer. ``literal_path``
-and ARM A's ``_proc_bindings`` are the precedent.
-
-Two stated limits:
-
-  * A FACTORY IN ANOTHER FILE is missed. @cli's ``conftest.make_capture_console``
-    returns a buffered console and two test files install it over the product;
-    one pass over one file cannot see a helper it imported. Those two are the
-    whole of @cli's 0-of-12, and they are the only false negatives measured.
-  * ``console.print = lambda ...`` -- patching the METHOD rather than the object
-    -- is not a rule of its own. 47 hits in 5 files, and all 5 are already
-    convicted for installing the console that carries it. A second rule would
-    charge one habit twice.
-
-The whole rule, measured 2026-09-22 by this checker: 432 hits in 81 of 580 test
-files. 79 files already read the channel with ``capsys``. Per branch, and the
-before/after audits, in mock_console.md.
+Reference: mock_console.md
 """
 
 import ast
@@ -160,9 +71,7 @@ def _is_console_name(name: str | None) -> bool:
     """Whether this name is a console OBJECT -- ``console``, ``CONSOLE``,
     ``err_console``, ``Console``.
 
-    One qualifier at most, which is what keeps a FUNCTION out. @prax mocks
-    ``_print_event_to_console``; a rule that took any name ending in the word
-    convicted that helper, and mocking a helper is not item 14's offence.
+    One qualifier at most, which is what keeps a FUNCTION (``_print_event_to_console``) out.
     """
     lowered = (name or "").lower().lstrip("_")
     return lowered == "console" or bool(_QUALIFIED_CONSOLE.fullmatch(lowered))
@@ -171,9 +80,7 @@ def _is_console_name(name: str | None) -> bool:
 def _target_attr(node: ast.expr) -> str:
     """The attribute a patch target names -- ``console`` for ``"a.b.console"``.
 
-    An f-string target is read from its last literal part: @ai_mail spells the
-    module as ``f"{MOD}.console"`` in 44 places, and a rule that only read a
-    plain string would miss every one.
+    An f-string target is read from its last literal part, so ``f"{MOD}.console"`` is read.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value.rsplit(".", 1)[-1]
@@ -217,9 +124,7 @@ def _direct_substitute(node: ast.expr, fakes: Set[str]) -> str | None:
 def _helper_returns(nodes: List[ast.AST], fakes: Set[str]) -> Dict[str, str]:
     """Same-file functions whose ``return`` hands back a stand-in.
 
-    One hop, and one hop only. @devpulse's ``_real_console()`` returns
-    ``(console, buffer)`` and every caller installs the first element; without
-    this the file reads as clean while eight tests run on a substituted console.
+    One hop, and one hop only: a helper returning ``(console, buffer)`` has its first element installed.
     """
     helpers: Dict[str, str] = {}
     for function in nodes:
@@ -239,9 +144,8 @@ def _helper_returns(nodes: List[ast.AST], fakes: Set[str]) -> Dict[str, str]:
 def _bindings(nodes: List[ast.AST], fakes: Set[str], helpers: Dict[str, str]) -> Dict[str, str]:
     """Names bound ONLY to a stand-in, and what that stand-in is.
 
-    A name assigned anything else anywhere in the file is dropped: ``console``
-    rebound to the real one after a test is not the same name any more, and one
-    pass cannot say which value reaches the install.
+    A name assigned anything else anywhere in the file is dropped: one pass cannot say which value
+    reaches the install.
     """
     bound: Dict[str, str] = {}
     rejected: Set[str] = set()
@@ -277,8 +181,7 @@ def _substitute(node: ast.expr | None, fakes: Set[str], bound: Dict[str, str]) -
 def _patch_install(node: ast.Call, fakes: Set[str], bound: Dict[str, str]) -> str | None:
     """What a ``patch`` or ``patch.object`` call puts over a console, if any.
 
-    A patch given no replacement is the whole offence on its own: mock hands the
-    product a MagicMock by default, and 104 of the fleet's install sites take it.
+    A patch given no replacement is the whole offence on its own: mock hands the product a MagicMock by default.
     """
     if node.args and _is_console_name(_target_attr(node.args[0])):
         replacement = node.args[1] if len(node.args) > 1 else None
@@ -351,8 +254,7 @@ def _handoff_findings(nodes: List[ast.AST], fakes: Set[str], bound: Dict[str, st
 def _parse(source: str, what: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ruff already convicts a syntax error, and a line number invented for a
-    statement Python cannot parse sends its author to the wrong place.
+    ruff already convicts a syntax error; a line number invented for an unparseable file misleads.
     """
     try:
         return ast.parse(source)
@@ -367,9 +269,7 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
     if tree is None:
         return []
 
-    # One walk, reused by all five passes: six separate walks measured 10.8s
-    # over the fleet's 581 test files against literal_path's 5.3s, for a rule
-    # that answers the same question.
+    # One walk, reused by all five passes: separate walks doubled this rule's cost over the fleet.
     nodes = list(ast.walk(tree))
     fakes = _fake_console_classes(nodes)
     bound = _bindings(nodes, fakes, _helper_returns(nodes, fakes))
@@ -435,15 +335,7 @@ def _clean_message(renderers: List[int]) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for a console stand-in handed to the product.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for a console stand-in handed to the product."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -460,9 +352,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, _clean_message(counted_renderer_consoles(source))), 100)
 
-    # One line per hit, all inside ONE check rather than one check each --
-    # checklist._format_failure prints the FIRST failed check and appends
-    # "(+N more)", so N checks would show one hit and hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {what} - {fix}" for line, what, fix in hits)
 
     json_handler.log_operation(

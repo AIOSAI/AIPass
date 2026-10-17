@@ -3,25 +3,18 @@
 # Description: Import Site Standards Content Handler
 # Version: 1.1.0
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Import Site Standards Content Handler
-
-Provides formatted Import Site standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_import_site_standards() -> str:
-    """Return formatted import_site standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted import_site standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (test template v1, item 8):[/bold cyan]",
         "  Product imports go at the [green]top of the test file[/green], never inside a test.",

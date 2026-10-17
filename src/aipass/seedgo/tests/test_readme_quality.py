@@ -3,7 +3,7 @@
 # Description: Tests for readme_quality_check.py
 # Version: 1.0.2
 # Created: 2026-07-17
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_quality_check.py — README content quality from a stranger's view."""
@@ -22,14 +22,7 @@ from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
-    """Point is_bypassed's json_handler at a mock for every test here.
-
-    The bypass tests call the real is_bypassed, which appends to the
-    repo-tracked seedgo_json/utils_log.json via the json_handler global in
-    its OWN module -- xdist workers racing on that shared file corrupt it
-    (JSONDecodeError: Extra data). sys.modules patching never reaches a
-    function's globals, so the pin must land on the utils module object.
-    """
+    """Point is_bypassed's json_handler at a mock for every test here."""
     mock_handler = MagicMock()
     mock_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
@@ -48,11 +41,6 @@ def _branch_with_readme(tmp_path, readme_content, branch_name="mybranch"):
     readme.write_text(readme_content, encoding="utf-8")
 
     return str(entry)
-
-
-# ============================================================
-# Skip / edge cases
-# ============================================================
 
 
 def test_init_file_skipped(tmp_path):
@@ -77,10 +65,6 @@ def test_no_readme(tmp_path):
     assert result["score"] == 0
     assert all(not c["passed"] for c in result["checks"])
 
-
-# ============================================================
-# Good README — all checks pass
-# ============================================================
 
 GOOD_README = """# MyBranch
 
@@ -113,10 +97,6 @@ def test_good_readme_passes_all(tmp_path):
     assert "what_description" in names
 
 
-# ============================================================
-# Missing Quick Start
-# ============================================================
-
 NO_QUICKSTART = """# MyBranch
 
 A useful tool for data processing.
@@ -137,10 +117,6 @@ def test_missing_quick_start(tmp_path):
     assert checks["what_description"] is True
 
 
-# ============================================================
-# Quick Start without code block
-# ============================================================
-
 QUICKSTART_NO_CODE = """# MyBranch
 
 Something useful.
@@ -157,10 +133,6 @@ def test_quick_start_no_code_fails(tmp_path):
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["quick_start"] is False
 
-
-# ============================================================
-# Quick Start with code block passes
-# ============================================================
 
 QUICKSTART_WITH_CODE = """# MyBranch
 
@@ -181,10 +153,6 @@ def test_quick_start_with_code_passes(tmp_path):
     assert checks["quick_start"] is True
 
 
-# ============================================================
-# Getting Started variant accepted
-# ============================================================
-
 GETTING_STARTED = """# MyBranch
 
 Does things.
@@ -204,10 +172,6 @@ def test_getting_started_accepted(tmp_path):
     assert checks["quick_start"] is True
 
 
-# ============================================================
-# Stranger accessible — too many internal names
-# ============================================================
-
 TOO_MANY_INTERNALS = """# MyBranch
 
 Integrates with drone for routing, devpulse for orchestration,
@@ -222,10 +186,6 @@ def test_too_many_internal_names_fails(tmp_path):
     assert checks["stranger_accessible"]["passed"] is False
     assert "drone" in checks["stranger_accessible"]["message"]
 
-
-# ============================================================
-# Stranger accessible — within limit
-# ============================================================
 
 FEW_INTERNALS = """# MyBranch
 
@@ -246,10 +206,6 @@ def test_few_internal_names_passes(tmp_path):
     assert checks["stranger_accessible"] is True
 
 
-# ============================================================
-# Stranger accessible — aipass project name excluded
-# ============================================================
-
 AIPASS_PROJECT_NAME = """# MyBranch
 
 Standards compliance platform for AIPass. Audits all agents
@@ -269,10 +225,6 @@ def test_aipass_project_name_not_counted(tmp_path):
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["stranger_accessible"] is True
 
-
-# ============================================================
-# Invoke match — correct branch
-# ============================================================
 
 INVOKE_MATCH = """# mybranch
 
@@ -299,10 +251,6 @@ def test_invoke_matches_branch(tmp_path):
     assert checks["invoke_match"] is True
 
 
-# ============================================================
-# Invoke match — wrong branch
-# ============================================================
-
 INVOKE_MISMATCH = """# mybranch
 
 Does things.
@@ -328,10 +276,6 @@ def test_invoke_wrong_branch_fails(tmp_path):
     assert checks["invoke_match"] is False
 
 
-# ============================================================
-# No invoke section — skipped (passes)
-# ============================================================
-
 NO_INVOKE = """# mybranch
 
 Does things.
@@ -352,22 +296,12 @@ def test_no_invoke_section_skipped(tmp_path):
     assert "skipped" in checks["invoke_match"]["message"].lower()
 
 
-# ============================================================
-# What description — present
-# ============================================================
-
-
 def test_description_in_first_10_lines(tmp_path):
     readme = "# Branch\n\nThis tool processes data and generates comprehensive reports.\n"
     path = _branch_with_readme(tmp_path, readme)
     result = readme_quality_check.check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["what_description"] is True
-
-
-# ============================================================
-# What description — missing (only short lines)
-# ============================================================
 
 
 def test_no_description_fails(tmp_path):
@@ -378,22 +312,12 @@ def test_no_description_fails(tmp_path):
     assert checks["what_description"] is False
 
 
-# ============================================================
-# Bypass
-# ============================================================
-
-
 def test_bypass_passes(tmp_path):
     path = _branch_with_readme(tmp_path, "# Bad\n\nNo content.\n")
     bypass = [{"standard": "readme_quality", "file": Path(path).as_posix()}]
     result = readme_quality_check.check_module(path, bypass_rules=bypass)
     assert result["passed"] is True
     assert result["score"] == 100
-
-
-# ============================================================
-# Real entry point validation
-# ============================================================
 
 
 def test_seedgo_readme_passes():
@@ -407,8 +331,7 @@ def test_seedgo_readme_passes():
 
 
 def test_uppercase_registry_name_lowercase_path(tmp_path):
-    """Regression: uppercase registry name (BACKUP) with lowercase filesystem path
-    must resolve correctly — branch_name derived from directory, not registry."""
+    """An uppercase registry name over a lowercase path resolves: branch_name comes from the directory, not the registry."""
     readme = """# Backup
 
 A tool for managing automated backups across all AIPass branches.

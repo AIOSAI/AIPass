@@ -3,24 +3,15 @@
 # Description: Branch Discovery Handler
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Discovery Handler
-
-Discovers all AIPass branches from AIPASS_REGISTRY.json
 """
 
 from pathlib import Path
 from typing import List, Dict
-
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
 
 import importlib.util
 import json
@@ -28,10 +19,6 @@ import json
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
-
-# =============================================================================
-# PRIVATE BRANCH DETECTION
-# =============================================================================
 
 
 def _is_branch_private(branch_name: str) -> bool:
@@ -51,20 +38,10 @@ def _is_branch_private(branch_name: str) -> bool:
     return False
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def _find_registry() -> Path:
-    """
-    Find *_REGISTRY.json by walking up from CWD first, then from __file__.
-    CWD-first matches drone's registry_handler search order and supports
-    external projects with their own registries.
-    """
-    # Delegates: the name is the contract, the private glob walk was the disease.
-    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
-    # a flow_json plan counter could be served as the trust anchor.
+    """Find *_REGISTRY.json by walking up from CWD first (drone's search order), then from __file__."""
+    # Trap: a local parent.glob("*_REGISTRY.json") folds case on Windows/macOS and
+    # can serve a flow_json plan counter as the trust anchor; registry_scan does not.
     return registry_scan.find_registry()
 
 
@@ -108,16 +85,7 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:
 
 
 def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
-    """
-    Discover all branches from AIPASS_REGISTRY.json and caller's project registry.
-
-    Args:
-        include_private: If False (default), excludes branches listed in
-                         PRIVATE_BRANCH_REGISTRY.json. Set True to include them.
-
-    Returns:
-        List of dicts with 'name', 'path', 'entry_file' keys
-    """
+    """Discover all branches from AIPASS_REGISTRY.json and caller's project registry."""
     primary_path = _find_registry()
     branches = _branches_from_registry(primary_path)
 
@@ -138,17 +106,9 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
 
 
 def check_internal_access(branch_name: str) -> bool:
-    """
-    Check if the current working directory is inside a private branch.
+    """Check if the current working directory is inside a private branch.
 
-    Used to enforce isolation per DPLAN-035: private branches can only be
-    audited from inside their own directory.
-
-    Args:
-        branch_name: Name of the branch to check
-
-    Returns:
-        True if CWD is inside the branch (access allowed), False otherwise
+    Private branches can only be audited from inside their own directory.
     """
     _branch_path = None
     _priv_branches = discover_branches(include_private=True)
@@ -171,11 +131,7 @@ SCORING_PACK_KIND = "standards"
 def pack_kind(pack_dir: Path) -> str:
     """The `kind` a checker pack declares, defaulting to `standards`.
 
-    A pack with no manifest is a standards pack - that is what every pack was
-    before execution packs existed, and changing the default would silently
-    unregister the pack this branch has audited eighteen citizens with. An
-    unreadable manifest gets the same answer, loudly: refusing to score a pack
-    because its manifest has a typo is a worse failure than scoring it.
+    No manifest, or an unreadable one (logged), means standards: any other default unregisters the aipass pack.
     """
     manifest = pack_dir / "pack.json"
     if not manifest.is_file():
@@ -190,16 +146,7 @@ def pack_kind(pack_dir: Path) -> str:
 def discover_packs(handlers_dir: Path, kind: str = SCORING_PACK_KIND) -> Dict[str, Path]:
     """Every `*_standards/` pack of one kind, name -> path.
 
-    AN EXECUTION PACK IS REFUSED HERE, NOT SCORED. `tests_pytest_standards/`
-    ships nine `*_check.py` nominators, so it matches the filename convention
-    exactly - but its checkers define `nominate()` rather than `check_module`
-    or `check_branch`, so the scoring engine would load them, keep none, and
-    then report a number for a branch audited against ZERO standards. A pack
-    that scores 100 because nothing ran is the precise defect the audit-tests
-    lane exists to catch, and it would have been introduced BY that lane.
-
-    Design section 2.1. The shape gate stops the scoring ENGINE; this stops the
-    pack being offered as something to score in the first place.
+    Execution packs are refused: their checkers define `nominate()`, so scoring them reports zero standards.
     """
     packs: Dict[str, Path] = {}
     if not handlers_dir.is_dir():
@@ -218,10 +165,7 @@ def discover_packs(handlers_dir: Path, kind: str = SCORING_PACK_KIND) -> Dict[st
 def non_scoring_packs(handlers_dir: Path) -> Dict[str, str]:
     """Packs that exist but belong to another lane. Name -> kind.
 
-    Published rather than hidden: a pack directory that simply vanished from
-    every listing is indistinguishable from one that was never installed, and
-    an operator who can see `tests_pytest` is an execution pack knows where to
-    look for its numbers.
+    Published so a non-scoring pack is not mistaken for one never installed.
     """
     found: Dict[str, str] = {}
     if not handlers_dir.is_dir():
@@ -236,15 +180,7 @@ def non_scoring_packs(handlers_dir: Path) -> Dict[str, str]:
     return found
 
 
-# =============================================================================
-# PACK CORPUS
-# =============================================================================
-
-#: What the banner says a pack measured when its manifest declares nothing.
-#: These are the aipass pack's own terms: it walks one file at a time, and
-#: since 2026-09-21 (owner ruling 21:20) that walk covers apps/**/*.py plus
-#: tests/ test_*.py and conftest.py. It is the default because every pack was
-#: that pack before a second one existed.
+#: The banner's corpus when a manifest declares none: the aipass pack's per-file walk.
 DEFAULT_PACK_CORPUS: Dict[str, str] = {
     "noun": "files",
     "detail": "apps/ plus tests/ test_*.py and conftest.py",
@@ -254,15 +190,7 @@ DEFAULT_PACK_CORPUS: Dict[str, str] = {
 def pack_corpus(pack_dir: Path | None) -> Dict[str, str]:
     """What a pack says it reads, for the banner printed over its scores.
 
-    THE BANNER IS A CLAIM ABOUT THE PACK, NOT ABOUT THE ENGINE. It read
-    "N production files measured - apps/ only, tests/ not in the corpus" under
-    every pack until 2026-09-07, including one whose eleven rules are all
-    branch-level and read nothing but test units; the sentence was then false
-    twice over - wrong corpus, and a count no rule of that pack had used.
-
-    `measured_by` is "<module>:<callable>" inside the pack directory, resolved
-    the same way its checkers are. A pack that declares none keeps the engine's
-    own file count, which is the honest answer for a per-file pack.
+    `measured_by` is "<module>:<callable>" in the pack dir; none keeps the engine's file count.
     """
     corpus = dict(DEFAULT_PACK_CORPUS)
     if pack_dir is None:
@@ -283,10 +211,7 @@ def pack_corpus(pack_dir: Path | None) -> Dict[str, str]:
 def measure_pack_corpus(pack_dir: Path | None, branch_path: Path) -> int | None:
     """The size the pack itself measures for one branch, or None when it declares no measurer.
 
-    None is not zero. A pack with no `measured_by` has not failed to measure -
-    it has said nothing, and the caller keeps its own count. A measurer that
-    raises returns None for the same reason: a banner is not worth failing an
-    audit over, and a fabricated 0 would read as an empty branch.
+    None is not zero: a raising measurer also returns None, since a fabricated 0 reads as an empty branch.
     """
     corpus = pack_corpus(pack_dir)
     target = corpus.get("measured_by")

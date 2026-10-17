@@ -53,6 +53,16 @@ That guard is not decoration: it acquits **18 of the 20** candidates, including
 `route_command` and every `print_introspection`, which `main()` reaches for tests that call
 `main()`.
 
+**O3 called by pytest protocol** — acquitted. A hook a pytest plugin defines is called by
+pytest, never by a test. It is counted in the passing message, and it seeds the graph as a
+test call would, so the helpers only a hook calls are live. A module is a plugin when it
+defines `pytest_configure` or `pytest_sessionstart`: the test reads what the file is, not
+where it sits. The audit_hygiene payload is loaded with `-p` from a scratch copy, so neither
+its name nor its directory makes pytest call it; a `payload/` rule would acquit anything
+dropped there and miss a plugin elsewhere; a `conftest.py` lives in `tests/`, which no
+subject path under `apps/` names. A plugin that defines neither marker (only
+`pytest_runtest_call`, say) is still judged: the rule errs toward judging.
+
 A name-level graph collapses two modules that both define `run`, so it **over-acquits**
 rather than under-acquits. For a scored rule that is the right direction, and the number it
 acquits rides in the passing message rather than being hidden.

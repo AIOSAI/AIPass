@@ -3,45 +3,17 @@
 # Description: the weekly shadow cycle - three fleet measurements, one document, one mail
 # Version: 1.0.0
 # Created: 2026-09-02
-# Modified: 2026-09-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 The `shadow-cycle` verb. Runs the three weekly measurement passes back to back
 and mails ONE screen of headline counts and artifact paths.
 
-    drone @seedgo shadow-cycle              what the cycle is
-    drone @seedgo shadow-cycle run          the full cycle, emailed to @devpulse
-    drone @seedgo shadow-cycle run --no-mail  the full cycle, printed and not sent
-
-THE THREE PASSES, AND WHY THEY TRAVEL TOGETHER.
-
-  1. THE V5 SHADOW SCORE. The `pytest_quality` pack over every branch. It is a
-     SHADOW pack by its own declaration - it scores and gates nothing - and the
-     reason to run it weekly is that a shadow number is only useful as a SERIES
-     to diff against the calibrated v4 triage.
-  2. THE RANKED TEST INVENTORY. One row per test function, ordered for reading.
-  3. THE CROSS-BRANCH TWIN CENSUS, with the residue block: what a merge keyed on
-     FILENAME would destroy.
-
-Three numbers taken a week apart are three unrelated readings; three numbers
-taken in one pass are a cross-section. That is the whole argument for one verb.
-
-WHY IT WILL NOT RUN ON A BARE INVOCATION. `run` is required. This verb walks
-every branch three times and takes minutes, and the seedgo introspection
-standard reserves the no-argument call for describing a verb rather than firing
-it. A cycle that started because someone typed the name to see what it was is
-a cycle nobody asked for.
-
-THE MAIL IS AN EMAIL, NEVER A DISPATCH - a weekly reading must not wake a
-citizen at whatever hour the daemon fires. It carries the artifact PATHS; the
-reports themselves run to tens of megabytes and belong on disk.
-
-WHERE THE FLEET CONTAINER COMES FROM. `inventory` already owns that question
-and answers it off the imported `aipass` package rather than the registry,
-because the registry is machine-local and a fresh checkout has none - a second
-derivation here is exactly the defect that turned the board red on PR #751.
-This verb reuses that function; it does not re-derive it.
+Three passes in one run are a cross-section; taken a week apart they are unrelated readings.
+`run` is required: the cycle walks every branch three times, and a bare call only describes a verb.
+The mail is an email, never a dispatch (a weekly reading must not wake a citizen), and carries artifact paths.
+The fleet container comes from `inventory`, never re-derived: the registry is machine-local, absent on a fresh checkout.
 """
 
 import time
@@ -59,31 +31,23 @@ from aipass.seedgo.apps.handlers.shadow_cycle import cycle, mail, score
 from aipass.seedgo.apps.handlers.test_inventory import report, roots, twins
 from aipass.seedgo.apps.modules import inventory
 
-#: Exact tokens this module claims. Never a prefix match - `route_command`
-#: takes the first module returning truthy, so a prefix claim would swallow
-#: verbs this module knows nothing about.
+#: Never a prefix: `route_command` takes the first truthy module, so a prefix claim swallows other verbs.
 COMMANDS: tuple = ("shadow-cycle", "shadow_cycle")
 
-#: Every option this verb accepts.
 FLAGS: tuple = ("--no-mail", "--help", "-h")
 
-#: The word that starts the cycle. Required - see the module docstring.
 RUN_TOKEN = "run"
 
-#: The pack measured in shadow. Named here because it is the ONE thing about
-#: this cycle that a future ruling is expected to change.
+#: The one thing about this cycle a future ruling is expected to change.
 SHADOW_PACK = "pytest_quality"
 
-#: Who receives the one-screen summary.
 RECIPIENT = "@devpulse"
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Claim `shadow-cycle` and run it. Returns True once claimed, always.
 
-    The unconditional True is the safety property: an exception escaping here is
-    swallowed by the router and reported to the user as an unknown command, so a
-    broken verb would look like a verb that was never installed.
+    An exception escaping here is swallowed by the router as an unknown command, so a broken verb would look uninstalled.
     """
     if command not in COMMANDS:
         return False
@@ -144,9 +108,7 @@ def _score_pass() -> dict:
 def _inventory_pass() -> dict:
     """Pass 2 - the ranked test inventory over the whole fleet.
 
-    `inventory._measure` is called rather than copied: it names the four static
-    passes and their order, and a second spelling of that sequence here would be
-    a second definition of what the inventory IS.
+    `inventory._measure` is called, not copied: a second spelling would be a second definition of the inventory.
     """
     console.print()
     console.print("[bold cyan]2/3[/bold cyan] [dim]the ranked test inventory[/dim]")
@@ -156,14 +118,7 @@ def _inventory_pass() -> dict:
 
 
 def _twins_pass() -> dict:
-    """Pass 3 - cross-branch twins over the directory the branches live in.
-
-    The container is READ OFF THE SOURCE TREE by `inventory._fleet_container`,
-    never re-derived and never taken from the registry: the registry is
-    gitignored, so on a fresh checkout a second derivation answers nothing,
-    falls back to the repo root, and publishes "0 twins over 0 branches" as a
-    success. That is not a hypothetical - it is what turned PR #751 red.
-    """
+    """Pass 3 - cross-branch twins over the directory the branches live in."""
     console.print()
     console.print("[bold cyan]3/3[/bold cyan] [dim]cross-branch twins, keyed on shape[/dim]")
     container = inventory._fleet_container()
@@ -203,11 +158,6 @@ def _parse(args: List[str]) -> Tuple[bool, bool, str]:
     return wants_run, no_mail, ""
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def _score_line(result: dict) -> None:
     """One branch's shadow score, printed as it lands."""
     average = result.get("average", 0)
@@ -227,14 +177,8 @@ def _refuse_bare_flags() -> None:
 def _report(document: dict, body: str, published) -> None:
     """Print exactly what the recipient will read, then the caveats.
 
-    The body is printed VERBATIM and without markup so the console and the
-    inbox cannot show two different screens; the caveats follow it because they
-    are what the document refuses to be published without, and a reader at a
-    terminal has room for them where one screen of mail does not.
-
-    soft_wrap is on for the body alone: every line in it ends in an artifact
-    PATH, and a path folded at the console width is a path nobody can
-    double-click or copy in one go.
+    The body prints verbatim, without markup, so console and inbox show one screen; the caveats follow because
+    a terminal has room for them. soft_wrap is on for the body alone: each line ends in a path that must copy whole.
     """
     console.print()
     success(f"shadow cycle complete in {document['elapsed_seconds']:.0f}s")

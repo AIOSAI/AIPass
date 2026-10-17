@@ -3,53 +3,18 @@
 # Description: delete one statement at a time and report which deletions the suite does not notice
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """One statement at a time, not the whole body.
 
-WHY THIS EXISTS. `gutting` replaces a whole function body with `return None`
-and asks whether any test notices. That finds a function nothing observes, but
-it cannot find a STATEMENT nothing observes inside a function that is otherwise
-well tested — the body has other work in it, so gutting the whole thing is
-killed by the other work and the unobserved statement is never isolated.
-
-The species, three-instanced before this module was written (devpulse,
-DPLAN-0352 round 2):
-
-  round 0 A3   the deletable code was the caller's guard, not the callee body
-  round 1 row 3 a documented operation trail with no test reading it
-  round 3       extreme mutation left exactly one green of fourteen: `_refuse`
-                reduced to a bare `raise`, which deletes the trail call
-
-In one sentence: **code that is documented as doing something, that executes,
-that no test observes, and that whole-body gutting cannot isolate.**
-
-STATEMENT LEVEL, NOT BRANCH LEVEL. Deleting an `if`/`for`/`while`/`try` node
-deletes its whole block, which is branch deletion and a different, harder
-operator (round 0's A3 shape). This module recurses INTO compound statements
-and only ever deletes a SIMPLE statement, so a compound header is never the
-mutation. That boundary is the brief's, and it is enforced in
-`_is_deletable_kind` rather than left to reviewer discipline.
-
-COST IS THE GOVERNING CONSTRAINT. There are many more statements than
-functions, so this operator inherits `mutation_selection`'s coverage map or it
-does not run at all. It goes further than `gutting` does: gutting selects the
-tests covering the whole FUNCTION, while a statement only needs the tests that
-cover ITS OWN LINES, which is a strictly smaller set. The map's child reducer
-already ranges over `body_lineno..end_lineno`, so a per-statement span needs no
-change there — the narrowing is free.
-
-ARID NODES ARE DECLARED HERE, NOT TRIAGED LATER. A survivor list nobody can
-triage is worse than no operator (the brief, and round 3's mutmut run where
-`"utf-8"` to `"UTF-8"` and `None` flag values padded the survivor list until a
-50.9% score understated the suite badly). Every suppression in `ARID_REASONS`
-is a statement whose deletion CANNOT change behaviour, each with the reason it
-cannot; nothing is suppressed for being noisy, and the counts are published.
-
-WHAT IS DELIBERATELY NOT SUPPRESSED: logging, telemetry and operation-trail
-calls. Those look arid and are exactly the species this operator was built to
-find. Suppressing them would have suppressed all three sightings.
+`gutting` cannot isolate an unobserved STATEMENT inside an otherwise tested
+function. This finds code that is documented as doing something, executes, and
+no test observes. Only SIMPLE statements are deleted (a compound header is branch
+deletion, enforced in `_is_deletable_kind`). Cost needs `mutation_selection`'s
+coverage map, narrowed to the statement's own lines. Every arid suppression is a
+statement whose deletion cannot change behaviour; logging, telemetry and trail
+calls are never suppressed, they are the species this operator finds.
 """
 
 import ast
@@ -86,9 +51,7 @@ MODULE_NAME = "statement_deletion"
 SOURCE_ENCODING = "utf-8"
 DEFAULT_NEWLINE = "\n"
 
-#: What replaces a statement that was the only one in its block. Deleting the
-#: last statement of a block is a SyntaxError, not a mutant, so the block keeps
-#: a body and loses its behaviour — which is the mutation we meant.
+#: Fills a block whose only statement was deleted: an empty block is a SyntaxError, not a mutant.
 EMPTY_BLOCK_FILLER = "pass"
 
 #: Outcomes, spelled exactly as `gutting` spells them so one reader serves both.
@@ -98,34 +61,12 @@ OUTCOME_SKIPPED = gutting.OUTCOME_SKIPPED
 OUTCOME_NOT_RUN = gutting.OUTCOME_NOT_RUN
 OUTCOME_MUTATION_FAILED = gutting.OUTCOME_MUTATION_FAILED
 
-#: DELETION MAKES NON-TERMINATING MUTANTS, AND GUTTING DOES NOT. Removing a
-#: loop variable's advance (`index += 1`, `frame = frame.f_back`) leaves a
-#: `while` that never exits, and no test can fail a suite that never returns.
-#: Measured on fixture three with gutting's inherited 300s timeout: 7 of 108
-#: mutants took 95% of the entire campaign's wall clock, and the other 101
-#: averaged 0.71s. The timeout, not the mutant count, was the cost.
-#:
-#: So the ceiling is the target's OWN baseline rather than a fixed number: a
-#: run over a SUBSET of the suite cannot legitimately outlast the whole suite,
-#: and scaling by the target's own measurement is the lesson from projecting
-#: gutting's cost by a rate instead of by its suite.
+#: Deleting a loop advance (`index += 1`) makes a mutant that never returns, so the
+#: hang ceiling scales with the target's own baseline rather than a fixed number.
 HANG_TIMEOUT_FLOOR_SECONDS = 10
 
-#: HEADROOM, BECAUSE THE SUBSET IS SOMETIMES THE WHOLE SUITE. The ceiling above
-#: was argued from "a run over a SUBSET cannot legitimately outlast the whole
-#: suite" — true, and it does not hold when selection has no coverage entry for
-#: a statement and falls back to running everything. Then the mutant's honest
-#: cost IS the baseline and a ceiling of exactly the baseline loses a coin toss.
-#:
-#: Measured, canary a36f500a (devpulse r5_lane.json): baseline 19s, ceiling 19s,
-#: and the only two `not_run / mutant_timeout` of 153 were the only two with
-#: `selection_basis: unmapped_test_context` — store.py:82 `super().__init__` and
-#: kv.py:247 `logger.warning`. Both auditors deleted the log line by hand in
-#: under a suite's time. Five further mutants landed at 10.1-14.8s and survived
-#: the wall by luck.
-#:
-#: A hang is unbounded and a slow mutant is about one baseline, so doubling
-#: separates them and costs at most one extra baseline on a true hang.
+#: An unmapped statement runs the whole suite, so its honest cost IS one baseline;
+#: doubling separates a slow mutant from a hang at the cost of one extra baseline.
 HANG_TIMEOUT_BASELINE_MULTIPLIER = 2
 
 
@@ -139,9 +80,7 @@ REASON_NO_COVERING_TEST = gutting.REASON_NO_COVERING_TEST
 REASON_BUDGET_EXHAUSTED = gutting.REASON_BUDGET_EXHAUSTED
 REASON_MUTANT_NOT_PARSEABLE = gutting.REASON_MUTANT_NOT_PARSEABLE
 
-#: ARID NODES — a statement whose deletion cannot change behaviour. Each key is
-#: published with a count, and each value is the reason it cannot, so the list
-#: is reviewable rather than a denylist of things somebody found annoying.
+#: Arid nodes: deletion cannot change behaviour. Each is published with a count and its reason.
 ARID_DOCSTRING = "docstring"
 ARID_PASS = "pass_statement"
 ARID_ELLIPSIS = "ellipsis_body"
@@ -157,18 +96,13 @@ ARID_REASONS: Dict[str, str] = {
     ),
 }
 
-#: Non-arid skip reasons — the statement is real, but this operator cannot make
-#: a sound mutant of it. Counted separately from arid nodes on purpose: an arid
-#: node is a statement we CHOSE not to mutate, these are ones we COULD not.
+#: Real statements this operator cannot mutate soundly; counted apart from arid (chose not vs could not).
 REASON_COMPOUND_HEADER = "compound_header_is_branch_deletion"
 REASON_NO_LINE_RANGE = "no_line_range"
 REASON_UNPARSABLE_SOURCE = gutting.REASON_UNPARSABLE_SOURCE
 
-#: Simple statements this operator will delete. A compound statement
-#: (If/For/While/With/Try/Match) is NOT here: deleting one is branch deletion.
-#: `Return`, `Raise`, `Break` and `Continue` are here because deleting one is a
-#: statement deletion whose effect on control flow is exactly the point —
-#: round 3's single survivor was a deleted trail call beside a `raise`.
+#: No compound statement here: deleting one is branch deletion. Control-flow statements
+#: are here because their effect on control flow is exactly the point.
 DELETABLE_NODES: tuple = (
     ast.Expr,
     ast.Assign,
@@ -192,10 +126,7 @@ DELETABLE_NODES: tuple = (
 class StatementSite:
     """One deletable statement, addressed the way the coverage map addresses.
 
-    `relpath`, `qualname`, `body_lineno` and `end_lineno` carry the STATEMENT's
-    own span rather than the function's, because that is what makes the test
-    selection narrower than gutting's. `function_qualname` keeps the owning
-    function for the report, which is how a reader finds it.
+    The span is the statement's own, which narrows test selection below gutting's.
     """
 
     relpath: str
@@ -217,13 +148,7 @@ class StatementSite:
         return max(0, self.end_lineno - self.body_lineno + 1)
 
     def as_function_site(self) -> FunctionSite:
-        """The shape `mutation_selection` reads, spanning this statement only.
-
-        The map keys on `relpath::qualname:lineno` and reduces coverage over
-        `body_lineno..end_lineno`, so handing it the statement's span asks
-        "which tests execute THESE lines" instead of "which tests execute the
-        function". Nothing in the reducer changes; the span is the whole ask.
-        """
+        """The shape `mutation_selection` reads, spanning this statement only."""
         return FunctionSite(
             relpath=self.relpath,
             qualname=self.qualname,
@@ -265,20 +190,10 @@ class StatementCampaign:
     refusal_reason: Optional[str] = None
 
 
-# =============================================================================
-# DISCOVERY
-# =============================================================================
-
-
 def _is_bare_string(node: ast.stmt) -> bool:
     """Whether this is a bare string expression, wherever it sits.
 
-    Not just position 0. A string literal alone on a line evaluates and is
-    discarded at ANY point in a body, so deleting it cannot change behaviour
-    there either — only the leading one also binds `__doc__`. The first cut
-    tested `index == 0` and a mutant that dropped the position check survived,
-    because dropping it is not a defect: the narrower rule was simply less
-    true than the code it was judging.
+    Any position: a lone string literal is discarded anywhere; only the leading one binds `__doc__`.
     """
     if not isinstance(node, ast.Expr):
         return False
@@ -304,9 +219,7 @@ def _is_return_none(node: ast.stmt) -> bool:
 def _arid_reason_for(node: ast.stmt, ends_the_function: bool) -> Optional[str]:
     """Why deleting this statement could not change behaviour, or None.
 
-    `ends_the_function` is the whole guard on the `return` case: see
-    `_walk_block`. The first cut passed `is_last`, computed per BLOCK, which
-    made every guard clause arid.
+    `ends_the_function` is the whole guard on the `return` case; see `_walk_block`.
     """
     if _is_bare_string(node):
         return ARID_DOCSTRING
@@ -319,14 +232,8 @@ def _arid_reason_for(node: ast.stmt, ends_the_function: bool) -> Optional[str]:
     return None
 
 
-#: Nodes that open a fresh scope. `_walk_block` does NOT descend into these.
-#:
-#: `discover_statements` finds functions with `ast.walk`, which reaches every
-#: nested `def` and every method on its own, so descending here as well emitted
-#: each nested statement TWICE — once under the outer function's qualname and
-#: once under its own. Measured on a two-level fixture: 6 sites for 4 lines.
-#: Found here, not in the round-5 report; it inflates any denominator built on
-#: the site count and pays to run the same mutant twice.
+#: Not descended into: `discover_statements` reaches nested defs via `ast.walk`, so
+#: descending here too would emit each nested statement twice.
 _SCOPE_NODES: tuple = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 #: Loop nodes whose `body` re-enters: reaching the end of one starts the next
@@ -337,17 +244,8 @@ _LOOP_NODES: tuple = (ast.For, ast.AsyncFor, ast.While)
 def _child_block_exits(node: ast.stmt, name: str, parent_exits: bool) -> bool:
     """Whether reaching the end of `node.<name>` ends the enclosing function.
 
-    Reached only when `node` is itself the last statement of a block that ends
-    the function, so `parent_exits` already carries the outer answer. Three
-    blocks take it away again:
-
-      loop `body`      the next iteration runs — deleting a `return` there
-                       continues the loop instead of leaving the function
-      `finalbody`      falling off a `finally` resumes the pending return or
-                       re-raises the pending exception; a `return` there
-                       SWALLOWS both, so deleting it is never a no-op
-      `try` body with  an `else` runs when the try completes normally, so
-      an `else`        falling off the try body runs code a `return` skipped
+    A loop `body`, a `finalbody`, and a `try` body with an `else` each take that answer
+    away: deleting a `return` there continues, un-swallows, or runs the `else`.
     """
     if not parent_exits:
         return False
@@ -368,9 +266,6 @@ def _is_deletable_kind(node: ast.stmt) -> bool:
 def _body_blocks(node: ast.stmt, parent_exits: bool) -> List[Tuple[List[ast.stmt], bool]]:
     """Every statement list hanging off a compound statement, each with its
     own answer to "does reaching the end of this block end the function".
-
-    A nested `def`/`lambda`/`class` yields nothing: `discover_statements`
-    reaches those through `ast.walk` already, and descending twice double-counts.
     """
     if isinstance(node, _SCOPE_NODES):
         return []
@@ -399,23 +294,8 @@ def _walk_block(
 ) -> None:
     """Collect deletable statements in this block, then recurse into compounds.
 
-    `block_exits_function` is the tail-position answer for THIS block: True
-    when reaching its end ends the enclosing function. Only then is a trailing
-    bare `return` the same thing as falling off the end.
-
-    THE DEFECT THIS PARAMETER CURES (devpulse, round 5, canary a36f500a). The
-    first cut asked `index == len(block) - 1` and nothing else, so a `return`
-    last in an `if` body was declared arid — which is the definition of a
-    guard clause, and the species this operator exists to probe. `kv.py:238`,
-    the `return` after `kv refused: --json is only for list`, was filtered out
-    before it was ever probed; deleting it leaves the suite green while
-    `kv --json FILE set K V` prints the refusal, exits 2, AND writes the pair.
-    13 statements on that tree were skipped under the old reason.
-
-    Measured here, the same filter was wrong about three more shapes the
-    report did not name: a `return` last in a LOOP body (deleting it continues
-    the loop), last in a `finally` (deleting it stops swallowing the pending
-    return or exception), and last in a `try` body that has an `else`.
+    `block_exits_function`: a trailing bare `return` equals falling off the end only
+    when the block's end ends the function; a `return` last in an `if` is a guard clause.
     """
     sole = len(block) == 1
     for index, node in enumerate(block):
@@ -460,9 +340,7 @@ def discover_statements(
 ) -> List[StatementSite]:
     """Every deletable statement under `target_copy`, arid ones included.
 
-    Arid statements are RETURNED, carrying their reason, exactly as `gutting`
-    returns skipped functions: a list that quietly drops half the tree and then
-    reports a rate is lying about its denominator.
+    Arid statements are returned with their reason, so the denominator stays honest.
     """
     sites: List[StatementSite] = []
     for path in gutting.iter_source_files(target_copy, source_dirs=source_dirs):
@@ -503,19 +381,11 @@ def discover_statements(
     return sites
 
 
-# =============================================================================
-# MUTATION
-# =============================================================================
-
-
 def delete_statement(source: str, site: StatementSite) -> Optional[str]:
     """`source` with this statement removed, or None when it cannot be.
 
-    A text splice over the statement's own line range, never `ast.unparse`:
-    unparsing rewrites the whole file, so a kill would no longer be
-    attributable to the deletion. The same reasoning as `gutting.gut_source`,
-    and the same reason the signature and decorators stay byte-identical —
-    that invariant is what makes coverage-based test selection sound.
+    A text splice, never `ast.unparse`: the rest of the file stays byte-identical, which
+    keeps a kill attributable and coverage selection sound.
     """
     lines = source.splitlines(keepends=True)
     start = site.body_lineno - 1
@@ -541,8 +411,7 @@ def _mutant_text(source: str, site: StatementSite) -> Tuple[Optional[str], Optio
     try:
         compile(mutant, site.relpath, "exec")
     except (SyntaxError, ValueError) as e:
-        # An engine bug must never reach the suite as a perfect kill, so the
-        # mutant is compiled before it is written and the failure is named.
+        # Compiled before writing: an engine bug must never reach the suite as a perfect kill.
         logger.info("statement_deletion: %s:%s did not compile after deletion: %s", site.relpath, site.lineno, e)
         return None, REASON_MUTANT_NOT_PARSEABLE
     return mutant, None
@@ -551,11 +420,6 @@ def _mutant_text(source: str, site: StatementSite) -> Tuple[Optional[str], Optio
 def probeable(sites: Sequence[StatementSite]) -> List[StatementSite]:
     """The statements a campaign will actually run — not arid, not skipped."""
     return [s for s in sites if s.skip_reason is None and s.arid_reason is None]
-
-
-# =============================================================================
-# CAMPAIGN
-# =============================================================================
 
 
 def _selection_for(site: StatementSite, coverage_map: CoverageMap) -> Selection:
@@ -645,10 +509,7 @@ def run_campaign(
 ) -> StatementCampaign:
     """One instrumented baseline, then one selected run per live statement.
 
-    The baseline is the coverage run: under coverage selection a caller cannot
-    hand in a baseline taken some other way, because the map and the baseline
-    have to come from the same execution or the selection is about a different
-    tree.
+    The baseline is the coverage run: map and baseline must come from one execution.
     """
     import time
 
@@ -711,11 +572,6 @@ def run_campaign(
     )
 
 
-# =============================================================================
-# REPORT
-# =============================================================================
-
-
 def _count_by(values: Sequence[Optional[str]]) -> Dict[str, int]:
     """A count per distinct non-None value."""
     counts: Dict[str, int] = {}
@@ -725,30 +581,12 @@ def _count_by(values: Sequence[Optional[str]]) -> Dict[str, int]:
     return counts
 
 
-#: A function needs at least this many executed mutants before "every one of
-#: them survived" says anything. One statement surviving out of one is a
-#: statement finding; it is not evidence about the function.
+#: One survivor out of one is a statement finding, not evidence about the function.
 ROLLUP_MIN_STATEMENTS = 2
 
 
-# =============================================================================
-# THE CONVICTION LINE
-# =============================================================================
-
-#: WHAT WOULD OBSERVE THIS STATEMENT, by the shape of the statement itself.
-#:
-#: The brief's boundary, verbatim: "A scored check that says 'unobserved
-#: statement at aligner.py:87, log_operation table_refused, reached by 20
-#: tests, none read the trail' teaches. A percentage does not."
-#:
-#: So the survivor list is not the product — the sentence is. Each pattern
-#: names the assertion that WOULD have killed the mutant, because a builder
-#: told only that something is unobserved has to invent the cure themselves,
-#: and the round-5 trail gap survived five rounds of exactly that.
-#:
-#: Matched on the statement's own source line, most specific first. A shape
-#: nobody has a sentence for falls through to the generic clause rather than
-#: guessing, which is why the last entry matches everything.
+#: The assertion that would have killed each mutant, by statement shape. Matched most
+#: specific first; the last entry matches everything so nothing is guessed.
 OBSERVATION_CLAUSES: Tuple[Tuple[str, str], ...] = (
     (
         r"^json_handler\.log_operation\(\s*['\"](?P<name>[^'\"]+)",
@@ -768,11 +606,7 @@ OBSERVATION_CLAUSES: Tuple[Tuple[str, str], ...] = (
 def _outermost_callee(line: str) -> Optional[str]:
     """The function a call statement actually calls, or None.
 
-    Regex alone reads the FIRST identifier, which is the wrong one the moment
-    a call is chained: `Path(temp_name).unlink(missing_ok=True)` is a call to
-    `unlink`, and `super().__init__(reason)` to `__init__`. Naming `Path()` in
-    a conviction sends the builder to assert on the wrong thing, so the line
-    is parsed and the regex kept only for what will not parse.
+    Parsed, not regexed: a regex reads the first identifier of a chained call.
     """
     try:
         node = ast.parse(line.strip(), mode="eval").body
@@ -805,10 +639,7 @@ def observation_clause(source_line: str) -> str:
 def conviction_line(result: StatementResult) -> str:
     """One survivor, in the sentence a builder can act on.
 
-    The count of covering tests is the part that makes it a conviction rather
-    than a coverage note: a statement NO test reaches is a coverage fact and
-    never appears here, while one that 20 tests execute and none observe is a
-    claim about the assertions, which is the species.
+    A statement no test reaches is a coverage fact and never appears here.
     """
     site = result.site
     reached = result.selected_tests
@@ -820,23 +651,13 @@ def conviction_line(result: StatementResult) -> str:
     )
 
 
-#: How much of the statement the line quotes before it stops. A conviction is
-#: read in a terminal beside others; the address is what a builder navigates by.
 CONVICTION_STATEMENT_CHARS = 60
 
 
 def _survivor_rollup(campaign: StatementCampaign) -> dict:
     """Collapse whole-function survivor blocks into one row each.
 
-    MEASURED, not guessed: canary's round-4 tree returned 230 survivors and
-    188 of them - 82% - were statements inside `print_help` and
-    `print_introspection`, two functions `pseudo_tested` already convicts
-    whole. Listing them one statement at a time buries the other 42 behind a
-    cause that a cheaper operator already reported at the right altitude.
-
-    This is a REPORTING collapse and never a suppression: every mutant is
-    still in `mutants[]` with its own verdict. Nothing is dropped, and the
-    denominator is published beside the rollup.
+    A reporting collapse, never a suppression: every mutant stays in `mutants[]`.
     """
     per_function: Dict[Tuple[str, str], List[StatementResult]] = {}
     for result in campaign.results:
@@ -958,17 +779,8 @@ def summarize(campaign: StatementCampaign, sites: Sequence[StatementSite]) -> di
 def _cost_breakdown(campaign: StatementCampaign, executed: Sequence[StatementResult]) -> dict:
     """Fixed setup and marginal per-mutant cost, split.
 
-    THE DEFECT THIS REPLACES (devpulse, 2026-09-20). `seconds_per_mutant` was
-    the GROUP's elapsed time divided by the mutant count, which silently folds
-    one-time setup — env copy, baseline, coverage map — into a number named
-    "per mutant". Measured on devpulse: 278.72s over 2 mutants published
-    139.36, while the two mutants' own clocks read 0.98s and 1.58s and the
-    other 276.16s was setup. I reported that 139 as a per-mutant floor and it
-    reached the owner as a projection; it was arithmetic on my own bad metric.
-
-    The honest model is `setup + N x marginal`, so both travel, and the median
-    travels beside the mean because a deletion campaign's tail is long: canary
-    read a 0.74s median against a 2.14s mean with one mutant at 15.13s.
+    Elapsed over mutant count folds one-time setup into "per mutant"; the honest model
+    is `setup + N x marginal`, with the median beside the mean for the long tail.
     """
     own = sorted(result.elapsed_seconds for result in executed)
     mutant_total = sum(own)

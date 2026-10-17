@@ -3,7 +3,7 @@
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
 # Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -30,10 +30,6 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     unread_redirect_check as R,
 )
 from aipass.seedgo.tests.support_audit_tests_lane import _records, _spec_for
-
-# =============================================================================
-# THE ADAPTER CONTRACT
-# =============================================================================
 
 
 class TestAdapterShape:
@@ -130,14 +126,7 @@ class TestNominate:
         assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
-        """Law S1 for every group that does not run, however many there are.
-
-        The count is gone for the same reason it went in the two tests above:
-        `pseudo_tested` passed through this tuple while its engine existed and
-        its RUN LOOP did not, and a `== 2` turned that honest state into a red.
-        It has since left for OPT_IN_EXECUTION_GROUPS, which is the same fact
-        moving again - and this test did not have to change for either.
-        """
+        """Law S1 for every group that does not run, however many there are."""
         assert {"scoped_survival", "targeted_mutation"} <= set(adapter.UNBUILT_EXECUTION_GROUPS)
 
         for name in adapter.UNBUILT_EXECUTION_GROUPS:
@@ -151,13 +140,7 @@ class TestNominate:
 
 
 class TestOptInExecutionGroups:
-    """A BUILT group nobody asked for still publishes, and says which it is.
-
-    The defect these pin is the one the seam was built to end: two engines
-    shipped, measured and unreachable, with the published artifact calling
-    them "not built". A group that cannot be told apart from an unimplemented
-    one is a group nobody will ever turn on.
-    """
+    """A BUILT group nobody asked for still publishes, and says which it is."""
 
     def test_both_opt_in_groups_are_still_in_the_published_list(self, tmp_path):
         """Law S3: opting out may never remove a group from the artifact."""
@@ -168,13 +151,7 @@ class TestOptInExecutionGroups:
             assert name in documents
 
     def test_an_unrequested_opt_in_group_is_not_reported_as_unbuilt(self, tmp_path):
-        """The reason must not borrow the wording of the groups beside it.
-
-        `not built` was true for these two yesterday and is false today, and a
-        stale sentence in a `not_applicable` is worse than no sentence: it
-        tells a reader deciding whether to spend the wall clock that there is
-        nothing to spend it on.
-        """
+        """The reason must not borrow the wording of the groups beside it."""
         documents = adapter.nominate(_spec_for(tmp_path))
 
         for name in adapter.OPT_IN_EXECUTION_GROUPS:
@@ -191,13 +168,7 @@ class TestOptInExecutionGroups:
             assert documents[name]["score"] is None
 
     def test_the_request_rides_on_the_spec_rather_than_on_a_new_parameter(self, tmp_path):
-        """The seam itself: `nominate(spec)` can see what the operator asked for.
-
-        Pinned because the whole point of this design is that it cost no
-        signature change. A future refactor that moved the request into a
-        second argument would pass its own tests and silently stop honouring
-        `--width-coupling` for every caller that still holds the old shape.
-        """
+        """The seam itself: `nominate(spec)` can see what the operator asked for."""
         spec = _spec_for(tmp_path)
         spec.execution_groups = ["width_coupling"]
 
@@ -225,13 +196,7 @@ class TestOptInExecutionGroups:
         assert envcopy.normalise_execution_groups(None) == []
 
     def test_an_engine_that_raises_produces_a_group_and_never_a_crash(self, monkeypatch, tmp_path):
-        """Law S1 at its sharpest: could-not-run and found-nothing differ.
-
-        `nominate()` is called inside the runner's try block, so an exception
-        escaping one campaign would refuse the WHOLE target and publish nothing
-        about the other seventeen groups - a measurement lost to a dependency
-        the target never needed.
-        """
+        """Law S1 at its sharpest: could-not-run and found-nothing differ."""
 
         def _explode(*args, **kwargs):
             raise RuntimeError("no interpreter")
@@ -338,19 +303,11 @@ class TestTeardown:
         assert tmp_path.exists()
 
 
-# =============================================================================
-# THE ENVIRONMENT - Law M10
-# =============================================================================
-
-
 class TestFireCanary:
     """fire_canary reports the canary the gated session recorded; it runs no second experiment."""
 
     def test_fire_canary_reports_the_summary_record_from_the_gate_log(self, tmp_path):
-        """The summary record's canary comes back field by field, booleans coerced.
-
-        Mutant: the summary record skipped in apps/handlers/tests_pytest_standards/adapter.py — killed.
-        """
+        """The summary record's canary comes back field by field, booleans coerced."""
         spec = _spec_for(tmp_path)
         spec.log_path.parent.mkdir(parents=True)
         lines = [json.dumps(record) for record in _records(canary_caught=False)]
@@ -365,10 +322,7 @@ class TestFireCanary:
         assert set(reported) == {"attempted", "caught", "path", "error"}
 
     def test_fire_canary_names_an_unreadable_log_in_error(self, tmp_path):
-        """No log on disk leaves the gate unproven, and the error names the missing log.
-
-        Mutant: GateLogError swallowed into an empty dict in apps/handlers/tests_pytest_standards/adapter.py — killed.
-        """
+        """No log on disk leaves the gate unproven, and the error names the missing log."""
         spec = _spec_for(tmp_path)
 
         reported = adapter.fire_canary(spec)
@@ -584,7 +538,7 @@ class TestUnreadRedirectNominatesTheMechanism:
 
     def test_substituting_the_writer_is_the_second_door_and_acquits(self, tmp_path):
         """MEASURED, not imagined: this is how seedgo observes its own trail,
-        and the first cut of the rule reported seedgo as blind because of it."""
+        and reading it as blindness would report seedgo as blind."""
         body = (
             "def test_a(monkeypatch):\n"
             "    seen = []\n"

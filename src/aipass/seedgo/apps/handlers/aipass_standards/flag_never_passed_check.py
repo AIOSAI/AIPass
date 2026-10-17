@@ -3,77 +3,12 @@
 # Description: Flag Never Passed Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Flag Never Passed Standards Checker Handler
+"""Flag Never Passed Standards Checker Handler
 
-Crack class P from the 2026-09-22 eyes-on review of @backup's tests: the
-product's ``handle_command`` parses a ``--flag`` out of ``args`` and no test in
-the branch ever passes that flag to it. The flag's branch is unpinned -- delete
-the parse, hardcode the default, and the suite stays green.
-
-@backup's ``apps/modules/share.py:129`` is the shape::
-
-    public = "--public" in args
-    run_share(file_path, public=public)
-
-``public = False`` survives all 21 share tests. The only place ``--public``
-appears under ``backup/tests/`` is a help-text substring assertion and a tuple
-of flag names iterated for a help sweep. Neither hands it to the parser.
-
-WHAT COUNTS AS PASSING IT, and this is the whole rule. The literal must reach
-an ARGUMENT of some call: ``handle_command("share", ["--public"])``, a
-sub-handler (``handle_create([target, "--dry-run"])``, which is how @spawn
-tests its flags), a ``monkeypatch.setattr(sys, "argv", [...])`` before
-``main()``, a name bound to an argv list, or a ``parametrize`` argvalue whose
-parameter is then handed over. A tuple that is only ITERATED is not an
-argument, which is what keeps @backup's ``for flag in ("--name", ...,
-"--public")`` help sweep from acquitting the very flag it names.
-
-AN ARGV CARRYING ``--help`` OR ``-h`` EXERCISES NOTHING ELSE IN THAT ROW. The
-product itself says so -- share.py returns from ``print_help()`` before it
-reads ``args[0]`` -- so ``["drive_clear", root, "--force", "--help"]`` in
-@backup's help sweep pins ``--help`` and leaves ``--force`` exactly as unpinned
-as before. Without this the sweep acquitted three of the five flags the
-reviewers named.
-
-CHECK FIRST, measured 2026-09-22 over the fleet:
-
-  * 27 files convicted, 43 hits, 8.8s. Nine branches. @aipass 14, @spawn 10,
-    @backup 5, @seedgo 4 -- and @seedgo's four are mine to cure.
-  * THE THREE CUTS, and the middle one is the instructive failure:
-      the flag appears as ANY string under tests/      7 files,  9 hits
-      the literal must reach a handle_command CALL    38 files, 82 hits
-      any call argument, minus the --help rows        27 files, 43 hits
-    The middle cut convicted all 20 of @spawn's flags, because @spawn tests
-    its sub-handlers (``handle_create``) and never names ``handle_command``.
-    A rule that only reads one function name mistakes a different spelling
-    for an absent test.
-
-DEVPULSE ASKED WHETHER P IS NEAR ITS FINAL SIZE. No. Their first cut of
-7 files / 8 hits is the LOOSEST reading -- it reproduces here at 7 / 9. The
-dispatch's own stricter wording, that a test must pass the literal to the
-parser, is five times larger.
-
-THE JUDGEMENT THEY ASKED ME TO NAME: a flag parsed only in a module's
-``__main__`` block, or only in a helper that builds argv for something else,
-is NOT declared and is never convicted. The declared set starts at
-``handle_command`` and follows only the same-file functions it calls. The
-router's contract is the one the tests exercise; a ``__main__``-only flag is a
-different surface and belongs to whatever tests that entry point.
-
-AN ARGV FOR ANOTHER PROGRAM IS NOT DECLARED EITHER, even inside the parser's
-reach (1.1.0, 2026-10-08). A string in the argv of ``subprocess.run`` /
-``Popen`` / ``check_output`` / ``os.exec*`` -- the list literal itself, or the
-list a same-function name was bound to -- belongs to the program being started.
-hooks' ``diagnostics_state.py:243`` handed ``--outputjson`` to pyright and was
-convicted for it until this cut.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: if the literal never reaches the
-parser in any test, the branch behind it is never taken, and deleting the
-parse cannot turn the suite red. There is no threshold and nothing to tune.
+Reference: flag_never_passed.md
 """
 
 import ast
@@ -100,21 +35,19 @@ FLAG = re.compile(r"^--[A-Za-z][\w-]*$")
 #: The two spellings that short-circuit a command before any other flag is read.
 HELP: frozenset[str] = frozenset({"--help", "-h"})
 
-#: Calls whose first argument (or ``args=``) is an argv for ANOTHER program, by
-#: the module that owns them. A flag in that argv is the other program's, never
-#: this branch's parser's (hooks, fleet green split legs, 2026-10-08).
+#: Calls whose first argument (or ``args=``) is an argv for ANOTHER program, by the
+#: module that owns them: a flag in that argv is never this branch's parser's.
 ARGV_CALLS: Dict[str, frozenset[str]] = {
     "subprocess": frozenset({"run", "Popen", "call", "check_call", "check_output"}),
     "os": frozenset({"execv", "execve", "execvp", "execvpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"}),
     "asyncio": frozenset({"create_subprocess_exec"}),
 }
 
-#: Marker carried down a descent to say "this row is a help argv".
 _HELP_ROW = "help"
 
 CURE = "pass it to the parser in a test, or delete the branch nothing reaches"
 
-#: A disposal copy is neither a parser nor a test (seedgo, fleet green leg 10).
+#: A disposal copy is neither a parser nor a test.
 ARCHIVE = ".archive"
 
 
@@ -135,8 +68,7 @@ def _tail_name(node: ast.AST) -> str:
 def _parse(path: Path) -> ast.Module | None:
     """A file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
     """
     try:
         return ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
@@ -148,10 +80,8 @@ def _parse(path: Path) -> ast.Module | None:
 def declared_flags(branch_root: Path) -> Dict[str, Tuple[Path, int]]:
     """Every ``--flag`` a branch's parsers read, and where it is read.
 
-    The walk starts at ``handle_command`` and follows the functions it calls in
-    the SAME file, because a parser is routinely one delegation deep. It does
-    not follow into ``__main__`` or into another module: see the judgement note
-    in the module docstring.
+    The walk starts at ``handle_command`` and follows the functions it calls in the SAME
+    file (a parser is routinely one delegation deep), never into ``__main__`` or another module.
     """
     found: Dict[str, Tuple[Path, int]] = {}
     for path in _live_files(branch_root / "apps"):
@@ -184,13 +114,7 @@ def _argv_of(call: ast.Call) -> ast.AST | None:
 
 
 def _argv_literals(function: ast.AST) -> Set[int]:
-    """Node ids of every string sitting in an argv this function hands to another program.
-
-    The argv is the call's own expression, or the list a same-function name was
-    bound to when the call passes that name. hooks' ``diagnostics_state.py:243``
-    is the shape: ``subprocess.run([sys.executable, "-m", "pyright",
-    "--outputjson", file_path])`` builds pyright's argv, not hooks' parser.
-    """
+    """Node ids of every string sitting in an argv this function hands to another program."""
     binds: Dict[str, List[ast.AST]] = {}
     argvs: List[ast.AST] = []
     for node in ast.walk(function):
@@ -236,9 +160,8 @@ def _row_of(node: ast.List | ast.Tuple) -> Set[str]:
 def _harvest(roots: List[ast.AST]) -> Tuple[Set[str], Set[str], Set[str]]:
     """(flags exercised, flags shadowed by a --help row, names reached).
 
-    ONE descent over the argument subtrees, with a visited set: a nested call's
-    arguments are reachable from the outer call's too, and walking each one
-    separately took the fleet from 8.8s to 59s with identical findings.
+    ONE descent over the argument subtrees, with a visited set: a nested call's arguments
+    are reachable from the outer call's too, and walking each separately is far slower.
     """
     flags: Set[str] = set()
     shadowed: Set[str] = set()
@@ -267,11 +190,7 @@ def _harvest(roots: List[ast.AST]) -> Tuple[Set[str], Set[str], Set[str]]:
 
 
 def _bindings(tree: ast.Module) -> Tuple[Dict[str, ast.AST], List[ast.AST]]:
-    """(name -> the expression bound to it, every call-argument expression).
-
-    Both in ONE walk. Collecting the arguments separately walked every node of
-    every test file twice for no new finding.
-    """
+    """(name -> the expression bound to it, every call-argument expression)."""
     binds: Dict[str, ast.AST] = {}
     arguments: List[ast.AST] = []
     for node in ast.walk(tree):
@@ -342,12 +261,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def _clean_message(shadowed: Set[str]) -> str:
-    """The passing message, carrying the help-shadowed count without a verdict.
-
-    The device ``weak_oracle`` uses for its soft oracles and ``named_encoding``
-    for latin-1: a number the owner asked for rides along, and nobody is
-    charged for it.
-    """
+    """The passing message, carrying the help-shadowed count without a verdict."""
     if not shadowed:
         return "Every flag this branch parses is passed to it by a test"
     return (
@@ -357,15 +271,7 @@ def _clean_message(shadowed: Set[str]) -> str:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for flags its parsers read that no test ever passes.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo).
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a branch for flags its parsers read that no test ever passes."""
     if is_bypassed(branch_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -378,8 +284,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, _clean_message(shadowed)), 100)
 
     # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per flag would show the first
-    # and hide the rest behind a count.
+    # check and appends "(+N more)", so one check per flag would hide the rest.
     detail = "\n".join(
         f"{path.relative_to(branch_root)}:{line} {flag} is parsed and never passed - {CURE}"
         for path, line, flag in findings

@@ -3,57 +3,32 @@
 # Description: Custom Function Test Coverage Map Module
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Custom Function Test Coverage Map Module
-
-AST-scans a branch's apps/modules/ and apps/handlers/ for public functions,
-cross-references against tests/, and outputs a coverage map showing which
-custom functions have tests and which don't.
-
-Run: drone @seedgo test_map @branch
 """
 
 import sys
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
-# Handler (implementation)
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
-# Drone services for @ resolution
 from aipass.drone.apps.modules import normalize_branch_arg
 
-# Branch discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches
-
-
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -88,13 +63,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE means explain: `test_map @flow --help` used to scan
-    # every function in @flow.
+    # A help flag anywhere means explain, never scan the branch.
     if wants_help(None, args):
         print_help()
         return True
 
-    # Expect @branch argument
     branch_arg = args[0]
     if not branch_arg.startswith("@"):
         error(
@@ -105,7 +78,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     branch_name = normalize_branch_arg(branch_arg)
 
-    # Resolve branch path
     branches = discover_branches(include_private=True)
     branch_entry = None
     for b in branches:
@@ -122,10 +94,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     branch_path = branch_entry["path"]
 
-    # Run the scan
     result = scan_branch(branch_path)
 
-    # Display results
     _display_coverage_map(result)
 
     json_handler.log_operation(
@@ -139,11 +109,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     )
 
     return True
-
-
-# =============================================================================
-# DISPLAY
-# =============================================================================
 
 
 def _display_coverage_map(result: dict) -> None:
@@ -179,7 +144,6 @@ def _display_coverage_map(result: dict) -> None:
 
         console.print()
 
-    # Summary
     style = "green" if pct >= 50 else "yellow" if pct >= 25 else "red"
     console.print(f"[bold]Summary:[/bold] [{style}]{tested}/{total}[/{style}] custom functions tested ({pct}%)")
     console.print()
@@ -218,10 +182,6 @@ def print_help() -> None:
     console.print("  [green]drone @seedgo test_map @api[/green]")
     console.print()
 
-
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
 
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):

@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/aipass_standards/
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -26,29 +26,15 @@ from aipass.seedgo.apps.handlers.aipass_standards import naming_check
 from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
 
-    The bypass tests call the real is_bypassed, which appends to the
-    repo-tracked seedgo_json/utils_log.json via the json_handler global in
-    its OWN module -- xdist workers racing on that shared file corrupt it
-    (JSONDecodeError: Extra data). sys.modules patching never reaches a
-    function's globals, so the pin must land on the utils module object.
+    is_bypassed appends to the tracked seedgo_json/utils_log.json via its own module's json_handler; xdist races corrupt it.
     """
     mock_handler = MagicMock()
     mock_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
-
-
-# ---------------------------------------------------------------------------
-# Tests -- naming_check.check_module
-# ---------------------------------------------------------------------------
 
 
 def test_naming_check_module_returns_dict(tmp_path):
@@ -90,16 +76,8 @@ def test_naming_check_module_with_bypass(tmp_path):
     assert result["passed"] is True
 
 
-# ---------------------------------------------------------------------------
-# Tests -- json_structure_check.check_module
-# ---------------------------------------------------------------------------
-
-
 def test_json_structure_check_returns_expected_keys(tmp_path):
-    """A file outside modules/ and handlers/ is declined at 100.
-
-    Mutant: case (d) fails in json_structure_check.py — killed.
-    """
+    """A file outside modules/ and handlers/ is declined at 100."""
     py_file = tmp_path / "sample.py"
     py_file.write_text(
         '"""Sample."""\nimport json\n',
@@ -198,7 +176,6 @@ def test_json_structure_check_branch_post(tmp_path):
     assert len(violations) == 1
     assert scores == [0]
 
-    # Clean branch
     (json_dir / "bad_split").rmdir()
     (json_dir / "custom_config").mkdir()
     violations2, scores2 = json_structure_check.check_branch_post(str(branch))
@@ -236,11 +213,6 @@ def test_json_structure_unbypassed_subdir_still_fails(tmp_path):
     assert "random_dir" in violations[0]["message"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- naming_check.is_bypassed
-# ---------------------------------------------------------------------------
-
-
 def test_naming_is_bypassed_true():
     """is_bypassed returns True when rule matches."""
 
@@ -261,17 +233,10 @@ def test_naming_is_bypassed_wrong_standard():
     assert naming_check.is_bypassed("foo.py", "naming", bypass_rules=rules) is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- json_structure_content custom_config doctrine (the owner ruling S193)
-# ---------------------------------------------------------------------------
-
-
 def _custom_config_doctrine_text():
     """Just the custom_config house-pattern section, lowercased.
 
-    Sliced deliberately: asserting against the whole 200-line standard would
-    let a generic word like "untouched" pass from some unrelated paragraph
-    after the doctrine block itself was deleted.
+    Sliced so a generic word cannot pass from an unrelated paragraph after the doctrine block is deleted.
     """
     full = json_structure_content.get_json_structure_standards()
     start = full.index("custom_config/ HOUSE PATTERN:")
@@ -310,12 +275,7 @@ def test_doctrine_malformed_file_is_never_clobbered():
 
 
 def test_doctrine_pins_the_write_boundary():
-    """The one sentence that decides whether a snapshot writer is legal.
-
-    Everything else in the block describes a load; this is the only line that
-    bounds a WRITE. Without it pinned, the whole yellow paragraph could be
-    deleted and every other doctrine test would still pass.
-    """
+    """The one sentence that decides whether a snapshot writer is legal."""
     text = _custom_config_doctrine_text()
 
     assert "code never writes into custom_config/ outside that regeneration path" in text
@@ -328,23 +288,17 @@ def test_doctrine_states_merge_direction():
 
     assert "deep-merge" in text
     assert "file over seed" in text
-    # Seed-over-file would silently undo every operator edit on a key the
-    # seed also carries — the exact inversion S193 reversed.
+    # Seed-over-file would silently undo every operator edit on a key the seed also carries.
     assert "seed over file" not in text
 
 
 def test_doctrine_does_not_carry_the_reversed_never_snapshot_rule():
-    """The pre-S193 doctrine said the opposite; it must not creep back.
-
-    This text has now inverted twice (FPLAN-0380 ws1 -> ruling S193). A checker
-    cannot catch a standard that contradicts the fleet's operating truth, so
-    the wording itself is pinned here.
-    """
+    """The pre-S193 doctrine said the opposite; it must not creep back."""
     text = _custom_config_doctrine_text()
 
     assert "never self-heal-write" not in text
     assert "holds only overrides" not in text
-    # "Missing file = defaults" was the reversed rule — missing now regenerates.
+    # Missing now regenerates: "missing file = defaults" is the reversed rule.
     assert "missing file = defaults" not in text
 
 
@@ -353,7 +307,7 @@ def test_doctrine_keeps_six_key_drift_as_seed_lesson():
     text = _custom_config_doctrine_text()
 
     assert "6 keys" in text
-    # Reframed: stale seed regenerates stale truth, not "files can't hold config".
+    # Stale seed regenerates stale truth, not "files can't hold config".
     assert "stale seed regenerates stale truth" in text
 
 
@@ -362,11 +316,6 @@ def test_doctrine_omits_queued_quarantine_upgrade():
     text = _custom_config_doctrine_text()
 
     assert "quarantine" not in text
-
-
-# ---------------------------------------------------------------------------
-# Tests -- json_structure_check.check_branch_info (custom_config signpost)
-# ---------------------------------------------------------------------------
 
 
 def _branch_with_custom_config(tmp_path, filenames):
@@ -414,7 +363,6 @@ def test_custom_config_info_lists_operator_files(tmp_path):
     line = lines[0]
     assert "mybranch_json/custom_config/" in line
     assert "2 operator files" in line
-    # Sorted, README excluded
     assert "alpha_config.json, cadence_config.json" in line
     assert "README.md" not in line
     assert "content not audited" in line
@@ -448,11 +396,6 @@ def test_custom_config_never_affects_score(tmp_path):
     violations, scores = json_structure_check.check_branch_post(str(branch))
     assert violations == []
     assert scores == [100]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- json_handler_check disk triplet completeness (bidirectional)
-# ---------------------------------------------------------------------------
 
 
 def _branch_with_json_files(tmp_path, filenames):
@@ -571,34 +514,16 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
     assert result["message"].startswith("2/3 modules missing triplet files")
 
 
-# ---------------------------------------------------------------------------
-# Tests -- json_handler_check accepts the one shim (DPLAN-0325 part A)
-# ---------------------------------------------------------------------------
-
-
 def _canonical_shim_bytes_or_skip():
     """The canonical shim as the pinned spec defines it, or skip saying why.
 
-    Read from the spec block rather than from any branch copy: a constant
-    taught by a branch would learn that branch's drift and then bless it.
-
-    The spec lives under ``devpulse/docs.local/``, and ``docs.local/`` is
-    gitignored fleet-wide (.gitignore:58) — so it is ABSENT on a fresh
-    checkout and these pins cannot run there. Skipping with the path named is
-    the honest report; asserting against a file CI does not have is the exact
-    shape of the machine-local defect that turned every board red on 2026-09-02
-    (FPLAN-0474/0475), when a check derived a fleet fact from the gitignored
-    registry and degraded silently instead of failing loudly.
-
-    What survives on CI regardless: the hash constant itself, which is in the
-    checker and therefore in the repo, and every pin below that builds its own
-    input instead of reading the spec.
+    A constant taught by a branch copy would bless that branch's drift. docs.local/ is gitignored, so the spec
+    is absent on a fresh checkout: this skips naming the path rather than degrade silently.
     """
     import re
     from pathlib import Path
 
-    # From the installed package, so the read is identical whichever rootdir
-    # pytest picks — the same discovery the contract suite uses.
+    # From the installed package, so the read is identical whichever rootdir pytest picks.
     spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
     if not spec.is_file():
         pytest.skip(f"pinned spec not present ({spec}) — docs.local/ is gitignored, so this pin is local-only")
@@ -610,12 +535,7 @@ def _canonical_shim_bytes_or_skip():
 
 
 def test_the_pinned_hash_is_the_hash_of_the_spec_block():
-    """The constant and the spec cannot drift apart without this turning red.
-
-    The whole accept path is one comparison against one constant, so the
-    constant IS the standard. If the spec is amended and the constant is not,
-    every migrated branch fails its own audit for a reason no message explains.
-    """
+    """The constant and the spec cannot drift apart without this turning red."""
     import hashlib
 
     measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
@@ -628,15 +548,8 @@ def test_the_pinned_hash_is_the_hash_of_the_spec_block():
 def _canonical_shim_bytes_on_disk():
     """The canonical shim from the citizen template, verified against the pin.
 
-    A second source, and deliberately a different one from
-    :func:`_canonical_shim_bytes_or_skip`. That one reads the spec, which is
-    gitignored and therefore absent on CI. This one reads the file every
-    newborn branch is stamped from, which ships in the repo — so the pins that
-    need REAL canonical bytes still run on a fresh checkout.
-
-    Reading a branch copy would teach a test that branch's drift, so the bytes
-    are checked against ``CANONICAL_SHIM_SHA256`` before being handed back:
-    if the template ever drifts, these pins say so instead of blessing it.
+    The spec is gitignored and absent on CI; the template ships in the repo, so pins needing real bytes still
+    run. The bytes are checked against ``CANONICAL_SHIM_SHA256``, so template drift is never blessed.
     """
     import hashlib
     from pathlib import Path as _Path
@@ -689,15 +602,7 @@ def test_the_canonical_shim_passes_capability_by_hash(tmp_path):
 
 
 def test_one_changed_character_is_no_longer_the_canonical_shim(tmp_path):
-    """Identity, not resemblance: a shim that drifts stops being the shim.
-
-    Red-first proof that the hash path is doing the work — one extra space,
-    nothing else. Until part B this only pinned WHICH path answered, because
-    the mutated text still imported the service and fell through to the
-    transitional read. That read is gone (2026-09-04, section 4), so the
-    mutation is now REFUSED outright, which is the whole point of narrowing:
-    a byte of drift is a red, not a quieter green.
-    """
+    """Identity, not resemblance: a shim that drifts stops being the shim."""
     mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
     passed, message = _capability(tmp_path, mutated, "anybranch")
     assert passed is False
@@ -705,15 +610,7 @@ def test_one_changed_character_is_no_longer_the_canonical_shim(tmp_path):
 
 
 def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused(tmp_path):
-    """A branch that adopts the import and keeps its own directory is not migrated.
-
-    The failure this forbids is a file that reads as migrated — it has the
-    import line at the top — while still writing through a binding of its own.
-    It used to be caught by a table of forbidden tokens consulted on the
-    transitional accept path. That path and that table are gone (part B
-    section 4); the hash refuses this text for the simpler reason that it is
-    not the shim's bytes, and cannot be argued with about which tokens count.
-    """
+    """A branch that adopts the import and keeps its own directory is not migrated."""
 
     half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
     passed, message = _capability(tmp_path, half, "canary")
@@ -722,13 +619,7 @@ def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused(tmp_path):
 
 
 def test_the_refusal_message_names_the_branch_and_the_line_to_write(tmp_path):
-    """A red a branch cannot act on is a red that stays.
-
-    The hash says nothing on its own — "sha256 mismatch" tells a reader
-    nothing about what to do. The refusal has to carry the branch, the fact
-    that there is ONE implementation, and the import line the replacement
-    starts with, because that is the entire remedy.
-    """
+    """A red a branch cannot act on is a red that stays."""
     passed, message = _capability(tmp_path, "def load_json(name):\n    return {}\n", "canary")
     assert passed is False
     assert "canary" in message
@@ -744,12 +635,7 @@ def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
 
 
 def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
-    """The file every newborn inherits is an audit subject, unrendered.
-
-    Nothing audited it before DPLAN-0325: a template stamping a log-only fork
-    would have minted eighteen non-compliant branches before any audit noticed,
-    because the audit only ever walked branches.
-    """
+    """The file every newborn inherits is an audit subject, unrendered."""
 
     branch = tmp_path / "spawnish"
     template = branch / "templates" / "citizen" / "apps" / "handlers" / "json"
@@ -762,26 +648,15 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     assert result["passed"] is False
     assert "Not the canonical json shim" in result["message"]
 
-    # The REAL bytes, not a hand-written lookalike. Since part B section 4 the
-    # only accept path is the hash, so a two-line stand-in that merely imports
-    # the service is refused here exactly as it would be in a branch.
+    # The real bytes: the only accept path is the hash, so a stand-in that merely imports the service is refused.
     handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
     result = _named_check(branch, "Template handler capability")
     assert result is not None
     assert result["passed"] is True
 
 
-# ---------------------------------------------------------------------------
-# Tests -- naming_check treats a bound alias as an alias, not a constant
-# ---------------------------------------------------------------------------
-
-
 def test_a_bound_alias_is_not_a_lowercase_constant():
-    """`save_json = _h.save_json` names a callable; PEP 8 spells it lowercase.
-
-    The shape DPLAN-0325 makes fleet-wide — nine per branch — and the reason
-    canary, memory and spawn carried naming bypasses before this rule existed.
-    """
+    """`save_json = _h.save_json` names a callable; PEP 8 spells it lowercase."""
 
     source = "save_json = _h.save_json\nInvalidDocument = json_handler.InvalidDocument\nMAX = 5\n"
     result = naming_check.check_constant_naming(source)
@@ -798,12 +673,7 @@ def test_an_alias_with_a_trailing_comment_is_still_an_alias():
 
 
 def test_the_alias_rule_does_not_excuse_an_expression_that_merely_contains_a_dot():
-    """Only a BARE dotted name is an alias — the narrowing has an edge.
-
-    Red-first: without the anchors on the pattern, every lowercase module-level
-    assignment containing an attribute access would stop being checked, which
-    is a far larger exemption than the one that was asked for.
-    """
+    """Only a BARE dotted name is an alias — the narrowing has an edge."""
 
     result = naming_check.check_constant_naming("total = counters.seen + 1\nfirst = items.data[0]\n")
     assert result is not None
@@ -811,26 +681,12 @@ def test_the_alias_rule_does_not_excuse_an_expression_that_merely_contains_a_dot
     assert "total" in result["message"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- json_structure does not convict a shim for delegating resolution
-# ---------------------------------------------------------------------------
-
-
 def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
-    """The canonical shim has no `Path(__file__)`, no `.resolve()`, no `.parent`.
-
-    Measured 2026-09-03: prax's shim, spawn's shim and spawn's citizen template
-    each scored 75 on this check the day they migrated, because path resolution
-    moved INTO the service — which derives the branch root without `resolve()`
-    on purpose, so a dead cwd on Windows cannot poison it. A standard that
-    demands the spelling convicts the endpoint of the migration.
-    """
+    """The canonical shim has no `Path(__file__)`, no `.resolve()`, no `.parent`."""
 
     handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
     handler.parent.mkdir(parents=True)
-    # The REAL bytes. This used to be a hand-written four-line stand-in, which
-    # the marker read accepted; part B section 4 moved the exemption onto the
-    # hash test (finding (a)), so only the shim itself earns it now.
+    # The real bytes: the exemption rides the hash test, so only the shim itself earns it.
     handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
 
     checks = json_structure_check.check_module(str(handler), bypass_rules=None)["checks"]
@@ -853,34 +709,14 @@ def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
 
 
 def test_the_two_standards_share_the_shim_test_not_a_copy_of_a_string():
-    """Both standards must agree on what a shim IS, by running the same function.
-
-    json_structure_check excuses a shim from "resolves its own path" — the
-    service derives the branch root from the shim's __file__ and the shim
-    resolves nothing. Until part B the two standards agreed by importing one
-    copy of a marker STRING. They now import one copy of the hash TEST, which
-    is strictly stronger: a string can be true of a file that is not the shim.
-
-    Measured 2026-09-04 (finding (a)): if part B had removed the marker
-    without giving structure the hash test in its place, all eighteen branches
-    and the citizen template would have dropped 100 -> 75 on their handler
-    file. The identity assertion below is what makes that impossible to redo
-    by accident.
-    """
+    """Both standards must agree on what a shim IS, by running the same function."""
     assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
-
-
-# ---------------------------------------------------------------------------
-# Tests -- json_structure recognises a branch-owned operation-logging seam
-# ---------------------------------------------------------------------------
 
 
 def _seam_branch(tmp_path, seam_body: str | None = None):
     """A branch whose audit trail lives in its own module, built on prax.
 
-    Shaped like the real tree — ``<root>/aipass/<branch>/apps/...`` beside a
-    ``prax/`` directory — because the seam lookup resolves the branch from the
-    file's own path, exactly as it must on disk.
+    Shaped like the real tree, because the seam lookup resolves the branch from the file's own path.
     """
     (tmp_path / "aipass" / "prax").mkdir(parents=True)
     seam = tmp_path / "aipass" / "backupish" / "apps" / "handlers" / "audit" / "trail.py"
@@ -904,12 +740,7 @@ def _wiring_checks(path):
 
 
 def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
-    """@backup moved 67 audit calls off the shim per the spec, as ordered.
-
-    The old check was a literal substring test for 'json_handler.log_operation'
-    and convicted 41 of backup's 43 files for obeying it. Recognised, never
-    bypassed: backup will not carry a bypass for following the spec.
-    """
+    """@backup moved 67 audit calls off the shim per the spec, as ordered."""
 
     seam = _seam_branch(tmp_path)
     module = seam.parents[2] / "modules" / "snapshot.py"
@@ -931,12 +762,7 @@ def test_the_seam_itself_does_not_have_to_log_through_itself(tmp_path):
 
 
 def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp_path):
-    """The narrowing has an edge: a same-named helper is not a logging seam.
-
-    Red-first — without the two conditions (defines log_operation AND builds it
-    on aipass.prax) any module could name a local object `trail` and claim the
-    exemption, which is a far wider waiver than the one backup needs.
-    """
+    """The narrowing has an edge: a same-named helper is not a logging seam."""
 
     fake = _seam_branch(tmp_path, "def log_operation(operation, data):\n    print(operation)\n")
 
@@ -949,28 +775,8 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
     assert not all(c["passed"] for c in checks)
 
 
-# ---------------------------------------------------------------------------
-# RETIRED 2026-09-07 (FPLAN-0491) -- the v4 test_quality sections.
-#
-# Two sections lived here: "v4 test_quality retires the handler's items"
-# (DPLAN-0325 part B) and "an item is only scored where the branch ships a
-# subject for it". Both imported test_quality_check, which moved to
-# apps/handlers/aipass_standards/.archive/ when the owner sealed DPLAN-0323.
-# A test whose subject is archived cannot go red; it can only ImportError.
-# Verbatim disposal copy: tests/.archive/deleted_2026-09-07_test_quality_v4.py
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Tests -- host_portability_check (HOST_PORTABILITY)
-#
-# Every fixture below is a minimised reproduction of a REAL fleet site, named
-# in its docstring. Synthetic rather than live-file pins on purpose: a pin on
-# `drone path_resolver.py:135` goes red the next time drone adds a line above
-# it, which teaches the fleet to delete the pin. The shape is what the rule
-# reads, so the shape is what is pinned; the live file:line list is produced by
-# running the checker across the registry and lives in host_portability.md.
-# ---------------------------------------------------------------------------
+# host_portability_check: fixtures are minimised copies of real fleet sites, never live file:line pins,
+# which go red whenever the file grows; the live list lives in host_portability.md.
 
 
 def _scan_source(tmp_path, source, name="sample.py"):
@@ -986,11 +792,7 @@ def _lines(violations):
 
 
 def test_host_portability_declares_the_branch_level_contract():
-    """AUDIT_SCOPE and the entry point the audit pipeline dispatches on.
-
-    branch_level, not all_files: the per-file lane's corpus is apps/ only, and
-    this standard's whole reason for existing is that tests/ broke macOS CI.
-    """
+    """AUDIT_SCOPE and the entry point the audit pipeline dispatches on."""
     assert host_portability_check.AUDIT_SCOPE == "branch_level"
     assert callable(host_portability_check.check_branch)
 
@@ -1010,10 +812,7 @@ def test_a_clean_branch_scores_100_and_reports_the_file_count(tmp_path):
 
 
 def test_a_branch_with_one_dirty_file_scores_by_clean_file_share(tmp_path):
-    """Score is clean/total x 100 -- the number the all_files lane averages to.
-
-    Two files, one of them running tmux bare: 50, not 0 and not 99.
-    """
+    """Score is clean/total x 100 -- the number the all_files lane averages to."""
     apps = tmp_path / "apps"
     apps.mkdir()
     (apps / "clean.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
@@ -1030,16 +829,8 @@ def test_a_branch_with_one_dirty_file_scores_by_clean_file_share(tmp_path):
     assert failing[0]["violations"][0]["file"] == "apps/dirty.py"
 
 
-# -- ARM B: assumed non-portable binary --------------------------------------
-
-
 def test_tmux_kill_session_with_check_false_is_convicted(tmp_path):
-    """hooks session_boot.py:248, :313 and :1078 -- the fleet's three tmux bugs.
-
-    check=False is the trap this pin exists for. A missing binary raises
-    FileNotFoundError out of exec, BEFORE there is an exit code to ignore, so
-    check=False suppresses nothing at all.
-    """
+    """hooks session_boot.py:248, :313 and :1078 -- the fleet's three tmux bugs."""
     source = (
         "import subprocess\n"
         "\n"
@@ -1056,11 +847,7 @@ def test_tmux_kill_session_with_check_false_is_convicted(tmp_path):
 
 
 def test_systemctl_enable_with_no_guard_is_convicted(tmp_path):
-    """trigger service_control.py:82 -- systemctl --user enable, bare.
-
-    The sibling at :101 in the same file wraps the identical call in
-    `except Exception` and acquits; only this one is naked.
-    """
+    """trigger service_control.py:82 -- systemctl --user enable, bare."""
     source = (
         "import subprocess\n"
         "\n"
@@ -1076,12 +863,7 @@ def test_systemctl_enable_with_no_guard_is_convicted(tmp_path):
 
 
 def test_a_which_probe_in_the_same_function_acquits_the_binary(tmp_path):
-    """aipass handoff_platform launch_tmux -- shutil.which('tmux') then run it.
-
-    Function-scoped on purpose. hooks session_boot HAS a `shutil.which("tmux")`
-    at module line 90, inside a different function, and its three bare calls
-    must still convict.
-    """
+    """aipass handoff_platform launch_tmux -- shutil.which('tmux') then run it."""
     source = (
         "import shutil\n"
         "import subprocess\n"
@@ -1101,12 +883,7 @@ def test_a_which_probe_in_the_same_function_acquits_the_binary(tmp_path):
 
 
 def test_a_filenotfounderror_handler_acquits_the_binary(tmp_path):
-    """daemon tests/conftest.py:90 -- systemctl inside except FileNotFoundError.
-
-    Counted as context in a passed check line, never scored: about two dozen
-    fleet sites are already written this way and convicting them would teach
-    the fleet to switch the rule off.
-    """
+    """daemon tests/conftest.py:90 -- systemctl inside except FileNotFoundError."""
     source = (
         "import subprocess\n"
         "\n"
@@ -1124,7 +901,7 @@ def test_a_filenotfounderror_handler_acquits_the_binary(tmp_path):
     assert acquitted == 1
 
 
-#: A test that runs tmux inside a pytest.raises of the given exception (seedgo, fleet green leg 10).
+#: A test that runs tmux inside a pytest.raises of the given exception.
 _RAISES_TMUX = (
     "import subprocess\n"
     "import pytest\n"
@@ -1138,10 +915,7 @@ _RAISES_TMUX = (
 
 @pytest.mark.parametrize("expected", ["FileNotFoundError", "OSError", "(FileNotFoundError, PermissionError)"])
 def test_a_missing_file_raises_around_the_binary_acquits_it(tmp_path, expected):
-    """Where tmux is absent the call raises exactly what the test expects, so it passes on every host.
-
-    Red first: only a try/except counted as the guard, and this line was convicted.
-    """
+    """Where tmux is absent the call raises exactly what the test expects, so it passes on every host."""
     violations, acquitted = _scan_source(tmp_path, _RAISES_TMUX.format(expected=expected))
 
     assert violations == []
@@ -1157,12 +931,7 @@ def test_a_raises_of_another_error_still_convicts_the_binary(tmp_path, expected)
 
 
 def test_platform_dispatch_into_a_variable_argv0_is_not_convicted(tmp_path):
-    """hooks apps/sound.py -- afplay on darwin, aplay otherwise, run from a var.
-
-    190 of the fleet's 374 subprocess sites spell argv[0] dynamically and that
-    spelling is usually the CURE. A rule that guessed at dynamic argv[0] would
-    convict this file, which is the correct answer written correctly.
-    """
+    """hooks apps/sound.py -- afplay on darwin, aplay otherwise, run from a var."""
     source = (
         "import subprocess\n"
         "import sys\n"
@@ -1184,11 +953,7 @@ def test_platform_dispatch_into_a_variable_argv0_is_not_convicted(tmp_path):
 
 
 def test_a_direct_pathlib_path_subclass_is_convicted_below_3_12(tmp_path):
-    """trigger tests/test_error_registry.py:1477 class _RefusingPath(Path) (PR #774).
-
-    Below 3.12 Path.__new__ needs _flavour on the subclass: AttributeError on
-    CI's 3.10 and 3.11, green on every 3.12 seat.
-    """
+    """trigger tests/test_error_registry.py:1477 class _RefusingPath(Path) (PR #774)."""
     source = "from pathlib import Path, PurePath\n\n\nclass _RefusingPath(Path):\n    pass\n"
     source += "\n\nclass _Pure(PurePath):\n    pass\n"
     violations, _acquitted = _scan_source(tmp_path, source)
@@ -1224,20 +989,8 @@ def test_a_portable_binary_is_never_read(tmp_path):
     assert acquitted == 0
 
 
-# -- ARM A: /proc as a filesystem argument -----------------------------------
-
-
 def test_the_openat2_twin_acquits_and_the_walk_fallback_convicts(tmp_path):
-    """drone path_resolver.py -- :101 acquitted, :135 convicted. The one-hop pair.
-
-    Both functions read the same Linux-only path 34 lines apart. The openat2
-    one is reached only from `if _openat2_available():`, and that predicate
-    returns `sys.platform == "linux" and ...`. The walk one is the NON-Linux
-    fallback -- it runs precisely when the platform is not Linux, and then
-    reads a filesystem only Linux has. That is the fleet's one genuine product
-    bug of this class, and without the caller hop it is one row of noise
-    beside its own guarded twin.
-    """
+    """drone path_resolver.py -- :101 acquitted, :135 convicted. The one-hop pair."""
     source = (
         "import os\n"
         "import sys\n"
@@ -1274,11 +1027,7 @@ _INLINE_GUARD_HEAD = "import sys\nfrom pathlib import Path\n\n"
 
 
 def test_a_module_level_inline_platform_guard_acquits_its_true_side(tmp_path):
-    """prax agent_status_writer.py:62 -- PROC_ROOT = Path("/proc") if linux else None.
-
-    An ast.IfExp outside any function: the /proc literal runs only where the
-    platform is Linux (seedgo, fleet green leg 16). Green-only before its mutant.
-    """
+    """prax agent_status_writer.py:62 -- PROC_ROOT = Path("/proc") if linux else None."""
     source = _INLINE_GUARD_HEAD + 'PROC_ROOT = Path("/proc") if sys.platform == "linux" else None\n'
 
     violations, _ = _scan_source(tmp_path, source)
@@ -1305,13 +1054,7 @@ def test_a_function_level_inline_platform_guard_keeps_its_acquittal(tmp_path):
 
 
 def test_a_proc_read_in_a_pty_gated_class_is_still_convicted(tmp_path):
-    """api tests/test_host_attach.py:912 and :919 -- @pty_required is not a guard.
-
-    The class carries `pty_required = pytest.mark.skipif(not is_available(),
-    ...)`, which probes for a PTY. macOS HAS a PTY, so the unit runs there and
-    then calls os.listdir on a filesystem macOS does not have. The predicate
-    has to name a platform to acquit, and this one names a capability.
-    """
+    """api tests/test_host_attach.py:912 and :919 -- @pty_required is not a guard."""
     source = (
         "import os\n"
         "import pytest\n"
@@ -1332,13 +1075,7 @@ def test_a_proc_read_in_a_pty_gated_class_is_still_convicted(tmp_path):
 
 
 def test_a_module_level_skipif_alias_acquits_a_proc_read(tmp_path):
-    """The `_posix_only` spelling -- a mark bound once at module level, used as @.
-
-    17+ guards fleet-wide are spelled this way. A reader that only understands
-    the inline `@pytest.mark.skipif(...)` form convicts every one of them, and
-    a rule with that acquittal rate is off within a week. The alias acquits
-    when its predicate names the host that HAS the recipe.
-    """
+    """The `_posix_only` spelling -- a mark bound once at module level, used as @."""
     source = (
         "import os\n"
         "import sys\n"
@@ -1359,14 +1096,7 @@ def test_a_module_level_skipif_alias_acquits_a_proc_read(tmp_path):
 
 
 def test_a_windows_only_alias_no_longer_acquits_a_proc_read(tmp_path):
-    """The same alias naming Windows -- `os.name == 'nt'` -- launders nothing now.
-
-    This fixture used to be the acquittal pin, cited to aipass test_doctor.py:249.
-    The real site is correct for a reason the fixture minimised away: it
-    replaces the module's Path and forces os.name, so it never reads the host.
-    Stripped of that, the unit runs on macOS (os.name is 'posix' there) and
-    reads a filesystem macOS does not have.
-    """
+    """The same alias naming Windows -- `os.name == 'nt'` -- launders nothing now."""
     source = (
         "import os\n"
         "import pytest\n"
@@ -1387,12 +1117,7 @@ def test_a_windows_only_alias_no_longer_acquits_a_proc_read(tmp_path):
 
 
 def test_a_proc_path_used_as_a_mock_dict_key_is_not_convicted(tmp_path):
-    """ai_mail tests/test_wake.py:337 and :348 -- a dict key opens nothing.
-
-    The argument restriction is the whole rule. This literal is a key in a
-    lookup table handed to a fake-open factory; no filesystem is touched, on
-    any host, ever.
-    """
+    """ai_mail tests/test_wake.py:337 and :348 -- a dict key opens nothing."""
     source = (
         "def test_is_zombie(monkeypatch, tmp_path):\n"
         '    status_file = tmp_path / "status"\n'
@@ -1409,14 +1134,7 @@ def test_a_proc_path_used_as_a_mock_dict_key_is_not_convicted(tmp_path):
 
 
 def test_the_prose_of_a_skipif_reason_is_not_a_read_but_the_gate_it_explains_is(tmp_path):
-    """prax tests/test_instance_lock.py:172 before d57b60fc -- red on every macOS run.
-
-    Two claims on one decorator. Arm A still never reads the reason's literal:
-    the prose opens nothing. Arm C convicts the GATE the prose explains - it
-    says /proc is Linux's and then names Windows, so macOS, which has no procfs
-    either, ran the unit (34707762639, 34707861282, 34708132945). Until
-    FPLAN-0554 round three this pin asserted the shape was clean.
-    """
+    """prax tests/test_instance_lock.py:172 before d57b60fc -- red on every macOS run."""
     source = (
         "import pytest\n"
         "import sys\n"
@@ -1435,11 +1153,7 @@ def test_the_prose_of_a_skipif_reason_is_not_a_read_but_the_gate_it_explains_is(
 
 
 def test_a_proc_argv_element_is_not_convicted(tmp_path):
-    """aipass sandbox_checker.py:71 -- `--proc /proc` is an argv pair for bwrap.
-
-    Not a path this caller opens: bwrap mounts it inside a namespace it
-    creates. The FS-argument rule never nominates it.
-    """
+    """aipass sandbox_checker.py:71 -- `--proc /proc` is an argv pair for bwrap."""
     source = (
         "import subprocess\n"
         "\n"
@@ -1490,11 +1204,7 @@ def test_an_oserror_handler_acquits_a_proc_read(tmp_path):
 
 
 def test_an_existence_early_out_acquits_a_proc_read(tmp_path):
-    """aipass system_detector.py:172 -- `if not meminfo.exists(): return 0`.
-
-    The guard sits BELOW the literal, which is why the existence check is read
-    over the whole function rather than only the lines above the read.
-    """
+    """aipass system_detector.py:172 -- `if not meminfo.exists(): return 0`."""
     source = (
         "from pathlib import Path\n"
         "\n"
@@ -1520,15 +1230,8 @@ def test_a_bare_proc_string_that_never_reaches_the_filesystem_is_not_convicted(t
     assert violations == []
 
 
-# -- ARM A through a bound name (FPLAN-0554 round three) ---------------------
-
-
 def test_a_proc_literal_bound_to_a_name_is_convicted_where_the_name_is_read(tmp_path):
-    """skills lib/system_status/handler.py:96 spelled every read this way.
-
-    The literal goes into a variable and the variable goes to open(). A reader
-    that took only a literal argument never nominated one of them.
-    """
+    """skills lib/system_status/handler.py:96 spelled every read this way."""
     source = (
         "def read_meminfo():\n"
         '    meminfo_path = "/proc/meminfo"\n'
@@ -1542,13 +1245,7 @@ def test_a_proc_literal_bound_to_a_name_is_convicted_where_the_name_is_read(tmp_
 
 
 def test_the_skills_handler_existence_refusal_still_acquits(tmp_path):
-    """skills handler.py before 8d1c6ef6 -- the product half of that red was honest.
-
-    It refused by name on a host with no /proc ("not available (non-Linux
-    system?)") with success False. The red lived in four TESTS asserting
-    success on macOS behind a Windows-only skip, which arm C convicts; the
-    existence early-out stays a guard, measured at 1 live fleet site.
-    """
+    """skills handler.py before 8d1c6ef6 -- the product half of that red was honest."""
     source = (
         "import os\n"
         "\n"
@@ -1567,11 +1264,7 @@ def test_the_skills_handler_existence_refusal_still_acquits(tmp_path):
 
 
 def test_a_bound_path_is_judged_at_its_read_not_its_constructor(tmp_path):
-    """skills lib/telegram base_bot.py:2721 -- Path() outside the try, iterdir inside.
-
-    Building a Path touches nothing. The constructor line was a false row
-    beside a read that is already inside `except OSError`.
-    """
+    """skills lib/telegram base_bot.py:2721 -- Path() outside the try, iterdir inside."""
     source = (
         "from pathlib import Path\n"
         "\n"
@@ -1616,16 +1309,8 @@ def test_a_name_rebound_to_something_else_is_not_followed(tmp_path):
     assert violations == []
 
 
-# -- ARM C: a skip that names the wrong host (tests lane) --------------------
-
-
 def test_a_windows_only_skip_on_a_unit_whose_reason_names_linux_proc_is_convicted(tmp_path):
-    """skills tests/test_runner.py before 8d1c6ef6 -- four of these, red every macOS run.
-
-    Class-nested, multi-line decorator, and the reason names the recipe
-    ("reads Linux /proc/meminfo") while the predicate names Windows. The row
-    sits on the decorator: that is the line the owner changes.
-    """
+    """skills tests/test_runner.py before 8d1c6ef6 -- four of these, red every macOS run."""
     source = (
         "import sys\n"
         "\n"
@@ -1665,11 +1350,7 @@ def test_a_skip_naming_the_recipe_host_acquits_the_linux_named_unit(tmp_path):
 
 
 def test_a_windows_only_skip_on_a_posix_recipe_is_correct_and_not_convicted(tmp_path):
-    """hooks tests/test_cc_sessions.py:76 -- `ps` is on Linux AND macOS.
-
-    The reason names Linux, but beside macOS and no Linux-only recipe word;
-    excluding Windows is exactly right for a ps-based helper.
-    """
+    """hooks tests/test_cc_sessions.py:76 -- `ps` is on Linux AND macOS."""
     source = (
         "import pytest\n"
         "import sys\n"
@@ -1686,12 +1367,7 @@ def test_a_windows_only_skip_on_a_posix_recipe_is_correct_and_not_convicted(tmp_
 
 
 def test_a_reason_naming_proc_beside_a_macos_lane_is_not_convicted(tmp_path):
-    """devpulse tests/test_watchdog_wire.py:832 -- /proc OR lsof, and macOS has lsof.
-
-    Measured and rejected: a rule firing on any /proc word in a reason
-    convicts this correct gate, which deliberately keeps macOS in the run
-    because the lsof branch is the code the test exists for.
-    """
+    """devpulse tests/test_watchdog_wire.py:832 -- /proc OR lsof, and macOS has lsof."""
     source = (
         "import pytest\n"
         "import sys\n"
@@ -1711,11 +1387,7 @@ def test_a_reason_naming_proc_beside_a_macos_lane_is_not_convicted(tmp_path):
 
 
 def test_a_linux_named_unit_with_no_gate_at_all_is_not_convicted(tmp_path):
-    """aipass tests/test_cross_os.py:189 -- the rejected shape, 5 fleet hits, 5 false.
-
-    A name alone says nothing about the host: this unit hands the STRING
-    "linux" to a pure function. Only a gate that names the wrong host is read.
-    """
+    """aipass tests/test_cross_os.py:189 -- the rejected shape, 5 fleet hits, 5 false."""
     source = (
         "def test_filter_linux_only_all_rows(tmp_path):\n"
         '    assert gaps_for_platform("linux", start=tmp_path) == ["9"]\n'
@@ -1727,10 +1399,7 @@ def test_a_linux_named_unit_with_no_gate_at_all_is_not_convicted(tmp_path):
 
 
 def test_a_unit_that_forces_its_own_platform_lane_is_not_convicted(tmp_path):
-    """ai_mail tests/test_wake.py:283 shape -- the unit sets sys.platform itself.
-
-    Its gate is not what makes it portable; the patch is. The host is never asked.
-    """
+    """ai_mail tests/test_wake.py:283 shape -- the unit sets sys.platform itself."""
     source = (
         "import pytest\n"
         "import sys\n"
@@ -1799,15 +1468,8 @@ def test_the_off_linux_half_is_not_read_as_a_linux_name(tmp_path):
     assert violations == []
 
 
-# -- CORPUS: lib/ ------------------------------------------------------------
-
-
 def test_lib_is_in_the_corpus(tmp_path):
-    """skills lib/ -- all seven built-in skills live there and were never scored.
-
-    lib/system_status/handler.py read /proc on every macOS run while this
-    standard read skills 100, because the walk stopped at apps/ and tests/.
-    """
+    """skills lib/ -- all seven built-in skills live there and were never scored."""
     handlers = tmp_path / "lib" / "telegram" / "apps" / "handlers"
     handlers.mkdir(parents=True)
     (handlers / "tmux_manager.py").write_text(
@@ -1821,8 +1483,6 @@ def test_lib_is_in_the_corpus(tmp_path):
     failing = [c for c in result["checks"] if not c["passed"]]
     assert failing[0]["violations"][0]["file"] == "lib/telegram/apps/handlers/tmux_manager.py"
 
-
-# -- ARM E: a resolved path compared with one taken as given -----------------
 
 _LOCATE_CONFIG = """import os
 from pathlib import Path
@@ -1859,11 +1519,7 @@ def locate_config():
 
 
 def test_a_resolved_home_compared_with_an_unresolved_walk_is_convicted(tmp_path):
-    """hooks apps/handlers/config/loader.py locate_config() before 2.1.0 (60d2af72, macOS CI PR #774).
-
-    home went through _absolute() (resolve: /private/var), the walk's bounds came
-    from Path.cwd() and Path.home() as given (/var): the install read as external.
-    """
+    """hooks apps/handlers/config/loader.py locate_config() before 2.1.0 (60d2af72, macOS CI PR #774)."""
     source = _LOCATE_CONFIG.replace("BOUNDS", "search, stop = _search_bounds()")
     violations, _acquitted = _scan_source(tmp_path, source)
     assert _lines(violations) == [28]
@@ -1905,16 +1561,8 @@ def test_two_unresolved_or_two_resolved_spellings_are_acquitted(tmp_path):
     assert _scan_source(tmp_path, source)[0] == []
 
 
-# ---------------------------------------------------------------------------
-# Tests -- calendar_bound_check (CALENDAR_BOUND)
-#
-# Every fixture is a minimised copy of the CI red of 2026-09-13: daemon's
-# weekly slot seeder rolled a slot forward from datetime.now(), and a test
-# asserted the seeded value as a literal with nothing frozen - green for one
-# week, then red on every host. The rule reads production through the test's
-# own imports, so each fixture lays down a tiny package: pkg/demo/apps/slots.py
-# beside pkg/demo/tests/test_slots.py.
-# ---------------------------------------------------------------------------
+# calendar_bound_check: each fixture lays down pkg/demo/apps/slots.py beside pkg/demo/tests/test_slots.py,
+# because the rule reads production through the test's own imports.
 
 _SLOTS_PRODUCTION = '''from datetime import datetime, timedelta
 
@@ -2002,12 +1650,7 @@ def test_calendar_bound_declares_the_branch_level_contract():
 
 
 def test_the_slot_seeder_time_bomb_is_convicted(tmp_path):
-    """The CI red itself: literal expected value, seeder reads now three calls in, nothing frozen.
-
-    The date also sits in the test's own helper default and in the seeder's
-    docstring. Neither is production spelling the date, so neither acquits -
-    the first build read the test module as production and let this exact row go.
-    """
+    """The CI red itself: literal expected value, seeder reads now three calls in, nothing frozen."""
     violations, context = _calendar_scan(tmp_path, _SLOTS_UNIT)
 
     assert _lines(violations) == [_line_of(_SLOTS_UNIT, 'assert runstate["last_run"]')]
@@ -2067,12 +1710,7 @@ def test_the_slot_is_seeded_at_an_injected_instant():
 
 
 def test_a_stamp_is_not_a_derivation(tmp_path):
-    """A round trip through code that only STAMPS now is clear (api test_tracking's shape).
-
-    touch() checks now against None, stores it with setdefault, and turns it into
-    a string with isoformat - none of which can change what 'created' holds.
-    57 of the 58 units the first, wider shape convicted were exactly this.
-    """
+    """A round trip through code that only STAMPS now is clear (api test_tracking's shape)."""
     source = """from pkg.demo.apps.slots import touch
 
 

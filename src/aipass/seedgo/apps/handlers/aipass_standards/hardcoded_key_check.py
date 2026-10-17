@@ -3,16 +3,13 @@
 # Description: Hardcoded Key Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Hardcoded Key Standards Checker Handler
 
-Scans Python source files for hardcoded API keys matching known provider
-prefixes (OpenRouter, OpenAI, Anthropic, Google, AWS, GitHub, Slack, etc.).
-Placeholder values, comments, and docstrings are filtered out so only
-genuine secrets trigger a failure.
+Reference: hardcoded_key.md
 """
 
 import re
@@ -28,10 +25,6 @@ AUDIT_SCOPE = "all_files"
 # A file nothing could read is not a file with no key: it fails by name.
 UNREADABLE = "Cannot read the file, so it was not scanned for keys"
 
-# -- Key patterns -----------------------------------------------------------
-# Each tuple: (provider_label, compiled regex)
-# Patterns require the key to appear inside quotes and be long enough to
-# exclude obvious placeholders (minimum 8 chars after prefix).
 
 _KEY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
@@ -68,8 +61,6 @@ _KEY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-# Placeholder indicators -- if the captured value matches any of these the
-# hit is treated as documentation, not a real secret.
 _PLACEHOLDER_VALUE_RE = re.compile(
     r"(?:your[_\-]?key|xxx+|example|placeholder|abc123|new\-key|"
     r"v1-\.\.\.|all[_\-]?x|test|fake|dummy|sample|\.\.\.|"
@@ -82,7 +73,6 @@ _PLACEHOLDER_SUFFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Words on the line (outside the key literal) that signal example context.
 _EXAMPLE_CONTEXT_WORDS = frozenset(
     {
         "example",
@@ -93,14 +83,10 @@ _EXAMPLE_CONTEXT_WORDS = frozenset(
     }
 )
 
-# Pure comment line.
 _PAT_COMMENT = re.compile(r"^\s*#")
 
 # Regex compile context -- the key-like string is a detection pattern itself.
 _PAT_REGEX_CONTEXT = re.compile(r"""re\.compile|r["']|\\[dws\^]""")
-
-
-# -- Helpers ----------------------------------------------------------------
 
 
 def _is_placeholder(key_value: str) -> bool:
@@ -112,17 +98,8 @@ def _is_placeholder(key_value: str) -> bool:
     return False
 
 
-# -- Core detection ---------------------------------------------------------
-
-
 def _scan_line(lineno: int, line: str) -> list[tuple[int, str]]:
-    """
-    Check a single source line for hardcoded key literals.
-
-    Returns a list of (lineno, provider_label) tuples for each finding.
-    Skips comment lines, example-context lines, regex-compile contexts,
-    and placeholder values.
-    """
+    """Check a single source line for hardcoded key literals."""
     if _PAT_COMMENT.match(line):
         return []
 
@@ -144,13 +121,9 @@ def _scan_line(lineno: int, line: str) -> list[tuple[int, str]]:
 
 
 def _scan_file(file_path: Path) -> list[tuple[int, str]] | None:
-    """
-    Scan a single Python file for hardcoded keys.
-
-    Skips __init__.py files, docstring regions, and comment lines.
-    Returns a list of (lineno, provider_label) tuples, or None when the file
-    cannot be read: an unread file is not a file with no key, and the caller
-    fails it by name (seedgo fleet green leg 15).
+    """Scan a single Python file for hardcoded keys.
+    Returns [(lineno, provider_label)], or None when the file cannot be read: an unread file
+    is not a file with no key, and the caller fails it by name.
     """
     if file_path.name == "__init__.py":
         return []
@@ -168,7 +141,6 @@ def _scan_file(file_path: Path) -> list[tuple[int, str]] | None:
     for lineno, line in enumerate(lines, start=1):
         stripped = line.strip()
 
-        # Track triple-quoted docstrings
         triple_count = stripped.count('"""') + stripped.count("'''")
         if triple_count:
             if triple_count % 2 == 1:
@@ -184,21 +156,8 @@ def _scan_file(file_path: Path) -> list[tuple[int, str]] | None:
     return findings
 
 
-# -- Public entry point -----------------------------------------------------
-
-
 def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
-    """
-    Check if a Python file contains hardcoded API keys.
-
-    Args:
-        module_path: Path to the Python file to check.
-        bypass_rules: Optional list of bypass rules to skip certain checks.
-
-    Returns:
-        dict with keys: passed, score, checks, standard.
-    """
-    # Whole-file bypass
+    """Check if a Python file contains hardcoded API keys."""
     if is_bypassed(module_path, "hardcoded_key", bypass_rules=bypass_rules):
         result = {
             "passed": True,
@@ -220,7 +179,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
 
     path = Path(module_path)
 
-    # File existence
     if not path.exists():
         result = {
             "passed": False,
@@ -240,7 +198,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
         )
         return result
 
-    # Skip __init__.py
     if path.name == "__init__.py":
         result = {
             "passed": True,
@@ -261,7 +218,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
         )
         return result
 
-    # Scan the file
     raw_findings = _scan_file(path)
     if raw_findings is None:
         return {
@@ -271,13 +227,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "HARDCODED_KEY",
         }
 
-    # Filter out bypassed lines
     findings: list[tuple[int, str]] = []
     for lineno, label in raw_findings:
         if not is_bypassed(module_path, "hardcoded_key", lineno, bypass_rules):
             findings.append((lineno, label))
 
-    # Build the single check entry
     checks: list[dict] = []
     if findings:
         line_numbers = [f[0] for f in findings]
@@ -299,7 +253,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             }
         )
 
-    # Score
     passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int(passed_checks / total_checks * 100) if total_checks > 0 else 0

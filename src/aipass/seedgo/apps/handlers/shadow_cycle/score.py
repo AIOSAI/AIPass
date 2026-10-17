@@ -3,36 +3,16 @@
 # Description: the v5 shadow score - one checker pack over the fleet, scoring and never gating
 # Version: 1.0.0
 # Created: 2026-09-02
-# Modified: 2026-09-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 THE SHADOW SCORE: a full standards audit that decides nothing.
 
-`pytest_quality` declares `"status": "shadow"` in its own pack.json - it judges
-what a test PROVES, and until its numbers have been diffed against the
-calibrated v4 triage nobody may act on them. So this pass runs the identical
-scoring engine the `audit` verb runs, over the identical pack, and publishes the
-number beside the word SHADOW rather than beside a threshold.
-
-WHY IT REUSES `audit_branch_incremental` RATHER THAN SHELLING `drone`. A second
-invocation path is a second answer: the moment the weekly number and the
-`drone @seedgo audit pytest_quality` number can disagree, the series is
-measuring the wrapper instead of the fleet. One engine, one answer.
-
-ITS OWN ARTIFACT FILE, ALWAYS. A fleet audit's default destination is
-`.seedgo/last_audit.json`, and a weekly cycle writing there would silently
-replace the aipass-pack document a reader believes is the fleet's compliance
-record - one file, two packs, no way to tell which run produced it. The cycle's
-artifact carries the pack in its NAME, for the reason `last_audit_{branch}.json`
-carries the branch in its own.
-
-KNOWN COST, STATED RATHER THAN HIDDEN. The incremental audit cache is keyed on
-branch name alone while its validity STAMP includes the pack path, so a shadow
-run evicts the aipass-pack entry for every branch and the next `audit aipass` is
-a cold full scan. The output is correct either way - only slower. The fix
-belongs to the cache's key, not to this pass, and it is not taken here.
-"""
+`pytest_quality` declares itself shadow, so its number is published beside the
+word SHADOW, never a threshold. It runs `audit_branch_incremental`, not `drone`:
+a second path is a second answer. The artifact name carries the pack so it never
+replaces `.seedgo/last_audit.json`."""
 
 import time
 from collections import defaultdict
@@ -49,31 +29,18 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 
 MODULE_NAME = "shadow_cycle.score"
 
-#: This branch's `handlers/` directory - where every checker pack lives.
 HANDLERS_DIR = module_file(__file__).parents[1]
 
-#: How many of the weakest standards the one-screen summary names.
 WEAKEST_SHOWN = 3
 
-#: A branch scoring under this is named individually rather than averaged away.
-#: Ninety is the audit display's own "healthy" line, reused so the weekly series
-#: and the interactive verb draw attention to the same branches.
+#: The audit display's own "healthy" line, so the series and the verb flag the same branches.
 ATTENTION_BELOW = 90
 
 
 def pack_path(pack_name: str) -> Path:
     """Where a scoring pack lives on disk.
 
-    Raises rather than defaulting to another pack: a cycle that quietly scored
-    `aipass` because `pytest_quality` was renamed would publish a number under
-    the wrong heading, which is the one failure a weekly series cannot survive.
-
-    Args:
-        pack_name: The pack's short name, e.g. ``pytest_quality``.
-
-    Returns:
-        The pack directory.
-    """
+    Raises rather than defaulting: a renamed pack must never publish under the wrong heading."""
     packs = discovery.discover_packs(HANDLERS_DIR)
     if pack_name not in packs:
         available = ", ".join(sorted(packs)) or "none"
@@ -89,17 +56,7 @@ def run(
 ) -> dict:
     """Score every branch against one pack, publish the full result set, summarise it.
 
-    Args:
-        pack_name: The pack to score against.
-        branches: Registry entries, as `discovery.discover_branches` returns them.
-        artifact_path: Where the complete, untruncated result set is written.
-        on_branch: Called with each branch's result the moment it lands, so a
-            caller that owns a console can report a five-minute pass while it
-            runs. A handler never prints; it hands the line back.
-
-    Returns:
-        The summary block the cycle document carries.
-    """
+    ``on_branch`` gets each result as it lands: a handler never prints, it hands the line back."""
     resolved = pack_path(pack_name)
     results: List[Dict] = []
 
@@ -159,9 +116,7 @@ def _standard_averages(results: Sequence[Dict]) -> Dict[str, int]:
 def _below_attention(results: Sequence[Dict]) -> List[list]:
     """Branch and score for every branch under the attention line, worst first.
 
-    `result["branch"]` is the registry ENTRY, not a name - reading it as a
-    string is the shape that puts a whole dict in a summary line.
-    """
+    `result["branch"]` is the registry ENTRY, not a name."""
     low = [[result["branch"]["name"], result["average"]] for result in results if result["average"] < ATTENTION_BELOW]
     return sorted(low, key=lambda pair: pair[1])
 

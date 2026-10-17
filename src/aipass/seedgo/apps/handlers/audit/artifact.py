@@ -3,34 +3,14 @@
 # Description: Audit Artifact Handler
 # Version: 1.3.0
 # Created: 2026-08-11
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Audit Artifact Handler
 
-Serialises a COMPLETE audit result set to a JSON file on disk.
-
-WHY THIS EXISTS:
-audit_display.py renders for a human and therefore truncates -- 10 files, 3
-diagnostics per file, 5 violations per standard, messages clipped at 60 chars.
-A branch reading that display as if it were the whole truth derived a violation
-count that never existed (@prax, the "85 fossil rules" measurement). The display
-budget is correct for a terminal and wrong for a machine, so machines get a
-different surface: this one.
-
-The artifact is a LOSSLESS projection of the same ``audit_results`` list the
-display renders from. Nothing here caps, clips, sorts-and-takes, or summarises
-away a violation. If a cap ever appears in this file, the feature is worthless
--- completeness is the entire point.
-
-JOIN CONTRACT (the reason for the shape):
-Consumers reconcile violations against a branch's ``.seedgo/bypass.json``,
-whose rules key on ``(file, standard)`` where ``file`` is a branch-relative
-POSIX path. So every violation row carries ``branch``, ``standard`` and a
-branch-relative ``file`` as first-class fields -- no string parsing, no
-basename guessing, no path arithmetic needed on the consumer side. The raw
-path the checker reported is preserved alongside as ``abs_path``.
+A lossless projection of ``audit_results`` for machines (the display truncates): never cap here.
+Rows carry ``branch``, ``standard`` and branch-relative ``file``, the join key of bypass.json.
 
 Doc shape (schema_version 1)::
 
@@ -43,9 +23,6 @@ Doc shape (schema_version 1)::
       "failed_checks": [{branch, standard, name, message}],
       "type_errors":   [{branch, file, errors, warnings, diagnostics: [...]}]
     }
-
-Flat top-level lists, each row self-identifying by branch -- one loop to
-filter, no nesting to walk, and no duplicated copy that could drift.
 """
 
 import json
@@ -60,21 +37,13 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 # Bump when the doc SHAPE changes so consumers can gate on it.
 SCHEMA_VERSION = 1
 
-# audit/ -> handlers/ -> apps/ -> seedgo/  (never a hardcoded path)
 _SEEDGO_ROOT = module_file(__file__).parents[3]
 
 ARTIFACT_DIR_NAME = ".seedgo"
 ARTIFACT_FILE_NAME = "last_audit.json"
 
-#: The pack whose artifact keeps the bare historical name - the compliance
-#: record CI and every saved consumer already read. Every other pack is
-#: suffixed so it can never be mistaken for this one.
+#: The pack whose artifact keeps the bare name CI and every consumer read; others are suffixed.
 DEFAULT_PACK_NAME = "aipass"
-
-
-# =============================================================================
-# PATHS
-# =============================================================================
 
 
 def default_artifact_path(
@@ -84,37 +53,8 @@ def default_artifact_path(
 ) -> Path:
     """Default destination for an audit artifact.
 
-    Derived from this file's location, so it follows the checkout wherever it
-    lives -- a clone, a container, another OS.
-
-    ``last_audit.json`` means the FLEET and only the fleet. A single-branch run
-    writes ``last_audit_{branch}.json`` instead, because a scoped run used to
-    overwrite the fleet file with a one-branch document (@prax hit this within a
-    minute of the feature landing). The metadata said scope=single-branch, but a
-    consumer reading the file cold measured one branch and concluded the other
-    16 were clean. Separate names mean that consumer gets no file rather than a
-    confident subset.
-
-    A ``--no-bypass`` run gets a ``_no_bypass`` suffix for exactly that reason:
-    same fleet, same tree, deliberately lower numbers. Overwriting the normal
-    artifact with it would hand the next cold reader a confident wrong answer.
-
-    A non-default PACK gets ``_pack_{name}`` for the same reason, and it was
-    added last because the gap was live: ``audit pytest_quality`` is a fleet
-    run with no flags, so it wrote ``last_audit.json`` -- replacing the
-    47-standard compliance record with a 12-standard shadow score that gates
-    nothing. ``aipass`` and an unstated pack keep the historical bare name,
-    because that name IS the compliance record every existing consumer reads;
-    renaming it would fix the collision by breaking what the collision put at
-    risk.
-
-    Args:
-        specific_branch: Branch name for a single-branch run, else None.
-        no_bypass: True when the run had every bypass rule switched off.
-        pack: Checker pack name. None or ``aipass`` keeps the bare name.
-
-    Returns:
-        Path to write the artifact to.
+    ``last_audit.json`` is the default-pack fleet run only; a branch, ``--no-bypass`` or other
+    pack run gets its own suffix, so a cold reader never takes a subset for the fleet record.
     """
     stem = ARTIFACT_FILE_NAME.removesuffix(".json")
     if pack and pack != DEFAULT_PACK_NAME:
@@ -127,12 +67,7 @@ def default_artifact_path(
 
 
 def _seedgo_version() -> Optional[str]:
-    """Seedgo's own version string, or None when it cannot be read.
-
-    Imported lazily and defensively: a handler must not hard-depend on the
-    entry point it is called from, and a missing version is metadata worth
-    omitting -- never a reason to lose an audit artifact.
-    """
+    """Seedgo's own version string, or None; lazy so a handler never hard-depends on its entry point."""
     try:
         from aipass.seedgo.apps.seedgo import VERSION
 
@@ -143,11 +78,7 @@ def _seedgo_version() -> Optional[str]:
 
 
 def _branch_relative(raw: str, branch_root: Path) -> str:
-    """Branch-relative POSIX path -- the join key against bypass.json's 'file'.
-
-    Checkers report either an absolute path or an already-relative one; both
-    arrive here and leave in the single form a bypass rule is written in.
-    """
+    """Branch-relative POSIX path -- the join key against bypass.json's 'file'."""
     if not raw:
         return ""
     path = Path(raw)
@@ -160,17 +91,8 @@ def _branch_relative(raw: str, branch_root: Path) -> str:
         return path.as_posix()
 
 
-# =============================================================================
-# COLLECTORS -- one row per finding, nothing capped
-# =============================================================================
-
-
 def _collect_violations(result: Dict[str, Any], branch_name: str, branch_root: Path) -> List[Dict[str, Any]]:
-    """Every per-file violation across every standard in one branch result.
-
-    Reads the ``{standard}_violations`` keys audit_branch() writes, so a new
-    checker pack shows up here with no change to this handler.
-    """
+    """Every per-file violation, read from the ``{standard}_violations`` keys audit_branch() writes."""
     rows: List[Dict[str, Any]] = []
     for key in sorted(result):
         if not key.endswith("_violations"):
@@ -194,12 +116,7 @@ def _collect_violations(result: Dict[str, Any], branch_name: str, branch_root: P
 
 
 def _collect_failed_checks(result: Dict[str, Any], branch_name: str) -> List[Dict[str, Any]]:
-    """Every failed check from results[standard]['checks'].
-
-    Branch-level findings (architecture's missing dirs/files, crashed-checker
-    reports) live only here -- they never become per-file violations, and the
-    display renders them through a separate path.
-    """
+    """Every failed check from results[standard]['checks'], where branch-level findings live only."""
     rows: List[Dict[str, Any]] = []
     for standard, data in sorted(result.get("results", {}).items()):
         if not isinstance(data, dict):
@@ -264,32 +181,13 @@ def _branch_entry(result: Dict[str, Any], violation_count: int) -> Dict[str, Any
     }
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def build_artifact(
     audit_results: List[Dict[str, Any]],
     pack: Optional[str] = None,
     specific_branch: Optional[str] = None,
     no_bypass: bool = False,
 ) -> Dict[str, Any]:
-    """Build the complete artifact document from an audit result list.
-
-    Args:
-        audit_results: The audit's own result list -- the same object the
-            display renders (and truncates) from.
-        pack: Checker pack name, recorded in metadata.
-        specific_branch: Branch name when the run targeted one branch; None
-            means a full-fleet run.
-        no_bypass: True when the run had every bypass rule switched off.
-            Recorded in metadata so a consumer can tell the raw score from the
-            normal one without inspecting the filename.
-
-    Returns:
-        The artifact doc (JSON-serialisable), uncapped and unclipped.
-    """
+    """Build the complete artifact document from an audit result list."""
     branches: List[Dict[str, Any]] = []
     violations: List[Dict[str, Any]] = []
     failed_checks: List[Dict[str, Any]] = []
@@ -340,20 +238,7 @@ def write_audit_artifact(
 ) -> Path:
     """Write the complete audit result set to a JSON file. Returns its path.
 
-    Raises whatever the filesystem raises -- an artifact that silently failed
-    to write is exactly the "display looked complete" failure this feature
-    exists to end. Callers report the error; they never swallow it.
-
-    Args:
-        audit_results: Complete audit result list.
-        output_path: Destination override. Defaults to default_artifact_path().
-        pack: Checker pack name, recorded in metadata.
-        specific_branch: Branch name for a single-branch run, else None.
-        no_bypass: True when the run had every bypass rule switched off — its
-            own filename and its own metadata flag, never the normal one's.
-
-    Returns:
-        Path the artifact was written to.
+    Raises whatever the filesystem raises: a silently unwritten artifact is the failure this ends.
     """
     path = Path(output_path) if output_path else default_artifact_path(specific_branch, no_bypass, pack=pack)
     document = build_artifact(audit_results, pack=pack, specific_branch=specific_branch, no_bypass=no_bypass)

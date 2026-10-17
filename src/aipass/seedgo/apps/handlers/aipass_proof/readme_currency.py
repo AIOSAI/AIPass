@@ -3,7 +3,7 @@
 # Description: Verify README.md accuracy against actual pack state
 # Version: 1.0.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-17
 # =============================================
 
 """README Currency Proof -- Compare README checker counts and standard lists against actual pack.
@@ -11,14 +11,6 @@
 Checks that the seedgo branch README.md accurately reflects the current state
 of the standards pack: correct checker count, all standards documented, no stale
 references to removed standards.
-
-Interface:
-    scan(pack_dir: Path) -> dict
-    Returns: {"passed": bool, "readme_found": bool, "actual_check_count": int,
-              "readme_counts": list, "undocumented": list, "stale_refs": list,
-              "issues": list, "summary": str}
-
-Reference: tools/readme_currency_scanner.py (original prototype)
 """
 
 from __future__ import annotations
@@ -30,23 +22,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
-# -- Helpers -------------------------------------------------------------------
-
-
 def _standard_name_from_file(filename: str) -> str:
-    """Extract the standard name from a *_check.py filename.
-
-    Example: 'cli_flags_check.py' -> 'cli_flags'
-    """
+    """Extract the standard name from a *_check.py filename."""
     return filename.removesuffix("_check.py")
 
 
 def _normalize_name(name: str) -> str:
-    """Normalize a standard name for flexible matching.
-
-    Lowercases, replaces spaces/hyphens with underscores, strips
-    surrounding whitespace, and collapses repeated underscores.
-    """
+    """Normalize a standard name for flexible matching."""
     name = name.lower().strip()
     name = re.sub(r"[\s\-]+", "_", name)
     name = re.sub(r"_+", "_", name)
@@ -56,10 +38,7 @@ def _normalize_name(name: str) -> str:
 def _extract_readme_count_references(
     readme_text: str,
 ) -> list[dict[str, str | int]]:
-    """Find lines that reference a number followed by checker/standard/etc.
-
-    Returns a list of dicts with 'line', 'number', and 'context' keys.
-    """
+    """Find lines that reference a number followed by checker/standard/etc."""
     results: list[dict[str, str | int]] = []
     pattern = re.compile(
         r"\b(\d+)\s+"
@@ -86,12 +65,10 @@ def _extract_readme_standard_names(readme_text: str) -> set[str]:
     """
     names: set[str] = set()
 
-    # Parse the comma/and-separated list in the Checker Packs section.
     checks_pattern = re.compile(r"pack\s+checks?:\s*(.+?)(?:\.|$)", re.IGNORECASE | re.DOTALL)
     match = checks_pattern.search(readme_text)
     if match:
         raw_list = match.group(1)
-        # Split on commas and ", and "
         raw_list = re.sub(r",?\s+and\s+", ",", raw_list)
         for item in raw_list.split(","):
             item = item.strip().rstrip(".")
@@ -101,23 +78,10 @@ def _extract_readme_standard_names(readme_text: str) -> set[str]:
     return names
 
 
-# -- Core scan -----------------------------------------------------------------
-
-
 def scan(pack_dir: Path) -> dict:
-    """Compare README.md checker counts and standard lists against actual pack state.
-
-    Args:
-        pack_dir: Path to the standards pack directory (e.g. handlers/aipass_standards/).
-                  The seedgo README.md is located at pack_dir.parent.parent.parent / "README.md".
-
-    Returns:
-        Dict with keys: passed, readme_found, actual_check_count, readme_counts,
-        undocumented, stale_refs, issues, summary.
-    """
+    """Compare README.md checker counts and standard lists against actual pack state."""
     issues: list[str] = []
 
-    # -- Gather actual standards from pack_dir --
     if not pack_dir.is_dir():
         msg = f"Pack directory not found: {pack_dir}"
         logger.warning(msg)
@@ -136,9 +100,6 @@ def scan(pack_dir: Path) -> dict:
     actual_names: set[str] = {_standard_name_from_file(f.name) for f in check_files}
     actual_check_count = len(check_files)
 
-    # -- Locate README --
-    # pack_dir is e.g. .../seedgo/apps/handlers/aipass_standards/
-    # seedgo root = pack_dir.parent.parent.parent
     seedgo_root = pack_dir.parent.parent.parent
     readme_path = seedgo_root / "README.md"
 
@@ -158,7 +119,6 @@ def scan(pack_dir: Path) -> dict:
 
     readme_text = readme_path.read_text(encoding="utf-8")
 
-    # -- Count references --
     count_refs = _extract_readme_count_references(readme_text)
     count_mismatch = any(ref["number"] != actual_check_count for ref in count_refs)
     if count_mismatch:
@@ -168,10 +128,8 @@ def scan(pack_dir: Path) -> dict:
                     f"Line {ref['line']}: README says {ref['number']} but actual count is {actual_check_count}"
                 )
 
-    # -- Name references --
     readme_names = _extract_readme_standard_names(readme_text)
 
-    # Build lookup tables for normalized matching
     actual_lookup: dict[str, str] = {_normalize_name(n): n for n in actual_names}
     readme_lookup: dict[str, str] = {_normalize_name(n): n for n in readme_names}
 
@@ -202,7 +160,6 @@ def scan(pack_dir: Path) -> dict:
 
     passed = not count_mismatch and not stale_refs and not undocumented
 
-    # -- Summary --
     if passed:
         summary = f"README is current. {actual_check_count} checkers, all documented, no stale references."
     else:

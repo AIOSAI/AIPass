@@ -3,13 +3,11 @@
 # Description: Branch Discovery Handler
 # Version: 2.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-06
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Discovery Handler
-
-Discovers all branches from AIPASS_REGISTRY.json for diagnostics scanning.
 """
 
 import json
@@ -23,19 +21,12 @@ from aipass.seedgo.apps.handlers import registry_scan
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # Delegates: the name is the contract, the private glob walk was the disease.
-    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
-    # a flow_json plan counter could be served as the trust anchor.
+    # Never a local glob: "*_REGISTRY.json" folds case on Windows/macOS and can match a plan counter.
     return registry_scan.find_registry()
 
 
 def discover_branches() -> List[Dict]:
-    """
-    Discover all branches from AIPASS_REGISTRY.json for diagnostics.
-
-    Returns:
-        List of dicts with 'name' and 'path' keys
-    """
+    """Discover all branches from AIPASS_REGISTRY.json for diagnostics."""
     branches = []
     registry_path = _find_registry()
 

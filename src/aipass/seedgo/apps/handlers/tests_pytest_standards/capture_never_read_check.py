@@ -3,35 +3,12 @@
 # Description: nominator - capture-never-read and receipt-only asserts (RETURN-ONLY)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 8 — the test asked for the output and never looked at it.
+"""TAXONOMY rule 8 — the test asked for the output and never looked at it.
 
-Two shapes, one species:
-
-  capture-never-read   the unit takes `capsys` or `capfd` as a fixture and
-                       never calls `readouterr()`. It arranged to see the
-                       output and then did not. TAXONOMY calls this **the
-                       exact static tell**, and it is: @daemon's
-                       `test_help_flag` requests capsys, never reads it, and
-                       survived a probe that changed what help prints.
-  receipt-only         the unit's SOLE assertion is `is True` / `== 0` on a
-                       call to a `print_*` / `show_*` / `report_*` / `render_*`
-                       function. The function's whole job is what it emits;
-                       the return value is a receipt saying the call happened.
-
-SOLE IS THE SPECIES. This is the rule most likely to be got wrong in the
-damaging direction, and TAXONOMY's known-good table says so in three separate
-rows: nine `assert result is True` lines in @api are each paired with
-`mock_keys.get_api_key.assert_called_once_with(...)` and are correct; five
-`is_ssl_error(x) is True` assertions are correct because the boolean IS the
-behaviour — a predicate under test, not a router's receipt. So a `is True`
-standing beside any other assertion or any `assert_*` call is never nominated,
-and a callee that does not name itself an output function is never nominated.
-
-Measured population: 18 in @daemon, 24 in @backup, 4 + 4 across @api.
+Reference: capture_never_read.md
 """
 
 import ast
@@ -44,7 +21,6 @@ GROUP = "static_capture_never_read"
 #: Fixtures that capture output. Requesting one is a declaration of intent.
 CAPTURE_FIXTURES: frozenset = frozenset({"capsys", "capfd", "capsysbinary", "capfdbinary"})
 
-#: The method that actually reads what was captured.
 READ_METHOD = "readouterr"
 
 #: Callee-name prefixes whose real work is what they EMIT, not what they return.
@@ -94,9 +70,7 @@ def _reads_capture(unit: corpus.TestUnit) -> bool:
 def _receipt_assert(node: ast.Assert) -> str:
     """The output callee this assert takes a receipt from, or "".
 
-    Matches `assert f(...) is True` and `assert f(...) == 0` where `f` names
-    itself an output function. Anything else returns "" — the rule refuses to
-    guess which functions print.
+    Only callees that name themselves output functions: the rule refuses to guess which print.
     """
     test = node.test
     if not isinstance(test, ast.Compare) or len(test.ops) != 1:
@@ -145,9 +119,7 @@ def nominate(scanned: corpus.Corpus) -> List[dict]:
 def _receipt_nomination(unit: corpus.TestUnit) -> dict:
     """A receipt-only nomination for a unit, or {} when the assertion is paired.
 
-    The pairing check is the whole correctness of this rule. A single
-    assertion beside the receipt, or any `assert_*` mock call, means the unit
-    checks behaviour and the receipt is incidental.
+    Any other assertion or `assert_*` mock call beside the receipt acquits the unit.
     """
     asserts = corpus.asserts_in(unit)
     if len(asserts) != 1:

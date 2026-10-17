@@ -78,6 +78,23 @@ json_handler.log_operation("my_module", "operation", data)  # Typo-prone, boiler
 
 **Reference:** `drone @seedgo standard json_structure` for the complete implementation example.
 
+### What the checker reads
+
+- The check applies only when some **public** function takes `module_name` and lets it be
+  omitted (a default, or absorbed through `*args` / `**kwargs`). A required `module_name` is
+  supplied at every call site, so there is nothing to detect. A private helper's parameter
+  (leading underscore) is internal plumbing with no caller to detect; renaming a public
+  function to buy the exemption removes it from the API.
+- The proof is the **question**, not the spelling: a call to any frame-walk API
+  (`sys._getframe`, `inspect.stack`, `inspect.currentframe` ...) or to a named caller helper
+  (`_get_caller_module_name`, `get_caller`). `sys._getframe` is the sound answer:
+  `inspect.stack()` reaches an unguarded `os.path.realpath` inside `inspect.getmodule`, which
+  reads `os.getcwd()` and fails on a Windows machine with a dead working directory.
+- Both are read from the parse tree, never as a substring, so a docstring or comment that
+  names a call neither proves nor convicts. An unparseable file is no acquittal.
+- Known blind spot: the rule reads the parameter's NAME, so a `module_name` that is an event
+  payload field rather than a caller identity looks the same.
+
 ---
 
 ## Default Handlers
@@ -307,6 +324,15 @@ from aipass.cli.apps.handlers.error_handler import track_operation
 # ✅ RIGHT - import CLI module (public API)
 from aipass.cli.apps.modules.error_tracking import track_operation
 ```
+
+### Handlers and modules/ - own branch BLOCKED, other branches ALLOWED
+
+A handler importing its **own** branch's `modules/` inverts the layering (orchestration lives in
+modules/) and is the shape that can close a cycle. Another branch's `modules/` is that branch's
+public gateway, the door the independence rule sends cross-branch callers to, so a handler may
+import it. Prax's logger and cli's modules are allowed everywhere. When the file's branch cannot be
+told from its path, the independence rule is not evaluable and says so, while the orchestration
+rule stays strict.
 
 ### Security Guard Implementation
 

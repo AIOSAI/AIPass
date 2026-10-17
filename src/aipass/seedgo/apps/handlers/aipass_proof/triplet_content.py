@@ -3,25 +3,16 @@
 # Description: Queryable content for the triplet proof
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Triplet Proof Content Handler
-
-Provides formatted triplet proof content for the query system.
-Module orchestrates, handler implements.
-"""
+"""Triplet Proof Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_triplet_proof() -> str:
-    """Return triplet proof content for query system.
-
-    Returns:
-        str: Formatted proof text with Rich styling
-    """
+    """Return triplet proof content for query system."""
     sep = "\u2500" * 70
     lines = [
         f"[dim]{sep}[/dim]",

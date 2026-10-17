@@ -3,45 +3,20 @@
 # Description: audit-tests core spine - the universal group list
 # Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """
 CORE_SPINE — the groups every ecosystem publishes.
 
-The group list is a COMPOSITION, never a constant (design section 4.2):
-
-    group_list = CORE_SPINE + [f"{ecosystem}.{name}" for name in adapter.declared_groups()]
-
-Revision 1 of the design made `group_list` equality with a single core
-constant. That shape could not grow: adding an ecosystem meant editing the
-core, which is the exact future rebuild the owner's ruling 3 forbade. The
-invariant that actually matters is not equality — it is that NOTHING
-VANISHES, which `laws.py` enforces against the previous artifact.
-
-A spine group an adapter cannot measure stays in the list and reports
-`not_applicable` with a reason. It never disappears, and it is never 0
-(Law S1: not-run is `not_applicable`, never zero).
-
-REV 4 CONTRACTS, written while the groups are still unbuilt, because the
-requirement has to land before the capability or it never lands at all:
-
-  * `kill_cause` binds `oracle_execution` and the adapter's mutation groups.
-    No mutant record may exist without a kill-cause split. See KILL_CAUSE_CONTRACT.
-  * `scoped_survival` measures module-granularity ORACLE SURVIVAL and is never
-    to be read as pseudo-testedness. See SURVIVAL_NAMING_CONTRACT.
-  * `width_coupling` reports a DIVERGENCE COUNT off a two-point sample and is
-    never to be read as width-independence. See WIDTH_COUPLING_CONTRACT.
+The group list is CORE_SPINE plus namespaced adapter groups, never a constant;
+the invariant is that nothing vanishes, which `laws.py` enforces.
 """
 
 from typing import Dict, List
 
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_pytest_standards import envdiff
-
-# =============================================================================
-# THE SPINE
-# =============================================================================
 
 #: Universal across every ecosystem. Order is the published order.
 CORE_SPINE: tuple = (
@@ -51,15 +26,7 @@ CORE_SPINE: tuple = (
     "ai_advisory",
 )
 
-#: The only group carrying a score on day one.
-#:
-#: SCORED and GATING are different words and stay different: `hygiene` carries
-#: a number, and the artifact blocks nothing at launch. Promotion into this
-#: tuple requires BOTH (1) the group's blind counters existing and published,
-#: and (2) a measured fleet-wide distribution of those counters in hand at
-#: ruling time. Disclosure is a confession, not a certificate — a bar phrased
-#: as "until gate_coverage proves the gate sees what it claims" is either
-#: unreachable or met by an empty confession (design section 4.5, rev 4).
+#: Scored is not gating: promotion needs published blind counters AND a measured fleet distribution of them.
 SCORED_GROUPS: tuple = ("hygiene",)
 
 #: Tier per spine group. The AI tier may only nominate (Law S6).
@@ -70,8 +37,7 @@ SPINE_TIERS: Dict[str, str] = {
     "ai_advisory": "ai",
 }
 
-#: Why each spine group is universal — published in the artifact so a reader
-#: never has to ask why a group they cannot use is present.
+#: Why each spine group is universal, published in the artifact.
 SPINE_RATIONALE: Dict[str, str] = {
     "hygiene": "'a test may write only inside the declared sandbox' is a claim in every language",
     "oracle_execution": "the PROJECTION-ORACLE family; mutation exists in every ecosystem",
@@ -79,17 +45,7 @@ SPINE_RATIONALE: Dict[str, str] = {
     "ai_advisory": "the L2 tier - nominate only, never scored",
 }
 
-# =============================================================================
-# REV 4 CONTRACTS - binding on groups that do not exist yet
-# =============================================================================
-
-#: Groups bound by the kill_cause contract - every group that EXECUTES A
-#: MUTANT, and nothing else. `pseudo_tested` stopped being hypothetical on
-#: 2026-09-19 when its opt-in seam landed, and it shipped carrying the split
-#: on every record exactly as this contract required while it was still
-#: unbuilt, which is the whole argument for writing requirements before
-#: capabilities. `width_coupling` landed the same day and is deliberately
-#: ABSENT: it runs no mutant, so there is no kill here to split.
+#: Every group that EXECUTES A MUTANT, and nothing else; `width_coupling` runs none, so it is absent.
 KILL_CAUSE_BOUND: tuple = (
     "oracle_execution",
     "pseudo_tested",
@@ -137,20 +93,7 @@ PSEUDO_TESTED_SCOPE_CONTRACT = (
     "group may not be read as a pseudo-tested RATE."
 )
 
-#: The contract binding `width_coupling`, and the reason it is NOT in
-#: KILL_CAUSE_BOUND: that tuple binds groups that EXECUTE MUTANTS, and this
-#: group executes none. It runs one unmutated suite twice and subtracts the
-#: verdicts, so there is no kill, no exception class behind one, and nothing
-#: for a kill_cause split to describe. Adding it there would have made the
-#: contract list look thorough while binding a group to a requirement it
-#: cannot meet - which is how a contract stops meaning anything.
-#:
-#: THE LIMITS ARE NOT RESTATED HERE, THEY ARE THE ENGINE'S OWN. `envdiff.py`
-#: publishes `WIDTH_AXIS_LIMITS` with every result, so a second prose statement
-#: of the same caveats in this file would be one edit away from disagreeing
-#: with the one the artifact actually carries. The contract states what the
-#: count IS and then binds the published list verbatim; a limit added to the
-#: axis is a limit added to this contract, with nobody needing to remember.
+#: Limits are bound verbatim from `envdiff.WIDTH_AXIS_LIMITS`, never restated, so the two cannot drift.
 WIDTH_COUPLING_CONTRACT = (
     "width_coupling publishes a DIVERGENCE COUNT: the number of nodeids whose pass/fail "
     "verdict changes between two runs of the same unmutated suite that differ only in "
@@ -162,11 +105,6 @@ WIDTH_COUPLING_CONTRACT = (
     "limits, which travel in the group document as `limits`: " + " ".join(envdiff.WIDTH_AXIS_LIMITS)
 )
 
-#: What a statement-deletion survivor does and does not mean. It deletes ONE
-#: simple statement, never a compound header, so a dead BRANCH is out of its
-#: reach by construction - and its declared arid list removes the statements
-#: whose deletion cannot change behaviour without claiming the rest are all
-#: observable.
 STATEMENT_DELETION_SCOPE_CONTRACT = (
     "A survivor here is one statement whose deletion no covering test noticed. It is not a claim "
     "about the function around it, and it is not a claim about any branch: this operator deletes "
@@ -175,7 +113,6 @@ STATEMENT_DELETION_SCOPE_CONTRACT = (
     "with the reason each cannot change behaviour, and their counts travel in the document."
 )
 
-#: Contract text keyed by the group it binds, for stamping into the artifact.
 GROUP_CONTRACTS: Dict[str, str] = {
     "oracle_execution": KILL_CAUSE_CONTRACT,
     "pseudo_tested": KILL_CAUSE_CONTRACT + " " + PSEUDO_TESTED_SCOPE_CONTRACT,
@@ -186,28 +123,13 @@ GROUP_CONTRACTS: Dict[str, str] = {
 }
 
 
-# =============================================================================
-# COMPOSITION
-# =============================================================================
-
-
 def compose_group_list(ecosystem: str, declared: List[str]) -> List[str]:
     """Build the published group list: spine first, adapter groups namespaced.
 
-    Namespacing is what lets a second ecosystem exist without the core knowing
-    about it. `pytest.static_ruff_pt` is a Python linter's rule family; a Rust
-    adapter would never have to enumerate it, and a Rust species has somewhere
-    to go.
-
-    Raises ValueError if an adapter declares a name that collides with the
-    spine, because a shadowed spine group would vanish from the list without a
-    ruling — the one thing S3/S4 exists to prevent.
+    A spine-name collision raises: a shadowed spine group would vanish without a ruling.
     """
     collisions = sorted(set(declared) & set(CORE_SPINE))
     if collisions:
-        # A rejected adapter is operationally interesting: it means a pack tried
-        # to shadow a spine group, which would have made that group vanish from
-        # the published list without a ruling.
         json_handler.log_operation(
             "adapter_declaration_rejected",
             {"ecosystem": ecosystem, "reason": "spine_collision", "groups": collisions},
@@ -230,12 +152,7 @@ def is_scored(group: str) -> bool:
 
 
 def contract_for(group: str) -> str:
-    """The rev-4 contract text bound to a group, or "" if it has none.
-
-    Accepts both the bare adapter name (`scoped_survival`) and the namespaced
-    published name (`pytest.scoped_survival`), because callers legitimately
-    hold either.
-    """
+    """The contract text bound to a bare or namespaced group name, or "" if it has none."""
     if group in GROUP_CONTRACTS:
         return GROUP_CONTRACTS[group]
     bare = group.split(".", 1)[-1]
@@ -245,13 +162,7 @@ def contract_for(group: str) -> str:
 def spine_document(group: str) -> dict:
     """The default `not_applicable` document for an unimplemented spine group.
 
-    Law S1: not-run is `not_applicable`, never 0. The reason is mandatory —
-    a `not_applicable` without one is indistinguishable from a silent skip.
-
-    The AI tier carries `kind: nominate_only` unconditionally (Law S6). A
-    refused artifact is built entirely from these documents, so if the spine
-    did not stamp it here, every refusal would itself be an unlawful artifact —
-    found by the refused-artifact test on its first run.
+    The AI tier is stamped `nominate_only` here because refused artifacts are built from these (Law S6).
     """
     tier = SPINE_TIERS.get(group, "exec")
     document = {

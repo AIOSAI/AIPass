@@ -3,54 +3,22 @@
 # Description: Subcommand Help Standards Checker Handler
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """Subcommand Help Standards Checker Handler.
 
-Validates that branch entry points handle <cmd> --help by showing
-subcommand-specific help — never executing the command, never silently
-falling back to top-level help.
+Branch entry points handle <cmd> --help with subcommand-specific help: never
+executing the command, never silently falling back to top-level help.
 
-The standard names three ways to get this wrong; until 2026-09-20 this
-checker could only see two of them.
+Rule 1, the guard (entry points): --help in the remaining args is intercepted
+before dispatch, by an explicit guard or by argparse ``parse_known_args``.
 
-RULE 1 — THE GUARD (entry points).
-  Every entry point that routes subcommands must intercept --help in the
-  remaining args (after command extraction) BEFORE dispatching to handlers.
-  Passes on either an explicit subcommand --help guard on remaining args, or
-  argparse ``parse_known_args`` (which absorbs --help from any position).
-
-RULE 2 — REACHABLE PER-VERB HELP (any production module).
-  The standard's third contract line is "shows top-level help (unhelpful)",
-  and nothing enforced it. Drone shipped for months with nineteen per-verb
-  git paragraphs behind ``get_help(command)`` that no caller could reach:
-  ``print_help()`` was called with no argument, so every ``drone @git VERB
-  --help`` returned the top-level index. Rule 1 scored it 100 — correctly,
-  by its own terms. The violation was not at the entry point and not at the
-  dispatch site; it was in the chain between them (drone fc032265).
-
-  Measured before building (2026-09-20, fleet at HEAD):
-    129 help dispatch sites sit in a router that knows the verb, and 125 of
-    them hand their printer nothing. That is the NORM, not the violation —
-    those printers have no per-verb content to reach, so the top-level page
-    is the only right answer and the dispatch site cannot tell the two apart.
-    Pre-fix drone was byte-identical in shape to all 125.
-
-  So this rule reads the PROVIDER, not the dispatch site: a help-text
-  function that selects per-verb content by testing its own parameter
-  against two or more string literals, where every in-module call to it
-  omits that argument. Then the per-verb branches are dead by construction.
-
-  Population is small and honestly so: of 213 help-named functions fleet-wide,
-  140 take no parameter at all, and exactly 1 carries per-verb content. The
-  rule convicts pre-fix drone, clears the cure, and clears all 125 innocent
-  sites. One specimen is the whole population, so it is CALIBRATED, not
-  validated — it will be exercised the day a second per-verb provider lands.
-
-SCOPE: branch_level. Rule 1 still reports on the entry point only; rule 2
-walks every production module, because that is where the species lives.
-``check_module`` stays for the checklist hook, which runs per file.
+Rule 2, reachable per-verb help (any production module): a help provider that
+selects content by testing its parameter against two or more string literals,
+while every in-module call omits that argument, strands its per-verb pages.
+It reads the provider, not the dispatch site: most routers rightly hand their
+printer nothing, because that printer has no per-verb content.
 """
 
 import ast
@@ -73,17 +41,13 @@ _HELP_STRINGS = frozenset({"--help", "-h"})
 
 _ENTRY_NAMES = {"main", "handle_command"}
 
-# "help" has to be a whole word. Matching the substring pulls in every
-# ``_local_helpers``/``_helper_kind`` in the tree: an early cut of rule 2 had
-# a population of 56 that way, 49 of them not help machinery at all, and its
-# precision was an accident of what those helpers happened to be called with.
+# "help" has to be a whole word: a substring match pulls in every ``_helper`` name.
 _NAME_TOKENS = re.compile(r"[^a-z0-9]+")
 
 # Two literals, not one. A provider that tests its parameter once is usually
 # guarding ``is None`` or a single alias; per-verb CONTENT means a menu.
 _MIN_VERB_LITERALS = 2
 
-# Rule 2 walks the branch itself, so it owns its own corpus.
 _SOURCE_DIR = "apps"
 
 
@@ -169,14 +133,7 @@ def _is_nonargs_subscript_help(node: ast.Compare) -> bool:
 def _has_subcommand_help_guard(func_node: ast.AST, func_name: str = "") -> bool:
     """Return True if the function has a subcommand-level --help check.
 
-    Detects patterns like:
-      remaining_args[0] in ["--help", "-h"]
-      "--help" in remaining_args
-      rest[0] == "--help"
-    where the variable is NOT the raw args/argv.
-
-    In handle_command(), args IS the subcommand args (not full argv),
-    so args[0] checks there count as subcommand guards.
+    In handle_command(), args IS the subcommand args (not full argv), so args[0] counts.
     """
     args_are_subcommand = func_name == "handle_command"
     for node in ast.walk(func_node):
@@ -201,25 +158,15 @@ def _has_subcommand_help_guard(func_node: ast.AST, func_name: str = "") -> bool:
     return False
 
 
-# =============================================================================
-# RULE 2 — per-verb help that no caller can reach
-# =============================================================================
-
-
 def _is_help_name(name: str) -> bool:
-    """Whether ``name`` carries "help" as a whole token.
-
-    ``helper`` and ``helpers`` are a different word and must not match, or the
-    rule starts reading every private test helper in the branch.
-    """
+    """Whether ``name`` carries "help" as a whole token."""
     return "help" in [t for t in _NAME_TOKENS.split(name.lower()) if t]
 
 
 def _produces_help_text(func_node: ast.AST) -> bool:
     """Whether this function hands back or prints TEXT.
 
-    A provider returns a page; a predicate (``_is_help_flag``) returns a bool.
-    Only the first kind can have per-verb content to lose.
+    A predicate (``_is_help_flag``) returns a bool and has no per-verb content to lose.
     """
     for node in ast.walk(func_node):
         if isinstance(node, ast.Return):
@@ -240,9 +187,7 @@ def _produces_help_text(func_node: ast.AST) -> bool:
 def _verb_literals(func_node: ast.AST, param: str) -> set[str]:
     """The verbs this function selects content with, read off its own body.
 
-    Name-independent on purpose: a branch is free to call the parameter
-    ``command``, ``verb`` or ``topic``, and pinning a vocabulary here would
-    make the rule learn drone's word rather than the shape.
+    Name-independent: the parameter may be ``command``, ``verb`` or ``topic``.
     """
     verbs: set[str] = set()
     for node in ast.walk(func_node):
@@ -256,8 +201,7 @@ def _verb_literals(func_node: ast.AST, param: str) -> set[str]:
 def _tests_param(node: ast.AST, param: str) -> TypeGuard[ast.Compare]:
     """Whether this node compares ``param`` against something.
 
-    A TypeGuard, not a bool: the narrowing has to reach the caller, or the
-    reader (and pyright) cannot see why the next line may treat it as one.
+    A TypeGuard, not a bool, so the narrowing reaches the caller.
     """
     return isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == param
 
@@ -282,11 +226,7 @@ def _compared_strings(node: ast.Compare) -> set[str]:
 
 
 def _subscript_keys(func_node: ast.AST, node: ast.Subscript) -> set[str]:
-    """The menu behind ``pages[command]``, literal or one name-hop away.
-
-    Counting the subscript as a single verb hid every dict-keyed provider
-    behind the two-literal floor.
-    """
+    """The menu behind ``pages[command]``, literal or one name-hop away."""
     if isinstance(node.value, ast.Dict):
         return _dict_string_keys(node.value)
     if isinstance(node.value, ast.Name):
@@ -345,9 +285,8 @@ def _calls_to(tree: ast.Module, name: str) -> list[ast.Call]:
 def find_unreachable_verb_help(tree: ast.Module) -> list[str]:
     """Per-verb help providers whose every in-module call omits the verb.
 
-    A provider with NO call site here is left alone: its callers live in
-    another module and this lane cannot see them, so there is nothing to
-    measure. Silence on what cannot be read beats a guess either way.
+    A provider with NO call site here is left alone: its callers live in another
+    module this lane cannot see.
     """
     findings: list[str] = []
     for name, (param, verb_count, lineno) in _per_verb_providers(tree).items():
@@ -383,8 +322,7 @@ def _parse(path: Path) -> ast.Module | None:
 def _is_production(file_path: str) -> bool:
     """APPLIES_TO = "production", read through the shared gate.
 
-    Both lanes consult applicability.py so scope can never be decided twice
-    and differently — that disagreement is the reason the module exists.
+    Both lanes consult applicability.py so scope is never decided twice, differently.
     """
     return not applicability.is_test_path(file_path) and not applicability.is_retired_path(file_path)
 
@@ -447,9 +385,8 @@ def _bypassed_result() -> Dict:
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check one file. Entry points get both rules; any other module gets rule 2.
 
-    This is the checklist lane's door (the PostToolUse hook runs per file).
-    The audit lane calls ``check_branch`` instead — rule 2's corpus is the
-    branch, not the entry point, because that is where the species lives.
+    The checklist lane's door (the PostToolUse hook runs per file); the audit
+    lane calls ``check_branch``, because rule 2's corpus is the whole branch.
     """
     path = Path(module_path)
 
@@ -501,12 +438,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Rule 1 on the entry point, rule 2 on every production module.
-
-    Rule 2 had to leave entry_point scope to exist at all: drone's stranded
-    per-verb help lived in ``apps/modules/git_module.py``, a file the audit
-    lane never handed this checker.
-    """
+    """Rule 1 on the entry point, rule 2 on every production module."""
     branch = Path(branch_path)
     if is_bypassed(str(branch), "subcommand_help", bypass_rules=bypass_rules):
         return _bypassed_result()

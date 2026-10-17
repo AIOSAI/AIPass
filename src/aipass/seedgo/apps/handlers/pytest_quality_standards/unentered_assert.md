@@ -142,6 +142,7 @@ file must never read as an absent one.
 standing in the body already proves something always runs, so the unit is
 excused a step earlier and the literal-iterable arm is the one that fires. It is
 written down here rather than left for the next reader to discover as a
-surprise.
+surprise. The assert arm stays because `has_floor` answers for one loop, for a
+caller that reads loops directly.
 
 *Design: DPLAN-0323 / FPLAN-0469*

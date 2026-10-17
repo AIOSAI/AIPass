@@ -3,7 +3,7 @@
 # Description: Completeness + join-key tests for audit/artifact.py
 # Version: 1.2.0
 # Created: 2026-08-11
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit/artifact.py."""
@@ -26,10 +26,6 @@ import pytest
 
 from aipass.seedgo.apps.handlers.audit import artifact as audit_artifact
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 # Deliberately longer than the display's 60-char clip.
 LONG_MESSAGE = (
@@ -117,11 +113,6 @@ def _write_and_load(tmp_path: Path, results, **kwargs) -> dict:
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# Completeness — the core regression
-# ---------------------------------------------------------------------------
-
-
 def test_all_violations_survive_display_caps(tmp_path):
     """14 files x 2 standards = 28 violations, plus 2 more — all 30 must land."""
     branch_root = tmp_path / "prax"
@@ -195,11 +186,6 @@ def test_branch_level_failed_checks_are_kept(tmp_path):
     assert doc["metadata"]["totals"]["failed_checks"] == 1
 
 
-# ---------------------------------------------------------------------------
-# Join keys — (file, standard) against .seedgo/bypass.json
-# ---------------------------------------------------------------------------
-
-
 def test_violations_carry_branch_relative_file_and_standard(tmp_path):
     """Join keys are explicit fields, matching bypass.json's 'file' + 'standard'."""
     branch_root = tmp_path / "prax"
@@ -248,11 +234,6 @@ def test_type_errors_carry_join_keys(tmp_path):
     assert row["file"] == "apps/modules/typed.py"
     assert row["standard"] == "diagnostics"
     assert row["branch"] == "PRAX"
-
-
-# ---------------------------------------------------------------------------
-# Metadata
-# ---------------------------------------------------------------------------
 
 
 def test_metadata_block_is_well_formed(tmp_path):
@@ -317,11 +298,6 @@ def test_multiple_branches_all_appear(tmp_path):
     assert len([v for v in doc["violations"] if v["branch"] == "FLOW"]) == 8
 
 
-# ---------------------------------------------------------------------------
-# Failure surfacing + paths
-# ---------------------------------------------------------------------------
-
-
 def test_write_failure_raises_rather_than_passing_silently(tmp_path):
     """A file where the parent directory should be — must raise, not no-op."""
     blocker = tmp_path / "blocker"
@@ -344,12 +320,7 @@ def test_default_path_is_derived_not_hardcoded(tmp_path):
 
 
 def test_scoped_run_does_not_clobber_the_fleet_artifact(tmp_path):
-    """A single-branch run writes its own file; last_audit.json stays fleet-only.
-
-    @prax ran 'audit aipass @prax' and it overwrote last_audit.json with a
-    one-branch document. metadata.scope was honest, but a consumer reading the
-    file cold measured one branch and concluded the other 16 were clean.
-    """
+    """A single-branch run writes its own file; last_audit.json stays fleet-only."""
     scoped = audit_artifact.default_artifact_path("prax")
     fleet = audit_artifact.default_artifact_path()
 
@@ -359,12 +330,7 @@ def test_scoped_run_does_not_clobber_the_fleet_artifact(tmp_path):
 
 
 def test_no_bypass_run_does_not_clobber_the_normal_artifact(tmp_path):
-    """A --no-bypass run writes its own file — same tree, deliberately lower numbers.
-
-    Identical hazard to the scoped-run one above: a consumer reading
-    last_audit.json cold has no way to know the run that produced it had every
-    bypass rule switched off, and would publish the raw score as the real one.
-    """
+    """A --no-bypass run writes its own file — same tree, deliberately lower numbers."""
     fleet = audit_artifact.default_artifact_path()
     fleet_raw = audit_artifact.default_artifact_path(no_bypass=True)
     scoped_raw = audit_artifact.default_artifact_path("prax", no_bypass=True)
@@ -376,19 +342,7 @@ def test_no_bypass_run_does_not_clobber_the_normal_artifact(tmp_path):
 
 
 def test_a_second_pack_does_not_clobber_the_aipass_fleet_record(tmp_path):
-    """A non-default pack writes its own file; last_audit.json stays the aipass record.
-
-    THE LIVE DEFECT, found by running the shadow cycle: `audit pytest_quality`
-    is a fleet run with no flags, so it took the same path as `audit aipass`
-    and overwrote last_audit.json with a 12-standard shadow score that gates
-    nothing. The file sat that way for ~25 minutes. A consumer reading it cold
-    expects the 47-standard compliance record and would have measured a pack
-    whose numbers nobody may act on.
-
-    Identical in kind to the scoped-run and no-bypass hazards pinned above, and
-    the cure is theirs: the pack is part of the name. `aipass` stays unsuffixed
-    because it IS the compliance record every existing consumer already reads.
-    """
+    """A non-default pack writes its own file; last_audit.json stays the aipass record."""
     fleet = audit_artifact.default_artifact_path()
     shadow = audit_artifact.default_artifact_path(pack="pytest_quality")
 
@@ -398,24 +352,14 @@ def test_a_second_pack_does_not_clobber_the_aipass_fleet_record(tmp_path):
 
 
 def test_the_default_pack_keeps_the_historical_artifact_name(tmp_path):
-    """`aipass` and an unstated pack both answer last_audit.json.
-
-    The counter-arm, and it is load-bearing: CI and every saved consumer read
-    that exact name. A cure that renamed the aipass artifact would fix the
-    collision by breaking the thing the collision endangered.
-    """
+    """`aipass` and an unstated pack both answer last_audit.json."""
     assert audit_artifact.default_artifact_path(pack="aipass") == audit_artifact.default_artifact_path()
     assert audit_artifact.default_artifact_path(pack=None).name == "last_audit.json"
     assert audit_artifact.default_artifact_path(pack="aipass", specific_branch="prax").name == "last_audit_prax.json"
 
 
 def test_pack_and_branch_and_bypass_all_discriminate_together(tmp_path):
-    """Three axes, three suffixes, no pair collides.
-
-    Pinned because the defect was precisely one axis missing from a function
-    that already handled the other two: partial discrimination reads as full
-    discrimination at the call site.
-    """
+    """Three axes, three suffixes, no pair collides."""
     paths = {
         audit_artifact.default_artifact_path(),
         audit_artifact.default_artifact_path(specific_branch="prax"),

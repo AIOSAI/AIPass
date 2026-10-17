@@ -3,42 +3,16 @@
 # Description: age and authorship per test function, from one blame per file
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 AGE AND AUTHORSHIP, from one `blame` per FILE and an AST line-range map.
 
-WHY PER FILE AND NOT PER FUNCTION. Asking version control directly for a line
-range costs 0.05-0.12 s per function - about 27 minutes for this fleet. One
-blame per file plus a line-range map costs about 30 seconds for the same 20,000
-answers. The 100x is the whole reason this report runs in a minute instead of
-half an hour, and it was measured rather than assumed.
-
-READ-ONLY BY CONSTRUCTION. The only subprocess this module runs is a blame, a
-verb the fleet's own gate names as read-only and allows raw. Nothing here
-writes, stages, or moves a reference.
-
-WHAT BLAME ACTUALLY ANSWERS, which is not "when was this test written". It
-reports, for each line as it stands NOW, the commit that last touched it. So
-the oldest surviving line in a function gives a LOWER BOUND on that function's
-age: a test written a year ago and reformatted last week reads as a week old.
-The bias runs one way - this module UNDER-states age, never over-states it -
-and the artifact says so rather than publishing a distribution that looks more
-precise than it is.
-
-AUTHOR BUCKETS ARE A DECLARED TABLE, NOT A GUESS. On this fleet three commit
-identities share one email address, so buckets key on the author NAME. Names
-the table does not know go to OTHER rather than to `human`: defaulting an
-unrecognised identity into the smallest and most decision-relevant bucket is
-how a report ends up claiming humans wrote tests they did not. Every distinct
-name is published with its count, so the reader classifies the residual.
-
-A FILE WITH NO HISTORY IS REPORTED, NEVER DEFAULTED. Two test files on this
-fleet are collected and run by CI with no history at all. They get
-`author_bucket: UNTRACKED` and their own summary line, because a test with no
-history is a different object from a test whose history is unremarkable.
-"""
+One blame per file instead of per function is ~100x faster. Blame dates each
+line's LAST touch, so age is a LOWER BOUND. Authors key on NAME (agents and the
+human share one email); an unknown name goes to OTHER, never HUMAN. A file with
+no history is UNTRACKED, never defaulted."""
 
 import re
 import subprocess
@@ -54,26 +28,19 @@ from aipass.prax import logger
 #: The read-only version-control verb this module runs, and nothing else.
 BLAME_ARGV: tuple = ("git", "blame", "--porcelain", "--")
 
-#: Commit identities that are agents, and the bucket each belongs to. Keyed by
-#: author NAME because this fleet's agents and its human share one email.
 AUTHOR_BUCKETS: dict = {
     "AIOSAI": "AGENT_AIOSAI",
     "AIPass": "AGENT_AIPASS",
     "dependabot[bot]": "BOT",
 }
 
-#: Where an author name the table does not know goes. Deliberately not `HUMAN`.
 BUCKET_OTHER = "OTHER"
 
-#: A file version control has no history for.
 BUCKET_UNTRACKED = "UNTRACKED"
 
-#: Seconds in a day, for turning commit timestamps into ages.
 SECONDS_PER_DAY = 86400.0
 
-#: How many blames run at once. Each is a subprocess doing I/O, so threads are
-#: the right tool - but the count is capped: 600 concurrent child processes on
-#: a four-core box spend more time being scheduled than being useful.
+#: Capped: hundreds of concurrent blames on a four-core box spend their time being scheduled.
 BLAME_WORKERS = 8
 
 #: The porcelain header line that opens each hunk: sha, source line, result line.
@@ -131,15 +98,8 @@ def _blame_one(root: Path, relpath: str) -> LineHistory:
 def parse_porcelain(output: str) -> LineHistory:
     """Per-line author and commit time from porcelain blame output.
 
-    Porcelain emits the full header once per commit and only the sha line on
-    every later hunk from that same commit, so author and time are cached per
-    commit and reused. A parser that expected a header on every line would
-    attribute every repeated hunk to nobody.
-
-    Written as guard-and-continue rather than an if/elif ladder: an `elif` is a
-    nested `If` in the tree, so a four-branch ladder inside a loop reads as
-    depth five to any reader - human or checker - measuring nesting.
-    """
+    Porcelain gives the full header once per commit, so identity is cached per commit.
+    Guard-and-continue, not elif: an elif ladder in this loop measures as depth five."""
     authors: Dict[int, str] = {}
     times: Dict[int, int] = {}
     by_commit: Dict[str, Tuple[str, int]] = {}
@@ -171,11 +131,7 @@ def _remember_identity(line: str, commit: str, by_commit: Dict[str, Tuple[str, i
 def attribute(history: LineHistory, first_line: int, last_line: int, now: float) -> FunctionHistory:
     """The history of one function, from the blame of the file it lives in.
 
-    The author is whoever owns the MOST lines in the range, not whoever touched
-    it last: a one-line fix by a second hand does not make that hand the author
-    of the test, and an inventory that said otherwise would re-attribute a
-    generated batch to whoever most recently ran a formatter over it.
-    """
+    The author owns the MOST lines in the range, not the last touch: a formatter is not an author."""
     if not history.tracked:
         return _no_history()
 
@@ -209,10 +165,7 @@ def bucket_for(author: str) -> str:
 def author_census(histories: Sequence[FunctionHistory]) -> List[dict]:
     """Every distinct author name with its bucket and test count.
 
-    Published so the OTHER bucket is auditable. A reader who knows a name in
-    OTHER is an agent can say so; a reader handed only a `human: 52` line
-    cannot check it at all.
-    """
+    Published so the OTHER bucket is auditable."""
     counts = Counter(history.author for history in histories if history.author)
     return [{"author": author, "bucket": bucket_for(author), "tests": count} for author, count in counts.most_common()]
 

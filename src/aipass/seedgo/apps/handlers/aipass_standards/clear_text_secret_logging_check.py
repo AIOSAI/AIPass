@@ -3,153 +3,12 @@
 # Description: Clear Text Secret Logging Standards Checker Handler
 # Version: 1.3.0
 # Created: 2026-10-10
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Clear Text Secret Logging Standards Checker Handler
+"""Clear Text Secret Logging Standards Checker Handler
 
-WHERE IT CAME FROM. PR #774 round seven, head 38166f35: GitHub's CodeQL
-check went red while every workflow job was green. Its one HIGH row,
-py/clear-text-logging-sensitive-data, sits on prax ``apps/modules/logger.py:135``,
-``SystemLogger.warning``: the fleet's one log sink, so CodeQL reports the SINK
-and lists the two SOURCES it traced into it, both classified "secret". Read
-against CodeQL's own source model (a ``foo.<name>`` attribute read whose name
-says secret is a source), both are ``secrets_store.SECRETS_BASE`` reads in @api
-``apps/handlers/host/tokens.py`` -- ``store_path()`` :182 and ``lock_path()``
-:267 -- reaching three warning calls: the temp-store cleanup :324, the stale
-lock :370 and ``_drop_lock`` :438. A path inside the secrets directory, not
-the secret; the scanner read the name.
-
-THIS RULE CONVICTS THE CALLER LINE, never the sink: a prax logger call
-(``logger.debug/info/warning/error/critical/exception``, the receiver named
-``logger`` or bound by an import from ``aipass.prax``) is a row when a piece of
-its message -- a positional argument, an f-string piece, a ``%`` operand, a
-``.format()`` argument or a ``+`` operand -- is:
-
-  1. NAMED AS A SECRET. A Name, Attribute or Call whose identifier holds a
-     secret word as a whole segment (``SECRET_WORDS``; ``api_key`` and its
-     kin as consecutive segments, camelCase split). ``credentials[0]`` reads
-     the collection; ``str()``, ``repr()``, ``Path()`` and the string methods
-     (``.strip()`` ...) are looked through.
-  2. BUILT IN THIS FILE FROM A SECRET-NAMED SOURCE. The derivation STARTS
-     only from a secret-named module-level binding (``SECRETS_BASE = ...`` at
-     the file's top level, read where no local shadows it), a secret-named
-     attribute read (``secrets_store.SECRETS_BASE``, ``self.api_key``) -- a
-     token word seeds neither (``QUIET_SEED_WORDS``) -- or, since 1.1.0
-     (dispatch 39bfe173, CodeQL round nine), the RESULT of a call named by
-     CodeQL's source words (``_get_secret(bot_id)``, ``load_trusted_keys()``;
-     ``_call_seeds``: secret(s), trusted, confidential, none of CodeQL's
-     exclusion words, no setter verb). It never starts from a parameter, a
-     loop or ``with`` target or a function-local name. From a source it
-     FOLLOWS: assignments (and loops or ``with`` items over a built value),
-     comprehensions over a built value (their element read with the target
-     bound to it), the wrappers sorted/list/tuple/set/dict/str/repr/join/
-     format/f-strings, a same-file function whose ``return`` hands a built
-     value back, a same-file parameter handed one, THE SAME-FILE HOP (a call
-     whose argument is built, to a function that returns that parameter: the
-     only place a parameter is followed, and per call -- a clean argument
-     through the same helper stays clean), an attribute of a built name
-     (``target.parent``), and since 1.2.0 (dispatch fad65d17, CodeQL round
-     ten) the READS of a built value -- ``.get(k)``, ``.pop(k)``,
-     ``.setdefault(k, d)``, ``.items()``, ``.keys()``, ``.values()``
-     (``FOLLOWED_READS``; the receiver carries, a default does not) beside the
-     subscripts and loops already followed -- and the ADDS of one:
-     ``seen.append(key)``, ``.extend``, ``.add``, ``.insert(i, x)`` on ``x``
-     bind the named collection (``FOLLOWED_ADDS``), and a dict literal
-     holding a built key or value is built. A ``non_``/``not_`` prefix acquits nothing. This arm
-     is what reaches the CodeQL rows: no name on those log lines says secret,
-     the source they were built from does.
-  3. (1.3.0, dispatch 4bb9a4c9, CodeQL round eleven) A SECRET READER'S
-     DOCUMENT NAME IN THE MESSAGE. Inside a def named as a secret reader
-     (``READER_VERBS`` get/read/load/fetch as a segment, on ``_call_seeds``'
-     words: secret(s)/trusted/confidential, no exclusion word, no setter verb;
-     a ``list`` segment makes it a lister, never a reader), in a file that
-     defines a secret LISTER (list_secrets: the file's own defs say secrets
-     store), a required positional parameter the lister does NOT take reaches
-     the log call's MESSAGE -- the first argument (or msg=): an f-string piece,
-     either side of a ``%`` or ``+`` in it, ``.format()`` on it, str()/repr()
-     and the string methods. The lister's parameters are the namespace the
-     caller chose (provider); the reader's others are the document names the
-     listing hands back (slug). MESSAGE ONLY for this arm, the narrowest form:
-     a ``%s`` argument is not its row (arms 1 and 2 still judge arguments). A
-     rebound parameter, a redaction, len() or a short slice acquits. This is
-     the one parameter seed: the ruling below stands for everything else.
-
-WHY ARM 2 STARTS SO NARROWLY. A parameter or loop variable called ``token``
-is a shell word or a counter as often as a credential (drone's
-``_resolve_mail_token(token)`` hands its argument back as ``command``); its
-name is judged by arm 1 wherever it reaches a log line, and spreading from it
-convicted lines that say nothing secret. A module-level binding and an
-attribute are where a file names its secret stores; those are CodeQL's
-sources too (SensitiveVariableAssignment, SensitiveAttributeAccess).
-
-CHECK FIRST (2026-10-10, 1,301 product files in src/aipass/*/apps and lib):
-16 rows in 8 files -- api 7 (arm 2: the six CodeQL-reachable warnings plus a
-debug on the same lock path), drone 1, hooks 7, skills lib 1 (all arm 1).
-Narrowings while measuring, each for a stated reason: 17 rows spread from
-secret-named calls, 6 from a subscript target whose index was read as a
-binding, and 9 from parameter, loop and local sources (the ruling above).
-
-ROUND NINE (1.1.0, 2026-10-10, 1,302 files, the fleet at 0 rows before): CodeQL
-traced @skills telegram ``config.py`` load_bot_config -- ``secret =
-_get_secret(bot_id)``, ``strays = non_secret_keys(secret)`` (a sorted generator
-over the document), ``strays`` on a warning -- which 1.0.0 missed. After the
-widening: 0 rows on the live fleet (@skills had cured the line); the pre-cure
-config.py convicts at its warning. Measured, each narrowing kept for its row:
-call seeds from every secret word 10 (token_hex x4, issue_token,
-context_fill_tokens x2, _get_turn_token x2, _without_credentials); adding
-credential(s) to the call words 1 (_without_credentials); no setter-verb
-exclusion 1 (@api host/config.py:150 from set_secret); token-word binding and
-attribute seeds 1 (@prax monitor.py:274, argparse's ``args.tokens``). Arm 1's
-new words trusted and confidential: 0 new rows.
-
-ROUND TEN (1.2.0, 2026-10-11, 1,383 files): CodeQL's alert kept two sources
-after rounds eight and nine; the chain it most plausibly reports is @api
-host/tokens.py load_tokens -- ``stored = secrets_store.get_secret(...)``,
-``records = stored.get("tokens")`` (lost here before 1.2.0), the
-comprehension, touch_token's loop and ``_is_due(record.get("last_used"))`` --
-to the ``last_used %r`` warning (:655). The pre-cure file (HEAD 6c3aa9aa)
-convicts at :655 and only there (:631's token_id crosses from server.py);
-@api's cure acquits. Live fleet 0 rows before and after; every sub-arm
-(each read, each add, the dict literal) measured alone: 0 rows.
-
-ROUND ELEVEN (1.3.0, 2026-10-11, 1,383 files): CodeQL's SARIF path, printed
-into the job log, runs from telegram's ``_api_list_secrets`` through
-handler.py's loop, ``migrate_bot_config``, ``_get_secret`` and api's modules
-``get_secret`` to api ``handlers/auth/secrets.py:83``,
-``logger.warning(f"Secret not found: {provider}/{slug}")``, and into prax
-logger.py:135 at the MESSAGE parameter's columns. CodeQL's reach is the
-message only (why rounds eight to ten, all %s arguments, never moved the
-count); this rule stays stricter for arms 1 and 2. Arm 3 convicts the pre-cure
-file (HEAD 6c3aa9aa) at :83 and only there (:64 logs provider, the lister's
-own parameter; :191 and :220 log ``e``); @api's cure (83f812c9) acquits.
-Fleet 0 rows before and after. Without the lister's namespace (every required
-parameter of a reader, gated or not): 1 false row, :64 ``provider``; the
-last required parameter alone, ungated: 0 rows, kept out as a guess of
-position where the lister is the file's own statement.
-
-NOT A ROW, each for its reason:
-  * An IDENTIFIER of a secret rather than the secret: a segment beside the
-    word says what it is (``IDENTIFIER_SEGMENTS``: token_id, token_count,
-    token_store, secret_path, secret_name, n_tokens -- the dispatch's own
-    list and their plain kin).
-  * A REDACTION: a call whose name holds redact, mask or scrub, ``len()``, or
-    a slice that shows at most ``MAX_SHOWN`` characters (``[-4:]``). A wider
-    slice (``token[:10]``) still shows the secret and stays a row.
-  * The secret word inside a string constant: the message names a field, it
-    does not carry one.
-  * Any other receiver, ``print`` included: ``output_routing`` owns those.
-  * Flow through another file's function: the derived arm is file-local, so a
-    value that crosses a module boundary is judged again by its name there
-    (telegram handler.py's loop over the listing is out of reach; arm 3
-    convicts where the document name lands in a reader's message instead).
-
-WHY NAMES RULE. A scanner and a stranger both read the name. A name that says
-secret on a log line is a leak in the reader's eyes even when the value is
-benign, so the cure for a false hit is the RENAME, and the rename is a cure,
-not a dodge. A real secret is cured by the redaction above, or by leaving the
-value out of the line.
+Reference: clear_text_secret_logging.md
 """
 
 import ast
@@ -197,9 +56,8 @@ SECRET_WORDS: Tuple[Tuple[str, ...], ...] = (
     ("confidential",),
 )
 
-#: The secret words whose CALL result seeds arm 2: CodeQL's own source words
-#: (secret|trusted|confidential; ``untrusted`` is its own segment, so never
-#: matches). token and password calls stay arm 1 only: token_hex, issue_token.
+#: The secret words whose CALL result seeds arm 2: CodeQL's own source words.
+#: ``untrusted`` is its own segment, so never matches; token and password calls stay arm 1.
 CALL_SOURCE_WORDS = frozenset({"secret", "secrets", "trusted", "confidential"})
 
 #: CodeQL's not-a-source words: a call name holding one anywhere seeds nothing.
@@ -218,9 +76,8 @@ SOURCE_EXCLUSIONS = (
     "redact",
 )
 
-#: Words that never SEED arm 2 from a binding or an attribute (arm 1 still reads
-#: them on the log line): measured, a token is a parser word in this fleet --
-#: argparse's ``args.tokens`` in prax monitor.py reached a log line as ``args``.
+#: Words that never SEED arm 2 from a binding or an attribute (arm 1 still reads them):
+#: a token is a parser word in this fleet (argparse's ``args.tokens``).
 QUIET_SEED_WORDS = frozenset({"token", "tokens"})
 
 #: Verbs of a call that PUTS a secret somewhere: its result is a status, not the secret.
@@ -264,20 +121,18 @@ PASS_THROUGH_CALLS = frozenset(
     {"str", "repr", "Path", "fspath", "sorted", "list", "tuple", "set", "frozenset", "dict", "reversed"}
 )
 
-#: Reads whose result is (part of) the value they are called on (1.2.0, dispatch
-#: fad65d17): ``stored.get("tokens")``, ``built.items()``. Only the receiver
+#: Reads whose result is (part of) the value they are called on. Only the receiver
 #: carries: a ``.get(k, default)`` default is not followed.
 FOLLOWED_READS = frozenset({"get", "pop", "setdefault", "items", "keys", "values"})
 
-#: Adds that put a value into the collection they are called on (1.2.0):
+#: Adds that put a value into the collection they are called on.
 #: ``seen.append(key)`` binds ``seen``. ``insert(i, x)`` is judged on ``x`` only.
 FOLLOWED_ADDS = frozenset({"append", "extend", "add", "insert"})
 
-#: Whether a dict literal holding a built key or value is built (1.2.0).
+#: Whether a dict literal holding a built key or value is built.
 FOLLOW_DICT_LITERALS = True
 
-#: Verbs of a def that READS a secret document out of a store (1.3.0, dispatch
-#: 4bb9a4c9): get_secret, _get_secret, read_secret, load_secret, fetch_secret.
+#: Verbs of a def that READS a secret document out of a store (get_secret, read_secret).
 READER_VERBS = frozenset({"get", "read", "load", "fetch"})
 
 #: The verb of a def that LISTS a store's documents (list_secrets): it returns
@@ -305,11 +160,6 @@ CURE = (
 )
 
 _CAMEL = re.compile(r"([a-z0-9])([A-Z])")
-
-
-# =============================================
-# NAMES
-# =============================================
 
 
 def segments(identifier: str) -> List[str]:
@@ -353,13 +203,7 @@ def _is_redaction(name: str) -> bool:
 
 
 def _call_seeds(name: str) -> bool:
-    """Whether a call so named returns a secret, by CodeQL's source model.
-
-    Its secret word is one of CALL_SOURCE_WORDS, kept by secret_word() (so
-    secret_path() and redact_secret() acquit), no SOURCE_EXCLUSIONS word is in
-    it anywhere (hash_secret, get_user_secret) and no SETTER_VERBS segment says
-    it stores rather than returns (set_secret, delete_secret).
-    """
+    """Whether a call so named returns a secret, by CodeQL's source model."""
     if secret_word(name) not in CALL_SOURCE_WORDS:
         return False
     if any(word in name.lower() for word in SOURCE_EXCLUSIONS):
@@ -410,11 +254,6 @@ def _source_text(expr: ast.expr) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
-# =============================================
-# THE FILE'S SCOPES
-# =============================================
-
-
 class _File:
     """One parsed file: its functions, and what is derived from a secret in each scope."""
 
@@ -433,16 +272,9 @@ class _File:
         # Comprehension targets bound to what they iterate, while one is read.
         self.overlay: Dict[str, str] = {}
         self.loggers = _logger_names(tree)
-        # Arm 2 STARTS only from a secret-named module-level binding
-        # (SECRETS_BASE = ...), a secret-named attribute read
-        # (secrets_store.SECRETS_BASE, self.api_key) or the result of a call
-        # _call_seeds() names a source (_get_secret(bot_id); dispatch 39bfe173).
-        # Never from a parameter, a loop or with target or a function-local
-        # name: those convicted drone's `command` through
-        # _resolve_mail_token(token) and memory's `message` on lines whose own
-        # names say nothing (coordinator ruling 2026-10-10). Every secret-named
-        # Name, Attribute or Call ON the log line is still arm 1. scan() sets
-        # this to read.
+        # Arm 2 starts only from a secret-named module-level binding, attribute read or
+        # source call; never from a parameter, loop or with target or function-local name.
+        # A secret-named Name, Attribute or Call ON the log line is still arm 1 (scan sets this).
         self.reading_log_line = False
         self.module_secrets = _module_secret_bindings(tree)
         self.scope_locals: Dict[ast.AST, Set[str]] = {tree: set()}
@@ -507,12 +339,7 @@ class _File:
     def _comprehension_leak(
         self, expr: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp, scope: ast.AST
     ) -> str | None:
-        """A comprehension: its element, read with each target bound to what it iterates.
-
-        ``sorted(key for key in document)`` carries the document's keys; a filter
-        (``if key not in SECRET_FIELDS``) acquits nothing; ``len(key)`` as the
-        element is a redaction like anywhere else.
-        """
+        """A comprehension: its element, read with each target bound to what it iterates."""
         saved = dict(self.overlay)
         try:
             for generator in expr.generators:
@@ -718,11 +545,7 @@ def _derive_pass(file: _File, scopes: List[Tuple[ast.AST, List[ast.stmt]]]) -> b
 
 
 def _derive_add(file: _File, call: ast.Call, scope: ast.AST) -> bool:
-    """Mark a collection a built value is added to: ``seen.append(key)`` binds ``seen``.
-
-    The receiver must be a plain name (``self.items.append(x)`` binds no name,
-    like a subscript target); ``insert(i, x)`` is judged on ``x``, never ``i``.
-    """
+    """Mark a collection a built value is added to: ``seen.append(key)`` binds ``seen``."""
     func = call.func
     if not (isinstance(func, ast.Attribute) and func.attr in FOLLOWED_ADDS and isinstance(func.value, ast.Name)):
         return False
@@ -780,11 +603,6 @@ def _is_log_call(node: ast.Call, loggers: Set[str]) -> bool:
     )
 
 
-# =============================================
-# ARM 3: A SECRET READER'S DOCUMENT NAME IN THE MESSAGE (1.3.0)
-# =============================================
-
-
 def _is_secret_def(name: str, verbs: frozenset) -> bool:
     """A def named on CodeQL's source words (as _call_seeds reads them) with one of ``verbs`` as a segment."""
     return _call_seeds(name) and any(part in verbs for part in segments(name))
@@ -798,14 +616,7 @@ def _required_positional(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Li
 
 
 def _document_parameters(tree: ast.Module) -> Dict[ast.AST, Set[str]]:
-    """Each secret reader's DOCUMENT parameters: the names its callers list out of the store.
-
-    Only in a file that defines a secret LISTER (list_secrets): the file's own
-    defs say it is a secrets store, and the lister's parameters are the
-    namespace a caller chooses (provider). A reader's required positional
-    parameters the lister does not take are the document names the listing
-    hands back (slug). A parameter the reader rebinds is not followed.
-    """
+    """Each secret reader's DOCUMENT parameters: the names its callers list out of the store."""
     defs = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     listers = [node for node in defs if _is_secret_def(node.name, LISTER_VERBS)]
     if not listers:
@@ -830,12 +641,7 @@ def _message(call: ast.Call) -> ast.expr | None:
 
 
 def _named_in_message(expr: ast.expr, names: Set[str]) -> str | None:
-    """The document parameter a message expression writes, or None.
-
-    Reads the f-string pieces, both sides of a ``%`` or ``+``, ``.format()``'s
-    receiver and arguments, str()/repr() and the string methods; a redaction,
-    len() or a slice of four characters or fewer acquits; any other call does too.
-    """
+    """The document parameter a message expression writes, or None."""
     if isinstance(expr, ast.Name):
         return expr.id if expr.id in names else None
     for piece in _message_parts(expr):
@@ -922,11 +728,6 @@ def scan(source: str) -> List[Tuple[int, str]]:
     return sorted(set(rows))
 
 
-# =============================================
-# CHECK
-# =============================================
-
-
 def _read(path: Path) -> str | None:
     """A file's text, or None if it cannot be read."""
     try:
@@ -947,15 +748,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a product file for a log call that writes a secret, or a value built from one, in clear text.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a product file for a log call that writes a secret, or a value built from one, in clear text."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 

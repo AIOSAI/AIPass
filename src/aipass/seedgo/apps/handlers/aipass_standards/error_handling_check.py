@@ -3,15 +3,10 @@
 # Description: Error Handling Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Error Handling Standards Checker Handler
-
-Validates error handling compliance — detects silent failures
-(bare except: pass) in production code.
-"""
+"""Error Handling Standards Checker Handler"""
 
 import ast
 from pathlib import Path
@@ -21,7 +16,6 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.aipass_standards import exception_handling
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 # APPLIES_TO: pytest.raises is the test idiom; a test's except blocks are deliberate.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
@@ -60,12 +54,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ERROR_HANDLING",
         }
 
-    # Only check: Error handling (for all files, not just non-test files)
     error_handling_check = check_error_handling(content, module_path)
     if error_handling_check:
         checks.append(error_handling_check)
 
-    # If no checks were added (no try/except blocks), pass
     if not checks:
         return {
             "passed": True,
@@ -97,15 +89,6 @@ def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[i
 
     Returns None when the file cannot be parsed, so the caller can skip rather
     than guess.
-
-    This replaced a line scanner that tracked an `in_except` flag and only cleared
-    it on a line starting at column 0. Nothing inside a class body starts at column
-    0, so once the flag was set it stayed set across method boundaries and the next
-    bare `pass` anywhere downstream -- in a different method, inside no except at
-    all -- was reported as a silent failure, against the earlier except's line.
-    The AST knows where a handler actually ends, and handler.lineno is already
-    1-indexed (the scanner reported a 0-based enumerate index, so every finding
-    came back one line low).
     """
     try:
         tree = ast.parse(content)
@@ -124,8 +107,7 @@ def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[i
                 continue
             # A `pass` guarding a block that does nothing but REPORT is catching
             # the failure of the report, not the original error — the same
-            # clause silent_catch uses, shared so the two cannot drift
-            # (@canary and @daemon, 2026-08-31).
+            # clause silent_catch uses, shared so the two cannot drift.
             if exception_handling.guards_a_diagnostic(node, module_path, handler.lineno):
                 continue
             silent.append(handler.lineno)
@@ -133,11 +115,7 @@ def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[i
 
 
 def check_error_handling(content: str, module_path: str = "") -> Optional[Dict]:
-    """Check for proper error handling patterns.
-
-    It reads the content alone; the `lines` it also took were never read and
-    were dropped, with the split that built them (seedgo, fleet green leg 8).
-    """
+    """Check for proper error handling patterns."""
     try_count = content.count("try:")
 
     if try_count == 0:

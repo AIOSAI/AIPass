@@ -3,23 +3,16 @@
 # Description: No Oracle Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 No Oracle Standards Content Handler
-
-Provides formatted no_oracle standards content.
-Module orchestrates, handler implements.
 """
 
 
 def get_no_oracle_standards() -> str:
-    """Return formatted no_oracle standards content with Rich markup.
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted no_oracle standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A test earns its place by proving something. If it verifies",

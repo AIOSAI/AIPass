@@ -3,63 +3,13 @@
 # Description: Rendered Path Oracle Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rendered Path Oracle Standards Checker Handler
 
-A test that asserts a PATH, spelled whole inside an f-string, against output a
-console RENDERED. Green on Linux, red on Windows and macOS. The specimen is
-@aipass's ``test_aipass_main.py``, ``TestMain.test_a_crash_whose_log_cannot_be_
-written_still_ends_on_the_crash_not_a_traceback`` (PR #787)::
-
-    log_home = tmp_path / "system_logs"
-    ...
-    _out, err = capsys.readouterr()
-    assert f"... Permission denied: '{log_home}')" in err
-
-TWO FRAGILITIES, and the second survives a cure for the first:
-
-  WRAP. Rich wraps a line at the console's width (the fleet conftest pins
-  200). A Windows tmp path (``C:\\Users\\runneradmin\\AppData\\Local\\Temp\\
-  pytest-of-runneradmin\\...``) or macOS's ``/private/var/folders/...`` pushes
-  the line past it, and the wrapped output no longer holds the substring.
-
-  REPR. ``str(OSError)`` renders the filename with ``%r``, so on Windows the
-  backslashes are DOUBLED, and ``'{log_home}'`` (single backslashes) never
-  matches, wrap or not. A wider console does not cure this one.
-
-THE CURE is a stable fragment: assert the message's words without the path,
-and the path's ``.name`` (``"system_logs" in err``), or compare the path
-through a channel nothing renders (a returned value, the exception's
-``.filename``).
-
-WHAT IS CONVICTED, inside one ``def test_*`` -- one finding per assert:
-
-  NEEDLE: an f-string with a FormattedValue that is a PATH: the ``tmp_path``
-  parameter itself, a name bound in the test to ``tmp_path`` /
-  ``tmp_path_factory.mktemp(...)`` / an expression rooted at one (``/``,
-  ``.joinpath``, ``.resolve()``, ...), a name bound to ``Path(...)`` /
-  ``PurePath(...)`` and their siblings, ``str(<path>)``, or ``<path>.parent``.
-  ``<path>.name`` / ``.stem`` / ``.suffix`` is NOT a path -- it is the cure.
-
-  HAYSTACK: captured console output: a name from ``out, err =
-  capsys.readouterr()`` (or ``capfd``), ``captured.out`` / ``.err`` on a name
-  bound to ``readouterr()``, ``capsys.readouterr().out`` inline or bound, and
-  ``result.output`` / ``.stdout`` / ``.stderr`` on a name bound to a
-  ``CliRunner`` ``invoke`` or a ``subprocess.run``. A plain alias of one of
-  these (``out = captured.out``) is the same value and is followed.
-
-  THE COMPARE: ``needle in haystack``, ``not in``, and ``==`` / ``!=`` with
-  the needle on either side.
-
-HELD, never convicted: an f-string bound to a name first (``msg = f"..."``
-then ``msg in err``), a haystack TRANSFORMED before the compare (``said =
-" ".join(err.split())`` -- the specimen's own wrap cure, still REPR-fragile),
-``check_output``'s return, ``tmpdir`` (py.path), and a path that reached the
-test through a helper or a fixture other than ``tmp_path``. Each needs a data
-flow the AST cannot settle in one function; guessing would convict cures.
+Reference: rendered_path_oracle.md
 """
 
 import ast
@@ -73,10 +23,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
 
-#: Advisory, then ratchet. Fleet 2026-10-13, 762 test files: the specimen was
-#: already cured by @aipass, and 9 asserts elsewhere convict (backup 8, devpulse
-#: 1). branch_audit keeps an ADVISORY standard out of the gating average, so
-#: landing it moves no branch's number; gate it once the nine are cured.
+#: branch_audit keeps an ADVISORY standard out of the gating average; gate it once the fleet's hits are cured.
 ADVISORY = True
 
 STANDARD = "RENDERED_PATH_ORACLE"
@@ -365,15 +312,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for a whole path asserted against rendered console output.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for a whole path asserted against rendered console output."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -389,8 +328,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, "No path is asserted whole against rendered output"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per assert would hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(
         f"{path.name}:{line} {name} — f-string renders path {{{expr}}} into {haystack}. {WHY} - {CURE}"
         for line, name, expr, haystack in findings

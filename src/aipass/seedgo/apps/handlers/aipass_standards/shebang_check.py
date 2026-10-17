@@ -3,16 +3,13 @@
 # Description: Shebang Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-03-06
-# Modified: 2026-03-06
+# Modified: 2026-10-17
 # =============================================
 
 """
 Shebang Standards Checker Handler
 
-Validates that Python files do not contain shebang lines (#!/...).
-AIPass is a pip-installable package -- all execution goes through
-pyproject.toml entry points or python3 -m.  Shebangs are unnecessary
-and should be removed.
+Reference: shebang.md
 """
 
 from pathlib import Path
@@ -21,31 +18,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: scan every .py file, not just entry point
 # APPLIES_TO: a test file is library code - nothing executes it directly.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if a Python file contains a shebang line.
-
-    Shebangs (#!/...) are not needed in pip packages -- all execution
-    goes through pyproject.toml entry points or python3 -m.
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if a Python file contains a shebang line."""
     path = Path(module_path)
 
     if is_bypassed(module_path, "shebang", bypass_rules=bypass_rules):
@@ -76,7 +55,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "SHEBANG",
         }
 
-    # Check line 1 for shebang
     if first_line.startswith("#!"):
         return {
             "passed": False,

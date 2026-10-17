@@ -3,78 +3,12 @@
 # Description: v5 - where does a skip condition get its answer from
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """Where does this test's skip condition get its answer from?
 
-A test that skips itself when the thing it tests changes name has stopped being a
-test. The cost is measured, not theoretical: renaming one constant in one branch
-made 75 tests silently vanish, and the run stayed green. Nothing failed, because
-nothing ran, and nothing said so.
-
-THREE PROVENANCES, AND ONLY ONE OF THEM IS A DEFECT.
-
-The MACHINE. `sys.platform`, `os.environ`, `shutil.which`, an optional extra
-probed with `find_spec`. A Linux-only test that skips on Windows is correct code,
-and a rule that flagged it would teach projects to delete their own portability.
-A machine probe anywhere in the condition - or anywhere in a helper the condition
-calls - acquits the whole site outright.
-
-The SUBJECT. The condition asks whether a production symbol still EXISTS, with
-`hasattr` or `getattr`, or reads a name imported from the code under test. That is
-the defect: the test's answer to "should I run?" is derived from the very thing
-whose disappearance it was written to catch. Rename the symbol and the test does
-not fail - it evaporates.
-
-NOTHING. An unconditional skip. A test that never runs proves nothing, whatever
-it asserts, and the assertions inside it are a decoration on a green board.
-
-THE MODULE SCOPE IS MEASURED, AND IT IS THE EXPENSIVE ONE. A module-level
-`pytest.skip(..., allow_module_level=True)` removes an entire FILE, and it belongs
-to no test function, so a reader that walked only test functions would miss the
-single most costly skip in the catalog - which is exactly the shape that took the
-75 tests. Every file therefore carries a `<module>` scope of its own alongside its
-units, and that scope is scored like any other.
-
-ONE HOP INTO A LOCAL HELPER, AND NO FURTHER. A skip condition is often written as
-`if not _default_factory_raises_on_unknown():` - the provenance is real and it is
-one function away. The same is true of a module-level name the condition reads:
-the reasoning lives in the statement that computes it, which may be a `for` loop
-around a `hasattr`, not a bare assignment, so the enclosing top-level statement is
-what gets followed. It stops at one hop because a rule that chased an arbitrary
-call graph would be an interpreter, and an interpreter that runs the subject is
-the thing this pack refuses to be.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM.
-
-It does not claim a flagged skip is wrong. A suite testing an optional plugin
-legitimately asks whether the plugin is there, and that shape is indistinguishable
-from the defect at this distance. The rule names the provenance; a human decides.
-
-It does not see a condition built at runtime from a variable it cannot follow, or
-a skip called through an alias it does not recognise, or a `skipif` written with
-`condition=` as a keyword instead of a positional argument - `pytest` accepts that
-spelling and this reader takes the first positional argument only. Each of those
-is a finding that never happens, which biases the score toward clean.
-
-It does not read class-level decorators. `@pytest.mark.skipif(...)` on a
-`class Test...:` reaches every method in it; this check reads each method's own
-decorators and body, and the file's module scope, and nothing between them.
-
-ONE ARM OF THE ORIGINAL RULE IS CHANGED RATHER THAN COPIED. The original reported
-the helper it hopped through by remembering the LAST name it followed, so a
-finding proved by a module-level binding could be attributed to an unrelated
-helper the same condition happened to call. Provenance now travels with each
-source, so the message names the thing that actually carried the answer. And a
-`@skip()` decorator - a `Call` whose dotted name is exactly `skip` - was found
-twice, once as a decorator and once by the body walk that also descends into
-decorators, producing two identical rows for one skip; findings are now deduped
-per (unit, line, species).
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the pack's
-own corpus reader. That constraint is the reason the pack exists.
-"""
+Reference: self_skip.md"""
 
 import ast
 from pathlib import Path
@@ -82,23 +16,15 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "self_skip"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
+#: Tried in order; a project matching none of them gets a whole-tree walk.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Dotted names whose presence in a condition makes it a MACHINE probe. These
-#: acquit outright: a platform or environment gate is correct code, and a rule
-#: that flagged them would teach branches to delete their own portability. Both
-#: the dotted spelling and the bare tail are accepted, because a test that did
-#: `from shutil import which` writes the same probe with a shorter name.
+#: Dotted or bare tail both match: `from shutil import which` writes the same probe shorter.
 MACHINE_PROBES: frozenset = frozenset(
     {
         "sys.platform",
@@ -114,29 +40,16 @@ MACHINE_PROBES: frozenset = frozenset(
     }
 )
 
-#: Calls that ask whether a symbol still exists. The defining shape of the
-#: defect: the test vanishes the moment the symbol is renamed.
 EXISTENCE_PROBES: frozenset = frozenset({"hasattr", "getattr"})
 
-#: The dotted spellings of a bare `skip` call this rule recognises in a body or
-#: at module level. Decorators are matched by suffix instead, because
-#: `pytest.mark.skip` and `pytest.mark.skipif` are the marker spellings.
+#: Body and module-level calls only; decorators match by suffix (`pytest.mark.skip`, `skipif`).
 SKIP_CALL_NAMES: tuple = ("pytest.skip", "skip")
 
-#: How many flagged scopes to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
+#: The full list lives in the report artifact.
 MAX_REPORTED: int = 12
 
-#: Parsed once per file to stand in for the module scope - see
-#: `_module_level_unit`. A source string rather than a hand-built `ast` node so
-#: that no field of `FunctionDef` has to be spelled out and kept correct across
-#: interpreter versions that add one.
+#: Parsed, not hand-built, so no `FunctionDef` field has to track interpreter versions.
 _STAND_IN_SOURCE: str = "def _module_scope():\n    pass"
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def _imported_names(parsed: corpus.TestFile) -> Set[str]:
@@ -205,11 +118,7 @@ def _called_helpers(condition: ast.AST, helpers: Dict[str, ast.AST]) -> List[str
 def _module_bindings(parsed: corpus.TestFile) -> Dict[str, List[ast.stmt]]:
     """Module-level name -> the top-level statements that compute it.
 
-    THE STATEMENT, NOT THE ASSIGNMENT. A flag is often set inside a `for` loop
-    whose `if hasattr(module, candidate):` is where the provenance actually
-    lives, so binding to the assignment node alone finds nothing. The enclosing
-    top-level statement is the smallest unit that contains the reasoning.
-    """
+    The enclosing top-level statement, not the assignment: the `hasattr` often sits in a `for` around it."""
     bindings: Dict[str, List[ast.stmt]] = {}
 
     for statement in parsed.tree.body:
@@ -231,11 +140,6 @@ def _module_bindings(parsed: corpus.TestFile) -> Dict[str, List[ast.stmt]]:
 def _read_module_names(condition: ast.AST, bindings: Dict[str, List[ast.stmt]]) -> List[str]:
     """Module-level names this condition reads that are computed elsewhere."""
     return sorted({node.id for node in ast.walk(condition) if isinstance(node, ast.Name) and node.id in bindings})
-
-
-# =============================================================================
-# WHERE THE SKIPS ARE
-# =============================================================================
 
 
 def _decorator_skip_sites(unit: corpus.TestUnit) -> List[Tuple[Optional[ast.AST], int, str]]:
@@ -264,11 +168,7 @@ def _body_skip_sites(unit: corpus.TestUnit) -> List[Tuple[Optional[ast.AST], int
 def _guarded_skip_calls(scope: ast.AST, how: str, skipped: Set[int]) -> List[Tuple[Optional[ast.AST], int, str]]:
     """Every recognised skip call under `scope`, paired with its guarding `if`.
 
-    A skip with no enclosing `if` gets a None condition, which is what separates
-    an unconditional skip from the other two provenances. `skipped` holds node
-    ids to leave alone - the module scope uses it to drop the calls that live
-    inside a function, which belong to that function's own row.
-    """
+    No enclosing `if` gives a None condition; `skipped` ids belong to a function's own row."""
     guards: Dict[int, ast.AST] = {}
     for node in ast.walk(scope):
         if isinstance(node, ast.If):
@@ -288,10 +188,7 @@ def _guarded_skip_calls(scope: ast.AST, how: str, skipped: Set[int]) -> List[Tup
 def _module_skip_sites(parsed: corpus.TestFile) -> List[Tuple[Optional[ast.AST], int, str]]:
     """`pytest.skip(...)` calls at module level, with their guarding `if`.
 
-    THIS IS THE MOST EXPENSIVE SKIP IN THE CATALOG. A module-level skip removes
-    the WHOLE FILE, and it was missing from the first version of the rule this
-    ports, which walked test functions only.
-    """
+    A module-level skip removes the WHOLE FILE, so the file gets a row of its own."""
     inside_functions: Set[int] = set()
     for node in ast.walk(parsed.tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -307,11 +204,6 @@ def _module_level_unit(parsed: corpus.TestFile) -> corpus.TestUnit:
     return corpus.TestUnit(name="<module>", node=node, relpath=parsed.relpath, line=1)  # type: ignore[arg-type]
 
 
-# =============================================================================
-# CLASSIFICATION
-# =============================================================================
-
-
 def _sources_for(
     condition: ast.AST,
     helpers: Dict[str, ast.AST],
@@ -319,10 +211,7 @@ def _sources_for(
 ) -> List[Tuple[ast.AST, str]]:
     """The condition and the one-hop places its answer can come from.
 
-    Each source carries WHERE IT CAME FROM, so a finding proved by a module-level
-    binding cannot be reported as coming from an unrelated helper the same
-    condition happened to call.
-    """
+    Each source carries where it came from, so the message names the one that carried the answer."""
     sources: List[Tuple[ast.AST, str]] = [(condition, "")]
     for name in _called_helpers(condition, helpers):
         sources.append((helpers[name], f"the local helper {name}()"))
@@ -347,9 +236,7 @@ def classify_site(
 ) -> List[Dict]:
     """Classify one skip site by where its condition gets its answer.
 
-    The public entry point for this rule - the report lane and the tests both ask
-    the question here rather than re-deriving it.
-    """
+    The rule's public entry point: the report lane and the tests ask here."""
     if condition is None:
         return [
             _finding(
@@ -447,11 +334,7 @@ def _deduped(rows: List[Dict]) -> List[Dict]:
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct scopes named by a list of findings, first-seen order.
 
-    THE SCORE IS PER SCOPE, NOT PER FINDING. A unit carrying three self-skips is
-    one place a reader has to go and look at; counting the findings would let a
-    single test drive a project's score below zero, and a score that can go
-    negative is one nobody believes twice.
-    """
+    THE SCORE IS PER SCOPE, NOT PER FINDING, so one test cannot drive the score below zero."""
     seen: List[str] = []
     for row in rows:
         if row["nodeid"] not in seen:
@@ -462,48 +345,20 @@ def flagged_nodeids(rows: List[Dict]) -> List[str]:
 def scope_count(scanned: corpus.Corpus) -> int:
     """How many places a skip can live: every test unit, plus every file.
 
-    THE DENOMINATOR HAS TO INCLUDE THE FILES, and getting that wrong makes the
-    score meaningless rather than merely coarse. A module-level skip belongs to
-    no test function, so its finding names a scope that is not among the units;
-    dividing by units alone lets the flagged count exceed the total and the
-    score go NEGATIVE on a small project. Counting each file's module scope as
-    a scope of its own is also the honest reading: a file-wide skip is a
-    separate place where the same defect lives, and it is the expensive one.
-    """
+    The files count: a module-level skip names no unit, and dividing by units alone can go negative."""
     return scanned.unit_count() + len(scanned.files)
-
-
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on where its skip conditions get their answers.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests reports not_applicable rather than a
-        number, because zero tests measured is not zero quality found.
-    """
+    ``bypass_rules`` is accepted for the scoring-API contract and not read: shadow mode gates nothing.
+    No tests reports not_applicable: zero tests measured is not zero quality found."""
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scope_count(scanned)
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty path: a broken only-test-file must never read as no tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

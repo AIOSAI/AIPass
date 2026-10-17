@@ -3,18 +3,13 @@
 # Description: Deep Nesting Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Deep Nesting Standards Checker Handler
 
-Scans Python source files for functions whose control-flow nesting depth
-exceeds the allowed threshold.  A nesting level is added for each:
-If / For / While / Try / With / ExceptHandler.
-
-Threshold: depth > 3 is a violation.  Functions that exceed this limit
-should be decomposed into smaller helpers.
+Reference: deep_nesting.md
 """
 
 import ast
@@ -28,26 +23,13 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
-# -- Nesting node types -----------------------------------------------------
-
 _NESTING_NODES = (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.ExceptHandler)
 
 DEPTH_LIMIT = 4
 
 
-# -- Bypass helper -----------------------------------------------------------
-
-
-# -- AST depth analysis ------------------------------------------------------
-
-
 def _max_nesting_depth(node: ast.AST, current: int = 0) -> int:
-    """
-    Recursively walk a function body and return the maximum nesting depth.
-
-    Each If/For/While/Try/With/ExceptHandler adds one level.
-    The initial call starts at depth 0 (inside the function body).
-    """
+    """Recursively walk a function body and return the maximum nesting depth."""
     max_depth = current
     for child in ast.iter_child_nodes(node):
         if isinstance(child, _NESTING_NODES):
@@ -59,13 +41,8 @@ def _max_nesting_depth(node: ast.AST, current: int = 0) -> int:
     return max_depth
 
 
-# -- File scanning -----------------------------------------------------------
-
-
 def _scan_file(file_path: Path) -> list[dict]:
-    """
-    Parse a single .py file and return a list of violation dicts.
-
+    """Parse a single .py file and return a list of violation dicts.
     Each violation: {'func': str, 'depth': int, 'line': int}
     """
     violations: list[dict] = []
@@ -93,24 +70,11 @@ def _scan_file(file_path: Path) -> list[dict]:
     return violations
 
 
-# -- Public checker entry point ----------------------------------------------
-
-
 def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
-    """
-    Check if a module complies with deep nesting standards.
-
-    Args:
-        module_path: Path to the Python file to check.
-        bypass_rules: Optional list of bypass rules to skip certain checks.
-
-    Returns:
-        dict with keys: passed, score, checks, standard.
-    """
+    """Check if a module complies with deep nesting standards."""
     checks: list[dict] = []
     path = Path(module_path)
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "deep_nesting", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -119,7 +83,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "DEEP_NESTING",
         }
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -128,7 +91,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "DEEP_NESTING",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -137,7 +99,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "DEEP_NESTING",
         }
 
-    # Scan for deep nesting violations
     violations = _scan_file(path)
 
     if not violations:
@@ -161,7 +122,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             }
         )
 
-    # Calculate score
     passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks) * 100) if total_checks > 0 else 0

@@ -3,7 +3,7 @@
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/json_structure_check.py."""
@@ -19,30 +19,10 @@ pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
 
 class TestJsonStructureExemptsDeclarationOnlyModules:
-    """ "Every module must log operations" is a rule about modules that PERFORM them.
-
-    Raised by @drone 2026-08-31 on drone/apps/handlers/exceptions.py — 86 lines,
-    ten exception classes, zero functions. It USED to pass, by carrying
-    `log_operation("exceptions_loaded")` at module level. That turned out to be a
-    real defect: running at import, it fired during pytest COLLECTION, before any
-    fixture existed, so no seam could intercept it. Removing it took the file
-    from passing to 0.
-
-    So the check was REWARDING the defect, and both routes to green were worse
-    than the violation: put the import-time write back, or add a function to a
-    file of pure class definitions purely so there is somewhere to call
-    log_operation from — dead code written to satisfy a grep, which
-    unused_function would then flag.
-
-    A module that defines no callable code performs no operations, so it has
-    nothing to log. The exemption is keyed on that structural fact and nothing
-    else: ONE method anywhere, and the module is back in scope.
-    """
+    """ "Every module must log operations" is a rule about modules that PERFORM them."""
 
     def _score(self, source, tmp_path):
-        # MUST land under apps/handlers or the checker returns not-applicable
-        # on the PATH and every assertion below passes for the wrong reason —
-        # which is exactly what the first cut of this class did.
+        # MUST land under apps/handlers, or the checker answers not-applicable and every assertion passes wrongly.
         target = tmp_path / "apps" / "handlers" / "routing" / "mod.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source, encoding="utf-8")
@@ -82,7 +62,7 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
     def test_an_unparseable_file_does_not_earn_the_exemption(self, tmp_path):
         """A syntax error is not evidence of purity. Answering "no callable
         code" for a file we could not read hands out the exemption on
-        ignorance — and the first cut of these pins let that mutant live."""
+        ignorance."""
         assert self._score('"""Doc."""\n\nclass Broken(\n', tmp_path)["score"] < 100
 
     def test_the_real_drone_file_is_exempt(self, tmp_path):
@@ -97,15 +77,7 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
 
 
 class TestJsonStructureExemptsPreLoggingBootstrapModules:
-    """The pre-logging bootstrap class @prax reported (2026-08-31).
-
-    A module the logging substrate itself imports cannot import json_handler
-    back: log_operation() WRITES, so wiring it there puts a file write on the
-    import path of every branch — the ungateable write that fires during pytest
-    COLLECTION. Two clauses decide it, both MEASURED here: no aipass import of
-    any kind, AND the logging chain's own imports reach the module. Either
-    clause alone hands out the exemption far too widely.
-    """
+    """The pre-logging bootstrap class @prax reported (2026-08-31)."""
 
     def _universe(self, tmp_path):
         """A miniature src/aipass with a logger that imports one bootstrap module."""
@@ -178,8 +150,7 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         assert self._check(boot) is False
 
     def test_a_file_outside_any_aipass_source_root_is_not_exempt(self, tmp_path):
-        """Under apps/handlers/, so check_module asks the question and only the missing root answers it.
-        Mutant: a file with no aipass source root is exempt in apps/handlers/aipass_standards/json_structure_check.py — killed."""
+        """Under apps/handlers/, so check_module asks the question and only the missing root answers it."""
         loose = tmp_path / "apps" / "handlers" / "loose.py"
         loose.parent.mkdir(parents=True)
         loose.write_text("import re\n\ndef parse(t):\n    return t\n", encoding="utf-8")
@@ -214,22 +185,10 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
 
 class TestTheBootstrapChainSeesRelativeImports:
     """@canary's json_structure finding, and it was a hole in an exemption I
-    ratified the night before.
-
-    Clause 2 of the pre-logging bootstrap exemption asks whether the logging
-    substrate's own imports REACH a module. The walk only followed absolute
-    ``aipass.*`` imports, and @canary's json_handler reaches its stdlib-only
-    helper with ``from ..paths import module_file`` — so a module that IS
-    beneath the logging system was invisible to the walk and got told to import
-    it. A relative import is a STATIC fact, unlike the importlib hops the walk
-    deliberately cannot see, so resolving it moves the set toward correct in the
-    direction the walk's own docstring already asks for.
-    """
+    ratified the night before."""
 
     def _resolve(self, module, level, package):
-        # The resolver is the unit, pure name arithmetic, public since 10-08;
-        # check_module reaches it only through a whole src/aipass tree, which the
-        # end-to-end test below already walks.
+        # The resolver is the unit, pure name arithmetic; check_module reaches it only through a whole tree.
         return json_structure_check.resolve_relative(module, level, package)
 
     def test_a_sibling_import_resolves(self):
@@ -257,9 +216,7 @@ class TestTheBootstrapChainSeesRelativeImports:
         """End to end on the real tree: @canary's helper is in the chain now."""
         from pathlib import Path
 
-        # parents[2] is src/aipass — parents[3] is src, and the wrong one made
-        # this skip instead of run. A skip reports its own defeat as a pass,
-        # which is the whole reason the branch is asserted rather than guessed.
+        # parents[2] is src/aipass, parents[3] is src: the branch is asserted, because a skip reads as a pass.
         aipass_root = Path(__file__).resolve().parents[2]
         assert aipass_root.name == "aipass", aipass_root
         target = aipass_root / "canary" / "apps" / "handlers" / "paths.py"

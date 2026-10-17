@@ -3,7 +3,7 @@
 # Description: audit-tests write gate: payload classifier and its gate log (split from test_audit_tests_lane.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py and gatelog.py."""
@@ -21,9 +21,7 @@ import pytest
 from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter, gatelog
 from aipass.seedgo.tests.support_audit_tests_lane import _records
 
-# The payload is deliberately NOT an importable aipass module - that is the
-# property `execution_isolation` proves. Loading it by path here is how a test
-# reaches something that must never be on the package path.
+# Loaded by path: the payload must never be an importable aipass module (`execution_isolation` proves it).
 _PAYLOAD = Path(adapter.PLUGIN_FILE)
 _spec = importlib.util.spec_from_file_location("audit_hygiene_plugin_under_test", _PAYLOAD)
 assert _spec is not None and _spec.loader is not None
@@ -32,12 +30,8 @@ _spec.loader.exec_module(plugin)
 
 
 def _outside_path(*parts: str) -> str:
-    """An absolute, native path that no allowance acquits, on either platform.
-
-    A POSIX literal like "/home/x/state.json" is drive-RELATIVE on Windows, so
-    `os.path.abspath` rewrites it against the current drive and any test that
-    hardcoded the literal compares against a path the code never produced.
-    """
+    """An absolute, native path that no allowance acquits, on either platform."""
+    # A POSIX literal is drive-relative on Windows: abspath rewrites it, so a hardcoded literal never matches.
     return os.path.abspath(os.path.join(os.sep, "audit_tests_not_an_allowance", *parts))
 
 
@@ -54,11 +48,6 @@ def state(tmp_path):
     return fresh
 
 
-# =============================================================================
-# THE CLASSIFIER - where the gate decides what a write means
-# =============================================================================
-
-
 class TestClassifierPrecedence:
     """The copy is checked before every tmp allowance, and that ordering is the gate."""
 
@@ -67,10 +56,7 @@ class TestClassifierPrecedence:
         assert plugin.classify(inside, state) == ("violation", "inside_copy")
 
     def test_the_copy_beats_the_pytest_basetemp_allowance_too(self, state):
-        # The scratch copy really can live under a pytest-of-* tree: it does
-        # whenever the lane is run from inside another pytest session. If that
-        # allowance were checked first it would acquit every write the gate
-        # exists to catch.
+        # The copy can live under pytest-of-* (a lane run inside pytest): checked first, that acquits every write.
         state.env_root = os.path.join(state.pytest_basetemp, "env")
         inside = os.path.join(state.env_root, "wrote.json")
         assert plugin.classify(inside, state) == ("violation", "inside_copy")
@@ -109,8 +95,7 @@ class TestAllowances:
         assert plugin.classify(os.devnull, state) == ("allowed", "devnull")
 
     def test_every_allowance_name_the_classifier_can_return_is_declared(self, state, tmp_path):
-        # A gate that acquits under a name it never published has widened its
-        # own sandbox silently, which is the one thing a gate may never do.
+        # Acquitting under a name it never published widens the gate's own sandbox silently.
         declared = {name for name, _ in plugin.ALLOWANCES}
         returned = {
             plugin.classify(state.log_path, state)[1],
@@ -126,19 +111,7 @@ class TestAllowances:
 
 
 class TestSeparatorPortability:
-    """The Windows branch of the classifier, driven from any platform.
-
-    THE DEFECT (Windows CI, PR#749, 3 of the 6 failures, ONE cause). The
-    classifier split on `os.sep` alone. On Windows that is "\\", so a path
-    spelled with forward slashes - which CPython accepts everywhere - came back
-    as a SINGLE part: `__pycache__` was never seen as a component, and the
-    basename was the whole string. A pycache write was acquitted as `bytecode`
-    (right verdict, wrong reason) and a `.coverage` write was convicted as
-    `outside_copy` - A FALSE VIOLATION in hygiene evidence.
-
-    These drive `classify()` itself through the Windows separator set, because
-    a cross-platform branch only CI can exercise is one nobody can red-first.
-    """
+    """The Windows branch of the classifier, driven from any platform."""
 
     WINDOWS = ("\\", "/")
 
@@ -151,26 +124,18 @@ class TestSeparatorPortability:
 
     def test_a_forward_slash_coverage_file_is_never_a_violation_on_windows(self, state, windows, tmp_path):
         """Mutant: the classifier splits on the first separator alone in payload/audit_hygiene_plugin.py — killed."""
-        # The one that made the gate lie: it read as violation/outside_copy.
-        # as_posix(), not str(): on Windows str() spells it with backslashes and the
-        # forward-slash case this test is named for would never be exercised.
+        # as_posix(), not str(): on Windows str() uses backslashes and the forward-slash case is never exercised.
         assert plugin.classify((tmp_path / ".coverage.host.1").as_posix(), state) == ("allowed", "coverage_data")
 
     def test_a_native_backslash_path_still_classifies_on_windows(self, state, windows):
         assert plugin.classify("D:\\x\\__pycache__\\m.pyc", state) == ("allowed", "pycache_dir")
 
     def test_a_backslash_is_a_filename_character_on_posix_and_never_a_separator(self):
-        # The other direction, and the reason the set is derived from os.altsep
-        # rather than written out: splitting on "\\" on POSIX would tear a legal
-        # filename into pieces and invent path components that do not exist.
+        # Derived from os.altsep: splitting on "\\" on POSIX would tear a legal filename into invented parts.
         assert plugin._split_path("/weird/back\\slash.txt", ("/",)) == ["", "weird", "back\\slash.txt"]
 
     def test_the_windows_pair_is_derived_from_windows_values(self):
-        # Spelled out, NOT re-derived. Asserting against
-        # tuple(s for s in (os.sep, os.altsep) if s) was a mirror-expect: on
-        # POSIX altsep is None, so a mutant reading (os.sep,) produced the very
-        # same tuple and the assertion could not fail. Measured - that mutant
-        # SURVIVED - so the derivation now takes its inputs as arguments.
+        # Spelled out, not re-derived: on POSIX altsep is None, so a derived expectation cannot fail.
         assert plugin.accepted_separators("\\", "/") == ("\\", "/")
 
     def test_the_posix_single_separator_is_derived_from_posix_values(self):
@@ -181,9 +146,7 @@ class TestSeparatorPortability:
         assert plugin.SEPARATORS == plugin.accepted_separators()
 
     def test_a_copy_boundary_survives_mixed_spelling(self, state, windows):
-        # env_root is written by the lane with native separators while the path
-        # comes from whatever the measured test typed. Compared unnormalised, a
-        # write INSIDE the copy lands outside it and the gate misses a forgery.
+        # env_root is native, the path is as typed: compared unnormalised, a write inside the copy reads outside.
         assert plugin._under("C:/env/pkg/f.py", "C:\\env", self.WINDOWS) is True
 
     def test_an_unrelated_tree_is_still_not_under_the_copy(self, state, windows):
@@ -248,12 +211,7 @@ class TestObservationCounting:
 
 
 class TestSessionRecording:
-    """The two payload facts a mutation pass found untested on their first run.
-
-    Both were exercised only end-to-end, so deleting either left 114 tests
-    green while the artifact quietly lost a field. An integration run that
-    passes is not a pin on the line that made it pass.
-    """
+    """The two payload facts a mutation pass found untested on their first run."""
 
     def test_logstart_records_the_unit_in_execution_order(self, state, monkeypatch):
         monkeypatch.setattr(plugin, "STATE", state)
@@ -298,14 +256,8 @@ class TestAttribution:
         assert ("tests/test_x.py::test_forges", "call", "open", written) in state.violations
 
     def test_the_attribution_key_is_the_native_normalized_absolute_path(self, state, monkeypatch):
-        # THE CANONICAL FORM, pinned rather than left to whichever platform ran
-        # the suite. The key is os.path.normpath of an absolute path, so it
-        # carries NATIVE separators - on Windows a POSIX-spelled write is
-        # recorded as a Windows path. That is deliberate: this string is
-        # published in the artifact for a human to go and look at, and a path
-        # the reader's own shell cannot resolve is a worse record than an ugly
-        # one. Windows CI (PR#749) failed here against a hardcoded POSIX
-        # literal, which is a test that only ever described one platform.
+        # The key is normpath of an absolute path, so NATIVE separators: the published path must resolve in
+        # the reader's own shell.
         monkeypatch.setattr(plugin, "STATE", state)
         state.nodeid, state.phase = "tests/test_x.py::test_forges", "call"
         spelled = _outside_path("somebody", "state.json").replace(os.sep, "/")
@@ -321,17 +273,11 @@ class TestAttribution:
         assert state.violations == {}
 
     def test_the_key_is_normalized_so_two_spellings_of_one_file_are_one_record(self, state, monkeypatch):
-        # Kills the mutant that deletes the normpath. The Windows-motivated
-        # tests above cannot: on POSIX, normpath of an already-clean absolute
-        # path is the identity, so deleting the call changed nothing and the
-        # mutant SURVIVED (measured). A path with a ".." segment needs
-        # normalising on EVERY platform, so this pin travels.
+        # A ".." segment needs normalising on every platform, so this kills the deleted-normpath mutant anywhere.
         monkeypatch.setattr(plugin, "STATE", state)
         state.nodeid, state.phase = "tests/test_x.py::test_forges", "call"
         direct = _outside_path("pkg", "state.json")
-        # NOT built through _outside_path: that helper calls abspath, which
-        # normalises the detour away before the code under test ever sees it.
-        # First attempt did exactly that and the mutant survived again.
+        # Not built through _outside_path: its abspath normalises the detour away before the code sees it.
         detoured = os.path.join(os.path.dirname(direct), "sub", "..", "state.json")
         plugin._record_write("open", direct)
         plugin._record_write("open", detoured)
@@ -343,11 +289,6 @@ class TestAttribution:
         for _ in range(3):
             plugin._record_write("open", "/home/somebody/.aipass/state.json")
         assert list(state.violations.values()) == [3]
-
-
-# =============================================================================
-# THE GATE LOG - the normalized measurement the core consumes
-# =============================================================================
 
 
 class TestGateLogReading:
@@ -390,10 +331,7 @@ class TestMeasurement:
         assert "did NOT catch it" in measured["unproven_reason"]
 
     def test_an_empty_log_says_the_plugin_never_reported_rather_than_blaming_the_hook(self):
-        # Written expecting "the write gate was not installed" and the run
-        # refuted it: an empty log has no header, so that branch fired and
-        # invented a specific cause from missing evidence. The reason now names
-        # the fact instead of inferring one.
+        # An empty log has no header: the reason names that fact rather than infer an uninstalled gate.
         measured = gatelog.measure([], timed_out=False)
         assert measured["proven"] is False
         assert "never reported" in measured["unproven_reason"]
@@ -403,9 +341,7 @@ class TestMeasurement:
         assert "no canary was fired" in gatelog.measure(records, timed_out=False)["unproven_reason"]
 
     def test_a_budget_expiry_says_the_budget_expired_rather_than_blaming_the_canary(self):
-        # The hang-to-refusal conversion falls out of canary-or-refuse, but the
-        # REASON a reader is handed must still name the budget, or a timeout
-        # looks like a broken gate.
+        # The reason must name the budget, or a timeout looks like a broken gate.
         measured = gatelog.measure([], timed_out=True)
         assert "budget expired" in measured["unproven_reason"]
 
@@ -455,9 +391,7 @@ class TestExecutedOrder:
     """Rev-4 section 9.2: order-specific and unreconstructable after the fact."""
 
     def test_the_order_comes_from_the_session_not_from_the_violations(self):
-        # Built the other way first, and a live run refuted it: deriving the
-        # order from violation records lists only the units that WROTE, so a
-        # clean test vanished from "the order the tests executed in".
+        # Order comes from every record: violation records list only units that wrote, dropping clean tests.
         records = _records(violations=1, order=["tests/a.py::clean", "tests/test_x.py::test_0"])
         assert gatelog.executed_order(records) == ["tests/a.py::clean", "tests/test_x.py::test_0"]
 

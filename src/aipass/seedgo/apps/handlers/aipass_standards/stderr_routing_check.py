@@ -3,24 +3,13 @@
 # Description: Stderr Routing Standards Checker
 # Version: 1.0.1
 # Created: 2026-03-13
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Stderr Routing Standards Checker
 
-Validates that error/warning output uses CLI display functions (error(), warning(),
-fatal()) which route to stderr, instead of raw console.print() with red/yellow markup
-that stays on stdout.
-
-CORRECT:
-    from aipass.cli.apps.modules import error, warning, fatal
-    error('Branch not found', suggestion='Check spelling')
-    warning('Template mismatch', details='Expected v2')
-
-WRONG:
-    console.print('[red]Error: Branch not found[/red]')
-    console.print('[yellow]Warning: mismatch[/yellow]')
+Reference: stderr_routing.md
 """
 
 import re
@@ -37,12 +26,7 @@ AUDIT_SCOPE = "all_files"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module routes error/warning output to stderr via CLI display functions.
-
-    Returns:
-        dict: {passed, checks, score, standard}
-    """
+    """Check if module routes error/warning output to stderr via CLI display functions."""
     checks: List[Dict] = []
     path = Path(module_path)
 
@@ -91,7 +75,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     filename = path.name
 
-    # Check 1: console.print() with error-like red markup
     error_prints = _find_error_prints(lines, module_path, bypass_rules)
     if error_prints:
         checks.append(
@@ -106,7 +89,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             {"name": "Error output routing", "passed": True, "message": "No error-like console.print() with red markup"}
         )
 
-    # Check 2: console.print() with warning-like yellow markup
     warning_prints = _find_warning_prints(lines, module_path, bypass_rules)
     if warning_prints:
         checks.append(
@@ -125,7 +107,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             }
         )
 
-    # Check 3: Custom Console(stderr=True) — should import err_console
     custom_stderr = _find_custom_stderr_console(lines, module_path, bypass_rules)
     if custom_stderr:
         checks.append(
@@ -136,7 +117,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             }
         )
 
-    # No checks applied = no output patterns = skip
     if not checks:
         return {
             "passed": True,
@@ -165,17 +145,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 def _is_markup_label(line: str, color: str, max_short_words: int = 2) -> bool:
     """Check if colored markup in a console.print() is a label/highlight, not a warning/error.
 
-    Detects section headers, term highlights, and short formatting labels that use
-    colored markup for emphasis — not for signaling warnings or errors.
-
-    Label patterns:
-    - Short highlight/term (<=max_short_words): 'off', 'Muted', 'Missing branch name'
-    - Colon-terminated: 'COMMANDS:', 'Options:', 'Discovered Modules:'
-    - ALL CAPS headers: 'ACTIONABLE ITEMS', 'ESCALATIONS NEEDED'
-
-    max_short_words controls the threshold for short-phrase detection:
-    - Yellow (warnings): 2 — real warnings like 'Template version mismatch' are 3+ words
-    - Red (errors): 5 — red is commonly used for CLI feedback phrases
+    max_short_words: yellow 2 (real warnings are 3+ words), red 5 (red is common for short CLI feedback).
     """
     pattern = re.compile(r"\[(?:bold\s+)?" + re.escape(color) + r"(?:\s+bold)?\](.*?)\[/", re.IGNORECASE)
     match = pattern.search(line)
@@ -186,10 +156,8 @@ def _is_markup_label(line: str, color: str, max_short_words: int = 2) -> bool:
         # Short highlight/term — too brief to be a real error/warning sentence
         if word_count <= max_short_words:
             return True
-        # Label ending with colon (e.g., 'COMMANDS:', 'Discovered Modules:')
         if text.endswith(":") and word_count <= 3:
             return True
-        # ALL CAPS section header (e.g., 'ACTIONABLE ITEMS')
         if text.isupper() and word_count <= 3:
             return True
     return False
@@ -217,9 +185,7 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
     in_main_block = False
     main_block_indent = 0
 
-    # Patterns: [red], [bold red], [red bold] in console.print()
     red_pattern = re.compile(r"console\.print\(.*\[(?:bold\s+)?red(?:\s+bold)?\]", re.IGNORECASE)
-    # Also catch: console.print("Error: ...") or console.print("Failed to ...")
     # Only match when keyword appears at the START of the string content (not buried in help text)
     # "error" requires a colon (to distinguish "Error: ..." from "Error Registry ...")
     error_msg_pattern = re.compile(
@@ -230,7 +196,6 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
         stripped = line.strip()
         current_indent = len(line) - len(line.lstrip()) if stripped else 0
 
-        # Track __main__ blocks
         if "if __name__ ==" in stripped and "__main__" in stripped:
             in_main_block = True
             main_block_indent = current_indent
@@ -238,7 +203,6 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
         if in_main_block and stripped and current_indent <= main_block_indent:
             in_main_block = False
 
-        # Track docstrings
         for quote in ('"""', "'''"):
             if line.count(quote) % 2 == 1:
                 in_docstring = not in_docstring
@@ -246,16 +210,13 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
         if _in_skip_context(line, in_docstring, in_main_block):
             continue
 
-        # Skip if in a string context (the console.print itself is in a string)
         if "console.print(" not in stripped:
             continue
 
-        # Check it's not inside a string literal
         before = line.split("console.print(")[0]
         if before.count("'") % 2 == 1 or before.count('"') % 2 == 1:
             continue
 
-        # Skip bypassed lines
         if is_bypassed(module_path, "stderr_routing", line=i, bypass_rules=bypass_rules):
             continue
 
@@ -276,7 +237,6 @@ def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list 
     in_main_block = False
     main_block_indent = 0
 
-    # Patterns: [yellow] in console.print() that look like warnings
     yellow_pattern = re.compile(r"console\.print\(.*\[(?:bold\s+)?yellow(?:\s+bold)?\]", re.IGNORECASE)
     # Only match when keyword appears at the START of the string content (not buried in help text)
     warning_msg_pattern = re.compile(r"""console\.print\(\s*f?["']\s*(?:⚠\s*)?warning\b""", re.IGNORECASE)

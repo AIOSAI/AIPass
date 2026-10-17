@@ -3,7 +3,7 @@
 # Description: Template Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-07-01
-# Modified: 2026-07-01
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -17,11 +17,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_template_standards() -> str:
-    """Return formatted template standards content with Rich markup.
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted template standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  Branches should not run with un-configured template files.",

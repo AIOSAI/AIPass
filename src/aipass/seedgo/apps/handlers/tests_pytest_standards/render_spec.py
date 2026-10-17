@@ -3,22 +3,13 @@
 # Description: renders a nominator's SPECIFICATION for the query surface
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-One renderer for every nominator's content file.
+"""One renderer for every nominator's content file.
 
-WHY THE CONTENT IS DERIVED AND NOT WRITTEN. A `*_content.py` maintained by
-hand beside a `*_check.py` is two statements of the same rule that can
-disagree, and the one a reader trusts is the prose. This campaign's whole
-subject is claims nothing checks — a documentation file that says the rule
-exempts `sys.platform` while the code stopped exempting it would be exactly
-that, in the auditor's own pack.
-
-So each nominator declares one `SPECIFICATION` dict and this module renders
-it. The check and the content cannot drift, because there is only one of them.
-The `.md` files are generated from the same dict by the same rule.
+Each nominator declares one `SPECIFICATION` dict and this renders it (and the `.md`),
+so the check and its prose cannot drift.
 """
 
 from typing import Dict, List

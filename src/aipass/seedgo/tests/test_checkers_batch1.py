@@ -3,7 +3,7 @@
 # Description: Unit tests for 8 aipass_standards checkers
 # Version: 1.0.3
 # Created: 2026-03-29
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -47,11 +47,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
@@ -65,11 +60,6 @@ def _pin_bypass_log(monkeypatch):
     mock_handler = MagicMock()
     mock_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
-
-
-# ===========================================================================
-# 1. architecture_check
-# ===========================================================================
 
 
 def test_architecture_check_clean_passes(tmp_path):
@@ -106,11 +96,6 @@ def test_architecture_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "architecture", "file": "bypassed.py"}]
     result = check_architecture(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
-
-
-# ===========================================================================
-# 2. cli_check
-# ===========================================================================
 
 
 def test_cli_check_clean_passes(tmp_path):
@@ -152,11 +137,6 @@ def test_cli_check_bypass_respected(tmp_path):
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
-# ===========================================================================
-# 3. cli_flags_check
-# ===========================================================================
-
-
 def test_cli_flags_check_clean_passes(tmp_path):
     """An entry point file with --version flag support should pass."""
     apps_dir = tmp_path / "mybranch" / "apps"
@@ -190,10 +170,7 @@ def test_cli_flags_check_violation_caught(tmp_path):
 
 
 def test_a_comment_only_apps_package_is_not_an_entry_point(tmp_path):
-    """The fenced apps/__init__.py is one comment line: no code, no --version asked (DPLAN-0404).
-
-    A package __init__ that carries code is still read, so the skip is the empty body, not the name.
-    """
+    """The fenced apps/__init__.py is one comment line: no code, no --version asked (DPLAN-0404)."""
     apps_dir = tmp_path / "mybranch" / "apps"
     apps_dir.mkdir(parents=True)
     init_file = apps_dir / "__init__.py"
@@ -218,11 +195,6 @@ def test_cli_flags_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "cli_flags", "file": "mybranch.py"}]
     result = check_cli_flags(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
-
-
-# ===========================================================================
-# 4. commented_logger_check
-# ===========================================================================
 
 
 def test_commented_logger_check_clean_passes(tmp_path):
@@ -265,11 +237,6 @@ def test_commented_logger_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "commented_logger", "file": "bypassed.py"}]
     result = check_commented_logger(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
-
-
-# ===========================================================================
-# 5. debug_print_check
-# ===========================================================================
 
 
 def test_debug_print_check_clean_passes(tmp_path):
@@ -330,11 +297,6 @@ def test_debug_print_string_literal_not_flagged(tmp_path):
     assert result["score"] == 100, f"print() inside strings should not flag: {result}"
 
 
-# ===========================================================================
-# 6. deep_nesting_check
-# ===========================================================================
-
-
 def test_deep_nesting_check_clean_passes(tmp_path):
     """A file with shallow nesting (depth <= 4) should pass."""
     clean_file = tmp_path / "shallow.py"
@@ -392,11 +354,6 @@ def test_deep_nesting_check_bypass_respected(tmp_path):
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
-# ===========================================================================
-# 7. documentation_check
-# ===========================================================================
-
-
 def test_documentation_check_clean_passes(tmp_path):
     """A file with module docstring and function docstrings should pass."""
     clean_file = tmp_path / "documented.py"
@@ -432,11 +389,6 @@ def test_documentation_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "documentation", "file": "bypassed.py"}]
     result = check_documentation(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
-
-
-# ===========================================================================
-# 8. encapsulation_check
-# ===========================================================================
 
 
 def test_encapsulation_check_clean_passes(tmp_path):

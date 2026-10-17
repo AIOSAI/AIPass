@@ -3,15 +3,13 @@
 # Description: Shared source-skip directories for branch-tree-scanning checkers
 # Version: 1.1.0
 # Created: 2026-06-10
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Shared skip-directory set for checkers that rglob branch trees.
 
-Single source of truth so per-checker lists cannot drift.
-Output dirs (artifacts, dropbox, docs.local, system_logs) are runtime
-products, not committed source — scanning them causes local-vs-CI
-audit divergence (FPLAN-0261).
+Single source of truth so per-checker lists cannot drift. Output dirs (artifacts, dropbox, docs.local,
+system_logs) are runtime products, not committed source; scanning them diverges a local audit from CI.
 """
 
 import sys
@@ -72,31 +70,25 @@ def is_prototype_file(path_str: str) -> bool:
 
 SOURCE_SKIP_DIRS: frozenset[str] = frozenset(
     {
-        # Build / cache
         "__pycache__",
         ".mypy_cache",
         ".ruff_cache",
         ".pytest_cache",
-        # Environment
         ".venv",
         "venv",
         "node_modules",
         ".git",
         "site-packages",
-        # Archive / staging
         ".archive",
         ".sorting_unprocessed",
-        # Project infrastructure (not auditable source)
         ".trinity",
         ".aipass",
         ".ai_mail.local",
         ".spawn",
-        # Output / runtime (gitignored — causes local-vs-CI divergence)
         "artifacts",
         "dropbox",
         "docs.local",
         "system_logs",
-        # Data / non-source
         "logs",
         "tools",
         "backups",
@@ -109,11 +101,9 @@ SOURCE_SKIP_DIRS: frozenset[str] = frozenset(
 def in_skipped_dir(path: Path, root: Path) -> bool:
     """Whether a path below ``root`` is, or sits inside, a SOURCE_SKIP_DIRS directory.
 
-    Only the parts below ``root`` are read, so a skip-named directory above the
-    walk (a temp root, a checkout under ``backups/``) never empties it. A skip
-    name that is an importable package is source, not output: commons'
-    ``apps/handlers/artifacts/`` is live code, and skipping it convicted two
-    true declarations (seedgo, leg 148dd7c5).
+    Only the parts below ``root`` are read, so a skip-named directory above the walk (a temp root,
+    a checkout under ``backups/``) never empties it. A skip name that is an importable package is
+    source, not output: commons' ``apps/handlers/artifacts/`` is live code.
     """
     current = root
     for part in path.relative_to(root).parts:

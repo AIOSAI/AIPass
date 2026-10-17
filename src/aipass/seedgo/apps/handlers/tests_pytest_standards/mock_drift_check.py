@@ -3,31 +3,12 @@
 # Description: nominator - patch-target resolution (MOCK-DRIFT)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 4 — a patch whose target is a MODULE answers anything.
+"""TAXONOMY rule 4 — a patch whose target is a MODULE answers anything.
 
-`@patch("a.b.c")` where `c` is a function replaces that function. Where `c` is
-a *module*, the whole module becomes a `MagicMock`, and a `MagicMock` answers
-every attribute access that will ever be made of it. Delete the production
-function the test is about and the mock supplies it anyway.
-
-That is not a hypothetical. Deleting `auth.validate_credentials` from @api left
-**46 of 46 tests green** (TAXONOMY corpus row 23). The suite had no opinion
-about whether the function existed.
-
-WHY THIS RESOLVES AGAINST FILES AND NOT IMPORTS. Law M10 forbids the
-instrument from importing the tree it measures, so the rule may not ask Python
-whether `a.b.c` is a module — it asks the FILESYSTEM, by looking for `c.py` or
-`c/__init__.py` on the dotted path inside the target. That is weaker than an
-import and it is the correct weakness: a nominator that imported the subject
-would execute it, which is the defect this whole lane exists to refuse.
-
-`spec=` / `autospec=True` / `new_callable=` ACQUIT. A specced mock raises on
-an attribute the real object does not have, which is exactly the property
-whose absence this rule is about.
+Reference: mock_drift.md
 """
 
 import ast
@@ -42,12 +23,10 @@ GROUP = "static_mock_drift"
 #: them acquits the patch outright.
 ACQUITTING_KEYWORDS: frozenset = frozenset({"spec", "spec_set", "autospec", "new_callable"})
 
-#: The call names this rule watches.
 PATCH_NAMES: frozenset = frozenset({"patch", "mock.patch", "patch.object", "unittest.mock.patch"})
 
-#: This rule reads PRODUCTION, so a production file that would not parse makes
-#: it report less than the tree holds. `nominators` merges the corpus's count
-#: into this group's published limits when the flag is set.
+#: Reads production, so an unparseable production file under-reports; `nominators`
+#: merges the corpus's count into this group's limits when set.
 READS_PRODUCTION = True
 
 SPECIFICATION = {
@@ -80,9 +59,7 @@ SPECIFICATION = {
 def _module_paths(root: Path) -> Set[str]:
     """Every dotted module path that exists as a FILE under the target.
 
-    Both `a/b/c.py` and `a/b/c/__init__.py` count, and every suffix of each
-    path is recorded, because a test patches `aipass.daemon.apps.x`, not the
-    path relative to the branch root.
+    Every suffix is recorded: a test patches `aipass.daemon.apps.x`, not a branch-relative path.
     """
     found: Set[str] = set()
 
@@ -119,15 +96,7 @@ def _module_constants(parsed: corpus.TestFile) -> Dict[str, str]:
 def _patch_target(node: ast.Call, constants: Dict[str, str]) -> Optional[str]:
     """The dotted string a patch call targets, or None when it cannot be read.
 
-    F-STRINGS ARE RESOLVED AGAINST MODULE-LEVEL CONSTANTS, and that is not a
-    convenience. `@patch(f"{_MOD}.json_handler")` is the dominant real spelling
-    — the whole 46-test block in TAXONOMY corpus row 23 is written that way —
-    and the first version of this rule required an `ast.Constant`, so it scored
-    a branch with 25 known MOCK-DRIFTs as completely clean. A detector that
-    only reads the spelling nobody uses measures nothing.
-
-    Only interpolations of module-level string constants resolve. Anything
-    computed returns None, and an unreadable target is never nominated.
+    f-strings over module-level constants resolve: `f"{_MOD}.x"` is the dominant real spelling.
     """
     if not node.args:
         return None
@@ -202,20 +171,12 @@ def _from_import_stmt(node: ast.Import, modules: Set[str]) -> Set[str]:
 def _module_bound_names(scanned: corpus.Corpus, modules: Set[str]) -> Dict[str, Set[str]]:
     """Per production module, the names it binds to another MODULE by import.
 
-    This is what makes the rule precise rather than a name-collision guess.
-    `@patch(f"{_MOD}.console")` and `@patch(f"{_MOD}.json_handler")` look
-    identical to a last-segment match, but only one of them names a module:
-    `console` is a Rich object imported from `aipass.cli`, and `json_handler`
-    is a module file. Patching the first is ordinary; patching the second
-    replaces a module with something that answers every attribute forever.
+    Tells a module (`json_handler`) from an imported object (`console`) a last-segment match conflates.
     """
     bound: Dict[str, Set[str]] = {}
 
     for path, tree in scanned.production_trees.items():
-        # Keyed by STEM, which is what a patch target's parent segment gives.
-        # UNIONED rather than assigned: two modules can share a stem, and the
-        # second one overwriting the first would drop bindings silently - a
-        # hole that makes the rule report fewer nominations, toward clean.
+        # Unioned, not assigned: two modules can share a stem, and overwriting drops bindings.
         bound.setdefault(path.stem, set()).update(_imported_module_names(tree, modules))
 
     return bound

@@ -3,14 +3,13 @@
 # Description: Documentation Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Documentation Standards Checker Handler
+"""Documentation Standards Checker Handler
 
 Validates documentation compliance: module docstrings and function docstrings.
-META block validation is handled separately by meta_check.py.
+META block validation is handled separately by meta_check.py. Reference: documentation.md
 """
 
 import ast
@@ -22,26 +21,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
-# Applies to production source only: a test documents itself by its name and its
-# assertions. 163 of 456 fleet test files failed docstring coverage (36%, 15 branches).
+# Applies to production source only: a test documents itself by its name and assertions.
 APPLIES_TO = "production"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows documentation standards.
-
-    Checks module-level docstrings and public function docstrings.
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional bypass rules
-
-    Returns:
-        dict with passed, checks, score, standard keys
-    """
+    """Check if module follows documentation standards."""
     checks = []
     path = Path(module_path)
 
@@ -74,7 +60,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DOCUMENTATION",
         }
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -90,11 +75,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DOCUMENTATION",
         }
 
-    # Check 1: Module-level docstring
     docstring_check = check_module_docstring(lines)
     checks.append(docstring_check)
 
-    # Check 2: Function docstrings (for public functions)
     function_docs_check = check_function_docstrings(content, lines)
     checks.append(function_docs_check)
 
@@ -119,14 +102,7 @@ TRIPLE_SINGLE: str = chr(39) * 3
 def _module_docstring_by_line_scan(lines: List[str]) -> Dict:
     """The pre-AST scan, kept for files that will not parse.
 
-    Says so in the message, because a fallback that reads like a verdict from
-    the real arm is an exemption granted on ignorance wearing a clean result.
-
-    Args:
-        lines: The module's source lines.
-
-    Returns:
-        dict with name, passed, message keys
+    Says so in the message: a fallback must not read like a verdict from the real arm.
     """
     for line in lines[:30]:
         stripped = line.strip()
@@ -144,40 +120,12 @@ def _module_docstring_by_line_scan(lines: List[str]) -> Dict:
 
 
 def check_module_docstring(lines: List[str]) -> Dict:
-    r"""
-    Check for module-level docstring, read as Python reads it.
-
-    THE LINE SCAN THIS REPLACES WAS DECIDED BY SPELLING, in both directions, and
-    both were measured across 1,845 files before this changed:
-
-      - it MISSED a prefixed docstring. An r-prefixed triple-quoted string is a
-        module docstring to Python and to help(); to a scan for a line starting
-        with a quote character it is nothing. Found by auditing a file of my own
-        that had one.
-      - it CREDITED any triple-quoted string in the first 30 lines - a class or
-        function docstring on a short module, a multi-line constant - to a file
-        with no module docstring at all. Seven files fleet-wide, and this is the
-        dangerous direction: a false negative gets believed.
-
-    ast.get_docstring asks the only question that matters, which is whether the
-    first statement in the module body IS a string.
-
-    Args:
-        lines: The module's source lines.
-
-    Returns:
-        dict with name, passed, message keys
-    """
+    r"""Check for module-level docstring, read as Python reads it."""
     try:
         tree = ast.parse("\n".join(lines))
     except SyntaxError as exc:
-        # Logged rather than swallowed, and my own silent_catch rule is the
-        # reason: it accepts a bare `return None` here and flags a return that
-        # NAMES its fallback, which rewards the less informative spelling. That
-        # is the same defect I fixed in the classify-and-return clause tonight,
-        # one clause over - banked as a rule question rather than widened
-        # mid-train, because "any call return converts the exception" would gut
-        # a rule that exists to catch real swallows.
+        # Logged rather than swallowed: silent_catch would accept a bare `return None` here
+        # and flag a return that names its fallback.
         logger.info("Module docstring check fell back to a line scan: %s", exc)
         return _module_docstring_by_line_scan(lines)
 
@@ -192,31 +140,7 @@ def check_module_docstring(lines: List[str]) -> Dict:
 
 
 def _public_functions_by_ast(content: str):
-    """Public functions and whether each has a docstring, read as Python reads.
-
-    THE LINE SCAN BELOW READ STRINGS AS SOURCE. ``stripped.startswith("def ")``
-    over the raw file matches a ``def`` inside a docstring's code example or
-    inside a module built as a string literal and fed to a subprocess — the
-    shape every branch wrote this week for the dead-cwd worlds. @api, @canary,
-    @skills and two seedgo files were all flagged for functions that do not
-    exist. Caught by dogfooding: this checker flagged a three-line example in a
-    new nominator's own docstring.
-
-    It had the mirror defect too. ``async def`` never matched at all, so an
-    undocumented async function was invisible — ``find_import_section_end`` in
-    the imports pack has handled ``async def`` since it was written.
-
-    Scope is UNCHANGED: nested functions still count, exactly as the line scan
-    counted them. Narrowing to module and class level would clear 40 more files
-    and that is a different decision, not this fix.
-
-    Args:
-        content: Module source.
-
-    Returns:
-        A list of ``(name, line, has_docstring)`` triples, or None when the
-        source will not parse.
-    """
+    """Public functions and whether each has a docstring, read as Python reads."""
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -233,14 +157,7 @@ def _public_functions_by_ast(content: str):
 
 
 def _judge(found: list) -> Dict:
-    """Turn the parsed function list into this check's verdict.
-
-    Args:
-        found: ``(name, line, has_docstring)`` triples.
-
-    Returns:
-        The check result dict.
-    """
+    """Turn the parsed function list into this check's verdict."""
     if not found:
         return {"name": "Function docstrings", "passed": True, "message": "No public functions to check"}
 
@@ -259,19 +176,13 @@ def _judge(found: list) -> Dict:
 
 
 def check_function_docstrings(content: str, lines: List[str]) -> Dict:
-    """
-    Check that public functions have docstrings.
-
-    Public functions (not starting with _) should have docstrings.
-    """
+    """Check that public functions have docstrings."""
     parsed = _public_functions_by_ast(content)
     if parsed is not None:
         return _judge(parsed)
 
-    # AST unavailable (the file will not parse). Fall back to the line scan
-    # rather than reporting clean: a file we could not read has not been proven
-    # to document anything, and an exemption bought with a SyntaxError is an
-    # exemption granted on ignorance.
+    # AST unavailable: fall back to the line scan rather than reporting clean, since a
+    # file we could not read has not been proven to document anything.
     public_functions = []
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -287,15 +198,12 @@ def check_function_docstrings(content: str, lines: List[str]) -> Dict:
     undocumented = []
     for func_name, line_num in public_functions:
         has_docstring = False
-        # Scan past the full function signature (may span many lines for
-        # functions with lots of parameters) up to 30 lines ahead.
         for check_line in range(line_num, min(line_num + 30, len(lines) + 1)):
             if check_line - 1 < len(lines):
                 check_stripped = lines[check_line - 1].strip()
                 if check_stripped.startswith('"""') or check_stripped.startswith("'''"):
                     has_docstring = True
                     break
-                # Stop scanning if we hit another def or class -- no docstring found
                 if check_line > line_num and (check_stripped.startswith("def ") or check_stripped.startswith("class ")):
                     break
         if not has_docstring:

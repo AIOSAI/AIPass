@@ -3,58 +3,33 @@
 # Description: Proof Query Module
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Proof Query Module
-
-Auto-discovering content query module for proof packs.
-Mirrors standards_query.py pattern but for proof content.
-
-Run: seedgo proof_query
 """
 
 import importlib.util
 from pathlib import Path
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.modules import CommandRefused
 
 
-# =============================================================================
-# PACK DISCOVERY
-# =============================================================================
-
-
 def _discover_proof_packs() -> dict:
     """Discover available proof packs from handlers/ directory.
 
-    Convention: directories named *_proof/ containing *_content.py files.
-    Pack identifier is the full directory name (e.g., "aipass_proof").
-
-    Returns:
-        Dict mapping pack name to Path, e.g. {"aipass_proof": Path("handlers/aipass_proof")}
+    Convention: directories named *_proof/ holding *_content.py files; the pack id is the directory name.
     """
     handlers_dir = Path(__file__).parent.parent / "handlers"
     packs = {}
@@ -65,55 +40,23 @@ def _discover_proof_packs() -> dict:
             continue
         if not d.name.endswith("_proof"):
             continue
-        # Must contain at least one *_content.py file
         content_files = list(d.glob("*_content.py"))
         if content_files:
             packs[d.name] = d
     return packs
 
 
-# =============================================================================
-# PROOF CONTENT DISCOVERY
-# =============================================================================
-
-
 def _discover_proof_content(pack_dir: Path) -> dict:
-    """Discover available proof content files within a pack.
-
-    Globs *_content.py from the pack directory.
-
-    Args:
-        pack_dir: Path to the *_proof/ directory
-
-    Returns:
-        Dict mapping proof name to Path,
-        e.g. {"triplet": Path("triplet_content.py"), ...}
-    """
+    """Discover available proof content files within a pack."""
     proofs = {}
     for f in sorted(pack_dir.glob("*_content.py")):
-        # Strip _content.py suffix to get proof name
         proof_name = f.stem.removesuffix("_content")
         proofs[proof_name] = f
     return proofs
 
 
-# =============================================================================
-# CONTENT LOADING
-# =============================================================================
-
-
 def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
-    """Load and return formatted proof content from a content handler.
-
-    Imports the content file and calls get_{proof_name}_proof().
-
-    Args:
-        content_file: Path to the *_content.py file
-        proof_name: Name of the proof (e.g., "triplet")
-
-    Returns:
-        Rich-formatted string, or None on failure
-    """
+    """Load and return formatted proof content from a content handler."""
     try:
         spec = importlib.util.spec_from_file_location(content_file.stem, content_file)
         if spec is None or spec.loader is None:
@@ -136,11 +79,6 @@ def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
         return None
 
 
-# =============================================================================
-# DISPLAY HELPERS
-# =============================================================================
-
-
 def _show_query_introspection() -> None:
     """No-args display: list available proof packs with content counts."""
     console.print()
@@ -148,7 +86,6 @@ def _show_query_introspection() -> None:
     console.print("Pack-aware content query — browse proof content by pack and name")
     console.print()
 
-    # Show discovered packs
     packs = _discover_proof_packs()
     console.print("[yellow]Discovered Proof Packs:[/yellow]")
     for name, pack_path in packs.items():
@@ -166,7 +103,6 @@ def _show_query_introspection() -> None:
             console.print(f"    [dim]- {proof_path.name} (get_{proof_name}_proof)[/dim]")
     console.print()
 
-    # Navigation hints with drone commands
     if packs:
         console.print("[yellow]Next:[/yellow]  Pick a pack to see its proofs")
         for name in packs:
@@ -177,14 +113,7 @@ def _show_query_introspection() -> None:
 def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
     """List all proofs available in a pack.
 
-    Args:
-        pack_name: Full pack directory name (e.g., "aipass_proof")
-        pack_dir: Path to the pack directory
-
-    Every caller hands it a pack from _discover_proof_packs, which admits only
-    a directory holding a *_content.py, so the list is never empty. The arm
-    that printed "No content handlers found." could not be reached and was
-    dropped (seedgo, fleet green leg 7).
+    Never empty: _discover_proof_packs admits only a directory holding a *_content.py.
     """
     proofs = _discover_proof_content(pack_dir)
 
@@ -205,13 +134,7 @@ def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
 
 
 def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None:
-    """Display specific proof content.
-
-    Args:
-        pack_name: Full pack directory name (e.g., "aipass_proof")
-        pack_dir: Path to the pack directory
-        proof_name: Name of the proof (e.g., "triplet")
-    """
+    """Display specific proof content."""
     proofs = _discover_proof_content(pack_dir)
     if proof_name not in proofs:
         error(f"Unknown proof: '{proof_name}'")
@@ -225,12 +148,10 @@ def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None
     content = _load_proof_content(proofs[proof_name], proof_name)
     json_handler.log_operation("proof_queried", {"pack": pack_name, "proof": proof_name})
     if not content:
-        # `_load_proof_content` already said why. Falling through to a silent
-        # return had the process exit 0 on a proof it never printed.
+        # `_load_proof_content` already said why; a silent return would exit 0 on a proof never printed.
         raise CommandRefused(refusal.EXIT_UNPROVEN, f"{pack_name}/{proof_name}")
 
     console.print()
-    # Handle both str and List[str] return types from content handlers
     if isinstance(content, list):
         for line in content:
             console.print(line)
@@ -239,25 +160,9 @@ def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'proof_query' command with pack-aware drill-down.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-            [] → show introspection (available packs)
-            ["aipass_proof"] → list proofs in pack
-            ["aipass_proof", "triplet"] → show proof content
-            ["--help"] → help
-
-    Returns:
-        True if handled, False if not this module's command
     """
     if command != "proof_query":
         return False
@@ -266,13 +171,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE means explain: `proof_query aipass_proof --help`
-    # used to look up a proof named '--help'.
+    # A help flag anywhere means explain, never a proof named '--help'.
     if wants_help(None, args):
         print_help()
         return True
 
-    # First arg = pack name
     packs = _discover_proof_packs()
     pack_name = args[0]
     if pack_name not in packs:
@@ -284,19 +187,12 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, pack_name)
 
-    # No second arg = list proofs in pack
     if len(args) < 2:
         _list_pack_proofs(pack_name, packs[pack_name])
         return True
 
-    # Second arg = proof name
     _show_proof_content(pack_name, packs[pack_name], args[1])
     return True
-
-
-# =============================================================================
-# INTROSPECTION & HELP
-# =============================================================================
 
 
 def print_introspection() -> None:

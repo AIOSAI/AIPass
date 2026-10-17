@@ -3,7 +3,7 @@
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
 # Version: 1.3.2
 # Created: 2026-04-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -34,14 +34,6 @@ from aipass.seedgo.tests.support_checkers_batch7 import _lines
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
 
-# ===========================================================================
-# 1. encapsulation_check sub-functions
-# ===========================================================================
-
-
-# -- extract_branch_from_import ----------------------------------------------
-
-
 class TestExtractBranchFromImport:
     """Tests for extract_branch_from_import."""
 
@@ -66,20 +58,12 @@ class TestExtractBranchFromImport:
         assert result == "seedgo"
 
     def test_handlers_nested_under_a_branch_tree_are_that_branchs(self):
-        """daemon's telegram_notifier.py:28 imports skills' lib/telegram handlers (measured 10-08).
-
-        The reader answered None, so the line fell to the same-branch package row
-        and read "handlers.notifier imported from handlers.schedule". The owner is
-        the segment after ``aipass.``, as ``_target_branch`` reads it.
-        """
+        """daemon's telegram_notifier.py:28 imports skills' lib/telegram handlers (measured 10-08)."""
         line = "from aipass.skills.lib.telegram.apps.handlers.notifier import ("
         violation = check_cross_branch_imports([line], "daemon/apps/handlers/schedule/notifier_use.py", "daemon")
 
         assert extract_branch_from_import(line) == "skills"
         assert violation["message"] == "Line 1: skills.apps.handlers imported (use modules entry point)"
-
-
-# -- extract_handler_package -------------------------------------------------
 
 
 class TestExtractHandlerPackage:
@@ -106,9 +90,6 @@ class TestExtractHandlerPackage:
         assert result is None
 
 
-# -- get_file_handler_package ------------------------------------------------
-
-
 class TestGetFileHandlerPackage:
     """Tests for get_file_handler_package."""
 
@@ -121,9 +102,6 @@ class TestGetFileHandlerPackage:
         """File in modules/ returns None."""
         result = get_file_handler_package((tmp_path / "apps" / "modules" / "something.py").as_posix())
         assert result is None
-
-
-# -- check_handler_guard -----------------------------------------------------
 
 
 class TestCheckHandlerGuard:
@@ -235,9 +213,6 @@ class TestCheckHandlerGuard:
             "passed": True,
             "message": "Handler security guard present (module-level _guard_branch_access() call)",
         }
-
-
-# -- check_cross_branch_imports ----------------------------------------------
 
 
 class TestCheckCrossBranchImports:
@@ -370,9 +345,6 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         ]
 
 
-# -- check_cross_package_imports ---------------------------------------------
-
-
 class TestCheckCrossPackageImports:
     """Tests for check_cross_package_imports."""
 
@@ -414,9 +386,6 @@ class TestCheckCrossPackageImports:
         assert result["passed"] is True
 
 
-# -- check_direct_handler_imports --------------------------------------------
-
-
 class TestCheckDirectHandlerImports:
     """Tests for check_direct_handler_imports."""
 
@@ -442,28 +411,7 @@ class TestCheckDirectHandlerImports:
 
 class TestEncapsulationDerivesItsInfrastructureAllowList:
     """@daemon, 2026-08-31: two adjacent lines in their entry point, the
-    json_handler import passing and the module_root import scoring the file 66%.
-
-    Both are same-branch handler imports by the branch's own entry point, and
-    the handlers guard itself permits exactly this — it blocks CROSS-branch
-    imports. The checker exempted json_handler by NAME rather than by the
-    property that makes it fine.
-
-    THE BASIS CHANGED 2026-09-04 (DPLAN-0325 pair 6). It used to read the
-    branch's own json_handler and take whatever that imported from under
-    handlers/. The sweep made every branch's handler the one canonical shim,
-    which imports aipass.prax and nothing else — measured across all eighteen
-    branches, the old derivation returned the EMPTY SET for every one of them.
-    It went blind silently: @daemon reddened on CI (f8d7867f) because its entry
-    point is the only one importing the resolution shim directly, and the other
-    seventeen were one edit away from the same red.
-
-    The rule now reads what a handler PUBLISHES. The resolution shim has to
-    live under handlers/ to be the one guarded spelling for Path(__file__) on a
-    machine with no readable working directory, and everything in the branch
-    resolves through it — so a top-level handler module defining module_file /
-    find_repo_root / source_root / resolved_file IS that file.
-    """
+    json_handler import passing and the module_root import scoring the file 66%."""
 
     def _allowed(self, branch_root, handler):
         """Entry point may import ``handler``. Mutant: allow list not derived in encapsulation_check.py — killed."""
@@ -479,15 +427,7 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         assert self._allowed(branch, "module_root") is True
 
     def test_the_canonical_json_shim_does_not_take_the_allow_list_with_it(self, tmp_path):
-        """THE REGRESSION PIN. This is the CI red, reproduced.
-
-        Before the cure, a branch whose json_handler was the canonical shim
-        derived nothing, because the shim imports aipass.prax and nothing under
-        handlers/. The resolution shim is still sitting right there, still the
-        floor of the branch, still imported by the entry point — and the
-        checker had stopped being able to see it. Red-first: build exactly that
-        branch and assert the name comes back.
-        """
+        """THE REGRESSION PIN. This is the CI red, reproduced."""
         branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         (handlers / "json").mkdir(parents=True)
@@ -502,10 +442,7 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
     def test_the_file_name_varies_by_branch_and_the_function_name_does_not(self, tmp_path):
         """Four spellings ship in the fleet: module_root.py, paths.py,
         repo_root.py, module_paths.py. Keying on the file name would exempt
-        some branches and not others for no reason a reader could defend.
-        One branch per spelling: the entry point's allow list matches by
-        substring, so "paths" in one branch would vouch for "module_paths".
-        Mutant: the entry point's allow list stops deriving from the handlers in apps/handlers/aipass_standards/encapsulation_check.py — killed."""
+        some branches and not others for no reason a reader could defend."""
         spellings = {
             "paths": "def find_repo_root():\n    return None\n",
             "repo_root": "def source_root():\n    return None\n",
@@ -535,13 +472,7 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         assert self._allowed(branch, "openrouter") is False
 
     def test_calling_the_guarded_spelling_is_not_publishing_it(self, tmp_path):
-        """The discriminator is DEFINING the function, not naming it.
-
-        Every module in a cured branch calls module_file at import time. If a
-        call counted, the exemption would spread to the whole branch and this
-        standard would mean nothing — which is the failure mode the old
-        substring-shaped rules in this pack were built out of.
-        """
+        """The discriminator is DEFINING the function, not naming it."""
         branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
@@ -573,24 +504,8 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         assert self._allowed(branch, "module_root") is False
 
 
-# -- the path a host hands the checker --------------------------------------
-
-
 class TestAWindowsPathIsReadLikeAPosixOne:
-    """Windows hands the checker C:\\...\\apps\\modules\\door.py, and the checker asked for "apps/modules/".
-
-    test_checklist's door row convicted encapsulation on Windows only (PR #774,
-    round two): the door was not seen as a module file, so its handler import
-    was judged as an entry point's. On Linux a file NAME may carry backslashes,
-    so the string Windows produces is reproduced exactly; the proof on Windows
-    itself is the next CI run.
-
-    The file is written AT the Windows spelling, parents made first (CI round
-    three: on Windows a backslashed name is a tree whose parents did not exist).
-    On Linux that string is one name inside tmp_path; on Windows it is the real
-    tree. No class is patched (CI round four: a lambda standing in for the
-    checker's Path had no cwd, reached only where AIPASS_REGISTRY.json is absent).
-    """
+    """Windows hands the checker C:\\...\\apps\\modules\\door.py, and the checker asked for "apps/modules/"."""
 
     _DOOR = (
         '"""Door: memory\'s entry limits, for other branches."""\n\n'

@@ -3,38 +3,12 @@
 # Description: nominator - assertion shape (TAUTOLOGY, TYPE-ONLY, OR-ESCAPE)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 5 — assertions that cannot fail, and assertions that let go.
+"""TAXONOMY rule 5 — assertions that cannot fail, and assertions that let go.
 
-Three shapes, all of them assertions a reader counts as coverage and a mutant
-walks straight past:
-
-  TAUTOLOGY   `assert True`, `len(x) >= 0`, `x in (True, False)`, `a == a`.
-              The claim is true of every possible program. Measured: 16 in
-              @daemon, 13 + 11 + 6 across three more branches.
-  TYPE-ONLY   the unit's ONLY assertions are `isinstance` checks. The test
-              pins the return TYPE and says nothing about the value, so any
-              implementation returning the right shape of garbage passes.
-  OR-ESCAPE   `assert result == [] or isinstance(result, list)` — the second
-              clause is true whenever the first one is, so the assertion has
-              an exit. One real example survived a probe that replaced the
-              whole diff engine with an echo; all 19 tests in the file passed.
-
-THE PAIRING RULE IS THE WHOLE DIFFICULTY, and getting it wrong in the other
-direction is worse than missing a tautology. A type assertion standing BESIDE
-a value assertion is correct, common, and must never be flagged — so TYPE-ONLY
-is a property of the UNIT, never of a single line. TAXONOMY's known-good table
-pins this: the same @api file holds both a MIRROR-EXPECT defect and a
-spelled-out constant assertion that killed seven mutants, which is why the
-rule has to be per-assertion for tautologies and per-unit for type-only.
-
-A CAPABILITY CLAUSE ACQUITS AN `or`. `assert not hasattr(signal, "SIGKILL") or
-SIGKILL not in [...]` is platform-divergent code, not an escape hatch: the
-first clause is about the MACHINE, not about the result. In a real OR-ESCAPE
-both clauses are about the result.
+Reference: assertion_shape.md
 """
 
 import ast

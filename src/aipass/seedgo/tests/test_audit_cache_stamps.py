@@ -3,15 +3,12 @@
 # Description: The audit cache's invalidation stamps and what its branch line reports
 # Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit/incremental_cache.py's stamp functions."""
 
-# Split out of test_incremental_audit.py on 2026-09-21: that file tests
-# audit_branch_incremental's BEHAVIOUR (what re-runs), these test the stamps it
-# decides with. Nothing here loads a branch or runs a checker, so nothing here
-# needs that file's infrastructure mocks.
+# These test the stamps audit_branch_incremental decides with, not what re-runs; nothing here loads a branch.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — that hashlib.sha1 and json.dumps are deterministic
@@ -24,11 +21,7 @@ from aipass.seedgo.apps.handlers.audit import audit_display, incremental_cache
 class TestStamps:
     def test_pack_stamp_no_longer_moves_when_a_checker_is_edited(self, tmp_path):
         """REVERSED 2026-09-21. This asserted the opposite until the per-checker
-        stamp landed, and the old assertion was the cost: one comment line in
-        one checker discarded every branch's whole entry, 1261.3s of fleet
-        re-scan measured against 9.7s for the same run with nothing touched.
-        A checker's own stamp carries it now — see compute_checker_stamps.
-        """
+        stamp landed: one comment line in one checker discarded every branch's whole entry."""
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
         checker = pack_dir / "naming_check.py"
@@ -80,12 +73,7 @@ class TestStamps:
         assert stamp1 != stamp2
 
     def test_machinery_stamp_changes_when_bypass_package_edited(self, tmp_path, monkeypatch):
-        """A bypass/ edit must re-scan every branch, not just seedgo's own tree.
-
-        FPLAN-0382 changed is_bypassed's matching semantics and nothing in the
-        stamp noticed: all 17 branches kept serving results computed under the
-        old rules, reading 17/17 green while uncached CI showed 99%.
-        """
+        """A bypass/ edit must re-scan every branch, not just seedgo's own tree."""
         machinery = tmp_path / "bypass"
         machinery.mkdir()
         utils = machinery / "utils.py"
@@ -114,12 +102,7 @@ class TestStamps:
         assert incremental_cache.current_stamp(branch_path, pack_dir) != stamp1
 
     def test_current_stamp_differs_when_bypasses_are_disabled(self, tmp_path):
-        """Suppressing the rules is an input change, exactly like editing them.
-
-        compute_bypass_stamp() fingerprints the bypass.json FILE, which is
-        byte-identical across a normal and a --no-bypass run — so the stamp
-        itself has to carry whether those rules were applied.
-        """
+        """Suppressing the rules is an input change, exactly like editing them."""
         pack_dir = tmp_path / "pack"
         pack_dir.mkdir()
         branch_path = tmp_path / "branch"
@@ -173,13 +156,7 @@ class TestCheckerStamps:
 
 
 class TestTheBranchLineSaysWhatWasReRun:
-    """A partial hit used to print exactly like a cold scan.
-
-    That is how the clobbering defect of 2026-09-21 stayed invisible: @memory
-    re-running two edited checkers over an otherwise cached corpus read as a
-    3.5s miss, indistinguishable from a cache that had been reverted by another
-    process. The owner diagnosed it from a log, not from the audit's own output.
-    """
+    """A partial hit used to print exactly like a cold scan."""
 
     def _partial(self, **over):
         base = {"checkers_total": 53, "checkers_cached": 51, "reran": ["imports", "named_encoding"]}

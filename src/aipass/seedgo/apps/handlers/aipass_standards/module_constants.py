@@ -3,22 +3,14 @@
 # Description: A module's string constants bound once at module level, and the f-strings built from them
 # Version: 1.1.0
 # Created: 2026-10-05
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """A module's string constants, read from its AST, for checkers that read a name as its value.
 
-Two checkers met the same blind spot (seedgo, fleet green leg 17):
-``stdlib_patch`` could not read ``patch(f"{_MOD}.shutil.which")`` and
-``import_site`` could not read ``sys.modules[KEY] = stub``. Both only need to
-know which string a module-level name holds, so the table lives here once.
-
-A name enters the table only when it is bound EXACTLY ONCE at module level,
-and that binding is ``NAME = "text"`` (or ``NAME: str = "text"``). Every other
-binding of the name counts against it: a second assignment, an augmented one,
-a loop or ``with`` target, an import, a ``def``/``class`` of that name, or a
-``global NAME`` inside any function. A name bound twice has two possible
-values, and a checker that guessed one would convict or acquit by luck.
+Only a name bound EXACTLY ONCE at module level, as ``NAME = "text"`` (or ``NAME: str = "text"``), enters.
+Any other binding (reassignment, augmented, loop or ``with`` target, import, def/class, ``global NAME``)
+disqualifies it: a name bound twice has two values, and a checker that guessed one would judge by luck.
 Function and class bodies are a different scope and are not read.
 """
 
@@ -67,15 +59,8 @@ def _bound_once(counts: Dict[str, int], values: Dict[str, str]) -> Dict[str, str
 def file_constants(tree: ast.Module, path: Path | None) -> Dict[str, str]:
     """``string_constants`` plus the string constants this test file imports from its own support module.
 
-    The fleet's split rule 4 moves a test file's ``_MOD`` into
-    ``tests/support_<stem>.py``, after which ``patch(f"{_MOD}.os.kill")`` read
-    nothing: the import counted as the name's one binding and carried no value
-    (hooks' ``test_session_boot*.py``, 45 sites, fleet green split legs).
-    ONE hop to a ``support_*.py`` beside the file, in the file's own branch
-    (``from aipass.<branch>.tests.support_x import NAME`` or ``from
-    .support_x import NAME``); no chains, no other module. The imported name
-    must be bound nowhere else in the file, the same once-only rule a local
-    constant meets.
+    ONE hop to a ``support_*.py`` beside the file in its own branch (``from aipass.<branch>.tests.support_x
+    import NAME`` or ``from .support_x import NAME``); no chains. The imported name must be bound nowhere else.
     """
     counts, values = _bindings(tree)
     constants = _bound_once(counts, values)

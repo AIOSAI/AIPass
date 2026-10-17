@@ -3,26 +3,15 @@
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
 # Version: 1.0.0
 # Created: 2026-10-12
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 The `ratchet` verb (DPLAN-0405, FPLAN-9994 phase 1).
 
-    drone @seedgo ratchet                     what the ratchet is
-    drone @seedgo ratchet pick                the next branch and why, nothing run
-    drone @seedgo ratchet run                 pick, probe with --pseudo-tested, record the point
-    drone @seedgo ratchet run --budget 3600   the same, with a longer campaign ceiling
-    drone @seedgo ratchet record @branch      record the probe already in a branch's artifact
+seedgo's `.daemon/schedule.json` runs `ratchet run` as a COMMAND job (no wake, no model): the probe is deterministic.
 
-WHO CALLS IT. seedgo's own `.daemon/schedule.json` runs `ratchet run` as a
-COMMAND job every Sunday, right behind `shadow-cycle run`: no wake, no model,
-no polling. The probe is deterministic, so nothing in it needs judgement.
-
-WHAT PHASE 1 DOES NOT DO YET, said here so nobody reads its absence as a
-decision: no hand-off dispatch (phase 2), no `verify` (phase 3), no `trend`
-and no Sunday mail (phase 4), no slices (phase 5). A first run that breaks
-cannot wake anyone.
+No hand-off dispatch, `verify`, `trend`, mail or slices yet: their absence is not a decision.
 
 THE SERIES IS THE CLOCK, never the artifact - see `handlers/ratchet/series.py`.
 """
@@ -39,16 +28,13 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.ratchet import pick, series
 from aipass.seedgo.apps.modules import CommandRefused
 
-#: Exact tokens this module claims - never a prefix.
 COMMANDS: tuple = ("ratchet",)
 
 SUBCOMMANDS: tuple = ("pick", "run", "record")
 
-#: The campaign ceiling a weekly probe runs under. One branch a week; the
-#: command job's own timeout (3600) sits above this plus the suite runs.
+#: The command job's own timeout (3600) sits above this plus the suite runs.
 DEFAULT_BUDGET_SECONDS = 1800
 
-#: The execution group the probe opts into, by the adapter's bare name.
 PROBE_GROUP = "pseudo_tested"
 
 
@@ -105,11 +91,6 @@ def _parse_budget(rest: List[str]) -> int:
 
     error(f"ratchet run takes only '--budget <seconds>', got '{' '.join(rest)}'")
     raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, " ".join(rest))
-
-
-# =============================================================================
-# SUBCOMMANDS
-# =============================================================================
 
 
 def _branch_names() -> List[str]:
@@ -174,11 +155,6 @@ def _record(argument: str) -> None:
     _print_point(line, None)
 
 
-# =============================================================================
-# THE PROBE AND THE POINT
-# =============================================================================
-
-
 def _probe(branch: str, budget: int) -> Tuple[dict, int]:
     """Run the audit-tests lane on one branch with the campaign opted in."""
     options = {"execution_groups": [PROBE_GROUP], "budget_seconds": budget}
@@ -214,11 +190,6 @@ def _print_point(line: dict, elapsed: Optional[float]) -> None:
     console.print(f"  [dim]crash-only   [/dim] {len(line['crash_only'])}")
     console.print(f"  [dim]archive      [/dim] {line['archive']}")
     console.print(f"  [dim]series       [/dim] {series.series_path()}")
-
-
-# =============================================================================
-# DISPLAY
-# =============================================================================
 
 
 def _print_help() -> None:

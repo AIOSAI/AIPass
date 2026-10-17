@@ -3,25 +3,20 @@
 # Description: Subprocess Text True Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Subprocess Text True Standards Content Handler
 
 Provides formatted Subprocess Text True standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_subprocess_text_true_standards() -> str:
-    """Return formatted subprocess_text_true standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted subprocess_text_true standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A subprocess call in text mode with no encoding decodes the child's output with",

@@ -3,106 +3,12 @@
 # Description: v5 - does a patch's replacement match its target (whole module; function over a class)
 # Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Does this patch replace a function, or a whole module?
 
-`patch("a.b.c")` where `c` is a function swaps that one function out. Where `c`
-is a MODULE, the whole module becomes a `MagicMock`, and a `MagicMock` answers
-every attribute access that will ever be made of it - including attributes the
-production code no longer has. Delete the function the test was named for and
-the mock supplies it anyway, silently, forever.
-
-That is measured, not hypothetical. Deleting `auth.validate_credentials` from one
-branch left 46 of 46 tests green. The suite had no opinion about whether the
-function existed, because none of those tests was ever talking to it.
-
-HOW A TARGET IS RESOLVED, AND WHY THE WEAK WAY IS THE RIGHT WAY. This check never
-imports the project it measures - a checker that imported a stranger's test tree
-would execute it, which is the failure this whole pack refuses. So it does not ask
-Python whether `a.b.c` is a module; it asks the corpus, which has already read the
-tree as text. A dotted target is a module when it matches the path of a `.py` file
-the corpus parsed, or when the file named by its parent segment binds that last
-segment to a module by import. That is strictly weaker than an import, and the
-weakness is deliberate: a module conjured at runtime is invisible here, and being
-blind to it costs nothing a reader relies on.
-
-WHY THE IMPORT-BINDING ARM EXISTS AT ALL. `patch(f"{_MOD}.console")` and
-`patch(f"{_MOD}.json_handler")` are the same shape to a last-segment match, but
-only one of them names a module: `console` is an object imported from a library
-and `json_handler` is a file. Matching on the name alone would flag the first,
-which is ordinary correct code. Reading what the parent file actually imports is
-what makes this rule precise rather than a name collision.
-
-F-STRING TARGETS RESOLVE, AND THAT IS NOT A CONVENIENCE. `patch(f"{_MOD}.thing")`
-is the dominant real spelling - the whole 46-test block above is written that way -
-and a first version of this rule demanded an `ast.Constant`, so it scored a branch
-holding 25 known module patches as completely clean. A detector that only reads the
-spelling nobody uses measures nothing. Only interpolations of module-level string
-constants resolve; anything computed is unreadable and is never flagged.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM.
-
-`spec=`, `spec_set=`, `autospec=True` and `new_callable=` acquit outright. A
-specced mock raises on an attribute the real object does not have, which is
-precisely the property whose absence this rule is about. It does not claim the
-acquittal is complete - a `spec` pointed at the wrong object is still a lie, and
-nothing static can see that.
-
-A target that resolves to no file in the tree is NOT flagged. The rule reports
-what it can resolve and stays quiet about the rest, rather than guessing from a
-name. That bias runs toward FEWER findings, and it is the direction to be wrong
-in for an advisory number.
-
-Class-level decorators are not read. `@patch(...)` on a `class Test...:` reaches
-every method in it, and this check only reads each method's own decorators and
-body, so a class-level module patch is missed. Stated rather than hidden, because
-a reader who knows the shape exists will otherwise assume it was measured.
-
-It reads PRODUCTION, so it can be reading less than the tree holds: a production
-file that will not parse contributes no module path and no import binding, which
-again biases toward clean. Every result therefore carries `production_limits()`
-as its own check line when anything was unreadable. A hole and an unread file look
-identical from outside, and only the check itself can tell them apart.
-
-TWO ARMS OF THE ORIGINAL RULE ARE GONE BECAUSE THEY COULD NEVER FIRE, and they are
-named here rather than carried as decoration. The first iterated a unit's
-decorators before walking its body: `ast.walk` on a `FunctionDef` already descends
-into `decorator_list`, so every decorator patch was found twice and the dedupe set
-threw the copy away - measured, not assumed. The second listed `patch.object` among
-the watched call names; `patch.object(module, "name")` takes an OBJECT as its first
-argument, never a dotted string, so the target reader returns None for it every
-time. Leaving either in place would tell a future reader that a shape is covered
-when it is not.
-
-SECOND SPECIES, CLASS-STANDIN (1.1.0, PR #774 CI round four). The same family:
-a patch whose replacement does not match its target. `monkeypatch.setattr(mod,
-"Path", lambda *a: ...)` where `mod`'s own source uses `Path` AS A CLASS - an
-attribute read off it (`Path.cwd()`), the second argument of isinstance/issubclass,
-a base in a class statement. The stand-in has no such surface, so that use dies with
-`'function' object has no attribute 'cwd'` - and only on the path that reaches it.
-seedgo's own batch7 test at 1.3.1 did exactly this: `_find_registry` falls back to
-`Path.cwd()` only when the git-ignored registry marker is absent, so every dev seat
-was green and every clean checkout red.
-- `mod` must be a bare name the TEST FILE binds by import, resolved to exactly one
-  production file through the corpus (longest dotted suffix, at least two segments
-  when the import has two). Never by importing. `mod.subprocess` is unreadable - the
-  target is not in the corpus - and is skipped.
-- The stand-in convicted: a lambda, a name the test file binds only to a `def`, or
-  `functools.partial(...)` (a partial has no `.cwd` and isinstance against it
-  raises - same species). Acquitted: a class (`class _FakePath`), `type(...)`, a
-  MagicMock/Mock (every attribute), anything else.
-- A constructor-only use (`Path(x)`) acquits: a function answers a call. A name the
-  module binds by plain `import` is a module, not a class, and acquits.
-- Helpers are read, not only units: the incident's patch lived in `_windows_spelled`.
-  The row names the def holding the call; the score is floored at 0 because a helper
-  is a place to look that is not a unit.
-- Not claimed: `setattr("pkg.mod.Name", ...)` string targets, local shadowing of
-  the name inside the product module, `except Name` uses.
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the pack's
-own corpus reader. That constraint is the reason the pack exists.
+Reference: mock_drift.md
 """
 
 import ast
@@ -111,49 +17,25 @@ from typing import Dict, List, Optional, Set
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "mock_drift"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Keyword arguments that make a mock refuse unknown attributes. Any one of them
-#: acquits the patch outright, because refusing unknown attributes is the exact
-#: property whose absence this rule is about.
+#: Keyword arguments that make a mock refuse unknown attributes; any one acquits.
 ACQUITTING_KEYWORDS: frozenset = frozenset({"spec", "spec_set", "autospec", "new_callable"})
 
-#: The call names this rule watches. `patch.object` is deliberately ABSENT: its
-#: first argument is an object rather than a dotted string, so it can never
-#: produce a readable target and listing it would only promise coverage.
+#: `patch.object` is deliberately absent: its first argument is an object, never a readable target.
 PATCH_NAMES: frozenset = frozenset({"patch", "mock.patch", "unittest.mock.patch"})
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def _module_paths(scanned: corpus.Corpus) -> Set[str]:
     """Every dotted module path the corpus read, plus every suffix of each.
 
-    EVERY SUFFIX, because a test patches `mypkg.apps.thing`, not the path
-    relative to the project root. Both `a/b/c.py` and `a/b/c/__init__.py` count.
-
-    Derived from what the corpus already parsed rather than from a second walk of
-    the disk. That keeps the resolvable set and the import-binding map describing
-    the same files, and it inherits the corpus's vendor pruning - which prunes
-    relative to the walk root, so a project that merely LIVES under a directory
-    called `build` still resolves.
+    From the corpus, not a second disk walk, so it describes the same files as the import-binding map.
     """
     found: Set[str] = set()
     relpaths = list(scanned.production_trees) + [parsed.relpath for parsed in scanned.files]
@@ -227,9 +109,7 @@ def _acquitting_keyword(node: ast.Call) -> str:
 def _patch_calls(unit: corpus.TestUnit) -> List[ast.Call]:
     """Every `patch(...)` call reaching this unit, decorator or context manager.
 
-    ONE WALK, NOT TWO. `ast.walk` on a `FunctionDef` descends into its
-    `decorator_list`, so a separate decorator pass would return every decorator
-    patch a second time - see the module docstring.
+    One walk: `ast.walk` already descends into `decorator_list`; a second pass double-counts.
     """
     return [
         node
@@ -263,10 +143,7 @@ def _plain_import_names(node: ast.Import, modules: Set[str]) -> Set[str]:
 def _module_bound_names(scanned: corpus.Corpus, modules: Set[str]) -> Dict[str, Set[str]]:
     """Per production file stem, the names it binds to another MODULE by import.
 
-    Keyed by STEM, which is what a patch target's parent segment gives. UNIONED
-    rather than assigned: two files can share a stem, and the second overwriting
-    the first would drop bindings silently - a hole that makes the rule report
-    fewer findings, toward clean.
+    Unioned, not assigned: two files can share a stem, and overwriting drops bindings silently.
     """
     bound: Dict[str, Set[str]] = {}
 
@@ -307,11 +184,7 @@ def unit_flags(
     modules: Set[str],
     bound: Dict[str, Set[str]],
 ) -> List[Dict]:
-    """Every module-patch finding in one unit, with the evidence for each.
-
-    The public entry point for this rule - the report lane and the tests both ask
-    the question here rather than re-deriving it.
-    """
+    """Every module-patch finding in one unit, with the evidence for each."""
     rows: List[Dict] = []
     seen: Set[tuple] = set()
 
@@ -355,11 +228,6 @@ def find_module_patches(scanned: corpus.Corpus) -> List[Dict]:
     return rows
 
 
-# =============================================================================
-# SECOND SPECIES - A FUNCTION STANDING IN FOR A CLASS
-# =============================================================================
-
-
 def _module_files(scanned: corpus.Corpus) -> Dict[str, Set[str]]:
     """Dotted module path (every suffix) -> the production relpaths it can name."""
     files: Dict[str, Set[str]] = {}
@@ -376,9 +244,7 @@ def _module_files(scanned: corpus.Corpus) -> Dict[str, Set[str]]:
 def _resolve_module(dotted: str, files: Dict[str, Set[str]]) -> str:
     """The ONE production file a dotted import names, or "" when none or ambiguous.
 
-    The longest suffix of `dotted` the corpus holds wins, and it must keep the last
-    two segments when there are two: `from thirdparty import worker` must not land
-    on a project file that merely shares the stem `worker`.
+    Keeps at least two segments, so `from thirdparty import worker` never lands on a stem match.
     """
     parts = dotted.split(".")
     shortest = min(2, len(parts))
@@ -411,11 +277,7 @@ def _file_functions(tree: ast.Module) -> Set[str]:
 
 
 def _is_function_standin(value: ast.expr, functions: Set[str]) -> bool:
-    """A lambda, a plain function from this file, or a functools.partial - none has a class surface.
-
-    A partial of the original class is convicted too: `partial(Path).cwd` does not
-    exist and `isinstance(x, partial(Path))` raises, so it is the same species.
-    """
+    """A lambda, a plain function from this file, or a functools.partial - none has a class surface."""
     if isinstance(value, ast.Lambda):
         return True
     if isinstance(value, ast.Name):
@@ -444,10 +306,7 @@ def _class_use(node: ast.AST, name: str) -> str:
 def _class_uses(tree: ast.Module, name: str) -> List[str]:
     """Where a module's own source uses `name` AS A CLASS: `line:how`, in line order.
 
-    Three uses, and only these: an attribute read off it (`Path.cwd`), the second
-    argument of isinstance/issubclass, a base in a class statement. A bare call
-    `Name(...)` is a constructor and a function answers it, so it is not here.
-    A name the module binds by plain `import` is a module, never a class.
+    A bare call `Name(...)` is not a class use: a function answers it.
     """
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any((a.asname or a.name.split(".")[0]) == name for a in node.names):
@@ -458,11 +317,7 @@ def _class_uses(tree: ast.Module, name: str) -> List[str]:
 
 
 def _owned_defs(parsed: corpus.TestFile) -> List[tuple]:
-    """(nodeid, def) for every module-level def and every method, helpers included.
-
-    HELPERS INCLUDED, because the real incident lived in one: `_windows_spelled`
-    patched Path, and no unit body held the call.
-    """
+    """(nodeid, def) for every module-level def and every method, helpers included."""
     owned: List[tuple] = []
     for node in parsed.tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -537,10 +392,7 @@ def find_class_standins(scanned: corpus.Corpus) -> List[Dict]:
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct units named by a list of findings, first-seen order.
 
-    THE SCORE IS PER UNIT, NOT PER FINDING. A unit carrying four module patches
-    is one unit a reader has to go and look at; counting the findings would let a
-    single sloppy test drive a project's score below zero, and a score that can go
-    negative is one nobody believes twice.
+    The score is per unit: counting findings could push the score negative.
     """
     seen: List[str] = []
     for row in rows:
@@ -549,37 +401,16 @@ def flagged_nodeids(rows: List[Dict]) -> List[str]:
     return seen
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its patches replace functions or modules.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests reports not_applicable rather than a
-        number, because zero tests measured is not zero quality found.
+    bypass_rules is accepted for the scoring-API contract and unread: advisory gates nothing.
     """
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS, with_production=True)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty-path return: an unparseable file must never read as an absent one.
     unreadable: List[Dict] = _limit_checks(scanned)
 
     if total == 0:
@@ -652,11 +483,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
 def _limit_checks(scanned: corpus.Corpus) -> List[Dict]:
     """The lines saying what could NOT be read, test side and production side.
 
-    THIS RULE READS PRODUCTION, so it can resolve fewer module paths than the
-    tree holds, and every unresolved path is a finding that never happens. That
-    bias runs toward clean, which is the direction nobody notices. So the
-    production limit is published beside the score rather than left implicit -
-    a hole and an unread file look identical from outside.
+    Published beside the score: an unread production file hides its findings.
     """
     checks: List[Dict] = []
 

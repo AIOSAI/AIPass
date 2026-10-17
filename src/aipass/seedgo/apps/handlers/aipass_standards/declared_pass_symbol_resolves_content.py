@@ -3,25 +3,16 @@
 # Description: Declared Pass Symbol Resolves Standards Content Handler
 # Version: 1.0.3
 # Created: 2026-09-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Declared Pass Symbol Resolves Standards Content Handler
-
-Provides formatted Declared Pass Symbol Resolves standards content.
-Module orchestrates, handler implements.
-"""
+"""Declared Pass Symbol Resolves Standards Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_declared_pass_symbol_resolves_standards() -> str:
-    """Return formatted declared_pass_symbol_resolves standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted declared_pass_symbol_resolves standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (test template v1 item 7, the WRONG-SYMBOL shape):[/bold cyan]",
         "  Every name a declared pass mentions has to resolve -- in the branch's apps/,",

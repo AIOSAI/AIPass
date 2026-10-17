@@ -3,82 +3,13 @@
 # Description: Literal Absolute Path Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 Literal Absolute Path Standards Checker Handler
 
-Test template v1, item 22: paths in a test are built from ``tmp_path``, never
-written as a literal ``/...``.
-
-WHY THIS IS NOT ``hardcoded_path``. That standard hunts one species, a HOME
-directory -- ``/home/<user>/``, ``/Users/<user>/``, ``C:\\Users\\<user>`` -- and
-it hunts it by regex over every line of every file in the fleet. Item 22's own
-example, ``Path("/nonexistent/path")``, has no home in it and ``hardcoded_path``
-cannot see it. Measured 2026-09-22 over the 553 fleet test files: 2,491 literal
-absolute paths, of which 164 are home-rooted. The other 2,327 had no checker.
-
-WHY IT IS RESTRICTED TO AN ARGUMENT, AND THE RESTRICTION IS THE RULE.
-``host_portability`` ARM A settled this shape for ``/proc``: a literal that
-merely SITS somewhere is data, and only a literal HANDED to a call is a path the
-test uses. The same split here throws out 2,327 nominations down to 874. The
-positions it throws out are the ones that would have made the rule a nuisance:
-
-    {"/srv/data/x.json": [...]}          a mock TABLE, keyed by path
-    assert result == "/fake/repo"        the ORACLE, not an input
-    mock.return_value = "/usr/bin/tmux"  what a STUB returns
-
-Never convicted, each for a measured reason (counts over the 553 files):
-
-  * A HOME-rooted literal (78 in argument position). ``hardcoded_path`` already
-    convicts it. Two standards charging one line teaches a reader to read
-    neither.
-  * MOCK DATA (200): an argument to ``Mock``/``MagicMock``/``patch``/
-    ``mock_open``/``parametrize``/``assert_called_*``, or a ``return_value=``,
-    ``side_effect=``, ``new=``, ``reason=``, ``match=``, ``id=``/``ids=``
-    keyword. The literal is what a stub RETURNS or what a skip's prose SAYS.
-  * A URL PATH (188): the argument of ``get``/``post``/``put``/``delete``/
-    ``head``/``request``/``websocket_connect``/``url_for``/``options``.
-    ``client.get("/v1/whoami")`` names a route, not a file.
-  * A SYSTEM ROOT (60): ``/bin``, ``/sbin``, ``/usr``, ``/etc``, ``/proc``,
-    ``/sys``, ``/dev``, ``/var/run``, ``/opt``, ``/Library``, ``/System``,
-    ``/Applications``. api's host-read fence tests hand ``/etc/passwd`` to the
-    product precisely because it is a real file outside the fence; ``tmp_path``
-    cannot express "a file the fence must refuse".
-  * A PURE PATH CLASS (26): ``PurePath``, ``PurePosixPath``, ``PureWindowsPath``.
-    They are string algebra and touch no filesystem by construction, which is
-    how prax ``test_repo_root.py`` asserts that a POSIX path is not absolute to
-    Windows.
-  * A STRING OPERATION (10): ``startswith``, ``endswith``, ``split`` and their
-    kin. The literal is a comparison operand that happens to be spelled as a
-    call argument.
-  * A DRIVE-LETTER literal (15 in 8 files) -- COUNTED and reported, never
-    convicted. On a POSIX host ``tmp_path`` cannot produce ``C:\\proj\\AIPass``,
-    so a rule that convicted memory's ``test_roots_lifecycle`` would be
-    demanding a cross-OS test lie about its own subject. Same device
-    ``named_encoding`` uses for latin-1: the count rides in the passing message
-    so the number stays visible without being a verdict.
-
-A NAME BOUND ONLY TO SUCH A LITERAL IS THE SAME HABIT, and is judged where the
-name is USED (20 sites in 8 files: aipass ``test_adopt.py`` binds
-``fake_home = "/fake/aipass/home"`` once and hands it to three calls). A name
-bound to anything else anywhere in the file is dropped -- which value reaches
-the call is a question one pass cannot answer. ARM A's ``_proc_bindings`` is the
-precedent and the reason.
-
-Two stated limits:
-
-  * A literal containing WHITESPACE is not a path. hooks ``test_hook_test.py``
-    binds a two-sentence refusal message that opens with ``/proj/...``; a rule
-    without this guard convicts the prose. One site fleet-wide.
-  * A literal that is never handed to a call -- a default argument, a bare
-    return, an element of a list that is not itself an argument -- is not
-    convicted. It is data until something uses it, and ARM A's measurement is
-    why that line sits where it does.
-
-The whole rule, measured 2026-09-22: 874 hits in 117 of 553 test files, 281 of
-them the template's own shape, ``Path("/...")``.
+Reference: literal_path.md
 """
 
 import ast
@@ -101,7 +32,7 @@ STANDARD_KEY = "literal_path"
 #: no habit to end.
 _POSIX_ABS = re.compile(r"^/[A-Za-z0-9_.\-]")
 
-#: A drive-rooted path. Counted, never convicted -- see the module docstring.
+#: A drive-rooted path. Counted, never convicted -- see literal_path.md.
 _DRIVE_ABS = re.compile(r"^[A-Za-z]:[\\/]")
 
 #: hardcoded_path's own ground, spelled as that checker spells it, so one line
@@ -239,8 +170,7 @@ def _path_bindings(tree: ast.Module) -> Dict[str, str]:
     """Names bound ONLY to a convictable path literal, and that literal.
 
     A name assigned anything else anywhere in the file is dropped: which value
-    reaches the call is then a question one pass cannot answer. Taken from
-    ``host_portability`` ARM A's ``_proc_bindings``, for the same reason.
+    reaches the call is then a question one pass cannot answer.
     """
     bound: Dict[str, str] = {}
     rejected: Set[str] = set()
@@ -259,8 +189,7 @@ def _path_bindings(tree: ast.Module) -> Dict[str, str]:
 def _parse(source: str, what: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ruff already convicts a syntax error, and a line number invented for a
-    statement Python cannot parse sends its author to the wrong place.
+    ruff already convicts a syntax error; a line number invented for an unparseable file misleads.
     """
     try:
         return ast.parse(source)
@@ -301,9 +230,7 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
 def counted_drive_paths(source: str) -> List[Tuple[int, str]]:
     """(line, value) for every drive-rooted literal handed to a call.
 
-    Counted, never convicted. ``tmp_path`` on a POSIX host cannot produce
-    ``C:\\proj\\AIPass``, so a cross-OS test has no other way to spell its own
-    subject.
+    Counted, never convicted: ``tmp_path`` on a POSIX host cannot produce a drive-rooted path.
     """
     tree = _parse(source, "counted")
     if tree is None:
@@ -360,15 +287,7 @@ def _clean_message(drive_paths: List[Tuple[int, str]]) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for a literal absolute path handed to a call.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for a literal absolute path handed to a call."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -385,9 +304,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, _clean_message(counted_drive_paths(source))), 100)
 
-    # One line per hit, all inside ONE check rather than one check each --
-    # checklist._format_failure prints the FIRST failed check and appends
-    # "(+N more)", so N checks would show one hit and hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {name} - {fix}" for line, name, fix in hits)
 
     json_handler.log_operation(

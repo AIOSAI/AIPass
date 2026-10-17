@@ -56,6 +56,13 @@ from aipass.seedgo.apps.handlers.file import file_handler
 - `json_handler` - Default JSON operations
 - `file_handler` - Default file operations
 - Same-package relative imports (`from .validator import X`)
+- The branch's resolution shim: a top-level module under `apps/handlers/` that defines one of
+  `module_file`, `find_repo_root`, `source_root` or `resolved_file` at module level. It is the
+  one guarded spelling of `Path(__file__)` every module resolves through, so it cannot sit
+  behind a module entry point (the entry point needs it first). The shim is found by what it
+  publishes, not by file name, because the file name varies by branch. Being a leaf (importing
+  nothing from its own `apps/`) is not enough: ordinary handlers with no local dependencies are
+  leaves too.
 
 ---
 

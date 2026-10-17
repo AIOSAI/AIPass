@@ -3,73 +3,12 @@
 # Description: Duplicate Test Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Duplicate Test Standards Checker Handler
+"""Duplicate Test Standards Checker Handler
 
-Crack class B from the 2026-09-22 eyes-on review of @backup's tests: a test
-that adds nothing, because another test in the same file already asserts
-everything it asserts. It doubles the maintenance and the runtime and it
-widens no net. The reviewers found 24 of them across nine files.
-
-TWO SHAPES, BOTH MECHANICAL, BOTH ON ONE CHECK:
-
-  B1 CLONE -- two tests whose bodies are the same statements, docstring
-     dropped. The name differs and nothing else does.
-  B2 SUBSUMED -- every statement of X also appears in Y, and the statements Y
-     adds beyond X are only asserts or bindings that call nothing. The
-     restriction on Y's extras is the whole rule. Without it,
-     ``test_floor_applies_with_no_backupignore`` (no .backupignore at all)
-     reads as subsumed by ``test_floor_applies_when_the_file_never_names_tmp``
-     (a .backupignore that omits tmp) -- but the second adds a
-     ``write_text``, and a statement that changes the world makes it a
-     DIFFERENT PRECONDITION, not a superset. Both reviewers called that pair
-     SOUND. A binding like ``ignore = project / ".backupignore"`` changes
-     nothing and does not break the reading.
-
-WHAT THIS RULE HONESTLY DOES NOT SEE, stated first because it is the headline
-number and it reorders the brief's priority list:
-
-  OF @BACKUP'S 24 DUPLICATE ROWS, THIS CHECKER CONVICTS TWO. The other 22 are
-  SEMANTIC duplication -- the same claim in a different spelling -- and no
-  shape rule reaches them. ``test_drive_pipeline.py:783`` and
-  ``test_drive_mocked.py:49`` pin the identical behaviour with ``[]`` versus
-  ``drive_sync.PRIMARY_COMMAND``, ``capsys.readouterr().out`` versus a tuple
-  unpack, and one extra ``assert err == ""``. A reader sees one test twice;
-  an AST sees two different programs.
-
-  The two it does convict are both confirmed rows and it invents none:
-  ``test_cli_routing.py:250`` ("identical claim to line 163") as SUBSUMED, and
-  ``test_dead_cwd_imports.py:828`` ("line-for-line the same assertion as 469")
-  as a CLONE.
-
-  That is the tuning answer for the owner: B is not the second-richest class
-  by evidence yield. It is a cheap, zero-false-positive rule that catches the
-  literal copies, and the reviewers' 24 need a judgement layer this cannot be.
-
-ONE FILE, NOT THE BRANCH. Cross-file duplication is real and measured -- 21
-files, 22 exact clones fleet-wide, and @backup's six drive_pipeline /
-drive_mocked pairs are the kind of thing it would name. It is left out
-because the verdict would have to be reported against one of two files and
-this lane hands the checker one path at a time. It wants a branch-level lane;
-the number is in the docs page so the owner can ask for one.
-
-CHECK FIRST, measured 2026-09-22 over the fleet's 559 test files:
-
-  * 59 files convicted, 92 hits, 6.8s -- 57 clones and 35 subsumed. Top three:
-    @api 8 files, @seedgo 8, @trigger 6. The worst single file is @devpulse's
-    ``test_git_gate.py`` at 6.
-  * A widened B2 that accepts ANY extra statement in Y finds 130 files and
-    204 hits, and convicts the SOUND pair above. That extra yield is bought
-    with a false conviction rate this measurement cannot bound, so the narrow
-    form ships and the wide number is reported.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: if every statement of your test
-already appears, verbatim, in another test in the same file, and that other
-test's only additions are asserts, your test excludes no failure the other
-does not already exclude. There is no threshold and nothing to tune.
+Reference: duplicate_test.md
 """
 
 import ast
@@ -86,14 +25,11 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "DUPLICATE_TEST"
 STANDARD_KEY = "duplicate_test"
 
-#: Prefix that makes a function a test, which is the only unit this rule judges.
 TEST_PREFIX = "test_"
 
-#: Marks a decorator among a test's statement shapes, so no statement can equal it.
 DECORATOR = "@"
 
-#: The pytest marks that change the case itself; every other mark (timeout,
-#: skipif, slow) only schedules the same case.
+#: The pytest marks that change the case; any other mark only schedules the same case.
 CASE_MARKS = {"parametrize", "usefixtures"}
 
 CLONE = "is the same test as"
@@ -103,11 +39,7 @@ CURE = "delete it, or widen it until it excludes a failure the other does not"
 
 
 def _body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> List[ast.stmt]:
-    """A function's statements with the docstring dropped.
-
-    Two tests that differ only in their prose are the same test. The prose is
-    still worth having; it is just not a second pin.
-    """
+    """A function's statements with the docstring dropped."""
     statements = list(function.body)
     first = statements[0] if statements else None
     if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
@@ -118,24 +50,13 @@ def _body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> List[ast.stmt]:
 def _shape(statement: ast.AST) -> str:
     """One statement as position-free text: formatting drops out, meaning does not.
 
-    ``ast.dump`` omits ``lineno`` and ``col_offset`` unless asked for them, so
-    the dump alone already ignores line breaks, indentation and comments while
-    every identifier and every constant survives. Constants are KEPT on
-    purpose: ``*.log`` and ``*.txt`` are two different claims about the
-    product, and a rule that blanked them convicted 345 files with 2,415 hits
-    fleet-wide. An earlier cut round-tripped through ``unparse`` and ``parse``
-    first, which found the identical duplicates and cost 7.8s over the fleet.
+    Constants are KEPT on purpose: ``*.log`` and ``*.txt`` are two different claims.
     """
     return ast.dump(statement)
 
 
 def _harmless(statement: ast.AST) -> bool:
-    """Whether a statement Y adds beyond X leaves the world exactly as it was.
-
-    An assert reads. A binding whose value calls nothing reads. Anything else
-    -- a bare call, a ``with``, a loop -- may have built the precondition that
-    makes Y a different test rather than a bigger one.
-    """
+    """Whether a statement Y adds beyond X leaves the world exactly as it was."""
     if isinstance(statement, ast.Assert):
         return True
     if isinstance(statement, (ast.Assign, ast.AnnAssign)):
@@ -147,9 +68,8 @@ def _harmless(statement: ast.AST) -> bool:
 def _changes_the_case(decorator: ast.expr) -> bool:
     """Whether a decorator makes the test a different case (seedgo, fleet green leg 10).
 
-    parametrize, usefixtures, patch and any non-mark decorator change what runs.
-    A ``pytest.mark.X`` or ``mark.X`` outside CASE_MARKS does not: twins that
-    differ only by a timeout or a skipif are one case run twice.
+    A ``pytest.mark.X`` outside CASE_MARKS does not change what runs: twins that differ
+    only by a timeout or a skipif are one case run twice.
     """
     target = decorator.func if isinstance(decorator, ast.Call) else decorator
     if not isinstance(target, ast.Attribute):
@@ -171,11 +91,7 @@ def _tests(tree: ast.Module) -> List[Tuple[int, str, Dict[str, ast.AST]]]:
             continue
         statements: Dict[str, ast.AST] = {_shape(s): s for s in _body(node)}
         if statements:
-            # The decorators are part of the test (seedgo, fleet green leg 9): two
-            # bodies under different parametrize cases or patch answers are two
-            # tests, as the page said all along. Each decorator is a member that
-            # is never harmless, so it can neither be shared away nor subsumed.
-            # Only the decorators that change the case count (leg 10).
+            # Decorators that change the case are part of the test: never shared away nor subsumed.
             statements.update({DECORATOR + _shape(d): d for d in node.decorator_list if _changes_the_case(d)})
             found.append((node.lineno, node.name, statements))
     return found
@@ -190,8 +106,7 @@ def _clones(tests: List[Tuple[int, str, Dict[str, ast.AST]]]) -> List[Tuple[int,
     for members in groups.values():
         if len(members) < 2:
             continue
-        # The FIRST by line is the original; every later one is the copy. Stable
-        # under an edit anywhere else in the file, which a "shortest" rule is not.
+        # The FIRST by line is the original: stable under an edit anywhere else in the file.
         original = min(members)[1]
         findings.extend((line, name, CLONE, original) for line, name in sorted(members)[1:])
     return findings
@@ -215,8 +130,7 @@ def _subsumed(tests: List[Tuple[int, str, Dict[str, ast.AST]]], claimed: Set[str
 def _parse(source: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
     """
     try:
         return ast.parse(source)
@@ -232,8 +146,7 @@ def scan(source: str) -> List[Tuple[int, str, str, str]]:
         return []
     tests = _tests(tree)
     clones = _clones(tests)
-    # A clone is already the strongest reading. Charging it again as subsumed
-    # would print the same test twice under two names for one defect.
+    # A clone is already the strongest reading; charging it again as subsumed double-counts.
     subsumed = _subsumed(tests, {name for _line, name, _rel, _other in clones})
     return sorted(clones + subsumed)
 
@@ -258,15 +171,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for tests another test in the same file already covers.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for tests another test in the same file already covers."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -282,9 +187,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, "Every test here asserts something no other test does"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per test would show the first
-    # and hide the rest behind a count.
+    # Every hit on ONE check: checklist._format_failure shows the first and "(+N more)".
     detail = "\n".join(
         f"{path.name}:{line} {name} {relation} {other} - {CURE}" for line, name, relation, other in findings
     )

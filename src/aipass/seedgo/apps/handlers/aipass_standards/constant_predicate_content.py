@@ -3,25 +3,16 @@
 # Description: Constant Predicate Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Constant Predicate Standards Content Handler
-
-Provides formatted Constant Predicate standards content.
-Module orchestrates, handler implements.
-"""
+"""Constant Predicate Standards Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_constant_predicate_standards() -> str:
-    """Return formatted constant_predicate standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted constant_predicate standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (crack class C, review of @backup 2026-09-22):[/bold cyan]",
         "  A lambda whose body is a constant, handed to product code as an argument.",

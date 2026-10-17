@@ -3,7 +3,7 @@
 # Description: silent_catch_check: classify, report, guard, hand on, empty answer (split from test_checkers_batch7.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/silent_catch_check.py and silent_catch_content.py."""
@@ -20,15 +20,7 @@ pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
 
 class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
-    """@spawn's report (2026-08-31): `except FileNotFoundError: return "absent"`
-    was flagged as a swallow. It is the opposite — the exception's information
-    becomes the return value and the caller asserts on it. A logger call in a
-    test helper would route production logging out of a suite, which is what the
-    hygiene lane exists to stop, so two standards were pulling opposite ways.
-
-    Two clauses, both measured: a SPECIFIC exception type (bare / Exception says
-    only "it failed"), and a body of exactly one `return <constant>`.
-    """
+    """@spawn's report (2026-08-31): `except FileNotFoundError: return "absent"`"""
 
     def _lines(self, tmp_path, source):
         target = tmp_path / "probe.py"
@@ -110,9 +102,7 @@ class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
         assert passed is False
 
     def test_a_return_carrying_the_caught_exception_qualifies(self, tmp_path):
-        """`return ("FAILED", str(exc))` carries MORE than a constant does.
-        Keying on ast.Constant alone flagged the better version of the pattern —
-        found by running the rule against @spawn's real file, not my examples."""
+        """`return ("FAILED", str(exc))` carries MORE than a constant does."""
         source = (
             "def verdict(run):\n"
             "    try:\n        return ('PASSED', '')\n"
@@ -143,20 +133,7 @@ class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
 
 class TestSilentCatchAllowsAHandlerThatReportsToAStream:
     """@commons' report (2026-08-31): a handler that PRINTS the failure was
-    flagged as swallowing it.
-
-    "Silently" is this standard's own word. Their entry point repairs
-    sys.path[0] before any cross-branch import — @prax's logger is imported
-    after that block, and importing it earlier is exactly what the repair exists
-    to make safe — so the only instrument in that window is stderr, and the
-    handler used it. The cure the checker demanded could not be written while
-    the code already did what the standard asks.
-
-    This is a correction against the definition, not a window exemption: it
-    holds anywhere, and the CLI standard keeps asking separately whether the
-    stream was the RIGHT instrument. Measured before landing: 1 handler in the
-    fleet matches.
-    """
+    flagged as swallowing it."""
 
     def _passed(self, tmp_path, source):
         target = tmp_path / "probe.py"
@@ -181,14 +158,7 @@ class TestSilentCatchAllowsAHandlerThatReportsToAStream:
     def test_the_write_must_be_to_a_stream_not_any_write_method(self, tmp_path):
         """Negative control on the clause: ``handle.write(...)`` puts the
         failure in a file nobody is watching. Keying on the method name alone
-        would have exempted every handler that quietly writes to disk.
-
-        The handler deliberately does NOT bind the exception. A later clause
-        (hands_the_exception_on) clears ``handle.write(str(exc))`` on its own
-        and separately measured grounds — the object is not dropped — so binding
-        it here would test that clause instead of this one and this pin would
-        pass while the stream rule rotted underneath it.
-        """
+        would have exempted every handler that quietly writes to disk."""
         source = "def f(handle):\n    try:\n        go()\n    except OSError:\n        handle.write('failed')\n"
         assert self._passed(tmp_path, source) is False
 
@@ -210,28 +180,7 @@ class TestSilentCatchAllowsAHandlerThatReportsToAStream:
 
 
 class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
-    """@daemon and @canary, 2026-08-31, the same site from two sides.
-
-    The fleet's ratified dead-cwd cure wraps its own diagnostic:
-
-        try:
-            logger.debug(...)
-        except Exception as inner:
-            _retain("logger", inner)
-
-    @daemon's own pin caught their first cut logging from OUTSIDE that try, and
-    the world that reaches this code is a machine whose filesystem cannot answer
-    a basic question — @prax's logger construction reads the working directory,
-    so "the logger is also down" is the SAME world. The literal fix the checker
-    demanded was to add a logger call to the handler for a logger failure: the
-    defect their pin had just caught, put back to satisfy a score.
-
-    @canary MEASURED the prescription instead of arguing with it — applying it
-    verbatim made their branch unimportable.
-
-    Measured before landing: 6 handlers in the fleet match, in 6 branches, and
-    every one is this cure's diagnostic guard.
-    """
+    """@daemon and @canary, 2026-08-31, the same site from two sides."""
 
     def _passed(self, tmp_path, source):
         target = tmp_path / "probe.py"
@@ -244,7 +193,7 @@ class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
 
     def test_a_pass_guarding_a_stream_report_is_not_silent(self, tmp_path):
         """@canary's shape: the write composes its message with type(exc), and
-        counting THAT call as an effect is what made the first cut miss it."""
+        counting THAT call as an effect would miss it."""
         source = (
             "import sys\n\n"
             "def f(name, exc, reported):\n"
@@ -257,19 +206,12 @@ class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
         assert self._passed(tmp_path, source) is True
 
     def test_a_pass_guarding_real_work_keeps_its_finding(self, tmp_path):
-        """The clause is on what the block DOES, not on the handler being empty.
-        A try that computes something and a bare pass is the original defect."""
+        """The clause is on what the block DOES, not on the handler being empty."""
         source = "def f(path):\n    try:\n        path.unlink()\n    except OSError:\n        pass\n"
         assert self._passed(tmp_path, source) is False
 
     def test_a_report_standing_beside_real_work_does_not_buy_the_exemption(self, tmp_path):
-        """The purity clause, pinned because a mutant walked through it.
-
-        Dropping ``all(...)`` and keeping only ``any(...)`` leaves a rule that a
-        single log line can buy: wrap anything at all, add a logger call, and
-        the handler goes quiet. The block has to be a diagnostic and NOTHING
-        else. Found by mutation, not by reading.
-        """
+        """The purity clause, pinned because a mutant walked through it."""
         source = (
             "def f(logger, path):\n    try:\n"
             "        logger.debug('about to unlink')\n        path.unlink()\n"
@@ -279,37 +221,19 @@ class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
 
     def test_a_file_handle_write_is_not_a_report(self, tmp_path):
         """The stream qualification, pinned on THIS clause rather than on
-        silent_catch's own helper — a mutant that accepted any ``.write``
-        survived every other pin, because the sibling clause was tested
-        somewhere else and this one had no negative control of its own."""
+        silent_catch's own helper: a mutant accepting any ``.write`` survived until this negative control."""
         source = "def f(handle):\n    try:\n        handle.write('note')\n    except OSError:\n        pass\n"
         assert self._passed(tmp_path, source) is False
 
     def test_a_block_of_pure_bookkeeping_is_not_a_diagnostic(self, tmp_path):
         """Negative control: bookkeeping may sit BESIDE a report, never stand in
-        for one. Without the at-least-one-report clause, every `seen.add(x)`
-        wrapped in a try would buy the exemption."""
+        for one. Without the at-least-one-report clause, every `seen.add(x)`"""
         source = "def f(seen, x):\n    try:\n        seen.add(x)\n    except OSError:\n        pass\n"
         assert self._passed(tmp_path, source) is False
 
 
 class TestAHandlerThatHandsTheExceptionOnIsNotSilent:
-    """@daemon's second shape, one level out from @spawn's classify-and-return:
-
-        except OSError as exc:
-            _record_unresolved(path, exc)
-            return path
-
-    Nothing is dropped — the exception becomes an argument to a named function
-    that owns reporting it. There the information became a return value, here it
-    becomes an argument; in both, the caller decides.
-
-    Measured before landing: 10 handlers match fleet-wide and all 10 were read
-    individually — six are this cure delegating to a named reporter, the rest a
-    Rich report before sys.exit (@cli), a subprocess writing its error as JSON
-    (@memory), a deliberately rate-limited queue warning (@prax) and a retained
-    list (@trigger). Zero looked like a swallow.
-    """
+    """@daemon's second shape, one level out from @spawn's classify-and-return:"""
 
     def _passed(self, tmp_path, source):
         target = tmp_path / "probe.py"
@@ -329,14 +253,7 @@ class TestAHandlerThatHandsTheExceptionOnIsNotSilent:
 
     def test_binding_the_exception_and_ignoring_it_keeps_its_finding(self, tmp_path):
         """The clause is that the object LEAVES. Binding `as exc` and dropping it
-        is the defect wearing the exemption's syntax.
-
-        The body calls something unrelated on purpose. ``return None`` would
-        have been the obvious probe and it is cleared by a DIFFERENT, older
-        clause — a named exception returning a constant is @spawn's
-        classify-and-return, ratified before this one — so it would have proved
-        nothing about the clause under test. Found by this pin failing.
-        """
+        is the defect wearing the exemption's syntax."""
         source = "def f(cleanup):\n    try:\n        go()\n    except OSError as exc:\n        cleanup()\n"
         assert self._passed(tmp_path, source) is False
 
@@ -349,23 +266,7 @@ class TestAHandlerThatHandsTheExceptionOnIsNotSilent:
 
 class TestTheEmptyAnswerIsAConstantWhateverItsType:
     """Caught by dogfooding: my own new cli_check helper scored 0 on
-    silent_catch for ``except SyntaxError: return set()``.
-
-    The classify-and-return clause reads ``ast.Constant``, which in Python
-    covers scalars and nothing else. So ``return ""`` was allowed and
-    ``return []`` was flagged — two spellings of one idea, "this function found
-    nothing", separated by which type the function happens to return. A
-    function whose contract is a list has no other way to say it, and
-    ``set()`` and ``frozenset()`` have no literal spelling at all.
-
-    Same species as the stream ruling three hours earlier in this file: the
-    verdict was being decided by the spelling rather than by what the code
-    does. EMPTY only — a handler returning ``[1, 2]`` is fabricating an answer,
-    not reporting an absence, and keeps its finding.
-
-    MEASURED before landing: 16 handlers across the fleet match, every one of
-    them ``return []``, ``return {}`` or ``return set()``.
-    """
+    silent_catch for ``except SyntaxError: return set()``."""
 
     def _judge(self, tmp_path, body):
         """check_module flags the handler returning ``body``. Mutant: _judge_handler bypassed in silent_catch_check.py — killed."""
@@ -386,9 +287,7 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
     @pytest.mark.parametrize("body", ["return [1, 2]", "return {'a': 1}", "return {'x'}"])
     def test_a_non_empty_literal_keeps_its_finding(self, tmp_path, body):
         """The boundary, and the reason the clause is not just "any literal": a
-        handler that invents content is not reporting an absence. The same
-        container emptied passes, so the content alone decides (seedgo, fleet
-        green leg 8)."""
+        handler that invents content is not reporting an absence; the same container emptied passes."""
         emptied = {"return [1, 2]": "return []", "return {'a': 1}": "return {}", "return {'x'}": "return set()"}
         assert self._judge(tmp_path, body) is True, body
         assert self._judge(tmp_path, emptied[body]) is False, body
@@ -396,12 +295,7 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
     @pytest.mark.parametrize("body", ["return list(c)", "return dict(a=1)", "return set(c)"])
     def test_a_builtin_called_with_arguments_keeps_its_finding(self, tmp_path, body):
         """Negative control for the call form. ``set()`` is the empty set;
-        ``set(c)`` is a computed answer wearing the same name.
-
-        The same builtin with its arguments taken away passes, so the arguments
-        alone decide (seedgo, fleet green leg 8: it was the same body as
-        test_a_non_empty_literal_keeps_its_finding).
-        """
+        ``set(c)`` is a computed answer wearing the same name."""
         assert self._judge(tmp_path, body) is True, body
         assert self._judge(tmp_path, body.split("(")[0] + "()") is False, body
 
@@ -411,21 +305,14 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
     @pytest.mark.parametrize("body", ["return compute()", "return build_default()", "return Path()"])
     def test_a_zero_argument_call_to_anything_else_keeps_its_finding(self, tmp_path, body):
         """Mutation control (M4, survived the first run). Dropping the builtin
-        name check exempted every no-argument call — a computed fallback that
-        happens to take no arguments is still computed, and ``Path()`` is not an
-        absence. The clause is the NAME and the emptiness together.
-
-        The control beside it: a zero-argument builtin container passes, so the
-        name decides (seedgo, fleet green leg 8: it was the same body as
-        test_a_non_empty_literal_keeps_its_finding)."""
+        name check exempted every no-argument call; the clause is the NAME and the emptiness together."""
         assert self._judge(tmp_path, body) is True, body
         assert self._judge(tmp_path, "return list()") is False
 
     def test_a_broad_except_gains_nothing_from_this(self, tmp_path):
         """The specific-exception clause is what makes the returned value
         meaningful. ``except Exception`` learns the caller nothing, so an empty
-        list from it is still a swallow.
-        Mutant: a broad except earns the empty-answer clause in apps/handlers/aipass_standards/silent_catch_check.py — killed."""
+        list from it is still a swallow."""
         source = "def f(c):\n    try:\n        return parse(c)\n    except Exception:\n        return []\n"
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")

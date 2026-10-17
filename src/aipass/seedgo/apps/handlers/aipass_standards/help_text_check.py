@@ -3,21 +3,13 @@
 # Description: Help Text Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Help Text Standards Checker Handler
 
-Detects user-facing string literals that reference ``python3`` or ``python``
-as a command instruction (e.g. "python3 tools/scanner.py").  These should
-tell the user to run commands via ``drone @branch`` instead.
-
-Shebangs, import statements, and Python API references (like "python version")
-are excluded.  Only instructional command invocations are flagged.
-
-One check per file -- passed if zero references found, failed with a count
-and the first three offending line numbers.
+Reference: help_text.md
 """
 
 import re
@@ -32,23 +24,18 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
-# ── Detection patterns (extracted from devpulse help_text_scanner_v1) ───
 
-# Lines to always skip
 _SHEBANG_RE = re.compile(r"^\s*#!")
 _COMMENT_RE = re.compile(r"^\s*#")
 
-# Single-line string literals (single or double quoted)
 _STRING_RE = re.compile(
     r'"(?:[^"\\]|\\.)*"|'  # double-quoted
     r"'(?:[^'\\]|\\.)*'",  # single-quoted
 )
 
-# Instructional python command references inside string content
 _PYTHON3_CMD_RE = re.compile(r"\bpython3\s+\S")
 _PYTHON_CMD_RE = re.compile(r"\bpython\s+(?:-[a-zA-Z]|\S+\.py)")
 
-# Triple-quote delimiters
 _TRIPLE_DOUBLE = '"""'
 _TRIPLE_SINGLE = "'''"
 
@@ -68,32 +55,10 @@ def _line_has_python_instruction(line: str) -> bool:
     return any(_has_python_instruction(s) for s in _strings_on_line(line))
 
 
-# ── Bypass helper ───────────────────────────────────────────────────────
-
-
-# ── Main checker entry point ────────────────────────────────────────────
-
-
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check a Python file for user-facing help text that references python3/python
-    commands instead of ``drone @branch``.
-
-    Args:
-        module_path: Path to the Python file to check.
-        bypass_rules: Optional list of bypass rules to skip certain checks.
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str,
-        }
-    """
+    """Check a Python file for user-facing help text that references python3/python instead of ``drone @branch``."""
     path = Path(module_path)
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -109,7 +74,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "HELP_TEXT",
         }
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "help_text", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -124,7 +88,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "HELP_TEXT",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -139,7 +102,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "HELP_TEXT",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -161,29 +123,22 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     lines = content.splitlines()
     violation_lines: list[int] = []
 
-    # State machine for multiline strings (mirrors scanner logic)
     in_multiline: bool = False
     multiline_delim: str = ""
 
     for lineno, raw_line in enumerate(lines, start=1):
-        # --- Inside a multiline string block ---
         if in_multiline:
             if multiline_delim in raw_line:
                 in_multiline = False
                 multiline_delim = ""
-            # Check content inside multiline strings (skip comment-only lines)
             if not _COMMENT_RE.match(raw_line) and _has_python_instruction(raw_line):
                 if not is_bypassed(module_path, "help_text", lineno, bypass_rules):
                     violation_lines.append(lineno)
             continue
 
-        # --- Normal line handling ---
-
-        # Skip shebangs and pure-comment lines
         if _SHEBANG_RE.match(raw_line) or _COMMENT_RE.match(raw_line):
             continue
 
-        # Check for opening triple-quote that does NOT close on the same line
         for delim in (_TRIPLE_DOUBLE, _TRIPLE_SINGLE):
             if delim in raw_line:
                 count = raw_line.count(delim)
@@ -192,12 +147,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     multiline_delim = delim
                 break
 
-        # Check single-line string literals for python command references
         if _line_has_python_instruction(raw_line):
             if not is_bypassed(module_path, "help_text", lineno, bypass_rules):
                 violation_lines.append(lineno)
 
-    # Build the single check result
     total_found = len(violation_lines)
 
     if total_found == 0:
@@ -222,7 +175,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     checks = [check_result]
 
-    # Score: one check, so 100 if passed, 0 if failed
     passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks) * 100) if total_checks > 0 else 0

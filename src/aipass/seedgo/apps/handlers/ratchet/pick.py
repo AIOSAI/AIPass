@@ -3,19 +3,13 @@
 # Description: the ratchet pick - the unit probed least recently, read from the series
 # Version: 1.0.0
 # Created: 2026-10-12
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 LEAST RECENTLY PROBED, AND THE SERIES SAYS WHEN. A unit never probed comes
-first; ties break alphabetically on the lowercased name. The registry's order
-is not the tie-break: the registry is gitignored, so its order is a fact about
-one host. Every probe line counts as a visit - weekly, recorded, refused - so a
-branch whose suite is red does not win the pick every week and starve the lap.
-
-The reason is returned as a sentence because it is written into the series
-line: the next wake and a human both read why this unit was chosen.
-"""
+first; ties break on the lowercased name, never the gitignored registry's order.
+Every probe line counts as a visit, so a red suite cannot win every pick."""
 
 from typing import Dict, List, Optional, Sequence, Tuple
 

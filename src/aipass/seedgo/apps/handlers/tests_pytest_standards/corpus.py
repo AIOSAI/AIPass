@@ -3,34 +3,14 @@
 # Description: the parsed test corpus every static nominator reads
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The test corpus, parsed ONCE and handed to every nominator.
+"""The test corpus, parsed ONCE and handed to every nominator.
 
-WHY THIS EXISTS AS A SEPARATE FILE. Nine nominators over an eighteen-branch
-fleet would otherwise parse every test file nine times. The research budget
-for the whole static tier is under four seconds fleet-wide; nine redundant
-parses is the difference between that number and a number nobody schedules.
-
-WHY EVERY RULE IS AST AND NOT GREP. This campaign has already made the
-token-grep mistake twice and measured itself wrong both times: a docstring
-naming `aipass` is not an import, and a fixture's SOURCE STRING is not a
-subprocess spawn. A rule that matches text matches the prose describing the
-rule, which is how a checker ends up flagging its own documentation.
-
-AN UNPARSEABLE FILE IS REPORTED, NEVER SKIPPED. A test file that will not
-parse is one no nominator could clear, and "could not check" must never read
-the same as "checked and clean" — the same rule the payload isolation proof
-already follows.
-
-WHAT A NOMINATION IS. Law M1: static NOMINATES, execution CONVICTS. Nothing
-here returns a score, and nothing here may emit a delete-family verdict
-(Law S7b) — a nomination says a test is suspect, never that it is worthless.
-Law M11 is why every row carries a `deletion_safety` field: deletion safety is
-a row-level probe, not a group, and the corpus records that the probe has not
-run rather than leaving a reader to assume it did.
+Every rule is AST, never grep: a text match matches the prose describing the rule.
+An unparseable file is reported, never skipped: "could not check" must never read
+as "checked and clean". Nothing here scores or emits a delete-family verdict (S7b).
 """
 
 import ast
@@ -40,12 +20,10 @@ from typing import Dict, Iterator, List, Optional, Sequence, Set
 
 from aipass.prax import logger
 
-#: Directories never walked when collecting the corpus.
 SKIP_DIRS: frozenset = frozenset(
     {"__pycache__", ".git", ".venv", "node_modules", ".ruff_cache", ".pytest_cache", ".mypy_cache", ".chroma"}
 )
 
-#: Filename shapes pytest itself collects.
 TEST_FILE_GLOBS: tuple = ("test_*.py", "*_test.py")
 
 #: Names that make a call an oracle even without an `assert` statement.
@@ -54,15 +32,11 @@ ORACLE_CALL_NAMES: frozenset = frozenset({"raises", "fail", "warns", "deprecated
 #: Mock assertion methods. A test asserting an interaction has a real oracle.
 MOCK_ASSERT_PREFIX = "assert_"
 
-#: Verdicts a nominator may emit. A subset of the core's ALLOWED_VERDICTS,
-#: kept here so a nominator cannot reach for a word the core would refuse.
+#: A subset of the core's ALLOWED_VERDICTS, so a nominator cannot reach for a refused word.
 VERDICT_SUSPECT = "suspect"
 VERDICT_IMPROVE = "improve"
 
-#: Stamped on every nomination row (Law M11). The probe that would settle
-#: whether a flagged test is safe to delete is NOT built in this release, and
-#: the row says so rather than staying silent — an absent field and a passing
-#: probe must never look the same.
+#: Law M11: the deletion-safety probe is not built; an absent field must not look like a pass.
 DELETION_SAFETY_UNPROBED = {
     "probed": False,
     "reason": (
@@ -110,9 +84,7 @@ class TestFile:
 class Corpus:
     """Everything the static tier reads, parsed once.
 
-    `unparseable` is a first-class field rather than a log line: a file the
-    parser could not read is a file no nominator cleared, and every group
-    publishes that count beside its own findings.
+    `unparseable` is a field, not a log line: every group publishes that count.
     """
 
     root: Path
@@ -120,13 +92,9 @@ class Corpus:
     unparseable: List[str] = field(default_factory=list)
     production: List[Path] = field(default_factory=list)
 
-    #: Production modules, parsed once for every rule that reads them.
     production_trees: Dict[Path, ast.Module] = field(default_factory=dict)
 
-    #: Production files the parser could not read. A rule whose subject is what
-    #: production DECLARES sees less than the tree contains when one of these
-    #: exists, and that bias runs toward FEWER nominations - toward clean. It
-    #: is published for the same reason the test-side count is.
+    #: Published: an unreadable production file biases production rules toward clean.
     production_unparseable: List[str] = field(default_factory=list)
 
     @property
@@ -151,30 +119,13 @@ class Corpus:
             yield from parsed.units
 
 
-# =============================================================================
-# COLLECTION
-# =============================================================================
-
-
 def _walk(root: Path, patterns: Sequence[str]) -> List[Path]:
     """Every file under `root` matching any pattern, skipping SKIP_DIRS."""
     found: List[Path] = []
     for path in sorted(root.rglob("*.py")):
-        # PRUNE RELATIVE TO THE WALK ROOT, NOT ABSOLUTELY. Reading `path.parts`
-        # tests the whole absolute path, so a target that merely LIVES under a
-        # directory named `.venv`, `node_modules`, `.git` etc. had every test
-        # file skipped - and the result was a silent, plausible empty corpus
-        # rather than an error. This lane copies targets into temporary trees,
-        # so the parent directories are not the target's own business.
-        # Measured before the fix: a project under node_modules/ collected 0 units.
-        # COLLECT WHAT PYTEST COLLECTS, AND NOTHING ELSE. pytest's own default
-        # `norecursedirs` includes `.*`, so no dot-directory is ever collected
-        # and nothing inside one can run. A rule reading a file pytest never
-        # loads reports on a test that does not exist: the banked canary
-        # fixture's `tests/.archive/test_scaffold.py` was nominated PERMA-SKIP
-        # for being unconditionally skipped, when the truth is it never runs at
-        # all. Pruning here rather than per rule keeps every nominator honest
-        # about its corpus at once.
+        # Relative to the walk root: a target living under `.venv/` or `node_modules/`
+        # must not lose every file. Dot-directories are pruned as pytest's own
+        # `norecursedirs` does, so no rule reads a file pytest never loads.
         relative_parts = path.relative_to(root).parts
         if any(part.startswith(".") for part in relative_parts[:-1]):
             continue
@@ -190,9 +141,6 @@ def _relpath(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        # An absolute nodeid still identifies the test, but it will not match
-        # anything an operator pastes into pytest from the target's own root,
-        # so the fallback is recorded rather than taken quietly.
         logger.warning(f"[AUDIT-TESTS] {path} is outside the corpus root {root}, using its absolute path")
         return path.as_posix()
 
@@ -237,18 +185,12 @@ def _build_unit(node, class_name: str, relpath: str) -> TestUnit:
 def build(root: Path, test_dirs: Optional[Sequence[str]] = None) -> Corpus:
     """Parse every test file under `root` into a Corpus.
 
-    `test_dirs` narrows the walk when a project keeps its tests in a known
-    place; passing None walks the whole tree, which is what an unknown
-    external target needs.
+    `test_dirs` None walks the whole tree, which an unknown external target needs.
     """
     root = Path(root)
     corpus = Corpus(root=root)
 
-    # FILTER BY EXISTENCE, THEN FALL BACK. The obvious spelling can never reach
-    # the fallback: a non-empty `test_dirs` yields a non-empty list whether or
-    # not any of those directories EXIST, so the walk finds nothing and the
-    # target reads as having no tests at all. Measured before the fix: a project
-    # keeping tests at src/tests/ collected 0 files, 0 units.
+    # Filter by existence first, or a non-empty `test_dirs` of missing dirs never falls back.
     roots = [root / name for name in (test_dirs or []) if (root / name).is_dir()] or [root]
     seen: Set[Path] = set()
     for search_root in roots:
@@ -272,15 +214,7 @@ def build(root: Path, test_dirs: Optional[Sequence[str]] = None) -> Corpus:
 def _parse_production(corpus: "Corpus", root: Path) -> None:
     """Parse every production module ONCE, for every rule that reads them.
 
-    Two rules read production - `mock_drift` resolves patch targets against it
-    and `entry_point_diff` reads what it declares - and each parsing the tree
-    itself means two full walks of a branch's source inside a static tier whose
-    whole budget is under four seconds fleet-wide. Parsed here, shared there.
-
-    A file that will not parse is COUNTED, not skipped. Both rules that read
-    production report FEWER findings when one exists, so the bias runs toward
-    clean, and an unrecorded lean toward clean is the shape this lane exists
-    to catch.
+    An unparseable file is counted, not skipped: production rules then lean toward clean.
     """
     for path in corpus.production:
         try:
@@ -295,10 +229,7 @@ def _parse_production(corpus: "Corpus", root: Path) -> None:
 def _parse(path: Path, root: Path) -> Optional[TestFile]:
     """Parse one test file, or None when it will not parse or read.
 
-    Never raises past its own edge. One unparseable file in a fleet sweep must
-    not take the other seventeen branches down with it — it is counted and
-    published, which is the difference between a measurement with a hole in it
-    and a measurement that silently stopped.
+    Never raises: one bad file must not take a fleet sweep down.
     """
     try:
         source = path.read_text(encoding="utf-8")
@@ -311,11 +242,6 @@ def _parse(path: Path, root: Path) -> Optional[TestFile]:
     parsed = TestFile(path=path, relpath=relpath, source=source, tree=tree)
     parsed.units = _units_in(tree, relpath)
     return parsed
-
-
-# =============================================================================
-# SHARED PREDICATES - what more than one rule asks of a unit
-# =============================================================================
 
 
 def asserts_in(unit: TestUnit) -> List[ast.Assert]:
@@ -355,10 +281,7 @@ def _with_oracle_names(node: ast.AST) -> List[str]:
 def oracle_calls_in(unit: TestUnit) -> List[str]:
     """Non-assert oracles: `pytest.raises`, `pytest.fail`, `mock.assert_*`.
 
-    A bare trailing call CAN be a working exception oracle (TAXONOMY rule 7's
-    own caveat), so this list is what stops the no-oracle rule from convicting
-    a test that really does check something. It is deliberately generous:
-    static NOMINATES.
+    Deliberately generous: a bare trailing call can be a working exception oracle.
     """
     found: List[str] = []
 

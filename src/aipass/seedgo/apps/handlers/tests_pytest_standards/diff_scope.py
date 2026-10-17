@@ -3,33 +3,13 @@
 # Description: the changed LINES of a commit or working tree, as a mutation scope
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-17
 # =============================================
 
 """Probe what changed, not what exists.
 
-WHY THIS EXISTS. `statement_deletion` measured at 454 mutants and 353 s on
-canary's whole tree, which is a cadence. Seedgo is 13,743 probeable statements
-and that is not. The same measurement on one real seedgo change set found 53
-probeable statements in its added lines - 0.39% of the tree - and that IS a
-cadence, on the fleet's largest branch. This module is the difference between
-those two numbers, moved out of a one-off script and into the lane.
-
-LINES, NOT FILES, AND THE ARTIFACT SAYS WHICH. A one-line fix in a 400-line
-module must probe one statement, not four hundred. `GRANULARITY` is published
-in every scope document, so a reader never has to infer from a count whether
-the number means lines or files.
-
-WHAT THIS SCOPE CANNOT SEE, stated the way the width axis states its limits:
-`SCOPE_LIMITS` below. The load-bearing one is the second - a statement that did
-not change but became unobserved BECAUSE of a change elsewhere is invisible
-here, and that is a real class of defect, not a quibble. Diff scope is a cost
-strategy. It is not a smaller version of the whole-tree pass.
-
-THE COPY IS NOT A REPOSITORY. `.git` is in RSYNC_EXCLUDES, so the diff is read
-from the REAL target before anything is copied. The line numbers carry over
-unchanged because the copy is byte-identical - that is the same property that
-makes coverage-mapped test selection sound, used a second time.
+A cost strategy, not a smaller whole-tree pass (see `SCOPE_LIMITS`). Read from the
+real target before the copy, since `.git` is excluded from it.
 """
 
 import re
@@ -41,65 +21,34 @@ from typing import Dict, List, Optional, Sequence, Set
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: What a scope row addresses. Published so a count is never ambiguous.
 GRANULARITY_LINE = "changed_lines"
 GRANULARITY_FILE = "changed_files"
 
-#: The scope this module implements. Named as a constant rather than written
-#: as a literal in the document, because the brief's boundary was "if you ship
-#: file scope because line scope is harder, say so in the artifact" - and the
-#: only way that promise survives a later edit is for the artifact to read the
-#: same constant the filter reads.
+#: The artifact reads the same constant the filter reads, so it cannot misstate lines vs files.
 GRANULARITY = GRANULARITY_LINE
 
-#: No ref means the working tree: unstaged and staged edits against HEAD.
 WORKING_TREE = None
 
-#: `git diff` with no context. Every hunk header then describes exactly the
-#: changed lines and nothing around them, which is the whole point: `-U3`
-#: would silently widen a one-line fix into a seven-line scope.
+#: `-U3` would silently widen a one-line fix into a seven-line scope.
 NO_CONTEXT = "--unified=0"
 
-#: Post-image hunk header: `@@ -a,b +c,d @@`. Only the `+` side is read - the
-#: pre-image line numbers address a file that no longer exists on disk, and a
-#: mutant can only be spliced into a line that is still there.
-#:
-#: The header gives only the START. The body is walked line by line from there,
-#: because the header's COUNT includes context lines and `drone @git show`
-#: refuses `--unified=0` (git would read it as a ref). Counting `+` lines in
-#: the body instead of trusting the header makes the parse exact at any
-#: context width, which is what keeps "changed LINES" honest when the diff
-#: arrives with three lines of padding around every hunk.
+#: Only the post-image START is read; the body is walked because `drone @git show`
+#: refuses `--unified=0`, so the header count includes context lines.
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
-#: `+++ b/<path>`, or `+++ /dev/null` for a deletion.
 _NEW_PATH = re.compile(r"^\+\+\+ b/(.+)$")
 _DEV_NULL = "+++ /dev/null"
 
-#: Read-only git, through the one sanctioned interface. The lane already
-#: shells out to rsync and pytest; this is the third, and it is the only one
-#: that touches a repository.
-#:
-#: TWO DOORS, AND THEY SEE DIFFERENT THINGS - measured, not assumed:
-#: `drone @git diff` is scoped to the CALLER'S OWN branch by cwd ("Show git
-#: diff for your branch"), so a working-tree scope covers seedgo and nothing
-#: else. Run against @canary it returned 0 files, and the first cut of this
-#: module reported that as a measured, empty, perfectly clean campaign.
-#: `drone @git show <ref>` prints one commit whole, every branch it touched,
-#: read as whoever asked - which is both fleet-wide and honest in the trail.
-#: So: a ref goes through `show`, the working tree goes through `diff`.
+#: `drone @git diff` is scoped to the caller's own branch by cwd; `drone @git show <ref>`
+#: prints a whole commit fleet-wide. A ref goes through `show`, the working tree `diff`.
 GIT_DIFF = ("drone", "@git", "diff")
 GIT_SHOW = ("drone", "@git", "show")
 
-#: The file drone reads to decide WHO is running a command.
 CALLER_MARKER = Path(".trinity") / "passport.json"
 
-#: A diff that takes longer than this is not a diff of a change set.
 DIFF_TIMEOUT_SECONDS = 120
 
-#: Every limit travels with the scope, the way WIDTH_AXIS_LIMITS travels with
-#: the width axis. A reader who sees "53 probed" without these reads it as
-#: "53 of the risk", and it is not.
+#: Travels with the scope: "53 probed" without these reads as "53 of the risk".
 SCOPE_LIMITS: Sequence[str] = (
     "It probes changed lines, so a statement that is unchanged but became UNOBSERVED because of a "
     "change elsewhere - a test weakened, a fixture rewritten, a caller that stopped reaching it - is "
@@ -137,10 +86,8 @@ class DiffScopeError(RuntimeError):
 class DiffScope:
     """The changed lines of one target, addressed the way sites are addressed."""
 
-    #: Target-relative posix path -> the post-image line numbers it changed at.
     changed: Dict[str, Set[int]] = field(default_factory=dict)
 
-    #: What was diffed. `None` is the working tree.
     ref: Optional[str] = None
 
     @property
@@ -156,9 +103,7 @@ class DiffScope:
     def holds(self, relpath: str, lineno: int, end_lineno: int) -> bool:
         """True when any line of `lineno..end_lineno` changed.
 
-        A multi-line statement whose MIDDLE changed is in scope: the mutation
-        deletes the whole statement, so the whole span is what the change can
-        have broken.
+        A changed middle line puts the whole statement in scope: the mutation deletes all of it.
         """
         numbers = self.changed.get(relpath)
         if not numbers:
@@ -177,13 +122,7 @@ class DiffScope:
 
 
 def caller_home() -> Path:
-    """The branch directory drone should log this read against - seedgo's own.
-
-    MEASURED, not assumed. Run from the repo root, `drone @git` refuses with
-    "cannot verify caller" because there is no citizen there; run from the
-    TARGET's directory, the read is logged against whichever branch is being
-    audited. The auditor reads git as itself, from where it stands.
-    """
+    """The branch directory drone should log this read against - seedgo's own."""
     for candidate in Path(__file__).resolve().parents:
         if (candidate / CALLER_MARKER).is_file():
             return candidate
@@ -194,13 +133,7 @@ def caller_home() -> Path:
 
 
 def _run_git(command: Sequence[str], what: str) -> str:
-    """The raw unified diff, or raise naming what could not be read.
-
-    The CWD says which citizen is asking, and that is not the same question as
-    which repository: git answers from anywhere inside the tree, so reading
-    from seedgo's own home costs nothing and keeps the trail naming the branch
-    that actually ran it.
-    """
+    """The raw unified diff, or raise naming what could not be read."""
     try:
         result = subprocess.run(
             list(command), capture_output=True, text=True, cwd=str(caller_home()), timeout=DIFF_TIMEOUT_SECONDS
@@ -220,12 +153,7 @@ def _run_git(command: Sequence[str], what: str) -> str:
 def parse_changed_lines(diff_text: str) -> Dict[str, Set[int]]:
     """Repo-relative path -> the post-image line numbers the diff ADDED.
 
-    The body is walked, not the header count: a context line and an added line
-    both advance the post-image counter, a removed line does not, and only the
-    added ones are recorded. A pure-deletion hunk therefore contributes
-    nothing - it adds no line, so there is no line to splice a mutant into.
-    That is limit 2 falling out of the parse rather than being enforced on top
-    of it.
+    A pure-deletion hunk adds no line, so there is nowhere to splice a mutant.
     """
     changed: Dict[str, Set[int]] = {}
     current: Optional[str] = None
@@ -256,10 +184,7 @@ def parse_changed_lines(diff_text: str) -> Dict[str, Set[int]]:
         elif line.startswith(" ") or line == "":
             post += 1
         else:
-            #: Commit-message prose, `index ...`, `similarity index ...`: not
-            #: hunk body. `show` prints all of it above the first `+++`, and
-            #: the message of a commit that quotes a diff would otherwise be
-            #: read as one.
+            #: Above the first `+++` is commit prose; a message quoting a diff is not a hunk.
             post = 0
             current = None
 
@@ -276,10 +201,7 @@ def _target_relative(repo_path: str, target_prefix: str) -> Optional[str]:
 def read_scope(target: Path, repo_root: Path, ref: Optional[str] = WORKING_TREE) -> DiffScope:
     """The change set of `target`, read from the REAL tree before any copy.
 
-    Raises `DiffScopeError` when the target is not inside a repository the
-    diff can address, and when the change set turns out to hold nothing of the
-    target. An empty scope probes nothing and would otherwise print as a
-    campaign that ran clean, which is the exact way this feature goes wrong.
+    Raises `DiffScopeError` on no repository or an empty change set (an empty scope reads clean).
     """
     try:
         prefix = target.resolve().relative_to(repo_root.resolve()).as_posix()
@@ -322,8 +244,6 @@ def read_scope(target: Path, repo_root: Path, ref: Optional[str] = WORKING_TREE)
 def apply(sites: Sequence, scope: DiffScope) -> List:
     """Every site whose own span intersects the change set.
 
-    Deliberately untyped in the site: this filter reads `relpath`, `lineno`
-    and `end_lineno` and nothing else, so it narrows a statement site and a
-    function site with one implementation instead of two that drift.
+    Untyped on purpose: one filter for statement and function sites, so they cannot drift.
     """
     return [s for s in sites if scope.holds(s.relpath, s.lineno, s.end_lineno)]

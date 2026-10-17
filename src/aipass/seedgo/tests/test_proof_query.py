@@ -3,7 +3,7 @@
 # Description: Unit tests for the proof_query module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/proof_query.py."""
@@ -23,11 +23,6 @@ from aipass.seedgo.apps.modules.proof_query import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for proof_query."""
@@ -40,11 +35,6 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setattr(proof_query, "warning", mock_warning)
     monkeypatch.setattr(proof_query, "error", mock_error)
     monkeypatch.setattr(proof_query, "json_handler", mock_json_handler)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -75,12 +65,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag AFTER a pack name explains it, never looks up a proof named '-h'.
-
-    The cured defect this pins, stated in handle_command itself: `proof_query
-    aipass_proof --help` used to look up a proof named '--help'. The return
-    value is True on both sides of that bug.
-    """
+    """A help flag AFTER a pack name explains it, never looks up a proof named '-h'."""
     with (
         patch.object(proof_query, "print_help") as helped,
         patch.object(proof_query, "_discover_proof_packs") as discovered,
@@ -102,12 +87,7 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_pack():
-    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
-
-    It returned True until 2026-09-07 and `seedgo.py` turned that into exit 0,
-    so a script reading the exit code saw a successful query of a pack that
-    does not exist (the owner's standing ruling, fleet sweep 2026-09-07).
-    """
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly."""
     with pytest.raises(CommandRefused) as refused:
         handle_command("proof_query", ["nonexistent_pack_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -115,14 +95,7 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs(capsys):
-    """print_introspection prints the module banner and the pack roster.
-
-    "console.print was called" is not an oracle: it holds for a function that prints one blank line,
-    and it held while nothing else was measured. The two strings pinned here were read off a real
-    run (2026-09-07) and they are the two the introspection contract owes a reader — WHICH module
-    answered, and the heading under which its discovered packs are listed.
-    Mutant: malformed markup on the roster heading in apps/modules/proof_query.py — killed.
-    """
+    """print_introspection prints the module banner and the pack roster."""
     result = print_introspection()
     printed = capsys.readouterr().out
     assert result is None
@@ -131,13 +104,7 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """print_help prints its banner and the pack+proof usage line.
-
-    Same reason as the introspection test above: `console.print.called` passes for any function that
-    prints anything at all. The usage line is the one a reader comes to help FOR — the three-argument
-    form that shows one proof's content — so that is what is pinned, read off a real run (2026-09-07).
-    Mutant: malformed markup on that usage line in apps/modules/proof_query.py — killed.
-    """
+    """print_help prints its banner and the pack+proof usage line."""
     result = print_help()
     printed = capsys.readouterr().out
     assert result is None
@@ -146,11 +113,7 @@ def test_print_help_runs(capsys):
 
 
 def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
-    """Only *_proof dirs holding a *_content.py are packs.
-
-    Mutant: a pack admitted without content in apps/modules/proof_query.py — killed.
-    """
-    # Build: tmp_path/handlers/ with pack subdirectories
+    """Only *_proof dirs holding a *_content.py are packs."""
     handlers_dir = tmp_path / "handlers"
     handlers_dir.mkdir()
 
@@ -169,7 +132,6 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
     fake_file.parent.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(proof_query, "__file__", str(fake_file))
 
-    # code_proof is a pack, and its path is valid_pack: the proof listed is the one written there.
     capsys.readouterr()
     assert proof_query.handle_command("proof_query", ["code_proof"]) is True
     assert "drone @seedgo proof_query code_proof triplet" in capsys.readouterr().out
@@ -180,10 +142,7 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
 
 
 def test_discover_proof_content_finds_content_files(tmp_path, monkeypatch, capsys):
-    """A pack's proofs are its *_content.py files, suffix stripped.
-
-    Mutant: the _content suffix kept in apps/modules/proof_query.py — killed.
-    """
+    """A pack's proofs are its *_content.py files, suffix stripped."""
     pack = tmp_path / "handlers" / "fake_proof"
     pack.mkdir(parents=True)
     (pack / "triplet_content.py").write_text("# fake", encoding="utf-8")
@@ -198,11 +157,6 @@ def test_discover_proof_content_finds_content_files(tmp_path, monkeypatch, capsy
     ]
     assert "triplet" in result
     assert "not_a_content" not in result
-
-
-# ---------------------------------------------------------------------------
-# Tests — help-flag safety (help_flag_safety: a flag ANYWHERE explains)
-# ---------------------------------------------------------------------------
 
 
 def test_help_after_the_pack_name_does_not_query(monkeypatch, tmp_path):

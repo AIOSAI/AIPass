@@ -3,25 +3,16 @@
 # Description: Queryable content for the README currency proof
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-README Currency Proof Content Handler
-
-Provides formatted README currency proof content for the query system.
-Module orchestrates, handler implements.
-"""
+"""README Currency Proof Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_readme_currency_proof() -> str:
-    """Return README currency proof content for query system.
-
-    Returns:
-        str: Formatted proof text with Rich styling
-    """
+    """Return README currency proof content for query system."""
     sep = "\u2500" * 70
     lines = [
         f"[dim]{sep}[/dim]",

@@ -3,23 +3,13 @@
 # Description: the before/after proof that the real tree was never touched
 # Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Law M10, measured rather than asserted.
 
-The instrument must not disturb what it measures. That is this lane's central
-promise, and a promise it merely stated would be the same species it exists to
-catch — a claim nothing could ever falsify. So the real tree is fingerprinted
-before the copy and again after teardown, and the comparison is published
-whether it is good news or not.
-
-THIS LIVES IN THE CORE BECAUSE IT IS LANGUAGE-NEUTRAL. Hashing a file tree
-involves no pytest concept, and it was briefly written into the pytest pack —
-which would have made the core import an adapter to prove its own promise, the
-exact dependency direction that turns a second ecosystem into a rewrite. A Rust
-adapter needs this proof just as much and should not have to reimplement it.
+Lives in the language-neutral core: the core must never import an adapter pack.
 """
 
 import hashlib
@@ -37,16 +27,7 @@ HASH_SIZE_LIMIT = 2 * 1024 * 1024
 
 
 def snapshot_tree(root: Path, hash_limit: int = HASH_SIZE_LIMIT) -> Dict[str, tuple]:
-    """Fingerprint a tree for the before/after proof that M10 held.
-
-    `(st_mtime_ns, st_size, st_ctime_ns, st_ino, md5)`. The research claimed
-    `st_ctime_ns` cannot be set from userspace and so catches a
-    forge-then-restore round trip. MEASURED, that does not hold in general: the
-    kernel's file-timestamp clock advances on a timer tick, so a rewrite and
-    its timestamp restoration inside one tick are indistinguishable from no
-    change at all, on ext4 and tmpfs alike. So content is HASHED rather than
-    inferred; the stat fields stay because they catch a same-content inode swap.
-    """
+    """Fingerprint a tree for the M10 proof; content is hashed, since ctime misses same-tick rewrites."""
     fingerprints: Dict[str, tuple] = {}
 
     for dirpath, dirnames, filenames in os.walk(root, onerror=_unreadable):
@@ -69,11 +50,7 @@ def _unreadable(error: OSError) -> None:
 
 
 def _fingerprint(full: str, hash_limit: int) -> Optional[tuple]:
-    """One file's fingerprint, or None if it is no longer there.
-
-    A file that vanished between the walk and the stat is simply absent from
-    this snapshot, which is exactly how a removal should read in the diff.
-    """
+    """One file's fingerprint, or None if it is no longer there."""
     try:
         info = os.lstat(full)
     except OSError as exc:
@@ -94,29 +71,7 @@ def _fingerprint(full: str, hash_limit: int) -> Optional[tuple]:
 def live_writers(root: Path, hash_limit: int = HASH_SIZE_LIMIT) -> Dict[str, List[str]]:
     """Paths that change while NOTHING of ours is running, measured not assumed.
 
-    THE PROBLEM THIS SOLVES. A target that is a live citizen writes its own
-    operational logs continuously - its daemon ticks, its server serves, its
-    logger rotates. Those writes land in the REAL tree during the measurement
-    window, and a before/after fingerprint cannot tell them from a test that
-    forged a log file. Measured on @api: eight paths under `api_json/` and
-    `logs/` moved during one run, and check 12 reported the instrument had
-    disturbed what it measured.
-
-    WHY NOT JUST EXEMPT LOG PATHS. Because `logs/operations.jsonl` is exactly
-    what this campaign convicted @backup for forging - 35 test nodeids writing
-    into the real one. An exemption keyed on the path would blind the proof to
-    the precise species it was built to catch. So the discriminator has to be
-    measured rather than declared.
-
-    HOW. Two back-to-back snapshots with no suite between them. Anything that
-    moves in that window is being written by something that is not us, and its
-    path is published as such. A path in the post-run diff that is NOT in this
-    set is unattributable to concurrent activity - which is the hard finding.
-
-    The window is short, so this UNDER-detects: a service that writes once a
-    minute will not show up, and its path will be reported as unattributed.
-    That direction is the safe one - it over-reports violations rather than
-    explaining them away - and it is stated here rather than left to be found.
+    Measured, not a log-path exemption, which would blind the proof to forged logs.
     """
     first = snapshot_tree(root, hash_limit)
     second = snapshot_tree(root, hash_limit)
@@ -126,10 +81,7 @@ def live_writers(root: Path, hash_limit: int = HASH_SIZE_LIMIT) -> Dict[str, Lis
 def diff_snapshots(before: Dict[str, tuple], after: Dict[str, tuple], record: bool = True) -> Dict[str, List[str]]:
     """Added / removed / modified paths between two tree snapshots.
 
-    A non-empty diff means the instrument disturbed what it measured, which is
-    the most serious thing this lane can discover about ITSELF. It is recorded
-    as an operational event here rather than at a call site, so no future
-    caller can obtain the diff without the record being written.
+    Recorded here, not at a call site, so no caller gets the diff without the record.
     """
     before_keys, after_keys = set(before), set(after)
     diff = {
@@ -147,18 +99,8 @@ def diff_snapshots(before: Dict[str, tuple], after: Dict[str, tuple], record: bo
     return diff
 
 
-# =============================================================================
-# THE CARRIER'S OWN WRITES
-# =============================================================================
-
-#: Write-relevant audit events, and which positional args carry a path. COPIED
-#: from `tests_pytest_standards/payload/audit_hygiene_plugin.py` rather than
-#: imported: this package is ecosystem-neutral core and may not import an
-#: adapter pack, because a core that imports an adapter turns a second
-#: ecosystem into a rewrite instead of a directory. One vocabulary held in two
-#: places on purpose - inventing a second one here would let the gate and the
-#: carrier disagree about what a write is. `os.replace` needs no entry of its
-#: own: CPython raises `os.rename` for it.
+#: Copied, not imported, from `tests_pytest_standards/payload/audit_hygiene_plugin.py`;
+#: keep the two in step. `os.replace` raises `os.rename`, so it needs no entry.
 CARRIER_PATH_ARGS: Dict[str, Tuple[int, ...]] = {
     "open": (0,),
     "os.rename": (0, 1),
@@ -178,26 +120,16 @@ CARRIER_PATH_ARGS: Dict[str, Tuple[int, ...]] = {
     "shutil.unpack_archive": (1,),
 }
 
-#: `open` reports (path, mode, flags). `mode` is None when the call arrived
-#: through os.open, so `flags` is the only universally present signal. Copied
-#: alongside the vocabulary above, for the same reason.
+#: `mode` is None via os.open, so `flags` is the one signal always present.
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
-#: One plain sentence, published beside every subtraction.
 CARRIER_NOTE = (
     "these paths were written by the audit's OWN machinery, not by the measured suite; "
     "they are subtracted from the diff above and listed here so the subtraction can be audited"
 )
 
-#: Carrier surfaces written by a DIFFERENT PROCESS, which this process's own
-#: hook cannot see and therefore cannot measure. Each entry names the surface,
-#: its owner, and why the measured suite cannot be its author.
-#:
-#: DELIBERATELY TINY, AND IT STAYS THAT WAY. Every entry here is a claim taken
-#: on trust, which is exactly what an observed write is not. A path that is
-#: neither observed nor declared stays in the diff and reads red - the honest
-#: direction, and the one thing that keeps this constant from silently becoming
-#: the path-shaped exemption list this design refuses to be.
+#: Carrier surfaces written by another process, which our hook cannot see.
+#: Keep it tiny: each entry is trusted, not observed; it must not grow into a path exemption list.
 DECLARED_CARRIER_WRITES: Tuple[Dict[str, str], ...] = (
     {
         "path": "src/aipass/hooks/logs/engine.jsonl",
@@ -215,22 +147,7 @@ DECLARED_CARRIER_WRITES: Tuple[Dict[str, str], ...] = (
 class CarrierRecorder:
     """Every real-tree path THIS process opens for writing during a run.
 
-    THE DEFECT THIS ANSWERS. A fleet baseline reported real-tree diffs on 5 of
-    21 targets and not one of them was test forgery: they were the audit's own
-    machinery - its logger, its json handler - writing while it measured. The
-    instrument disturbing what it measures is worth an ERROR; an ERROR that
-    fires on every fleet run is how an alarm dies.
-
-    WHY NOT A PATH RULE. The same fleet run showed an ADDED source file under a
-    target, `entry_point_diff_check.py`, written by a human editing the branch
-    while the audit ran. Any classification keyed on path shape - "anything
-    under the branch", "any *_log.json" - swallows that too, and with it every
-    real escape. So the discriminator is PROVENANCE: this records what OUR OWN
-    PROCESS wrote, and nothing else is ever subtracted on its evidence.
-
-    `sys.addaudithook` CANNOT BE REMOVED. So the hook is installed at most once
-    per process and does nothing at all while `active` is false; start and stop
-    toggle that flag rather than pretending to uninstall anything.
+    `sys.addaudithook` cannot be removed, so start/stop only toggle `active`.
     """
 
     def __init__(self) -> None:
@@ -243,8 +160,7 @@ class CarrierRecorder:
 
 RECORDER = CarrierRecorder()
 
-#: Module-level because `sys.addaudithook` is irreversible: a second install
-#: would double every event for the rest of the process's life.
+#: A second `sys.addaudithook` install would double every event for the process's life.
 _HOOK_INSTALLED = False
 
 
@@ -260,16 +176,7 @@ def is_write_open(args: tuple) -> bool:
 def _record_carrier_write(recorder: CarrierRecorder, event: str, path: object) -> None:
     """File one path against the open window, if it lands in the watched tree.
 
-    THE REJECT COMES FIRST AND TAKES THE RAW STRING. This runs on every single
-    file operation the audit process performs, so nothing may be constructed
-    before the paths that are none of our business are gone.
-
-    `normpath` is the fingerprinter's own form - `os.walk` joins onto the root
-    it was given and never resolves - so a recorded path is comparable with a
-    diff entry as a plain string. A write that reaches the tree through a
-    SYMLINK normalises to a different string and is not recorded, which leaves
-    that path in the diff reading red: the under-detecting direction, on
-    purpose.
+    Runs on every file operation, so the raw-string reject comes first.
     """
     if not isinstance(path, str) or not path.startswith(recorder.prefixes):
         return
@@ -279,13 +186,7 @@ def _record_carrier_write(recorder: CarrierRecorder, event: str, path: object) -
 
 
 def carrier_hook(event: str, args: tuple) -> None:
-    """The PEP 578 hook, in the AUDIT's own process. It never raises.
-
-    An exception here fires inside somebody else's own write call, so every one
-    is caught - and COUNTED, because a swallowed error nobody sees is a
-    fail-open mode: it would shorten the observed list without shortening the
-    diff, and a reader must be able to weigh that against the subtraction.
-    """
+    """The PEP 578 hook, in the AUDIT's own process. It never raises; swallowed errors are counted."""
     recorder = RECORDER
     if not recorder.active:
         return
@@ -300,10 +201,7 @@ def carrier_hook(event: str, args: tuple) -> None:
                 _record_carrier_write(recorder, event, args[index])
     except Exception as exc:  # a hook that raises breaks the process it lives in
         recorder.swallowed_errors += 1
-        # MUTED WHILE IT COMPLAINS. The logger writes a file, that write is an
-        # audit event, and this hook would be handling its own report of its
-        # own failure. The window is microseconds and it is the only way to
-        # make a swallowed error visible without risking recursion.
+        # Muted while logging: the logger's own write is an audit event and would recurse.
         recorder.active = False
         try:
             logger.debug(f"[AUDIT-TESTS] carrier hook failed on {event}: {type(exc).__name__}: {exc}")
@@ -327,22 +225,13 @@ def start_carrier_recording(root: Path) -> None:
 
 
 def stop_carrier_recording() -> Tuple[Dict[str, str], int]:
-    """Close the window and hand back `(writes, swallowed_errors)`.
-
-    The buffer is cleared by the next `start`, never here, so a second call
-    returns the same record rather than an empty one that would silently
-    subtract nothing.
-    """
+    """Close the window and hand back `(writes, swallowed_errors)`; only `start` clears the buffer."""
     RECORDER.active = False
     return dict(RECORDER.writes), RECORDER.swallowed_errors
 
 
 def _declared_for(path: str) -> Optional[Dict[str, str]]:
-    """The DECLARED entry covering this path, or None.
-
-    Matched on a path-separator boundary so a declared `.../logs/engine.jsonl`
-    cannot be stretched over `.../my_engine.jsonl`.
-    """
+    """The DECLARED entry covering this path, or None, matched on a separator boundary."""
     normal = path.replace(os.sep, "/")
     for entry in DECLARED_CARRIER_WRITES:
         if normal == entry["path"] or normal.endswith("/" + entry["path"]):
@@ -358,20 +247,7 @@ def carrier_partition(
 ) -> dict:
     """Split an M10 diff into what the audit itself wrote and what it did not.
 
-    Returns the subtracted diff, the FULL diff before subtraction, the carrier
-    block naming every path taken out with the evidence for it, and how the
-    attribution was reached. The unsubtracted truth stays in the document
-    because that is what makes the subtraction auditable: a subtraction a
-    reader cannot check is just a smaller number.
-
-    A PATH THE GATE SAW THE MEASURED SUITE WRITE IS NEVER SUBTRACTED, even when
-    this process wrote it too - both are true at once on a cross-branch log.
-    The carrier's evidence may EXPLAIN a path; it may never acquit one, because
-    the suite's own record is the finding this whole lane exists to make.
-
-    The operational record is written HERE rather than at a call site: the
-    error belongs to the diff nobody can account for, not to the raw diff, and
-    an alarm that fires on the audit's own logs teaches everyone to ignore it.
+    A path the gate saw the suite write is never subtracted: carrier evidence never acquits.
     """
     recorded = dict(writes or {})
     convicted = set(gate_recorded or ())

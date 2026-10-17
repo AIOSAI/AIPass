@@ -3,27 +3,15 @@
 # Description: tests for the static nominator tier, harness selfcheck and cache stamp
 # Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/ nominators and apps/handlers/audit_tests/selfcheck.py, cache, render."""
 
 # Phase 6-7 of the audit-tests lane: the nine nominators, selfcheck, cache, render.
-#
-# THE TWO-SIDED BAR (design section 10.2, from TAXONOMY section 6):
-#
-#     A checker that flags nothing in table A is not measuring.
-#     A checker that flags anything in table B is not shippable.
-#
-# So every rule here is tested in BOTH directions, and the known-good direction
-# is the one that gets the sharper test — a false nomination teaches a branch to
-# delete a pin that was holding something up, and Law M11 exists because that has
-# already nearly happened once in this campaign's own corpus.
-#
-# The fixtures reproduce TAXONOMY's exemplar SHAPES rather than importing another
-# branch's source. A test that read @daemon's tests would fail the day @daemon
-# fixed them, which would make this suite's green mean "the corpus has not moved"
-# instead of "the rule still works".
+# Every rule is tested in BOTH directions (table A must flag, table B must not), the known-good side
+# hardest: a false nomination teaches a branch to delete a load-bearing pin (Law M11). Fixtures reproduce
+# TAXONOMY's exemplar shapes, never another branch's source, so green means "the rule works".
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every nominator module under tests_pytest_standards/ parses and imports
@@ -82,11 +70,6 @@ def _species(rows) -> set:
     return {row["species"] for row in rows}
 
 
-# =============================================================================
-# THE CORPUS - parsed once, and honest about what it could not read
-# =============================================================================
-
-
 class TestCorpus:
     """Parsing is where a silent hole would be cheapest to introduce."""
 
@@ -103,8 +86,7 @@ class TestCorpus:
         assert list(scanned.units())[0].params == ["tmp_path"]
 
     def test_an_unparseable_file_is_counted_never_skipped(self, tmp_path):
-        # "could not check" must never read as "checked and clean" - the same
-        # rule the payload isolation proof already follows.
+        # "could not check" must never read as "checked and clean".
         scanned = _corpus(tmp_path, "def test_broken(:\n")
         assert scanned.unparseable == ["tests/test_sample.py"]
         assert scanned.files == []
@@ -114,17 +96,11 @@ class TestCorpus:
         assert any(path.name == "module_under_test.py" for path in scanned.production)
 
     def test_every_nomination_row_carries_an_unprobed_deletion_safety_field(self, tmp_path):
-        # Law M11: deletion safety is a row-level probe, and its ABSENCE must
-        # be stated. A row with no such field reads as safe to act on.
+        # Law M11: a row without the deletion-safety field reads as safe to act on, so its absence is stated.
         scanned = _corpus(tmp_path, "def test_one():\n    assert True\n")
         row = corpus.nomination("X", list(scanned.units())[0], "because")
         assert row["deletion_safety"]["probed"] is False
         assert row["deletion_safety"]["reason"]
-
-
-# =============================================================================
-# RULE 3 - SKIP PROVENANCE
-# =============================================================================
 
 
 class TestSelfSkip:
@@ -174,9 +150,7 @@ class TestSelfSkip:
         assert _species(self_skip_check.nominate(_corpus(tmp_path, source))) == {"PERMA-SKIP"}
 
     def test_a_module_level_skip_is_found(self, tmp_path):
-        # The most expensive skip in the catalog and the one the first version
-        # of this rule missed: it removes the WHOLE FILE. Renaming JSON_DIR made
-        # 75 daemon tests vanish through exactly this shape.
+        # The most expensive skip: it removes the WHOLE FILE (renaming JSON_DIR hid 75 daemon tests this way).
         source = """
             import pytest
             from module_under_test import thing
@@ -192,8 +166,7 @@ class TestSelfSkip:
         assert rows[0]["test"] == "<module>"
 
     def test_a_module_level_skip_reading_a_computed_name_is_followed(self, tmp_path):
-        # The provenance lives in the FOR LOOP that computed the name, not in
-        # the assignment. Binding to the assignment node alone finds nothing.
+        # The provenance lives in the FOR LOOP that computed the name; the assignment node alone finds nothing.
         source = """
             import pytest
             from module_under_test import thing
@@ -245,11 +218,6 @@ class TestSelfSkip:
         assert self_skip_check.nominate(_corpus(tmp_path, source)) == []
 
 
-# =============================================================================
-# RULE 4 - PATCH TARGET RESOLUTION
-# =============================================================================
-
-
 class TestMockDrift:
     """A patch that replaces a MODULE answers every attribute, forever."""
 
@@ -276,8 +244,7 @@ class TestMockDrift:
         assert _species(mock_drift_check.nominate(self._tree(tmp_path, source))) == {"MOCK-DRIFT"}
 
     def test_patching_a_non_module_attribute_is_not_nominated(self, tmp_path):
-        # `Console` is an object bound in the same module. A last-segment name
-        # match would flag it; resolving the binding does not.
+        # `Console` is bound in the same module: a last-segment name match would flag it, resolving does not.
         source = """
             from unittest.mock import patch
 
@@ -308,8 +275,7 @@ class TestMockDrift:
         assert mock_drift_check.nominate(self._tree(tmp_path, source)) == []
 
     def test_an_f_string_target_resolves_through_a_module_constant(self, tmp_path):
-        # The dominant real spelling. Requiring ast.Constant scored a branch
-        # with 25 known MOCK-DRIFTs as completely clean.
+        # The dominant real spelling: requiring ast.Constant scored 25 known MOCK-DRIFTs as clean.
         source = """
             from unittest.mock import patch
 
@@ -333,11 +299,6 @@ class TestMockDrift:
                     assert True
         """
         assert mock_drift_check.nominate(self._tree(tmp_path, source)) == []
-
-
-# =============================================================================
-# RULE 5 - ASSERTION SHAPE
-# =============================================================================
 
 
 class TestAssertionShape:
@@ -369,8 +330,7 @@ class TestAssertionShape:
         assert _species(assertion_shape_check.nominate(_corpus(tmp_path, source))) == {"TYPE-ONLY"}
 
     def test_isinstance_paired_with_a_value_assertion_is_never_flagged(self, tmp_path):
-        # TAXONOMY's known-good rule, and the direction that costs the most to
-        # get wrong: pairing is correct, common code.
+        # TAXONOMY's known-good rule, the costliest direction to get wrong: pairing is correct, common code.
         source = """
             def test_a():
                 result = probe()
@@ -384,8 +344,7 @@ class TestAssertionShape:
         assert "OR-ESCAPE" in _species(assertion_shape_check.nominate(_corpus(tmp_path, source)))
 
     def test_an_or_whose_first_clause_probes_the_machine_is_never_flagged(self, tmp_path):
-        # TAXONOMY known-good row 1. In a real OR-ESCAPE both clauses are about
-        # the result; here the first is about the platform.
+        # Known-good row 1: in a real OR-ESCAPE both clauses are about the result; here the first is the platform.
         source = """
             import signal
 
@@ -393,11 +352,6 @@ class TestAssertionShape:
                 assert not hasattr(signal, "SIGKILL") or signal.SIGKILL not in (1, 2)
         """
         assert assertion_shape_check.nominate(_corpus(tmp_path, source)) == []
-
-
-# =============================================================================
-# RULE 6 - THE CONFESSION GREP
-# =============================================================================
 
 
 class TestCoverageSlot:
@@ -412,8 +366,7 @@ class TestCoverageSlot:
         assert _species(coverage_slot_check.nominate(_corpus(tmp_path, source))) == {"COVERAGE-SLOT"}
 
     def test_a_docstring_merely_mentioning_coverage_is_not_a_confession(self, tmp_path):
-        # The false positive the naive grep produces, and it would fire dozens
-        # of times on this very branch, whose whole subject is checkers.
+        # The naive grep's false positive, and it would fire dozens of times on this checker-heavy branch.
         source = 'def test_a():\n    """The coverage report renders every branch."""\n    assert render() == "ok"\n'
         assert coverage_slot_check.nominate(_corpus(tmp_path, source)) == []
 
@@ -432,11 +385,6 @@ class TestCoverageSlot:
         assert coverage_slot_check.nominate(_corpus(tmp_path, source)) == []
 
 
-# =============================================================================
-# RULE 7 - NO ORACLE
-# =============================================================================
-
-
 class TestNoOracle:
     """Generous about what counts as an oracle, on purpose."""
 
@@ -452,19 +400,13 @@ class TestNoOracle:
         assert no_oracle_check.nominate(_corpus(tmp_path, source)) == []
 
     def test_a_call_to_a_local_assertion_helper_counts_as_an_oracle(self, tmp_path):
-        # Flagging this would teach branches to inline their helpers, which is
-        # a worse suite for a better number.
+        # Flagging this would teach branches to inline their helpers: a worse suite for a better number.
         source = "def test_a():\n    result = do_work()\n    _assert_document_is_lawful(result)\n"
         assert no_oracle_check.nominate(_corpus(tmp_path, source)) == []
 
     def test_the_nomination_shows_the_calls_it_saw(self, tmp_path):
         rows = no_oracle_check.nominate(_corpus(tmp_path, "def test_a():\n    do_work()\n    tidy()\n"))
         assert set(rows[0]["evidence"]["calls"]) == {"do_work", "tidy"}
-
-
-# =============================================================================
-# RULE 8 - CAPTURE NEVER READ
-# =============================================================================
 
 
 class TestCaptureNeverRead:
@@ -484,8 +426,7 @@ class TestCaptureNeverRead:
         ) == {"RETURN-ONLY"}
 
     def test_a_receipt_paired_with_another_assertion_is_never_nominated(self, tmp_path):
-        # TAXONOMY known-good row 9: nine such lines in @api are each paired
-        # and are correct.
+        # TAXONOMY known-good row 9: each such line is paired and correct.
         source = """
             def test_a(mocked):
                 assert print_help() is True
@@ -505,11 +446,6 @@ class TestCaptureNeverRead:
         # TAXONOMY known-good row 10: the boolean IS the behaviour.
         source = "def test_a():\n    assert is_ssl_error(x) is True\n"
         assert capture_never_read_check.nominate(_corpus(tmp_path, source)) == []
-
-
-# =============================================================================
-# RULE 9 - UNENTERED ASSERTIONS
-# =============================================================================
 
 
 class TestUnenteredAssert:
@@ -572,11 +508,6 @@ class TestUnenteredAssert:
         assert unentered_assert_check.nominate(_corpus(tmp_path, source)) == []
 
 
-# =============================================================================
-# RULE 10 - ENTRY POINT DIFF
-# =============================================================================
-
-
 class TestEntryPointDiff:
     """A declared verb no literal names is an absence, not a suspect test."""
 
@@ -619,17 +550,11 @@ class TestEntryPointDiff:
         assert row["nodeid"] == "" and "absence" in row["file"]
 
 
-# =============================================================================
-# RUFF PT - THE ADOPT HALF
-# =============================================================================
-
-
 class TestRuffPt:
     """Ruff's absence is a not_applicable, never a silent clean sheet."""
 
     def test_a_missing_ruff_raises_rather_than_returning_nothing(self, tmp_path, monkeypatch):
-        # Returning [] would publish a CLEAN group for a tool that never ran,
-        # which is the exact lie Law S1 exists to stop.
+        # Returning [] would publish a CLEAN group for a tool that never ran (Law S1).
         monkeypatch.setattr(ruff_pt_check, "_ruff_binary", lambda: "")
         with pytest.raises(RuntimeError, match="not installed"):
             ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
@@ -663,9 +588,7 @@ class TestRuffPt:
 def _fake_interpreter(tmp_path: Path, monkeypatch) -> Path:
     """Point `sys.executable` at a scratch venv and return its binary directory.
 
-    The lookup under test reads `sys.executable`, so a test that did not move
-    it would be measuring the machine it happens to run on - green here and
-    silent about every other machine.
+    The lookup reads `sys.executable`; not moving it measures only the machine the test runs on.
     """
     binaries = tmp_path / "venv" / "bin"
     binaries.mkdir(parents=True, exist_ok=True)
@@ -689,44 +612,31 @@ def _binary_nominate_used(tmp_path: Path, monkeypatch) -> str:
 
 
 class TestRuffBinaryLookup:
-    """PATH is not where ruff lives; a venv is, and the venv was invisible.
-
-    The reported defect: `shutil.which` searches PATH only, the drone process's
-    PATH does not carry `.venv/bin`, and the PT family therefore published
-    not_applicable on a machine that had had ruff installed for months. Every
-    test here is about that one sentence - a tool that IS present must never be
-    reported absent, and a tool that is absent must say where it was looked for.
-    """
+    """PATH is not where ruff lives; a venv is, and the venv was invisible."""
 
     def test_the_ruff_beside_the_interpreter_wins_over_the_one_on_path(self, tmp_path, monkeypatch):
-        # PREFERRED, not merely found. The venv's ruff is the one the target's
-        # own configuration was pinned against; a system ruff of another
-        # version would nominate different codes for the same corpus.
+        # PREFERRED, not merely found: the venv's ruff is the version the target's configuration was pinned to.
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         sibling = _executable(binaries / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: str(tmp_path / "elsewhere" / "ruff"))
         assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
 
     def test_the_windows_spelling_of_the_sibling_is_found_too(self, tmp_path, monkeypatch):
-        # A POSIX-only name list would report "not installed" on every Windows
-        # machine that has ruff - the same false not_applicable, moved.
+        # A POSIX-only name list would report "not installed" on every Windows machine that has ruff.
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         sibling = _executable(binaries / "ruff.exe")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: "")
         assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
 
     def test_path_is_still_searched_when_the_interpreter_has_no_sibling(self, tmp_path, monkeypatch):
-        # The fix adds a place to look; it must not remove one. A system-wide
-        # ruff with no venv beside it is the ordinary case on a CI runner.
+        # The fix adds a place to look, never removes one: a system ruff with no venv is the CI-runner case.
         _fake_interpreter(tmp_path, monkeypatch)
         on_path = str(tmp_path / "usr" / "bin" / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: on_path)
         assert _binary_nominate_used(tmp_path, monkeypatch) == on_path
 
     def test_a_sibling_that_is_a_directory_is_not_taken_for_a_binary(self, tmp_path, monkeypatch):
-        # Handing a directory to subprocess turns a missing linter into a
-        # crash, which the group would report as "ruff failed" - a third wrong
-        # answer to a question that has only two right ones.
+        # Handing a directory to subprocess turns a missing linter into a crash reported as "ruff failed".
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         (binaries / "ruff").mkdir()
         on_path = str(tmp_path / "usr" / "bin" / "ruff")
@@ -753,10 +663,7 @@ class TestRuffBinaryLookup:
 
     def test_the_refusal_names_both_places_it_looked(self, tmp_path, monkeypatch):
         """Mutant: _ruff_binary skips the PATH lookup in apps/handlers/tests_pytest_standards/ruff_pt_check.py — killed."""
-        # "ruff is not installed" was true of PATH and false of the machine,
-        # and no reader of the artifact could tell which claim they held. The
-        # reason has to carry the candidate locations or the next reader
-        # repeats the same investigation.
+        # The reason carries the candidate locations: "not installed" was true of PATH and false of the machine.
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         asked: list = []
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda name: asked.append(name))
@@ -769,20 +676,13 @@ class TestRuffBinaryLookup:
 
     def test_the_absence_reason_still_says_not_installed(self, tmp_path, monkeypatch):
         """Mutant: _ruff_binary skips the PATH lookup in apps/handlers/tests_pytest_standards/ruff_pt_check.py — killed."""
-        # The orchestrator's not_applicable text is read by people, and the
-        # phrase they search for is the old one; naming the places must not
-        # cost the sentence that says what happened.
+        # People search the not_applicable text for the old phrase, so naming the places must not cost it.
         _fake_interpreter(tmp_path, monkeypatch)
         asked: list = []
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda name: asked.append(name))
         with pytest.raises(RuntimeError, match="not installed"):
             ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
         assert asked == ["ruff"]
-
-
-# =============================================================================
-# THE ORCHESTRATOR AND ITS SHAPE GATE
-# =============================================================================
 
 
 class TestNominatorShapeGate:
@@ -794,15 +694,11 @@ class TestNominatorShapeGate:
         assert sorted(found) == sorted(adapter.STATIC_GROUPS)
 
     def test_the_declared_group_list_matches_what_discovery_finds(self):
-        # Adding a species is three files AND one line in STATIC_GROUPS. A file
-        # added without the line would silently change the published group list,
-        # which is exactly what Law S3 exists to stop.
+        # A species is three files AND one line in STATIC_GROUPS; a file without the line breaks Law S3.
         assert nominators.declared_groups() == sorted(adapter.STATIC_GROUPS)
 
     def test_discovery_returns_the_package_module_not_a_copy(self):
-        # A second module object for one rule means the SPECIFICATION a reader
-        # inspects is not the one that ran, and discovery re-executes all nine
-        # files on every call.
+        # A second module object means the SPECIFICATION a reader inspects is not the one that ran.
         found, _ = nominators.discover()
         assert found[ruff_pt_check.GROUP] is ruff_pt_check
 
@@ -839,8 +735,7 @@ class TestNominatorShapeGate:
         assert nominators.shape_problems(module) == []
 
     def test_every_problem_is_reported_at_once(self):
-        # All-problems-at-once, the same contract the adapter gate follows: a
-        # first-error-wins gate turns one fix into four rounds.
+        # All problems at once, as the adapter gate does: first-error-wins turns one fix into four rounds.
         module = _fake_module(check_branch=lambda p: {})
         assert len(nominators.shape_problems(module)) >= 4
 
@@ -849,8 +744,7 @@ class TestNominatorRun:
     """A rule that crashed and a rule that found nothing are different documents."""
 
     def test_a_measured_group_carries_no_score(self, tmp_path):
-        # Law S7a: an unscored group that carried a number would be refused by
-        # the artifact validator, so this is the pin that keeps it publishable.
+        # Law S7a: an unscored group carrying a number is refused by the validator; this keeps it publishable.
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1 == 1\n", encoding="utf-8")
         groups = nominators.run(tmp_path)
@@ -891,11 +785,6 @@ class TestNominatorRun:
         assert nominators.run(tmp_path)["static_self_skip"]["limits"]
 
 
-# =============================================================================
-# THE CONTENT TRIPLET - derived, so it cannot drift
-# =============================================================================
-
-
 class TestContentRendering:
     """The content file and the checker are one source, not two."""
 
@@ -916,10 +805,7 @@ class TestContentRendering:
             assert exemption in rendered
 
     def test_every_shipped_md_is_byte_identical_to_what_the_spec_renders(self):
-        # The strongest form of the no-drift claim, and the reason
-        # render_markdown() exists at all: the .md on disk is not a second
-        # statement of the rule that a reader has to trust, it is output. A
-        # SPECIFICATION edited without regenerating fails here, loudly.
+        # The .md on disk is output, not a second statement of the rule: an unregenerated edit fails here.
         found, _ = nominators.discover()
         drifted = []
         for group, module in sorted(found.items()):
@@ -933,12 +819,8 @@ class TestContentRendering:
     def test_every_shipped_nominator_has_a_content_module_and_a_doc(self):
         pack = Path(nominators.PACK_DIR)
         checks = sorted(pack.glob("*_check.py"))
-        # The anti-vacuity guard is real - a checker that stops being
-        # discovered would shrink this loop to a silent pass - but a CONSTANT
-        # was the wrong instrument for it: adding three species reddened this
-        # test for doing what the pack's "three files and one line" promise
-        # invites. Pinned against the adapter's declaration instead, which
-        # cannot go stale and still catches a vanished file.
+        # A checker that stops being discovered would shrink this loop to a silent pass; pinned against the
+        # adapter's declaration, not a constant, so adding species never reddens it.
         declared = {name.removeprefix("static_") for name in adapter.STATIC_GROUPS}
         assert {c.stem.removesuffix("_check") for c in checks} == declared
 
@@ -961,11 +843,6 @@ class TestContentRendering:
             assert f"def get_{name}_standards()" in source, name
 
 
-# =============================================================================
-# THE PACK-KIND REFUSAL - an execution pack is not scored
-# =============================================================================
-
-
 # The handlers/ directory the audit module discovers its packs in, found from the handler itself.
 _HANDLERS_DIR = Path(discovery.__file__).resolve().parent.parent
 
@@ -978,8 +855,7 @@ class TestPackKindRefusal:
         assert "tests_pytest" not in discovery.discover_packs(_HANDLERS_DIR)
 
     def test_the_execution_pack_is_still_visible_as_a_non_scoring_pack(self):
-        # Hidden and absent must not look the same: an operator who can see the
-        # pack knows where to look for its numbers.
+        # Hidden and absent must not look the same: an operator who sees the pack knows where its numbers are.
 
         assert standards_audit.non_scoring_packs().get("tests_pytest") == "execution"
 
@@ -988,8 +864,7 @@ class TestPackKindRefusal:
         assert "aipass" in discovery.discover_packs(_HANDLERS_DIR)
 
     def test_a_pack_with_no_manifest_is_treated_as_standards(self, tmp_path):
-        # Changing the default would silently unregister the pack this branch
-        # has audited eighteen citizens with.
+        # Changing the default would silently unregister the pack this branch audits the fleet with.
         assert discovery.pack_kind(tmp_path) == discovery.SCORING_PACK_KIND
 
     def test_an_unreadable_manifest_is_treated_as_standards(self, tmp_path):
@@ -997,9 +872,7 @@ class TestPackKindRefusal:
         assert discovery.pack_kind(tmp_path) == discovery.SCORING_PACK_KIND
 
     def test_the_non_scoring_packs_are_actually_printed(self, capsys):
-        # The function returning the right answer proves nothing if no surface
-        # calls it: a pack that is hidden and a pack that is absent look the
-        # same to an operator, which is the whole reason the list exists.
+        # The right answer proves nothing if no surface calls it.
 
         standards_audit.print_introspection()
         printed = capsys.readouterr().out
@@ -1010,11 +883,6 @@ class TestPackKindRefusal:
         assert manifest["kind"] == "execution"
 
 
-# =============================================================================
-# THE RETIREMENT - Law S3, and the ruling travels in the artifact
-# =============================================================================
-
-
 class TestRetirement:
     """A group may only vanish by a recorded ruling."""
 
@@ -1022,13 +890,10 @@ class TestRetirement:
         assert [entry["group"] for entry in adapter.RETIRED_GROUPS] == ["pytest.static_nominators"]
 
     def test_the_retirement_names_a_ruling(self):
-        # An entry with no ruling is refused by Law S3's own validator; this
-        # pins that the shipped entry carries one.
+        # An entry with no ruling is refused by Law S3's own validator; the shipped entry carries one.
         assert all(entry["ruling"] for entry in adapter.RETIRED_GROUPS)
 
-    #: The nine groups that existed when the placeholder was retired on
-    #: 2026-08-29. Frozen deliberately: this is a historical set, and a group
-    #: added later did not supersede anything.
+    #: The nine groups the placeholder stood in for. Frozen: a group added later superseded nothing.
     SUPERSEDING_GROUPS = (
         "static_assertion_shape",
         "static_capture_never_read",
@@ -1042,36 +907,18 @@ class TestRetirement:
     )
 
     def test_the_ruling_names_every_group_that_superseded_it(self):
-        # Naming two endpoints and trusting the middle is how a ruling ends up
-        # accounting for less than it retired. The claim is that every species
-        # the placeholder stood in for is still published - so every group that
-        # took over from it has to appear by name.
-        #
-        # CHECKED AGAINST THE FROZEN SET, not against STATIC_GROUPS. It read the
-        # live tuple until 2026-08-31, when adding static_empty_parametrize made
-        # it red: a group built two days later did not supersede a placeholder
-        # retired on 2026-08-29, and the only way to satisfy the old form would
-        # have been to write it into a historical ruling it had no part in. The
-        # test was asking a question about today and calling it a question about
-        # that date.
+        # Every species the placeholder stood in for must still be published, each by name. Checked against the
+        # frozen set, never STATIC_GROUPS: a later group did not supersede a retired placeholder.
         ruling = adapter.RETIRED_GROUPS[0]["ruling"]
         assert [group for group in self.SUPERSEDING_GROUPS if group not in ruling] == []
 
     def test_every_superseding_group_is_still_live(self):
-        # The other half of the claim, and the half the frozen set could lose:
-        # "still published" is only true while each of those nine is actually
-        # declared. If one is ever retired in turn, this reds and its own
-        # ruling has to account for it.
+        # The other half: "still published" holds only while each of the nine is declared.
         assert [group for group in self.SUPERSEDING_GROUPS if group not in adapter.STATIC_GROUPS] == []
 
     def test_no_currently_declared_group_is_also_retired(self):
         retired = {entry["group"].split(".", 1)[-1] for entry in adapter.RETIRED_GROUPS}
         assert retired & set(adapter.ADAPTER_GROUPS) == set()
-
-
-# =============================================================================
-# THE HARNESS SELF-CHECK
-# =============================================================================
 
 
 def _harness(**overrides):
@@ -1141,8 +988,7 @@ class TestSelfCheck:
         assert 12 not in failed, "the suite wrote nothing, so the OBSERVER-FORGERY row must stay green"
 
     def test_a_change_the_live_writer_probe_saw_first_does_not_fail_check_seventeen(self):
-        # A live citizen writes its own logs throughout the window. The path is
-        # still published in the diff - it is just not charged to this run.
+        # A live citizen writes its own logs throughout the window: published in the diff, not charged to this run.
         proof = {
             "probed": True,
             "real_tree_unchanged": False,
@@ -1209,15 +1055,9 @@ class TestSelfCheck:
         assert row["status"] == "not_applicable"
 
     def test_a_failing_harness_is_reported_never_raised(self):
-        # A harness failure removed from the document because it was
-        # inconvenient is the thing this campaign is against.
+        # A harness failure dropped from the document because it was inconvenient is the thing this lane refuses.
         block = _harness(m10_proof={"probed": False, "note": "x"})
         assert block["failed"] > 0 and block["checks"]
-
-
-# =============================================================================
-# THE CACHE STAMP - computed always, served by nothing
-# =============================================================================
 
 
 class TestCacheStamp:
@@ -1227,8 +1067,7 @@ class TestCacheStamp:
         assert cache.cache_block().get("served_from_cache") is False
 
     def test_the_block_carries_a_stamp_even_though_nothing_serves_it(self):
-        # A stamp first computed on the day serving is switched on is a stamp
-        # nobody has tested.
+        # A stamp first computed on the day serving is switched on is a stamp nobody has tested.
         assert cache.cache_block()["stamp"].startswith(cache.AT_CACHE_VERSION)
 
     def test_the_block_names_what_the_fingerprint_cannot_see(self):
@@ -1251,8 +1090,7 @@ class TestCacheStamp:
         assert cache.compute_stamp(tmp_path) != before
 
     def test_a_rename_to_an_identical_twin_changes_the_stamp(self, tmp_path):
-        # A hash over contents alone would call a rename a no-op, and a rename
-        # is exactly how a checker stops being discovered.
+        # A contents-only hash calls a rename a no-op, and a rename is how a checker stops being discovered.
         (tmp_path / "one.py").write_text("A", encoding="utf-8")
         before = cache.compute_stamp(tmp_path)
         (tmp_path / "one.py").rename(tmp_path / "two.py")
@@ -1267,9 +1105,7 @@ class TestCacheStamp:
         return pack
 
     def test_a_payload_change_moves_the_payload_segment_alone(self, tmp_path):
-        # Asserting only that the STAMP moved is vacuous - the pack hash would
-        # cover the payload anyway. The claim worth pinning is that the two
-        # segments are DISJOINT, so a reader can see which half changed.
+        # The STAMP moving is vacuous (the pack hash covers the payload); the segments must be DISJOINT.
         pack = self._pack(tmp_path)
         before = cache.compute_stamp(pack).split(":")
         (pack / "payload" / "plugin.py").write_text("y = 2\n", encoding="utf-8")
@@ -1284,17 +1120,11 @@ class TestCacheStamp:
         assert after[1] != before[1] and after[3] == before[3]
 
 
-# =============================================================================
-# RENDERING - the seam is easiest to lose here
-# =============================================================================
-
-
 def _screen(capsys) -> str:
     """Everything the run put on the terminal.
 
-    The refusal line and a failed harness check go to STDERR, which is right
-    for a CLI and is exactly why a test reading only `.out` would pass while
-    the operator saw nothing.
+    The refusal and a failed harness check go to STDERR, so a test reading only `.out` passes while the
+    operator sees nothing.
     """
     captured = capsys.readouterr()
     return captured.out + captured.err
@@ -1378,8 +1208,7 @@ class TestRender:
         assert "harness check 11 FAILED" in _screen(capsys)
 
     def test_the_renderer_names_no_ecosystem(self):
-        # One `if ecosystem == "pytest"` here and the second ecosystem is a
-        # rewrite rather than a directory.
+        # One `if ecosystem == "pytest"` here and the second ecosystem is a rewrite rather than a directory.
         source = Path(render.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
         literals = {

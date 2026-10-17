@@ -3,25 +3,18 @@
 # Description: Help Text Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 Help Text Standards Content Handler
-
-Provides formatted Help Text standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_help_text_standards() -> str:
-    """Return formatted help_text standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted help_text standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  User-facing help text must tell users to run commands via",

@@ -3,15 +3,11 @@
 # Description: README Update Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 README Update Operations Handler
-
-Implementation details for the readme_update module. Handles branch resolution,
-generator loading, and target resolution. Returns data structures for the
-module to display.
 """
 
 import json
@@ -24,26 +20,14 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
 from aipass.seedgo.apps.handlers.module_root import module_file
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# CONSTANTS
-# =============================================================================
-
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # Delegates: the name is the contract, the private glob walk was the disease.
-    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
-    # a flow_json plan counter could be served as the trust anchor.
     return registry_scan.find_registry()
 
 
-# Generator lives in the same handlers/readme/ directory as this file
 GENERATOR_PATH = module_file(__file__).parent / "readme_generator.py"
 
-# Section display names for output
 SECTION_NAMES = {
     "tree": "TREE",
     "modules": "MODULES",
@@ -53,39 +37,21 @@ SECTION_NAMES = {
 }
 
 
-# =============================================================================
-# BRANCH RESOLUTION
-# =============================================================================
-
-
 def resolve_branch(branch_arg: str) -> Optional[Dict]:
-    """
-    Resolve @branch argument to branch info from registry.
+    """Resolve @branch argument to branch info from registry.
 
-    Args:
-        branch_arg: Branch name, optionally prefixed with @
-
-    Returns:
-        Branch dict from registry, or None if not found
-
-    Raises:
-        OSError, ValueError: the registry exists and cannot be read. An
-            unreadable registry answered None, the answer for an unknown
-            branch (seedgo, fleet green leg 5); resolve_targets names it.
-    """
+    Raises OSError/ValueError on an unreadable registry: None means an unknown branch."""
     registry_path = _find_registry()
     if not registry_path.exists():
         return None
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
 
-    # Strip @ prefix and normalize
     name = branch_arg.lstrip("@").upper()
 
     for branch in registry.get("branches", []):
         if branch.get("name", "").upper() == name:
             return branch
-        # Also check aliases
         aliases = branch.get("aliases", [])
         for alias in aliases:
             if alias.lstrip("@").upper() == name:
@@ -95,17 +61,9 @@ def resolve_branch(branch_arg: str) -> Optional[Dict]:
 
 
 def get_all_branches() -> List[Dict]:
-    """
-    Get all branches from the registry.
+    """Get all branches from the registry.
 
-    Returns:
-        List of branch dicts, or an empty list when there is no registry
-
-    Raises:
-        OSError, ValueError: the registry exists and cannot be read. It
-            answered an empty list, the answer for an empty registry (seedgo,
-            fleet green leg 5); resolve_targets names it.
-    """
+    Raises OSError/ValueError on an unreadable registry: [] means no registry."""
     registry_path = _find_registry()
     if not registry_path.exists():
         return []
@@ -114,23 +72,10 @@ def get_all_branches() -> List[Dict]:
     return registry.get("branches", [])
 
 
-# =============================================================================
-# GENERATOR LOADER
-# =============================================================================
-
-
 def load_generator():
-    """
-    Load readme_generator module via importlib to avoid cross-branch import issues.
+    """Load readme_generator module via importlib to avoid cross-branch import issues.
 
-    Returns:
-        The readme_generator module, or None when the file is not there
-
-    Raises:
-        Whatever loading the file raises (a SyntaxError, an ImportError, an
-        OSError). It answered None with the reason at info level only, so the
-        user read "Failed to load" and nothing more (seedgo, fleet green leg 5).
-    """
+    None only when the file is absent; a load failure raises so its reason reaches the user."""
     if not GENERATOR_PATH.exists():
         return None
 
@@ -142,27 +87,10 @@ def load_generator():
     return generator
 
 
-# =============================================================================
-# TARGET RESOLUTION
-# =============================================================================
-
-
 def resolve_targets(args: List[str]) -> tuple:
-    """
-    Resolve command arguments to a list of branch targets.
+    """Resolve command arguments to a list of branch targets.
 
-    Handles @all, @branch, and bare branch names.
-
-    Args:
-        args: List of branch arguments
-
-    Returns:
-        Tuple of (branches_list, error_message).
-        On success: (list_of_dicts, None)
-        On failure: ([], error_string): "no_args", "no_branches",
-        "not_found:<target>", or "unreadable_registry:<reason>" when the
-        registry exists and cannot be read.
-    """
+    Errors are "no_args", "no_branches", "not_found:<target>" or "unreadable_registry:<reason>"."""
     if not args:
         return [], "no_args"
 

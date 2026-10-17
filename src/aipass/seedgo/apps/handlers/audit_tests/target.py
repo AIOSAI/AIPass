@@ -3,29 +3,10 @@
 # Description: audit-tests target resolution - @branch or any directory
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Target resolution. The lane points at a registered branch OR at any directory.
-
-Two shapes, one resolver:
-
-  * `@backup`      - a registry branch. The name is unique by construction, so
-                     the artifact filename is the bare name.
-  * `/some/path`   - any directory, including one outside the repo. Two
-                     unrelated projects can both be called `src` or `tests`,
-                     so an external target's artifact name carries an 8-char
-                     hash of its RESOLVED ABSOLUTE PATH. Without it, the second
-                     project silently overwrites the first's measurement.
-
-`config_note` is a rev-4 requirement (design section 9.2). The lane measures
-the branch-rootdir SERIAL configuration, and that is deliberately NOT the CI
-configuration (`--rootdir=. -n auto --dist loadscope`). A reader who assumed
-the number described CI would be wrong, and TAXONOMY section 5 rule 1 is
-explicit that a hygiene gate measuring a configuration nobody uses is worse
-than none. So the artifact says which one it measured, in words.
-"""
+"""Target resolution. The lane points at a registered branch OR at any directory."""
 
 import hashlib
 from dataclasses import dataclass, field
@@ -34,11 +15,9 @@ from typing import Dict, List, Optional
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: How many characters of the path hash an external target's name carries.
 PATH_HASH_LENGTH = 8
 
-#: The configuration this lane measures, stated in words for the artifact.
-#: Rev 4, boardroom Q-C settlement plus @aipass's N5 note.
+#: The lane measures branch-rootdir serial, not CI; the artifact says so in words.
 CONFIG_NOTE = (
     "branch-rootdir SERIAL: pytest is run from the target's own root under its "
     "own pytest.ini, one process, no xdist. This is NOT the CI configuration "
@@ -70,9 +49,7 @@ class Target:
     def artifact_name(self) -> str:
         """The artifact filename stem for this target.
 
-        A registry branch keeps its bare name. Anything else carries a hash of
-        the resolved absolute path, so two external projects with the same
-        directory name cannot overwrite each other's measurement.
+        Non-registry targets carry a path hash: two projects named `src` must not overwrite each other.
         """
         if self.is_registry_branch:
             return f"audit_tests_{self.name}"
@@ -94,23 +71,11 @@ class Target:
         }
 
 
-# =============================================================================
-# RESOLUTION
-# =============================================================================
-
-
 def _canonical_branch(name: str, branch_paths: Dict[str, Path]) -> str:
     """The registry's own spelling of a branch name. Raises if it has none.
 
-    The registry stores some names uppercase (`CANARY`) and everyone types
-    `@canary`, so an exact-match-only lookup refuses targets that plainly
-    exist. The fallback returns the CANONICAL spelling rather than the typed
-    one, which keeps `artifact_name()` stable no matter how the argument was
-    capitalised — two spellings of one branch must never produce two artifacts.
-
-    An AMBIGUOUS match raises rather than picking one. Two branches differing
-    only in case is a registry problem, and guessing which was meant is how a
-    lane measures the wrong tree while looking like it worked.
+    Returns the canonical spelling so two capitalisations never yield two artifacts;
+    an ambiguous case-insensitive match raises rather than guessing.
     """
     if name in branch_paths:
         return name
@@ -130,13 +95,8 @@ def _canonical_branch(name: str, branch_paths: Dict[str, Path]) -> str:
 def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Target:
     """Resolve a command-line target argument into a Target.
 
-    `branch_paths` maps branch name to path; the caller supplies it so this
-    module never imports the registry and stays testable without one.
-
-    Raises FileNotFoundError when a path target does not exist, and ValueError
-    when an `@name` does not resolve — both fail loudly rather than falling
-    back to the current directory, because a lane that silently measures the
-    wrong tree publishes a confidently wrong number.
+    The caller supplies `branch_paths` so this module never imports the registry.
+    Unresolvable targets raise; never fall back to cwd and measure the wrong tree.
     """
     branch_paths = branch_paths or {}
 
@@ -165,12 +125,7 @@ def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Ta
 
 
 def describe_layout(target: Target) -> str:
-    """Best-effort layout label, recorded rather than acted on.
-
-    The label never changes what runs — the adapter's `detect()` decides that.
-    It exists so a reader of two artifacts with different numbers can see
-    whether they were even the same shape of project.
-    """
+    """Best-effort layout label, recorded rather than acted on (`detect()` decides what runs)."""
     if (target.path / "pytest.ini").exists():
         return "pytest.ini at root"
     if (target.path / "tests").is_dir():

@@ -3,35 +3,12 @@
 # Description: behavioural pins for the test-inventory verb
 # Version: 1.0.4
 # Created: 2026-09-01
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
 
-# Pins for the ranked test inventory. Every test here names a DEFECT.
-#
-# The owner's standing rule governs this file: never add a test without a defect it
-# pins. The tool is a report about test bloat, so a pile of instruments defending
-# it would be the joke telling itself. What is pinned is what a future change
-# could plausibly break, and several of these reproduce a defect that was real
-# during the build:
-#
-#   * the closed mock-assert set (a prefix rule read a project helper named
-#     `assert_row_shape` as a mock assertion and filed a checking test as a
-#     change detector)
-#   * `importorskip` as CONDITIONAL rather than skipped (a measured miss: this
-#     fleet's bluesky driver importorskips a package that IS installed, and
-#     calling it skipped under-counted 12 running tests)
-#   * the conftest ignore scope (a basename match would silence every `parked/`
-#     in the fleet from one branch's file)
-#   * the blame range starting at the first DECORATOR (a `@parametrize` table
-#     attributed to whichever function sits above it)
-#   * a process-salted body fingerprint (two runs over an unchanged tree
-#     publishing different values, making every diff of the artifact noise)
-#
-# NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE. No test claims a fleet count, a
-# Python version, or a platform. That species cost this campaign twelve hours and
-# thirteen CI rounds, and it is exactly what the tool under test exists to find.
+# Every project here is built in tmp_path: no fleet count, Python version or platform, the species the tool exists to find.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — ast.parse's parsing; shape only walks the tree it returns
@@ -62,21 +39,11 @@ def _classify(source: str) -> shape.Shape:
     return shape.classify(_function(source))
 
 
-# =============================================================================
-# ASSERTION SHAPE
-# =============================================================================
-
-
 class TestAssertionShape:
     """What the NONE / MOCK_ONLY / REAL column convicts, and what it clears."""
 
     def test_a_function_that_checks_nothing_is_convicted_as_shapeless(self):
-        """The planted case. A smoke test that only proves no exception raised.
-
-        This is the shape the whole report exists to surface, and the one live
-        example that opened the queue on the first fleet run was seedgo's own:
-        `print_branch_summary(result)` on a line by itself.
-        """
+        """The planted case. A smoke test that only proves no exception raised."""
         found = _classify(
             """
             def test_basic_summary():
@@ -89,12 +56,7 @@ class TestAssertionShape:
         assert found.delegated_oracle is False
 
     def test_a_test_that_only_checks_its_own_doubles_is_mock_only_not_real(self):
-        """A change detector must not be cleared as a checking test.
-
-        arXiv:2606.18168 names this W4 across 86,156 agent-authored patches.
-        Folding it into REAL would hide the second-largest species in the
-        report behind the largest.
-        """
+        """A change detector must not be cleared as a checking test."""
         found = _classify(
             """
             def test_writes_the_row(mock_store):
@@ -106,13 +68,7 @@ class TestAssertionShape:
         assert found.shape == shape.SHAPE_MOCK_ONLY
 
     def test_a_project_helper_named_assert_something_is_not_read_as_a_mock(self):
-        """THE DEFECT: `startswith("assert_")` reads a project helper as a mock.
-
-        `assert_row_shape(...)` is a delegated oracle - a real check one call
-        away - and a prefix rule files the test that calls it under MOCK_ONLY,
-        beside the change detectors it has nothing to do with. The mock set is
-        closed for this reason.
-        """
+        """THE DEFECT: `startswith("assert_")` reads a project helper as a mock."""
         found = _classify(
             """
             def test_the_row_is_shaped_right():
@@ -124,12 +80,7 @@ class TestAssertionShape:
         assert found.delegated_oracle is True
 
     def test_pytest_raises_as_a_context_manager_is_a_real_oracle(self):
-        """A test with no `assert` statement can still check something.
-
-        `with pytest.raises(...)` is the common spelling and it appears in no
-        `ast.Assert` node. Missing it would convict a large, correct family of
-        exception tests as assertion-free.
-        """
+        """A test with no `assert` statement can still check something."""
         found = _classify(
             """
             def test_refuses_a_bad_path():
@@ -141,12 +92,7 @@ class TestAssertionShape:
         assert found.shape == shape.SHAPE_REAL
 
     def test_the_body_fingerprint_survives_a_new_process(self):
-        """THE DEFECT: `hash()` is salted per process (PEP 456).
-
-        A salted fingerprint means two runs over an unchanged tree publish
-        different values for every row, so every diff of the artifact is noise
-        and the twins column silently regroups between runs.
-        """
+        """THE DEFECT: `hash()` is salted per process (PEP 456)."""
         snippet = "def test_x():\n    value = 1\n    assert value"
         script = (
             "import ast, sys;"
@@ -181,21 +127,11 @@ def _in_fresh_process(script: str) -> str:
     return completed.stdout.strip()
 
 
-# =============================================================================
-# THE CORPUS DEFINITION
-# =============================================================================
-
-
 class TestWhatCountsAsATest:
     """The collection rules, which decide every number in the report."""
 
     def test_a_helper_class_contributes_no_tests(self, tmp_path):
-        """pytest collects methods from `Test*` classes and no others.
-
-        The audit-tests lane's corpus deliberately takes methods from ANY
-        class, because static nomination should be generous. An inventory that
-        inherited that generosity would report tests that cannot run.
-        """
+        """pytest collects methods from `Test*` classes and no others."""
         _write(
             tmp_path,
             "tests/test_a.py",
@@ -215,11 +151,7 @@ class TestWhatCountsAsATest:
         assert names == {"test_really"}
 
     def test_a_test_class_with_a_constructor_collects_nothing(self, tmp_path):
-        """pytest skips a `Test*` class that defines `__init__`, with a warning.
-
-        Counting its methods would put tests in the inventory that never run,
-        under a heading that says they do.
-        """
+        """pytest skips a `Test*` class that defines `__init__`, with a warning."""
         _write(
             tmp_path,
             "tests/test_b.py",
@@ -236,11 +168,7 @@ class TestWhatCountsAsATest:
         assert collection.collect(tmp_path).functions == []
 
     def test_a_dot_directory_is_pruned(self, tmp_path):
-        """`norecursedirs` carries `.*`, which is what keeps `.archive` out.
-
-        Losing it silently adds every parked and archived file to the corpus,
-        inflating the totals with code nobody runs and nobody maintains.
-        """
+        """`norecursedirs` carries `.*`, which is what keeps `.archive` out."""
         _write(tmp_path, "tests/.archive/test_old.py", "def test_old():\n    assert True")
         _write(tmp_path, "tests/test_live.py", "def test_live():\n    assert True")
 
@@ -249,12 +177,7 @@ class TestWhatCountsAsATest:
         assert names == {"test_live"}
 
     def test_the_blame_range_starts_at_the_first_decorator(self, tmp_path):
-        """A `@parametrize` table is part of the test that carries it.
-
-        Starting the range at `def` attributes the decorator lines to whatever
-        function sits above, so one test's churn lands on its neighbour's row -
-        and a parametrised test looks older than the table it was given.
-        """
+        """A `@parametrize` table is part of the test that carries it."""
         _write(
             tmp_path,
             "tests/test_c.py",
@@ -278,22 +201,11 @@ def _write(root: Path, relpath: str, source: str) -> Path:
     return path
 
 
-# =============================================================================
-# TESTS THAT EXIST AND NEVER RUN
-# =============================================================================
-
-
 class TestExclusions:
     """Files pytest refuses to run, and the two mechanisms that do it."""
 
     def test_a_conftest_ignore_glob_silences_only_its_own_directory(self, tmp_path):
-        """THE DEFECT: a basename match silences every `parked/` in the fleet.
-
-        pytest resolves each pattern against the CONFTEST'S directory. A
-        `parked/conftest.py` saying `["*"]` must silence its own directory and
-        no other, or one branch's parked tests delete another branch's live
-        ones from the report.
-        """
+        """THE DEFECT: a basename match silences every `parked/` in the fleet."""
         _write(tmp_path, "tests/parked/conftest.py", 'collect_ignore_glob = ["*"]')
         _write(tmp_path, "tests/parked/test_parked.py", "def test_parked():\n    assert True")
         _write(tmp_path, "tests/other/test_live.py", "def test_live():\n    assert True")
@@ -305,13 +217,7 @@ class TestExclusions:
         assert statuses["tests/other/test_live.py"] == exclusions.STATUS_COLLECTED
 
     def test_importorskip_is_conditional_and_a_bare_skip_is_not(self, tmp_path):
-        """THE MEASURED MISS. Whether an `importorskip` file runs is a HOST fact.
-
-        This fleet's bluesky driver importorskips a package that IS installed
-        here, so folding it into MODULE_LEVEL_SKIP under-counted twelve running
-        tests on the very machine doing the counting. An unconditional `skip`
-        is a different thing and keeps its own status.
-        """
+        """THE MEASURED MISS. Whether an `importorskip` file runs is a HOST fact."""
         _write(
             tmp_path,
             "tests/test_parked.py",
@@ -346,11 +252,7 @@ class TestExclusions:
         assert exclusions.STATUS_MODULE_SKIP not in exclusions.RUNNING_STATUSES
 
     def test_a_pytest_alias_still_reads_as_pytest(self, tmp_path):
-        """THE DEFECT: matching the literal word `pytest` misses an alias.
-
-        The file that produced this rule writes `import pytest as _parked`, and
-        a name-matched check reads a deliberately parked module as live.
-        """
+        """THE DEFECT: matching the literal word `pytest` misses an alias."""
         _write(
             tmp_path,
             "tests/test_aliased.py",
@@ -368,11 +270,6 @@ class TestExclusions:
         statuses = exclusions.classify(tmp_path, found.files, found.rules.norecursedirs)
 
         assert statuses["tests/test_aliased.py"] == exclusions.STATUS_MODULE_SKIP
-
-
-# =============================================================================
-# AGE AND AUTHORSHIP
-# =============================================================================
 
 
 PORCELAIN = """\
@@ -399,23 +296,14 @@ class TestHistory:
     """What blame is read as saying, and what it is not."""
 
     def test_a_repeated_commit_keeps_its_author(self):
-        """THE DEFECT: porcelain emits the full header ONCE per commit.
-
-        Every later hunk from the same commit carries only the sha line. A
-        parser expecting a header per line attributes those lines to nobody,
-        which reads as an untracked file with an author.
-        """
+        """THE DEFECT: porcelain emits the full header ONCE per commit."""
         parsed = history.parse_porcelain(PORCELAIN)
 
         assert parsed.authors == {1: "Alice", 2: "Alice", 3: "Bob"}
         assert parsed.times[3] == 2000000
 
     def test_the_author_is_whoever_owns_the_most_lines(self):
-        """A one-line fix by a second hand does not re-author the test.
-
-        Taking the LAST toucher would re-attribute a whole generated batch to
-        whoever most recently ran a formatter over the file.
-        """
+        """A one-line fix by a second hand does not re-author the test."""
         parsed = history.parse_porcelain(PORCELAIN)
 
         attributed = history.attribute(parsed, 1, 3, now=3000000.0)
@@ -436,44 +324,23 @@ class TestHistory:
         assert first_age > second_age
 
     def test_a_file_with_no_history_says_untracked_rather_than_defaulting(self):
-        """A test with no history is a different object from an ordinary one.
-
-        Defaulting it to an author, or to age zero, hides the finding: three
-        test files on this fleet have no history at all and two of them run in
-        CI.
-        """
+        """A test with no history is a different object from an ordinary one."""
         attributed = history.attribute(history.LineHistory(authors={}, times={}, tracked=False), 1, 10, now=3000000.0)
 
         assert attributed.author_bucket == history.BUCKET_UNTRACKED
         assert attributed.age_days is None
 
     def test_an_unrecognised_author_goes_to_other_and_never_to_human(self):
-        """THE DEFECT: defaulting unknown names into the smallest bucket.
-
-        On this fleet the `human` bucket holds about fifty tests out of twenty
-        thousand, so one unrecognised agent identity would multiply the most
-        decision-relevant number in the report.
-        """
+        """THE DEFECT: defaulting unknown names into the smallest bucket."""
         assert history.bucket_for("SomeNewAgent") == history.BUCKET_OTHER
         assert history.bucket_for("AIOSAI") == "AGENT_AIOSAI"
-
-
-# =============================================================================
-# THE SCORE, AND WHAT IT REFUSES TO SAY
-# =============================================================================
 
 
 class TestScoring:
     """The composite, and the vocabulary gate around the artifact."""
 
     def test_every_component_is_visible_and_they_sum_to_the_composite(self):
-        """A reader who disagrees with the weighting must be able to re-sort.
-
-        A composite published without its parts cannot be argued with, and the
-        weighting is a judgement rather than a measurement. If the arithmetic
-        and the published components ever diverge, the row is a claim nobody
-        can check.
-        """
+        """A reader who disagrees with the weighting must be able to re-sort."""
         scored = ranking.score(
             _classify("def test_x():\n    call_it()"),
             history.FunctionHistory(
@@ -490,12 +357,7 @@ class TestScoring:
         assert sum(ranking.WEIGHTS.values()) == pytest.approx(1.0)
 
     def test_an_unknown_age_contributes_nothing_rather_than_reading_as_young(self):
-        """THE DEFECT: `None` treated as zero days puts untracked files on top.
-
-        They already earn full authorship weight for having no recorded reason
-        to exist. Scoring an absent age as brand new would double-count the
-        same fact and push a real finding down the queue behind it.
-        """
+        """THE DEFECT: `None` treated as zero days puts untracked files on top."""
         untracked = history.FunctionHistory(
             author="", author_bucket=history.BUCKET_UNTRACKED, age_days=None, days_since_touch=None, lines=0
         )
@@ -505,22 +367,12 @@ class TestScoring:
         assert scored.components["recency"]["value"] == 0.0
 
     def test_publishing_without_blind_spots_is_refused(self):
-        """The blind spots are the load-bearing half of an honest report.
-
-        A reader who opens the rows and not the documentation is the normal
-        reader. A version of this artifact that lost the list would look more
-        authoritative than the one that has it.
-        """
+        """The blind spots are the load-bearing half of an honest report."""
         with pytest.raises(ValueError, match="blind spots"):
             report.assert_publishable({"blind_spots": []})
 
     def test_a_delete_family_word_in_a_published_label_refuses_the_write(self):
-        """THE WHOLE ARGUMENT, defended in code rather than in prose.
-
-        ISSTA 2018 is why no static signal here may authorise a removal. A
-        later contributor adding a band called `dead` would concede that
-        argument silently, so the write refuses instead of warning.
-        """
+        """THE WHOLE ARGUMENT, defended in code rather than in prose."""
         summary = {
             "blind_spots": ["something"],
             "ranking": {"means": "mentions delete, deliberately, in prose"},
@@ -531,16 +383,7 @@ class TestScoring:
             report.assert_publishable(summary)
 
     def test_prose_may_say_the_word_a_label_may_not(self):
-        """The negative control, pinning CATEGORY_LENGTH from BOTH sides.
-
-        A first version of this control passed the real blind-spot list and
-        asserted no refusal - and a mutation sweep raised CATEGORY_LENGTH to
-        ten thousand without failing it, because none of that prose happens to
-        contain a literal delete-family word. The control was a control over
-        nothing. So the two arms are CONSTRUCTED here: the same word, once in a
-        sentence long enough to be an explanation and once short enough to be a
-        category, must get two different answers.
-        """
+        """The negative control, pinning CATEGORY_LENGTH from BOTH sides."""
         explanation = (
             "This report will never tell anyone to delete a test, because no static signal "
             "measured here predicts what a removal would cost."
@@ -554,13 +397,7 @@ class TestScoring:
             report.assert_publishable({"blind_spots": ["something"], "note": "delete"})
 
     def test_the_real_published_prose_is_publishable(self):
-        """The shipped strings pass their own gate.
-
-        Pinned separately from the boundary above because these two can fail
-        independently: a future blind spot written just under the category
-        length, using the word, would refuse every run of the tool and the
-        boundary test would still be green.
-        """
+        """The shipped strings pass their own gate."""
         report.assert_publishable(
             {
                 "blind_spots": list(report.BLIND_SPOTS),
@@ -570,21 +407,11 @@ class TestScoring:
         )
 
 
-# =============================================================================
-# END TO END
-# =============================================================================
-
-
 class TestPublication:
     """One small tree, all the way through to files on disk."""
 
     def test_a_built_tree_publishes_rows_a_summary_and_a_digest(self, tmp_path):
-        """The pipeline holds together and writes where it is told.
-
-        Pinned because `publish` defaults to seedgo's own `.seedgo/`: a caller
-        that could not redirect it would make every test of this module write
-        into the branch's real artifact directory.
-        """
+        """The pipeline holds together and writes where it is told."""
         _write(tmp_path, "tests/test_x.py", "def test_x():\n    assert True")
         found = collection.collect(tmp_path)
         statuses = exclusions.classify(tmp_path, found.files, found.rules.norecursedirs)
@@ -603,12 +430,7 @@ class TestPublication:
 
 
 def _run_twins_verb(tmp_path: Path, monkeypatch, argument: str) -> list:
-    """Run `test-inventory <argument> --twins` and return the containers it handed twins.build.
-
-    Artifacts and operation logs go to tmp_path. twins.build is recorded at the
-    edge and then run for real over a one-branch scratch tree, so the verb's
-    routing is observed without walking the whole fleet.
-    """
+    """Run `test-inventory <argument> --twins` and return the containers it handed twins.build."""
     out = tmp_path / "out"
     scratch = tmp_path / "scratch"
     _write(scratch, "alpha/tests/test_a.py", "def test_a():\n    assert 1 + 1 == 2")
@@ -648,22 +470,10 @@ class TestTheTopSwitch:
 
 
 class TestTheTwinsSwitch:
-    """`--twins` on the test-inventory verb.
-
-    The twin report is only reachable through this switch, so an unwired flag
-    is an unrunnable report. Both pins here fired red first: the container
-    derivation caught a live defect where the fleet target published a zero.
-    """
+    """`--twins` on the test-inventory verb."""
 
     def test_the_twins_flag_is_declared_and_parsed(self, tmp_path: Path, monkeypatch, capsys) -> None:
-        """`--twins` through the verb runs the twin report over the named target, not the inventory.
-
-        A flag absent from FLAGS is rejected by the unrecognised-option arm
-        before it ever reaches the parser, so both halves are pinned together.
-        Both artifact directories and every operation log are redirected first,
-        so a mutant that drops the switch publishes an inventory into tmp_path.
-        Mutant: _parse leaves want_twins False in apps/modules/inventory.py — killed.
-        """
+        """`--twins` through the verb runs the twin report over the named target, not the inventory."""
         tree = tmp_path / "tree"
         _write(tree, "alpha/tests/test_a.py", "def test_a():\n    assert 1 + 1 == 2")
         out = tmp_path / "out"
@@ -682,12 +492,7 @@ class TestTheTwinsSwitch:
         assert not (out / report.ROWS_NAME).exists()
 
     def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self, tmp_path: Path, monkeypatch) -> None:
-        """`inventory._branch_container` descends from the repo root to the branches.
-
-        THE LIVE DEFECT THIS PINS: `roots.resolve("aipass")` answers the repo
-        root, but `twins.branch_dirs` reads immediate children only - so the
-        first wired run reported "0 twins over 0 branches" as a success.
-        """
+        """`inventory._branch_container` descends from the repo root to the branches."""
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
         [container] = _run_twins_verb(tmp_path, monkeypatch, roots.FLEET_ARGUMENT)
 
@@ -695,17 +500,7 @@ class TestTheTwinsSwitch:
         assert (container / "seedgo" / "tests").is_dir()
 
     def test_the_container_is_the_same_on_a_host_with_no_registry(self, tmp_path: Path, monkeypatch) -> None:
-        """The fleet container never depends on AIPASS_REGISTRY.json existing.
-
-        THIS TEST IS WHY PR 751 WAS RED ON EVERY BOARD. The first cure took the
-        common parent of `discover_branches`, which reads a registry that is
-        gitignored and therefore ABSENT on any fresh checkout: discovery
-        answered nothing, and the container degraded to the repo root - the
-        very "0 twins as success" the pin above exists to refuse. Green here
-        and red on CI is the signature of machine-local state, so the bare
-        world is asserted rather than assumed: an empty branch map is exactly
-        what a registry-less host produces.
-        """
+        """The fleet container never depends on AIPASS_REGISTRY.json existing."""
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
         [with_registry] = _run_twins_verb(tmp_path / "with", monkeypatch, roots.FLEET_ARGUMENT)
 
@@ -717,11 +512,7 @@ class TestTheTwinsSwitch:
         assert (without_registry / "seedgo" / "tests").is_dir()
 
     def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path, monkeypatch) -> None:
-        """Only the fleet target is redirected; a named directory is not.
-
-        The counter-arm. Silently descending under an explicit path would make
-        the verb walk somewhere the caller did not name.
-        """
+        """Only the fleet target is redirected; a named directory is not."""
         target = tmp_path / "named"
         target.mkdir()
 

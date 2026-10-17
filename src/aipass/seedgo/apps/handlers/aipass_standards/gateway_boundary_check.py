@@ -3,18 +3,13 @@
 # Description: Gateway Boundary Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Gateway Boundary Standards Checker Handler.
 
-A branch may write its OWN storage. It may ask another branch to write theirs,
-through that branch's door. What it may not do is reach into another branch's
-storage and write it by hand: two implementations of one format, drifting
-apart with nobody watching, and the owner's own rules bypassed.
-
-The owner's directive (2026-08-17), which this standard encodes: "@api should be
-only doing api calls. api is api thats it."
+A branch writes its own storage, and another's only through that branch's door: a hand
+write is a second implementation of one format, drifting with nobody watching.
 """
 
 import ast
@@ -30,13 +25,8 @@ APPLIES_TO = "production"
 # A file that does not parse: judged by nobody here, and said so (ruff convicts a parse error).
 NOT_JUDGED = "Not judged: the file does not parse (ruff convicts that)"
 
-# Storage markers and who is ALLOWED to write them by hand. Anyone else must
-# go through the owner's door. The list is deliberately short: a marker earns
-# a place here only when a branch's own storage is named by a path literal
-# that another branch could plausibly write.
-# PRIVATE storage roots only - one owner, and no branch has any business
-# writing another's by hand. Population today: 0. That is a guard, not a
-# failure to find anything, and it is stated rather than hidden.
+# Private storage roots and the only branches that may write them by hand; anyone else
+# goes through the owner's door.
 _STORAGE_OWNERS: Dict[str, Tuple[str, ...]] = {
     ".ai_mail.local": ("ai_mail",),
     ".seedgo": ("seedgo",),
@@ -44,55 +34,25 @@ _STORAGE_OWNERS: Dict[str, Tuple[str, ...]] = {
     ".spawn": ("spawn",),
     ".flow": ("flow",),
 }
-# DELIBERATELY ABSENT, each removed after measuring the false positives it
-# produced rather than on taste:
-#   ".trinity/" - EVERY branch writes its own; that is the memory protocol.
-#       Flagged @aipass/profile.py:61 writing its own local.json. The
-#       cross-branch writers (@memory, @spawn) are the legitimate ones, so the
-#       directory cannot separate right from wrong. 1 hit, 1 false.
-#   ".claude/" and ".aipass/" - SHARED project-config namespaces, not private
-#       storage. @commons, @skills, @trigger, @hooks each create their own
-#       file or subdir under them, correctly. 4 hits, 4 false.
-#   ".backup/" - three legitimate writers by design (@backup, @memory rollover,
-#       @flow archives), which is a shared lane wearing a dot-prefix.
-# The FILES inside a shared namespace still have owners - that is what
-# _OWNED_FILENAMES catches, and it is where this standard's precision lives.
-# NOT a private storage root, measured: ".aipass/". Four branches (@commons,
-# @skills, @trigger, @hooks) create their OWN subdir or file under it, which
-# is the shared project-config namespace working as designed - the same shape
-# as a branch writing its own key into .claude/. Listing it produced 4 hits,
-# all legitimate. The namespace is shared; the FILES inside it have owners,
-# which is what _OWNED_FILENAMES is for.
+# Absent, measured as false positives: ".trinity/" (every branch writes its own), ".claude/",
+# ".aipass/" (shared namespaces), ".backup/" (three writers by design); see _OWNED_FILENAMES.
 
-# Filenames a single branch owns outright. Re-declaring one of these as a
-# literal is the loudest signal in this checker: the constant already exists
-# in the owner's source, so a second copy is a mirror by construction.
-# NOT in this map, deliberately, and measured: AIPASS_REGISTRY.json and
-# passport.json. Every branch LOCATES and READS those by design - that is
-# address resolution, not mirroring. Including them flagged 47 files across
-# 13 branches, all of them reading. A standard that floods is worse than no
-# standard.
+# A literal re-declaring one of these mirrors a constant the owner already has.
+# AIPASS_REGISTRY.json and passport.json are absent: every branch locates and reads them.
 _OWNED_FILENAMES: Dict[str, str] = {
     "aipass-hooks-muted": "hooks",
     "settings.local.json": "aipass",
 }
 
-# Call shapes that WRITE. Read-only access to another branch's storage is a
-# different and much weaker concern - this standard is about writes.
-# Methods on a PATH OBJECT. "replace" is deliberately absent: str.replace() is
-# everywhere and Path.replace() is rare, so including it made every module that
-# reads a foreign file and massages the text look like a writer (measured: it
-# was the sole cause of 2 of 10 hits, @hooks' loader and @prax's detector, both
-# pure readers). os.replace is caught below on the module receiver instead.
+# Writes only. "replace" is absent: str.replace() would make every reader of a foreign
+# file look like a writer; os.replace is caught on the module receiver instead.
 _WRITE_METHODS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "touch", "rmdir", "rename", "chmod"})
-# Functions on the os / shutil / tempfile MODULE - matched only when the
-# receiver is that module, never on an arbitrary object.
+# os / shutil / tempfile functions, matched only when the receiver is that module.
 _WRITE_FUNCS = frozenset(
     {"mkstemp", "mkdtemp", "remove", "rmtree", "copy", "copy2", "copyfile", "move", "replace", "unlink"}
 )
 _WRITE_MODULES = frozenset({"os", "shutil", "tempfile"})
 
-# Evidence that the file talks to owners properly rather than by hand.
 _DOOR_MARKERS = ("drone", "route_command", "subprocess")
 
 
@@ -102,12 +62,7 @@ def _marker_of(value: str, markers: frozenset) -> set:
 
 
 def _markers_in(node: ast.AST, tainted: Dict[str, set], markers: frozenset, follow_calls: bool = False) -> set:
-    """Which foreign storage markers this expression's path derives from.
-
-    Empty when the expression is not a foreign path at all. This is what keeps
-    a violation attributed to the storage it really writes rather than to every
-    foreign name the module happens to mention.
-    """
+    """Which foreign storage markers this expression's path derives from."""
     hit: set = set()
     for sub in ast.walk(node):
         if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
@@ -162,8 +117,7 @@ def _taint_size(tainted: Dict[str, set]) -> int:
 def _tainted_names(tree: ast.AST, markers: frozenset) -> Dict[str, set]:
     """Names bound to another branch's storage, mapped to WHICH storage.
 
-    Iterated to a fixed point so a constant defined below its use still taints,
-    and so a helper returning a tainted path taints its own call sites.
+    Iterated to a fixed point: a constant defined below its use, or a helper's return, still taints.
     """
     tainted: Dict[str, set] = {}
     for _ in range(3):
@@ -185,11 +139,7 @@ def _opens_for_writing(node: ast.Call) -> bool:
 
 
 def _write_targets(node: ast.Call) -> List[ast.expr]:
-    """Expressions this call would WRITE to, or [] if it is not a write.
-
-    A method on a path object writes its receiver; os/shutil/tempfile functions
-    write whichever argument names the path; open() writes its first argument.
-    """
+    """Expressions this call would WRITE to, or [] if it is not a write."""
     func = node.func
     if isinstance(func, ast.Attribute):
         on_module = isinstance(func.value, ast.Name) and func.value.id in _WRITE_MODULES
@@ -206,9 +156,7 @@ def _write_targets(node: ast.Call) -> List[ast.expr]:
 def _writes_to(tree: ast.AST, tainted: Dict[str, set], markers: frozenset) -> List[Tuple[int, set]]:
     """(line, markers) for every write call whose TARGET is another branch's storage.
 
-    The whole precision of this standard is here: a module that merely reads a
-    foreign file, or writes its own while mentioning theirs, is not a violation.
-    The write and the foreign path must be the SAME path.
+    Precision lives here: the write and the foreign path must be the SAME path.
     """
     found: List[Tuple[int, set]] = []
     for node in ast.walk(tree):
@@ -240,9 +188,7 @@ def _branch_of(module_path: str) -> str:
 def _scan(source: str, branch: str) -> Optional[List[Tuple[int, str, str]]]:
     """Find writes into another branch's storage.
 
-    Returns list of (line_number, description, matched_text), or None when the
-    source does not parse: nothing was judged, which is not the [] of a file
-    with no write (seedgo fleet green leg 15).
+    Returns [(line, description, matched_text)], or None when the source does not parse.
     """
     try:
         tree = ast.parse(source)

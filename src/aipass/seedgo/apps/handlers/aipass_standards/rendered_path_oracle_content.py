@@ -3,25 +3,18 @@
 # Description: Rendered Path Oracle Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rendered Path Oracle Standards Content Handler
-
-Provides formatted Rendered Path Oracle standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_rendered_path_oracle_standards() -> str:
-    """Return formatted rendered_path_oracle standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted rendered_path_oracle standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A test that asserts a WHOLE PATH, spelled inside an f-string, against",

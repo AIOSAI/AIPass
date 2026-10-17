@@ -3,7 +3,7 @@
 # Description: Template baseline resolves class via spawn's modules gateway, never a mirror or a path join
 # Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py resolving citizen_class via spawn's gateway."""
@@ -23,11 +23,8 @@ import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
-# The gateway is what production imports; spawn's class_registry door is what
-# these tests read to enumerate cases (the retired-name list is spawn's to own,
-# and a test that hardcoded it would be the mirror coming back in through the
-# door). The door re-exports the handler's own objects (DPLAN-0404), so the
-# identity asserts below still compare spawn's functions.
+# The gateway is what production imports; spawn's class_registry door enumerates the cases (the retired-name
+# list is spawn's to own) and re-exports the handler's own objects, so identity asserts compare spawn's functions.
 from aipass.spawn.apps import modules as spawn_gateway
 from aipass.spawn.apps.modules import door_class_registry as class_registry
 
@@ -59,14 +56,7 @@ class TestRegisteredClassesResolveToTheOneTemplate:
     """manager and specialist both score against templates/citizen/."""
 
     def test_manager_resolves_to_citizen_template(self, tmp_path, monkeypatch):
-        """The recorded defect, pinned cured.
-
-        Before passport 2.0 the checker joined the class onto the templates path,
-        so every manager branch scored 'No template for citizen_class "manager"'
-        against a directory that has never existed -- a real branch failing for
-        the auditor's mistake. There is no templates/manager/ now either, by
-        design, which is exactly why this must be pinned rather than assumed.
-        """
+        """The recorded defect, pinned cured."""
         _template(tmp_path, monkeypatch)
         entry = _branch(tmp_path, "manager")
 
@@ -89,12 +79,7 @@ class TestRegisteredClassesResolveToTheOneTemplate:
         assert "spawn/templates/citizen/" in result[0]["message"]
 
     def test_both_classes_score_identically(self, tmp_path, monkeypatch):
-        """Same tree, different class -- the per-item verdicts must not differ.
-
-        Pinned as a whole-result comparison rather than two scores: a future fork
-        that quietly gave one class extra template items would still tie on 'all
-        passed' while scoring a different set.
-        """
+        """Same tree, different class -- the per-item verdicts must not differ."""
         _template(tmp_path, monkeypatch)
         entry = _branch(tmp_path, "manager")
         as_manager = architecture_check.check_template_baseline(str(entry))
@@ -172,12 +157,7 @@ class TestRefusedClassesScoreAViolation:
         assert "manager" in message and "specialist" in message
 
     def test_refusal_never_reaches_the_filesystem(self, tmp_path, monkeypatch):
-        """A refused class must fail on the value, not on a directory that happens to exist.
-
-        Planting templates/aipass_framework/ recreates the pre-archive world: the
-        raw join would find it and score a full clean baseline against a template
-        that is no longer anyone's, reporting the un-migrated passport as fine.
-        """
+        """A refused class must fail on the value, not on a directory that happens to exist."""
         templates = _template(tmp_path, monkeypatch).parent
         fossil = templates / "aipass_framework"
         (fossil / "apps").mkdir(parents=True)
@@ -194,43 +174,25 @@ class TestGatewayIsTheOnlySource:
     """The mirror is retired. Nothing here may answer the class question locally."""
 
     def test_import_path_is_the_declared_gateway(self):
-        """Production imports the two names from spawn's modules gateway.
-
-        Pinned on the source text, not just on behaviour: reaching around to
-        spawn.apps.handlers would still work at runtime while failing seedgo's
-        own encapsulation and handlers standards, and a checker that breaks the
-        rule it enforces on 17 branches is worse than a wrong answer.
-        """
+        """Production imports the two names from spawn's modules gateway."""
         source = Path(architecture_check.__file__).read_text(encoding="utf-8")
         assert "from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class" in source
         assert "spawn.apps.handlers" not in source
 
     def test_imported_names_are_spawns_own_callables(self):
-        """Identity, not equivalence.
-
-        A local reimplementation that merely agreed today would satisfy any
-        behavioural pin and drift the moment spawn changed. This fails the
-        instant the checker stops calling spawn's actual function.
-        """
+        """Identity, not equivalence."""
         assert architecture_check.get_template_dir is spawn_gateway.get_template_dir
         assert architecture_check.refuse_legacy_class is spawn_gateway.refuse_legacy_class
         assert architecture_check.get_template_dir is class_registry.get_template_dir
         assert architecture_check.refuse_legacy_class is class_registry.refuse_legacy_class
 
     def test_no_local_class_table_survives(self):
-        """The mirrored constants are gone, by name.
-
-        They were module-level and importable, so anything that still reads them
-        would break loudly — but a NEW table under a new name is the failure this
-        guards, which is why the source is checked for the shape as well.
-        """
+        """The mirrored constants are gone, by name."""
         for retired in ("CITIZEN_CLASS_TEMPLATES", "LEGACY_CITIZEN_CLASSES", "FORBIDDEN_CITIZEN_CLASSES"):
             assert not hasattr(architecture_check, retired), f"{retired} came back"
 
-        # Read as CODE, not as text: the docstrings name "admin" and
-        # "aipass_framework" as examples on purpose, and a substring search
-        # would either fail on the prose or be weakened until it saw nothing.
-        # Only a string LITERAL carrying one of these values is a second source.
+        # Read as CODE, not text: the docstrings name "admin" and "aipass_framework" on purpose, so only a
+        # string LITERAL carrying one of these values is a second source.
         tree = ast.parse(Path(architecture_check.__file__).read_text(encoding="utf-8"))
         docstrings = {
             id(node.body[0].value)
@@ -250,24 +212,13 @@ class TestGatewayIsTheOnlySource:
         assert not baked, f"{sorted(baked)} baked into seedgo code -- spawn's facts to hold, not mine"
 
     def test_the_import_has_no_silent_fallback(self):
-        """A missing gateway must kill the import, not degrade to a guess.
-
-        The whole point of retiring the mirror is that spawn is the one source;
-        a try/except ImportError around it would quietly restore two sources,
-        with the fallback answering only on the days spawn is broken.
-        """
+        """A missing gateway must kill the import, not degrade to a guess."""
         source = Path(architecture_check.__file__).read_text(encoding="utf-8")
         assert "except ImportError" not in source
         assert "ModuleNotFoundError" not in source
 
     def test_a_missing_gateway_fails_loudly_at_import(self):
-        """Behaviour, not just source: block the gateway and the checker must die.
-
-        The source pin above says no `except ImportError` is written; this proves
-        the consequence in a fresh interpreter, which also covers a fallback
-        arriving by some other spelling. Run as a subprocess because the import
-        must fail from cold — this module is already in sys.modules here.
-        """
+        """Behaviour, not just source: block the gateway and the checker must die."""
         script = textwrap.dedent(
             """
             import sys
@@ -293,10 +244,7 @@ class TestGatewayIsTheOnlySource:
         assert proc.stdout.strip() == "LOUD", f"stdout={proc.stdout!r} stderr={proc.stderr[-400:]!r}"
 
     def test_resolution_matches_spawn_on_every_value_spawn_knows(self, tmp_path, monkeypatch):
-        """End to end: the checker's answer IS spawn's answer, for every known value.
-
-        Mutant: refused class made citizen in apps/handlers/aipass_standards/architecture_check.py — killed.
-        """
+        """End to end: the checker's answer IS spawn's answer, for every known value."""
         known = (
             sorted(class_registry.CITIZEN_CLASSES)
             + sorted(class_registry.LEGACY_CLASSES)
@@ -326,15 +274,7 @@ class TestGatewayIsTheOnlySource:
                 assert f"spawn/templates/{expected}/" in head["message"], f"{value!r}: checker said {head!r}"
 
     def test_the_three_lanes_stay_apart(self, tmp_path, monkeypatch):
-        """Retired, forbidden and unregistered each get their own answer.
-
-        Compared as a set of three distinct messages rather than three separate
-        assertions: the failure being guarded is two lanes collapsing into one
-        sentence, which no single-lane assertion can see. Read through the
-        scored row, whose message carries the refusal verbatim.
-        Mutant: spawn's refusal text dropped from the unresolved lane in
-        apps/handlers/aipass_standards/architecture_check.py — killed.
-        """
+        """Retired, forbidden and unregistered each get their own answer."""
         _template(tmp_path, monkeypatch)
         messages = {
             lane: architecture_check.check_template_baseline(str(_branch(tmp_path / lane, value)))[0]["message"]
@@ -352,13 +292,7 @@ class TestResolutionSeamMatchesSpawn:
     """The one path fact seedgo still derives itself: the templates root."""
 
     def test_template_root_matches_spawn(self):
-        """seedgo's SPAWN_TEMPLATES_DIR is the parent of what spawn's resolver returns.
-
-        The checker keeps its own root constant so tests can point it at a fixture
-        tree; that seam is only honest while it agrees with spawn. If spawn moves
-        templates/, this fails here instead of silently scoring the fleet against
-        a directory that no longer exists.
-        """
+        """seedgo's SPAWN_TEMPLATES_DIR is the parent of what spawn's resolver returns."""
         available = class_registry.get_available_classes()
         assert available, "spawn registers no citizen class - there is no root to agree about"
         for citizen_class in available:
@@ -371,11 +305,7 @@ class TestResolutionSeamMatchesSpawn:
         assert "SPAWN_TEMPLATES_DIR / citizen_class" not in source
 
     def test_live_template_dir_is_on_disk(self):
-        """The template the fleet is actually scored against exists.
-
-        Live-state, deliberately: the gateway can resolve perfectly and still
-        name a directory nobody shipped.
-        """
+        """The template the fleet is actually scored against exists."""
         available = class_registry.get_available_classes()
         assert available, "spawn registers no citizen class - no template dir is being checked"
         for citizen_class in available:

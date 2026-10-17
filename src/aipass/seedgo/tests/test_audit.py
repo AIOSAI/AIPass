@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/audit/
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-07
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py, discovery.py and branch_audit.py."""
@@ -39,16 +39,8 @@ def _registry(tmp_path: Path, branches: list[dict], monkeypatch) -> None:
     monkeypatch.setattr(discovery, "_find_caller_registries", lambda: [])
 
 
-# ---------------------------------------------------------------------------
-# Tests -- a standard's display name, through print_branch_summary
-# ---------------------------------------------------------------------------
-
-
 def test_format_standard_name_snake_case(capsys):
-    """DEEP_NESTING's issues heading reads 'Deep Nesting'.
-
-    Mutant: the heading prints the raw name in apps/handlers/audit/audit_display.py — killed.
-    """
+    """DEEP_NESTING's issues heading reads 'Deep Nesting'."""
     lines = _branch_summary(capsys, "DEEP_NESTING", **_failed_branch_check("DEEP_NESTING"))
     assert "    └─ Deep Nesting issues:" in lines
 
@@ -60,33 +52,19 @@ def test_format_standard_name_lower_snake(capsys):
 
 
 def test_format_standard_name_single_word(capsys):
-    """A single word is title-cased.
-
-    Mutant: the heading prints the raw name in apps/handlers/audit/audit_display.py — killed.
-    """
+    """A single word is title-cased."""
     lines = _branch_summary(capsys, "naming", **_failed_branch_check("naming"))
     assert "    └─ Naming issues:" in lines
 
 
 def test_format_standard_name_empty(capsys):
-    """An empty name stays empty.
-
-    Mutant: an empty name replaced by a placeholder in apps/handlers/audit/audit_display.py — killed.
-    """
+    """An empty name stays empty."""
     lines = _branch_summary(capsys, "", **_failed_branch_check(""))
     assert "    └─  issues:" in lines
 
 
-# ---------------------------------------------------------------------------
-# Tests -- a standard's violation list, through print_branch_summary
-# ---------------------------------------------------------------------------
-
-
 def test_render_violations_shows_file_paths(capsys):
-    """Each violation prints its file and its issues.
-
-    Mutant: the file line dropped in apps/handlers/audit/audit_display.py — killed.
-    """
+    """Each violation prints its file and its issues."""
     violations = [
         {"path": "/some/file.py", "score": 60, "issues": ["bad naming"]},
     ]
@@ -96,20 +74,12 @@ def test_render_violations_shows_file_paths(capsys):
 
 
 def test_render_violations_truncates_at_five(capsys):
-    """At most 5 violations print, then 'and N more'.
-
-    Mutant: six shown in apps/handlers/audit/audit_display.py — killed.
-    """
+    """At most 5 violations print, then 'and N more'."""
     violations = [{"path": f"/file_{i}.py", "score": 50, "issues": ["issue"]} for i in range(8)]
     lines = _branch_summary(capsys, "test", test_violations=violations)
     printed = "\n".join(lines)
     assert "    ... and 3 more" in lines
     assert [i for i in range(8) if f"/file_{i}.py" in printed] == [0, 1, 2, 3, 4]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- discovery helpers
-# ---------------------------------------------------------------------------
 
 
 def test_discover_branches_returns_list(tmp_path, monkeypatch):
@@ -142,16 +112,8 @@ def test_discover_branches_no_registry_returns_empty(tmp_path, monkeypatch):
     assert result == []
 
 
-# ---------------------------------------------------------------------------
-# Tests -- branch_audit.discover_checkers
-# ---------------------------------------------------------------------------
-
-
 def test_discover_checkers_returns_dict(tmp_path):
-    """discover_checkers maps checker names to modules.
-
-    Mutant: the check_module/check_branch filter dropped in apps/handlers/audit/branch_audit.py — killed.
-    """
+    """discover_checkers maps checker names to modules."""
     # Empty directory => empty dict
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -182,10 +144,7 @@ def test_discover_checkers_finds_check_files(tmp_path):
 
 
 def test_collect_py_files_empty_branch(tmp_path, monkeypatch):
-    """A branch with no apps/ dir audits no files.
-
-    Mutant: the walk rooted at the branch, not apps/, in apps/handlers/audit/branch_audit.py — killed.
-    """
+    """A branch with no apps/ dir audits no files."""
     # tmp_path sits under the system temp root, which the corpus drops as throwaway.
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     (tmp_path / "stray.py").write_text("x = 1\n", encoding="utf-8")
@@ -195,10 +154,7 @@ def test_collect_py_files_empty_branch(tmp_path, monkeypatch):
 
 
 def test_a_branchs_shared_package_is_in_the_corpus(tmp_path, monkeypatch):
-    """A shared/ package beside apps/ is the branch's product code and is audited (DPLAN-0404 leg 1).
-
-    The aipass branch keeps project_home.py there, and its hooks import was invisible to every lane.
-    """
+    """A shared/ package beside apps/ is the branch's product code and is audited (DPLAN-0404 leg 1)."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     (tmp_path / "stray.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "shared").mkdir()
@@ -208,18 +164,9 @@ def test_a_branchs_shared_package_is_in_the_corpus(tmp_path, monkeypatch):
     assert result["files_checked"] == 1
 
 
-# ---------------------------------------------------------------------------
-# Tests -- uppercase registry name resolves to lowercase entry point
-# ---------------------------------------------------------------------------
-
-
 def test_uppercase_registry_name_resolves_to_lowercase_entry(tmp_path, monkeypatch):
     """Branches with uppercase registry names (BACKUP, HOOKS, etc.) must resolve to lowercase filesystem paths
-    for entry_file.
-
-    Mutants in apps/handlers/audit/discovery.py, both killed: the entry name not lower-cased;
-    discover_branches skips the primary registry.
-    """
+    for entry_file."""
     # Create a mock registry with uppercase branch name
     branch_dir = tmp_path / "backup"
     branch_dir.mkdir()
@@ -237,10 +184,7 @@ def test_uppercase_registry_name_resolves_to_lowercase_entry(tmp_path, monkeypat
 
 
 def test_uppercase_registry_name_no_entry_when_only_uppercase_file(tmp_path, monkeypatch):
-    """A branch with only an UPPERCASE.py entry is not found.
-
-    Mutant: the entry name not lower-cased in apps/handlers/audit/discovery.py — killed.
-    """
+    """A branch with only an UPPERCASE.py entry is not found."""
     branch_dir = tmp_path / "backup"
     branch_dir.mkdir()
     apps_dir = branch_dir / "apps"

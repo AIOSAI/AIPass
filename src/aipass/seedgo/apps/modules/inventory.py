@@ -3,34 +3,16 @@
 # Description: the test-inventory verb - a ranked static report over every test
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 The `test-inventory` verb. Lists every test function in a tree and ranks them
 for READING, never for removal.
 
-    drone @seedgo test-inventory aipass          every citizen, one tree
-    drone @seedgo test-inventory @backup         one branch
-    drone @seedgo test-inventory .               any directory
-    drone @seedgo test-inventory aipass --top 40 a longer reading queue
-
-WHY THE FILE IS NOT CALLED `test_inventory.py`. `python_files` collects
-`test_*.py`, and `testpaths` includes `src`, so a production module under that
-name is imported by pytest on every collection of the fleet. One such module
-already exists in this branch and it is a wart, not a precedent worth
-extending. The verb keeps its name; the file does not take it.
-
-WHAT THIS VERB IS NOT. It runs nothing, times nothing, and covers nothing - it
-reads source and version-control history. It is phase A of the test-governance
-plan and it sits OUTSIDE the audit-tests lane on purpose: the lane's Law S7a
-refuses a scored non-hygiene group, and that law is right. Folding a ranked
-inventory into the lane is a governance decision for phase D, taken with the
-fleet-wide distribution in hand - which is the thing this verb produces.
-
-CLAIMING IS EXACT MATCH ONLY. `route_command()` takes the first module
-returning truthy in sorted-name order, so a prefix claim would swallow verbs
-this module knows nothing about.
+The file is not `test_inventory.py`: pytest collects `test_*.py` under `src`, so that name is imported on every collection.
+It reads source and history only, outside the audit-tests lane on purpose: Law S7a refuses a scored non-hygiene group.
+Claiming is exact match: `route_command()` takes the first truthy module in sorted order, so a prefix claim swallows verbs.
 """
 
 import time
@@ -48,22 +30,17 @@ from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, report, roots, shape, twins
 
-#: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("test-inventory", "test_inventory")
 
-#: Every option this verb accepts.
 FLAGS: tuple = ("--top", "--twins", "--help", "-h")
 
-#: How many rows the reading queue shows when nobody says otherwise.
 DEFAULT_TOP = 15
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Claim `test-inventory` and run it. Returns True once claimed, always.
 
-    The unconditional True is the safety property: an exception escaping here
-    is swallowed by the router and reported to the user as an unknown command,
-    so a broken verb would look like a verb that was never installed.
+    An exception escaping here is swallowed by the router as an unknown command, so a broken verb would look uninstalled.
     """
     if command not in COMMANDS:
         return False
@@ -124,9 +101,7 @@ def _measure(root: roots.Root) -> report.Inventory:
 def _run_twins(root: roots.Root, started: float) -> None:
     """Measure cross-branch twins and publish the consolidation report.
 
-    A separate pass rather than an extra column on the inventory, because it
-    answers a different question: the inventory ranks tests for READING, this
-    one names the identities a later deletion walk may safely collapse.
+    A separate pass: the inventory ranks tests for reading, this names identities a deletion walk may collapse.
     """
     container = _branch_container(root)
     console.print(f"[dim]walking {container} for cross-branch twins[/dim]")
@@ -138,19 +113,8 @@ def _run_twins(root: roots.Root, started: float) -> None:
 def _branch_container(root: roots.Root) -> Path:
     """The directory whose immediate children are branches.
 
-    The fleet target resolves to the REPO root, one level above the branches,
-    and `twins` reads immediate children only - so handing it the repo root
-    finds nothing.
-
-    DERIVED FROM THE SOURCE TREE, NOT THE REGISTRY. The first cure asked
-    `discover_branches` for the branch paths and took their common parent.
-    That is green on a developer machine and RED on every fresh checkout:
-    AIPASS_REGISTRY.json is machine-local and gitignored, so on CI the
-    registry does not exist, discovery answers nothing, and the container
-    silently degraded to the repo root - publishing "0 twins over 0 branches"
-    as a success, the exact defect this verb exists to refuse. Every branch is
-    a subpackage of `aipass` by construction, so the package's own directory
-    IS the container, on any host, with or without a registry.
+    The fleet target is the repo root and `twins` reads immediate children only. Derived from the `aipass` package,
+    never the registry: AIPASS_REGISTRY.json is machine-local and absent on CI, which degraded silently to "0 twins".
     """
     if root.name != roots.FLEET_ARGUMENT:
         return root.path
@@ -161,11 +125,8 @@ def _branch_container(root: roots.Root) -> Path:
 def _fleet_container() -> Path:
     """Where the branch packages live, read off the imported `aipass` package.
 
-    `__file__` is None for a namespace package, so `__path__` is read as a
-    fallback rather than assumed away. If neither answers there is nothing left
-    to derive from, and guessing the repo root is precisely what broke CI - so
-    it raises. `twins.branch_dirs` would refuse that result one step later
-    anyway; refusing here names the real cause instead of the symptom.
+    `__file__` is None for a namespace package, so `__path__` is the fallback; with neither it raises rather than
+    guess the repo root, which names the cause instead of `twins.branch_dirs` refusing one step later.
     """
     if aipass.__file__:
         return Path(aipass.__file__).resolve().parent
@@ -216,11 +177,6 @@ def _branch_paths() -> dict:
     return {branch["name"]: branch["path"] for branch in discovery.discover_branches(include_private=True)}
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def _report(root: roots.Root, inventory: report.Inventory, paths: dict, elapsed: float, top: int) -> None:
     """Print the counts, the reading queue, and where the rows went."""
     summary = inventory.summary
@@ -261,9 +217,7 @@ def _report(root: roots.Root, inventory: report.Inventory, paths: dict, elapsed:
 def _report_twins(built: dict, path, elapsed: float) -> None:
     """Print the twin counts, the consolidation candidates, and the residue.
 
-    The residue block is the point of the whole verb: it names what a merge
-    keyed on FILENAME would destroy, so nobody reads the candidate list as
-    permission to collapse a family.
+    The residue names what a merge keyed on FILENAME would destroy, so the candidate list is never read as permission.
     """
     summary = built["summary"]
 

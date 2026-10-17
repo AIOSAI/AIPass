@@ -3,93 +3,13 @@
 # Description: Stdlib Patch Standards Checker Handler
 # Version: 1.3.0
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Stdlib Patch Standards Checker Handler
 
-Crack class Q from the 2026-09-22 eyes-on review of @backup's tests: a
-``patch`` whose target is a STDLIB function the product calls to do its own
-work. Replacing it is process-wide, and the oracle becomes spelling-specific --
-the test passes only while the product keeps reaching that exact name.
-
-``test_ceiling_guard.py:103`` is the evidence line and the perfect shape::
-
-    with patch.object(ceiling.os.path, "getsize", side_effect=AssertionError):
-
-``ceiling.os`` IS the real ``os``. That line replaces ``posixpath.getsize`` for
-every module in the process. Rewrite ``check_ceiling`` to use ``Path.stat()``
--- the same measurement, a different spelling -- and the guard silently stops
-being tested.
-
-THE JUDGEMENT THE DISPATCH ASKED ME TO NAME: which non-aipass targets are
-sanctioned, and why. The line is not "stdlib versus product", it is:
-
-  SANCTIONED -- an EDGE the test must seal. A process, the network, the
-  environment, the interpreter's own I/O and module table. Sealing an edge is
-  what a test is supposed to do, and there is no product-local seam that would
-  be better:
-      subprocess, socket, urllib, http, smtplib, ssl, ftplib, asyncio, select
-      sys.argv  sys.stdout  sys.stderr  sys.stdin  sys.path  sys.modules
-      sys.meta_path (the import tables are one rule, leg 9)  os.environ
-  819 hits acquitted, 662 of them ``subprocess``. Running a real subprocess in
-  a unit test is the defect; patching it is the cure.
-
-  SCORED -- the product's OWN work, done through the stdlib. The filesystem,
-  the clock, serialisation, imports, ``open``. The product could have been
-  given a seam and was not, so the test reaches around it into a shared
-  namespace:
-      importlib 218 | sys (not the six above) 211 | os 126 | builtins 97 |
-      pathlib 94 | shutil 93 | time 54 | tempfile 9 | inspect 5 | signal 3 |
-      logging 2 | datetime 2
-
-FOUR CUTS, 6,926 -> 916, and the third is the one worth remembering:
-
-  raw dotted root                             363 files, 6,926 hits
-  the root resolved through the file's imports 208 files, 1,993 hits
-  aipass name-collisions checked ON DISK       175 files, 1,584 hits
-  edges sanctioned                             155 files,   916 hits
-
-THEN A HOLE, found by @backup against this source on 2026-09-23 and closed the
-same day. A stdlib CLASS reached through a product binding --
-``monkeypatch.setattr(upload.Path, "resolve", ...)`` -- acquitted, while
-``patch("pathlib.Path.resolve")``, the same process-wide replacement spelled
-through the module, scored. The target is now judged by what it IS: an
-unresolved name is looked up in the product module's OWN imports, so
-``upload.Path`` is ``pathlib.Path`` and ``agent.TranscriptScanner``, which that
-module defines, stays acquitted. On the same 572-file corpus that closed 152
-files / 905 hits, the fix reads 159 / 1,002 -- 97 acquittals were this shape,
-every one of them ``pathlib.Path``, spread over 19 files, 7 of which scored 100
-the day before.
-
-THE RELATIVE IMPORT IS PART OF THE SAME ANSWER. Reading a product module's
-imports means reading ``from ..json import json_handler``, whose ``node.module``
-is the bare string ``json``. Taken at face value that is stdlib ``json`` and it
-convicted 4 lines in @backup on the first run of the fix. A relative import
-keeps its leading dots now, which makes its root empty -- neither aipass nor
-stdlib -- and a sibling package can never be mistaken for the library it shares
-a name with.
-
-``aipass/ai_mail/apps/handlers/contacts/email.py`` is a product module whose
-name collides with stdlib ``email``, and 291 hits were that one collision. A
-segment is only stdlib when the aipass path up to it does NOT exist as a file
-on disk. Guessing from the name alone convicts a third of @ai_mail.
-
-WHAT IT REFUSES TO JUDGE, reported with a count: 2,246 targets bound to a local
-name by assignment rather than an import (``mod = importlib.import_module(...)``
-then ``patch.object(mod.os, ...)``). The AST cannot say what ``mod`` is, so the
-rule says nothing. That is the honest edge of a resolution-based rule, and it
-is larger than everything it convicts.
-
-THE DISPATCH'S FIRST CUT SAID 53 FILES AND 362 HITS. This is 155 and 916, and I
-have not tuned toward the smaller number: the sanctioned list above is drawn on
-the edge/own-work line, not on where the count lands.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: a patched stdlib name is replaced for
-the whole process, so the test pins the product's SPELLING rather than its
-behaviour. Change the spelling without changing the behaviour and the test
-stops testing anything, silently. There is no threshold and nothing to tune.
+Reference: stdlib_patch.md
 """
 
 import ast
@@ -170,9 +90,8 @@ def _module_file(dotted: str) -> Path | None:
 def is_product_module(dotted: str) -> bool:
     """Whether ``aipass.a.b`` names a real file or package on disk.
 
-    The whole defence against a name collision. ``aipass...contacts.email`` is
-    @ai_mail's own module, not stdlib ``email``, and only the filesystem can
-    say so -- that one collision was 291 false convictions.
+    The whole defence against a name collision: ``aipass...contacts.email`` is @ai_mail's own module,
+    not stdlib ``email``, and only the filesystem can say so.
     """
     return _module_file(dotted) is not None
 
@@ -181,13 +100,8 @@ def is_product_module(dotted: str) -> bool:
 def bound_to(dotted: str, name: str) -> str | None:
     """What ``name`` inside product module ``dotted`` was imported from.
 
-    ``upload.Path`` is ``pathlib.Path`` because ``upload.py`` says
-    ``from pathlib import Path``. Reading the product module's own imports is
-    what lets the rule judge a target by what it IS rather than by which name
-    reached it; a class the module DEFINES has no import and answers "".
-    None when the module cannot be read or parsed: an unread import list is
-    not an acquittal, and the scan counts the target as not judged (seedgo
-    fleet green leg 15).
+    ``upload.Path`` is ``pathlib.Path`` because ``upload.py`` imports it; a class the module DEFINES answers "".
+    None when the module cannot be read or parsed: an unread import list is not an acquittal.
     """
     source = _module_file(dotted)
     if source is None:
@@ -203,12 +117,8 @@ def bound_to(dotted: str, name: str) -> str | None:
 def _imports(tree: ast.Module) -> Dict[str, str]:
     """Local name -> the dotted module or member it was imported from.
 
-    A RELATIVE import keeps its leading dots. ``from ..json import
-    json_handler`` in @backup's product code has ``node.module == "json"``, and
-    storing that bare would make a sibling package indistinguishable from
-    stdlib ``json`` -- 4 false convictions when the resolution first started
-    reading product imports. The dots make the root empty, which is neither
-    ``aipass`` nor stdlib, so the target is acquitted where it should be.
+    A RELATIVE import keeps its leading dots, so ``from ..json import json_handler`` has an empty root,
+    neither ``aipass`` nor stdlib, and a sibling package is never mistaken for stdlib ``json``.
     """
     found: Dict[str, str] = {}
     for node in ast.walk(tree):
@@ -230,16 +140,8 @@ def _through_product(segments: List[str]) -> str | None:
     the chain while it is still a real product module, and the first segment
     that leaves the product is the one to judge.
 
-    That segment is stdlib in two ways, and the second one was a hole @backup
-    found in this checker on 2026-09-23. A stdlib MODULE announces itself --
-    ``ceiling.os`` is ``os``. A stdlib CLASS does not: ``upload.Path`` is a
-    plain name, and reading only ``sys.stdlib_module_names`` acquitted it while
-    ``patch("pathlib.Path.resolve")`` -- the same replacement, spelled through
-    the import instead of through the module -- scored. A branch could turn the
-    row green one character at a time. So the name is resolved through the
-    PRODUCT MODULE'S OWN IMPORTS: ``upload.py`` says ``from pathlib import
-    Path``, so the target is ``pathlib``, and a class the module DEFINES
-    (``agent_handler.TranscriptScanner``) still answers "".
+    A stdlib CLASS (``upload.Path``) does not announce itself as a module does, so the name is resolved
+    through the product module's own imports; a class the module DEFINES still answers "".
     """
     for index in range(1, len(segments)):
         prefix = segments[: index + 1]
@@ -259,8 +161,7 @@ def _through_product(segments: List[str]) -> str | None:
 def _resolve(target: ast.AST, imports: Dict[str, str], constants: Dict[str, str]) -> str:
     """The target as a fully dotted path, or "" when nothing can resolve it.
 
-    An f-string resolves when every field is a module-level string constant
-    (``module_constants.joined_text``; seedgo, fleet green leg 17).
+    An f-string resolves when every field is a module-level string constant (``module_constants.joined_text``).
     """
     if isinstance(target, ast.Constant) and isinstance(target.value, str):
         return target.value
@@ -278,12 +179,8 @@ def _resolve(target: ast.AST, imports: Dict[str, str], constants: Dict[str, str]
 def _target(node: ast.Call, imports: Dict[str, str], constants: Dict[str, str], source: str) -> Tuple[str, str]:
     """(as written, fully dotted) for a patch call's target, its attribute included.
 
-    ``patch.object(sys, "argv", ...)`` and ``monkeypatch.setattr(sys, "argv",
-    ...)`` name the object first and the attribute second, and reading the
-    first alone judged them as a patch of all of ``sys`` while the string form
-    ``"sys.argv"`` was acquitted (cli and daemon, seedgo fleet green leg 9). The
-    attribute is joined only onto a stdlib object: a product module's binding
-    keeps the verdict it had. An f-string is shown as its source text.
+    ``patch.object(sys, "argv", ...)`` names the object first and the attribute second; reading the first
+    alone would judge a patch of all of ``sys``. The attribute is joined only onto a stdlib object.
     """
     first = node.args[0]
     if isinstance(first, ast.JoinedStr):
@@ -315,8 +212,7 @@ def _module_of(chain: str) -> str | None:
 def _parse(source: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ruff already convicts a syntax error; a verdict invented for an unparseable file misleads.
     """
     try:
         return ast.parse(source)
@@ -328,8 +224,7 @@ def _parse(source: str) -> ast.Module | None:
 def scan(source: str, path: Path | None = None) -> Tuple[List[Tuple[int, str, str]], int]:
     """((line, target, module) scored, how many targets could not be resolved).
 
-    ``path`` lets a constant imported from the file's own ``support_*.py``
-    resolve like a local one (``module_constants.file_constants``, 1.3.0).
+    ``path`` lets a constant imported from the file's own ``support_*.py`` resolve like a local one.
     """
     tree = _parse(source)
     if tree is None:
@@ -387,15 +282,7 @@ def _clean_message(unresolved: int) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for patches of stdlib work the product owns.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for patches of stdlib work the product owns."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -408,17 +295,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
     scored, unresolved = scan(source, path)
-    # A rule with `lines` acquits those rows alone (seedgo, fleet green leg 16):
-    # the file-level ask above passes no line, so a lines rule never matched it.
+    # A rule with `lines` acquits those rows alone: the file-level ask above passes no line.
     scored = [
         row for row in scored if not is_bypassed(module_path, STANDARD_KEY, line=row[0], bypass_rules=bypass_rules)
     ]
     if not scored:
         return _result(True, _one_check(True, _clean_message(unresolved)), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per patch would show the
-    # first and hide the rest behind a count.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(
         f"{path.name}:{line} {target} replaces {module} process-wide - {CURE}" for line, target, module in scored
     )

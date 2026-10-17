@@ -3,7 +3,7 @@
 # Description: Tests for cli_ux_check.py
 # Version: 1.1.1
 # Created: 2026-07-17
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_ux_check.py — CLI UX house pattern detection."""
@@ -39,11 +39,6 @@ def _entry_file(tmp_path, source):
     f = apps_dir / "branch.py"
     f.write_text(source, encoding="utf-8")
     return str(f)
-
-
-# ============================================================
-# Skip / edge cases
-# ============================================================
 
 
 def test_init_file_skipped(tmp_path):
@@ -84,10 +79,6 @@ def test_syntax_error(tmp_path):
     assert result["passed"] is False
 
 
-# ============================================================
-# Good entry point — all checks pass
-# ============================================================
-
 GOOD_ENTRY = """
 from aipass.cli import console
 
@@ -123,10 +114,6 @@ def test_good_entry_passes_all(tmp_path):
     assert "no_internal_modules" in names
 
 
-# ============================================================
-# Bad entry point — no print_introspection/print_help
-# ============================================================
-
 BAD_ENTRY = """
 def main():
     print("BRANCH - 5 modules discovered")
@@ -144,10 +131,6 @@ def test_bad_entry_fails_two_tier(tmp_path):
     assert checks["rich_console"] is False
     assert checks["title_markup"] is False
 
-
-# ============================================================
-# Bare print in help functions
-# ============================================================
 
 BARE_PRINT_ENTRY = """
 def print_introspection():
@@ -168,10 +151,6 @@ def test_bare_print_fails_rich_console(tmp_path):
     assert checks["two_tier_help"] is True
     assert checks["rich_console"] is False
 
-
-# ============================================================
-# Missing title markup
-# ============================================================
 
 NO_TITLE_ENTRY = """
 from aipass.cli import console
@@ -196,10 +175,6 @@ def test_missing_title_markup(tmp_path):
     assert checks["help_pointer"] is True
 
 
-# ============================================================
-# Missing purpose line
-# ============================================================
-
 NO_PURPOSE_ENTRY = """
 from aipass.cli import console
 
@@ -221,10 +196,6 @@ def test_missing_purpose_line(tmp_path):
     assert checks["purpose_line"] is False
     assert checks["help_pointer"] is True
 
-
-# ============================================================
-# Missing help pointer
-# ============================================================
 
 NO_POINTER_ENTRY = """
 from aipass.cli import console
@@ -248,10 +219,6 @@ def test_missing_help_pointer(tmp_path):
     assert checks["purpose_line"] is True
 
 
-# ============================================================
-# Missing usage section
-# ============================================================
-
 NO_USAGE_ENTRY = """
 from aipass.cli import console
 
@@ -274,10 +241,6 @@ def test_missing_usage_section(tmp_path):
     assert checks["examples_section"] is True
 
 
-# ============================================================
-# Missing examples section
-# ============================================================
-
 NO_EXAMPLES_ENTRY = """
 from aipass.cli import console
 
@@ -298,11 +261,6 @@ def test_missing_examples_section(tmp_path):
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["examples_section"] is False
     assert checks["usage_section"] is True
-
-
-# ============================================================
-# Internal modules exposed
-# ============================================================
 
 
 def test_internal_modules_detected(tmp_path):
@@ -365,22 +323,12 @@ def print_help():
     assert checks["no_internal_modules"] is True
 
 
-# ============================================================
-# Bypass
-# ============================================================
-
-
 def test_bypass_passes(tmp_path):
     path = _entry_file(tmp_path, "def main(): print('hello')\n")
     bypass = [{"standard": "cli_ux", "file": Path(path).as_posix()}]
     result = check_module(path, bypass_rules=bypass)
     assert result["passed"] is True
     assert result["score"] == 100
-
-
-# ============================================================
-# Score calculation
-# ============================================================
 
 
 def test_partial_score(tmp_path):
@@ -397,11 +345,6 @@ def print_help():
     result = check_module(path)
     assert 0 < result["score"] < 100
     assert result["passed"] is False
-
-
-# ============================================================
-# f-string extraction
-# ============================================================
 
 
 def test_fstring_title_detected(tmp_path):
@@ -423,11 +366,6 @@ def print_help():
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["title_markup"] is True
-
-
-# ============================================================
-# Real entry point validation
-# ============================================================
 
 
 def test_seedgo_entry_passes():

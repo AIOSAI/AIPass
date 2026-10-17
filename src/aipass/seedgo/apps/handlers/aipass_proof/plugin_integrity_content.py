@@ -3,25 +3,16 @@
 # Description: Queryable content for the plugin integrity proof
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Plugin Integrity Proof Content Handler
-
-Provides formatted plugin integrity proof content for the query system.
-Module orchestrates, handler implements.
-"""
+"""Plugin Integrity Proof Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_plugin_integrity_proof() -> str:
-    """Return plugin integrity proof content for query system.
-
-    Returns:
-        str: Formatted proof text with Rich styling
-    """
+    """Return plugin integrity proof content for query system."""
     sep = "\u2500" * 70
     lines = [
         f"[dim]{sep}[/dim]",

@@ -39,6 +39,8 @@ A cap nobody measures is a preference. This is the measurement.
 
 **Read, never copied.** The checker reads each name off the owner's live module — or the owner's config — at CALL time. It carries no copy of any of these numbers. Move a cap at its owner and the next audit moves with it; nothing in seedgo is edited.
 
+**@memory's caps are read from its config, not its handler.** `entry_limits.load_file_budgets()` serves a regeneration seed when `file_budgets` is absent: right for @memory, which keeps working with a broken config, and wrong for an auditor, which would score the fleet against numbers no config contains. Importing it is also a cross-branch handler import, which seedgo's handler independence standard forbids, and @memory publishes no `modules/` gateway for the budgets. The checker reads `entry_limits.file_budgets` in `memory.config.json` itself; a missing or unreadable key is the error row and nothing is scored.
+
 **The README cap is seedgo's own**, so it lives in seedgo's own config rather than as a Python constant: Phase 5's per-file CI ratchet has to read and move that number without importing Python. The user ruled 10,000 on 2026-09-15 at 16:02 ("readme 10k and off from start up"). The room had proposed 6,000, and FPLAN-0593 lines 179 and 221 still say 6,000 — **those lines are stale**; `pack.json` says so beside the number.
 
 **`external_inputs()`** names the four owner files (memory's config, hooks' `grounding_content.py`, prax's `operations.py` and its re-export) so the incremental audit cache re-scores every branch when an owner moves a cap. Without that channel each branch keeps serving the row it cached against the OLD number until someone runs `--full`.
@@ -75,6 +77,16 @@ Each group's subscore is proportional over the files actually present. The stand
 `ADVISORY = True`. `branch_audit` (line 638) keeps every advisory standard out of the branch's gating average. This rule scores, prints and gates nothing.
 
 A checker that moved in one commit put 17 of 18 branches red on 2026-09-13. The room's ruling is advisory first, then a **per-file ratchet in CI** once the numbers have a week behind them: once a file is under its cap, CI gates it there (DPLAN-0347, Phase 5). That ratchet reads `pack.json`.
+
+### The CI ratchet (`startup_ratchet.py`)
+
+The `seedgo-audit` job goes red when a gated file is over its cap, with one line naming the file, its measured size, the cap and the cap's owner.
+
+- **Two files only: `README.md` (seedgo) and `.aipass/aipass_local_prompt.md` (hooks).** Both are tracked in git, so a clean checkout sees what a local audit sees. `.trinity/*.json` and `DASHBOARD.local.json` are gitignored, so a gate on them would measure nothing in CI and pass by accident. `docs/*.md` stays advisory: the corpus holds pages over 20,000 that predate the rule, and a ratchet only drops on numbers already under.
+- **Absent is not a failure.** `readme_check`'s "README exists" unit already fails a missing README in the scored pack; the ratchet is about growth.
+- **`<=` passes.** A file exactly at its cap is under; over is strictly `chars > cap`, the same comparison as the advisory checker, measured by the same `measure_chars`.
+- **Caps are read on every measurement.** Each gated entry names a reader function on `startup_budget_check`, fetched with `getattr` at call time. An unreadable cap fails the job and prints `UNREADABLE` with the owner; there is no fallback number.
+- **Cold-runner safe.** No incremental cache, no registry lookup, no absolute path: branches are a directory walk (a directory under `src/aipass` with `apps/` is a branch, the same rule `.github/scripts/seedgo_audit.py` uses), and paths are built from the root the caller names. It never prints; the `.github` runner prints the returned lines, green rows included.
 
 ---
 

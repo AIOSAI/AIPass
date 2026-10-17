@@ -3,28 +3,12 @@
 # Description: Developer Home Standards Checker Handler — no person's home directory in a text file
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Developer Home Standards Checker Handler.
 
-THE RULING (owner, 2026-10-04). This is a public repo. No tracked text file may
-contain a developer's home directory: ``/home/<x>``, ``/Users/<x>`` or
-``C:\\Users\\<x>`` (either slash, doubled backslashes as source and JSON carry
-them, with or without a trailing separator) where ``<x>`` is not a neutral
-placeholder. A home directory names a person the same way a name does.
-
-NOT ``hardcoded_path``. That standard is about the PORTABILITY of code, so it
-skips comments and docstrings. This one is about NAMING A PERSON, and prose
-names a person exactly as code does — so nothing is skipped: a comment, a
-docstring, a markdown page and a JSON value are all read.
-
-TWO LANES, ONE SCAN. ``check_module`` judges one file (the audit and the
-checklist); ``scan_tracked`` walks a whole tracked tree for CI, applying each
-owning branch's bypass rules. Both call :func:`scan_text` — one implementation.
-
-``TEXT_FILES = True`` tells the checklist this checker judges any text kind,
-not only ``.py`` (see ``handlers/checklist/verdicts.py``).
+Reference: developer_home.md
 """
 
 import re
@@ -40,27 +24,15 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # APPLIES_TO: a home path names a person in a test exactly as in production.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
-# This checker's check_module judges any text kind, not only .py.
 TEXT_FILES = True
 
 STANDARD = "developer_home"
 RESULT_NAME = "DEVELOPER_HOME"
 
-# The text kinds read. An extensionless file (a script, a dotfile) is text too.
 TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".toml", ".yml", ".yaml", ".sh", ".txt"})
 
-# Home segments that name nobody, compared lower-cased after trailing prose
-# punctuation is stripped. Each family is here for a reason:
-#   * generic logins docs use as the example: user, username, someone, somebody;
-#   * the example cast of characters: carol, alice, bob, dave, eve;
-#   * second-person and fill-in words: you, yourname, your-name, your_name, me, name;
-#   * words that mark a sample: example, test, tester;
-#   * the project's own name, which is nobody's login: aipass;
-#   * a one-letter stand-in (x) and an elision (...);
-#   * GitHub's runner accounts, the home a CI log shows: runner, runneradmin, runner~1.
-# Two RULES sit beside the set: ANY single-character segment (an initial names
-# nobody findable), and any segment CONTAINING one of TEMPLATE_MARKS (a template
-# slot: <user>, <home>, {name}, $USER, %USERNAME%, u{i}, *).
+# Compared lower-cased after trailing prose punctuation is stripped; the families, and the
+# single-character and TEMPLATE_MARKS rules beside this set, are in developer_home.md.
 NEUTRAL_SEGMENTS = frozenset(
     {
         "user",
@@ -92,9 +64,7 @@ NEUTRAL_SEGMENTS = frozenset(
 TEMPLATE_MARKS = "<{$%*"
 _TRAILING_PROSE = ".,!?\u2026"
 
-# Same shape as name_ratchet's _HOME_PATH: POSIX and macOS case-sensitive behind a
-# (?<![\w.]) guard (so example.com/home/x is a URL, not a home); Windows a drive
-# letter, one or two backslashes or a slash, "users" in any case, a separator.
+# The (?<![\w.]) guard makes example.com/home/x a URL, not a home.
 _SEP = r"(?:\\{1,2}|/)"
 _HOME_PATH = re.compile(
     r"(?:(?<![\w.])/(?:home|Users)/|(?<![A-Za-z])[A-Za-z]:" + _SEP + r"(?i:users)" + _SEP + r")"
@@ -173,11 +143,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return _result(False, "Developer home", f"{len(hits)} developer home path(s): {previews}{more}")
 
 
-# =============================================================================
-# THE TREE — the CI runner
-# =============================================================================
-
-
 def _owning_branch(rel: str) -> Optional[Tuple[str, str]]:
     """``(branch_dir, branch_relative_path)`` for a file under src/aipass/<branch>/, else None."""
     parts = rel.split("/")
@@ -202,14 +167,8 @@ def _branch_rules(root: Path, branch_dir: str, cache: Dict[str, list]) -> list:
 def scan_tracked(repo_root: Path | str, files: Optional[Sequence[str]] = None) -> Dict:
     """Scan every tracked text file under ``repo_root``. Never prints.
 
-    Args:
-        repo_root: The checkout's root; every path is read relative to it.
-        files: Repo-relative posix paths. None asks git (``git ls-files``); a
-            tree git cannot list is RED, never clean.
-
-    Returns:
-        ``{"passed", "hits": [(rel, line, matched)], "files_read", "binary_skipped",
-        "errors"}``. ``passed`` is False on any hit and on any error.
+    ``files`` None asks git; a tree git cannot list is RED, never clean. ``passed`` is False
+    on any hit and on any error.
     """
     root = Path(repo_root)
     errors: List[str] = []

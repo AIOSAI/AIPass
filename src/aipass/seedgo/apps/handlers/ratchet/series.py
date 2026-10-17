@@ -3,31 +3,17 @@
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
 # Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 THE SERIES IS THE CLOCK. `.seedgo/audit_tests_<BRANCH>.json` is rewritten by
-every audit-tests run, and a run without `--pseudo-tested` rewrites the group
-to `not_applicable`: on 2026-10-12, 15 of 18 branch artifacts held no reading.
-So the ratchet keeps its own file, one JSON line per probe, never rewritten,
-and copies the artifact each line was read from into `.seedgo/ratchet/`, where
-no later run can overwrite it.
-
-A LINE IS KEYED BY `relpath::qualname`, never by line number: the verify
-point a week later must find the same function after the owner's edit moved it.
-
-NO ABSOLUTE PATH LEAVES THIS FILE. The artifact names the target, the
-interpreter and every file the gate saw by absolute path, so the first four
-archives carried `/home/<owner>/...` 68 times and turned CI's home-paths gate
-red (PR #786). Everything written here goes through `portable()` first: the
-AIPass root becomes repo-relative, any other home path becomes `~`. A probe on
-the owner's machine and one in CI then record the same paths.
-
-A REFUSED PROBE IS STILL A LINE. A red baseline, a missing coverage map or an
-exhausted budget is a visit with its reason, so the pick moves on and the
-refusal itself is what gets handed over.
-"""
+every audit-tests run (one without `--pseudo-tested` resets the group to
+`not_applicable`), so the ratchet keeps its own append-only file and archives
+each line's artifact into `.seedgo/ratchet/`, where no later run overwrites it.
+Lines key on `relpath::qualname`, never line number, so an edit cannot lose them.
+Everything written goes through `portable()`: an absolute home path turns CI's
+home-paths gate red. A refused probe is still a line, so the pick moves on."""
 
 import json
 import re
@@ -47,23 +33,19 @@ ARTIFACT_DIR = SEEDGO_ROOT / ".seedgo"
 #: The AIPass root the probe runs in: `src/aipass/seedgo` is three levels down.
 REPO_ROOT = SEEDGO_ROOT.parents[2]
 
-#: The home a path outside the root is written relative to, as `~`.
 HOME_DIR = Path.home()
 SERIES_NAME = "ratchet_series.jsonl"
 ARCHIVE_DIRNAME = "ratchet"
 
 SERIES_VERSION = "ratchet-series/1"
 
-#: The group this lane reads, as the audit-tests artifact names it.
 GROUP_KEY = "pytest.pseudo_tested"
 
-#: Phase 1 probes a branch whole. Slices (phase 5) split the largest ones.
 WHOLE_BRANCH = "1/1"
 
 TRIGGER_WEEKLY = "weekly"
 TRIGGER_RECORD = "record"
 
-#: The statuses a campaign that actually started can publish.
 CAMPAIGN_STATUSES: tuple = ("measured", "refused")
 
 
@@ -76,8 +58,7 @@ def read(directory: Optional[Path] = None) -> List[dict]:
     """Every line in the series, oldest first. A missing file is an empty series.
 
     A line that does not parse raises with its number: a series read past a
-    broken line would hand the pick a history with a hole in it.
-    """
+    broken line would hand the pick a history with a hole in it."""
     path = series_path(directory)
     if not path.exists():
         return []
@@ -117,9 +98,7 @@ def holds_run(run_id: str, lines: List[dict]) -> bool:
 def portable(value: Any, root: Optional[Path] = None, home: Optional[Path] = None) -> Any:
     """`value` with every path under the AIPass root made repo-relative and any other home path `~`.
 
-    Walks dicts (keys too), lists and strings; anything else is returned as is.
-    The root alone becomes `.`; `<root>/src/x` becomes `src/x`, inside prose too.
-    """
+    Walks dicts (keys too), lists and strings; the root alone becomes `.`."""
     rewrite = _rewriter(Path(root) if root else REPO_ROOT, Path(home) if home else HOME_DIR)
     return _walk(value, rewrite)
 
@@ -212,8 +191,7 @@ def build_line(
         "pseudo_tested": pseudo_tested,
         "uncovered": _keys((group.get("uncovered") or {}).get("functions") or []),
         "crash_only": _keys(m for m in mutants if m.get("outcome") == "killed" and m.get("kill_cause") == "error"),
-        # Phase 2 reads `no-test-needed(equivalent)` markers. Until then the
-        # field says it was not read, never that nothing was declared.
+        # None means the markers were not read, never that nothing was declared.
         "declared_equivalent": None,
         # Posix separators so the line reads the same from every host.
         "archive": Path(portable(str(archived))).as_posix() if archived else None,

@@ -3,50 +3,12 @@
 # Description: v5 - can this test's assertions actually fail
 # Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Can this test's assertions actually fail?
 
-THE SECOND V5 CHECK, PORTED FROM THE TAXONOMY NOMINATOR of the same name. Where
-`no_oracle` asks whether a test verifies anything at all, this one asks the next
-question down: the oracle is present - can it ever say no? An assertion that is
-true of every possible program is worse than a missing one, because a reader
-counts it as coverage and a mutant walks straight past it.
-
-THREE SHAPES, AND THEY ARE NOT THE SAME KIND OF CLAIM.
-
-TAUTOLOGY is per-assertion and it is the only one this file is confident about.
-`assert True`, `len(x) >= 0`, `x in (True, False)`, `a == a` - each is true of
-every program that reaches the line, so the assert is a comment with a keyword
-in front of it. Nothing about the surrounding test can rescue these.
-
-TYPE-ONLY is a property of the UNIT and never of a single line, and getting that
-backwards is the failure mode that would sink the rule. A type assertion
-standing BESIDE a value assertion is correct, common, and must never be flagged.
-Only when a unit's ENTIRE oracle is `isinstance` does it say something weak: the
-return shape is pinned and the value is not, so any implementation returning the
-right shape of garbage passes.
-
-OR-ESCAPE is the judgement call, and it is deliberately narrow. `assert result
-== [] or isinstance(result, list)` has an exit - the second clause holds whenever
-the first does. But `assert not hasattr(signal, "SIGKILL") or SIGKILL not in
-handlers` is platform-divergent code, not an escape: the first clause asks about
-the MACHINE, not about the result. So a capability probe anywhere in the `or`
-acquits it. That acquittal is generous on purpose; a false flag on real
-platform-divergent code is the kind of wrong that gets a standard switched off.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM. It does not claim to find every
-assertion that cannot fail - a tautology assembled at runtime from a variable is
-invisible to a static reader, and so is one hiding behind a helper the unit
-calls, because nothing here follows a call. It does not claim a flagged unit is
-a bad test; a tautology can sit beside four real assertions in the same body,
-and the unit still scores as flagged because the shape is worth a reader's eye.
-It does not claim to know whether an `or` was written as an escape or as honest
-tolerance of two legal answers. It nominates. A human decides.
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the
-pack's own corpus reader. That constraint is the reason the pack exists.
+Reference: assertion_shape.md
 """
 
 import ast
@@ -55,38 +17,22 @@ from typing import Dict, List
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "assertion_shape"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Names that make a clause a MACHINE-capability probe, which acquits an `or`.
-#: Both the dotted spelling and the bare tail are accepted, because a test that
-#: did `from shutil import which` writes the same probe with a shorter name.
+#: Capability probes that acquit an `or`; the bare tail also matches (`from shutil import which`).
 CAPABILITY_NAMES: frozenset = frozenset(
     {"hasattr", "sys.platform", "os.name", "platform.system", "sys.version_info", "shutil.which"}
 )
 
-#: Comparisons against `len(...)` that are true of every possible sequence.
-#: `>= 0` always holds and `< 0` never does, so both are decided before the
-#: program runs. `> 0`, `== 0` and `<= 0` are real claims and stay out.
+#: `len(x) >= 0` always holds and `< 0` never does; `> 0`, `== 0`, `<= 0` are real claims.
 VACUOUS_LEN_OPS: tuple = (ast.GtE, ast.Lt)
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
+#: The full list lives in the report artifact; the check message stays readable.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def _is_capability_clause(node: ast.AST) -> bool:
@@ -104,14 +50,7 @@ def _is_isinstance_only(node: ast.AST) -> bool:
 
 
 def _has_oracle_company(unit: corpus.TestUnit) -> bool:
-    """True when the unit holds an oracle that is not an assert statement.
-
-    A ``with pytest.raises(...)`` block (with or without ``as``) and a call
-    whose attribute name starts with ``assert_`` (the mock family:
-    ``assert_called``, ``assert_not_called``, ``assert_called_once_with`` and
-    kin) each make a claim about the value, so an isinstance beside one is
-    not the unit's whole oracle (seedgo, fleet green leg 20).
-    """
+    """True when the unit holds an oracle that is not an assert statement."""
     for node in ast.walk(unit.node):
         if isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
@@ -192,10 +131,7 @@ def _or_escape(test: ast.AST) -> str:
 def unit_flags(unit: corpus.TestUnit) -> List[Dict]:
     """Every assertion-shape finding in one unit, with the evidence for each.
 
-    The public entry point for this rule - the report lane and the tests both
-    ask the question here rather than re-deriving it. Per-assertion findings
-    come first in source order, then the unit-level TYPE-ONLY verdict, because
-    a reader triaging a unit wants the concrete line before the summary.
+    Per-assertion findings come first, then the unit-level TYPE-ONLY verdict.
     """
     asserts = corpus.asserts_in(unit)
     if not asserts:
@@ -241,10 +177,7 @@ def find_shaped_assertions(scanned: corpus.Corpus) -> List[Dict]:
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct units named by a list of findings, first-seen order.
 
-    THE SCORE IS PER UNIT, NOT PER FINDING. A unit holding four tautologies is
-    one unit a reader has to go and look at; counting the findings would let a
-    single sloppy test drive a project's score below zero, and a score that can
-    go negative is one nobody believes twice.
+    The score is per unit, not per finding, so it can never go below zero.
     """
     seen: List[str] = []
     for row in rows:
@@ -253,37 +186,16 @@ def flagged_nodeids(rows: List[Dict]) -> List[str]:
     return seen
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its assertions can fail.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests reports not_applicable rather than a
-        number, because zero tests measured is not zero quality found.
+    bypass_rules is accepted for the scoring-API contract and unread: shadow mode gates nothing.
     """
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty-corpus return: an unparseable-only project must not read as one without tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

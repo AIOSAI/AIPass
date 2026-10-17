@@ -3,25 +3,18 @@
 # Description: Module Scope Side Effect Standards Content Handler
 # Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Module Scope Side Effect Standards Content Handler
-
-Provides formatted Module Scope Side Effect standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_module_scope_side_effect_standards() -> str:
-    """Return formatted module_scope_side_effect standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted module_scope_side_effect standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  Module-level code in a test_*.py runs at COLLECTION -- once, before any test,",

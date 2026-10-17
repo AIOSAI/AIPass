@@ -3,37 +3,18 @@
 # Description: the corpus definition - which test functions the inventory counts
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 THE CORPUS DEFINITION, stated in code rather than assumed.
 
-Two independent passes over this fleet produced two different totals - 478
-assertion-free functions over 626 files / 19,471 functions, and 466 over 584
-files / 18,283 functions. Neither was wrong; they counted different things and
-neither said which. So this module makes the definition the first published
-artifact field, and the inventory reports ITS number under ITS rules.
-
-WHY NOT REUSE THE LANE'S `corpus.py`. The audit-tests lane parses a
-DELIBERATELY GENEROUS corpus: static nominates, so it collects test methods
-from any class and walks production too. pytest collects methods only from
-`Test*` classes and never imports production for that purpose. The lane's
-generosity is right for nomination and wrong for an inventory that claims to
-list the tests that RUN, so the two definitions stay separate and both numbers
-are published side by side.
-
-WHAT THIS COUNTS: test FUNCTIONS, not pytest items. `pytest --collect-only`
-reports 20,335 items on this fleet because `@parametrize` expands one function
-into many. A function is the unit a human edits or deletes, so it is the unit
-here - and the difference is published, never quietly reconciled.
-
-CONFIGURATION IS READ, NOT ASSUMED. `testpaths` and `norecursedirs` come from
-the repo-root `pyproject.toml`. When `tomllib` is unavailable (Python 3.10 has
-none) the fallback defaults are used AND recorded, because a corpus built from
-guessed configuration that says nothing reads exactly like one built from the
-real thing.
-"""
+Counts test FUNCTIONS (not pytest items: `@parametrize` expands one into many)
+under pytest's own rules: methods only in `Test*` classes, production never
+walked. The audit-tests lane's `corpus.py` is deliberately generous for
+nomination, so the two definitions stay separate. `testpaths` and
+`norecursedirs` come from the repo-root `pyproject.toml`; without `tomllib`
+the defaults are used and recorded."""
 
 import ast
 import fnmatch
@@ -128,19 +109,11 @@ class Collection:
         return counts
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-
 def read_rules(root: Path) -> CorpusRules:
     """The collection rules from the repo-root pyproject.toml, or the defaults.
 
-    A missing key falls back to pytest's own default for that key alone - the
-    config is read per-setting, not all-or-nothing, because a project that
-    customises `norecursedirs` and leaves `python_files` alone is the normal
-    case and must not lose the default it never overrode.
-    """
+    A missing key falls back to pytest's default for that key alone: a project that
+    overrides one setting keeps the defaults it never overrode."""
     config = root / "pyproject.toml"
     table, source, note = _load_pytest_table(config)
 
@@ -181,11 +154,6 @@ def _load_pytest_table(config: Path) -> Tuple[dict, str, str]:
         return {}, "pytest defaults", f"{config.name} declares no [tool.pytest.ini_options] table"
 
     return table, str(config.name), ""
-
-
-# =============================================================================
-# COLLECTION
-# =============================================================================
 
 
 def collect(root: Path, rules: Optional[CorpusRules] = None) -> Collection:
@@ -231,16 +199,12 @@ def _search_roots(root: Path, rules: CorpusRules) -> List[Path]:
 def _pruned(path: Path, root: Path, patterns: Sequence[str]) -> bool:
     """True when any directory on the way to `path` matches norecursedirs.
 
-    Matched against directory BASENAMES the way pytest matches them, so the
-    `.*` entry that restores dot-dir exclusion prunes `.archive` and `.trinity`
-    without also pruning a project whose whole checkout sits under a dot path.
-    """
+    Matched against directory BASENAMES as pytest does, so `.*` prunes `.archive`
+    without pruning a checkout that sits under a dot path."""
     try:
         parts = path.relative_to(root).parts[:-1]
     except ValueError:
-        # A candidate outside the tree being walked is an anomaly, not a normal
-        # case: pruning it against its ABSOLUTE parts is the safe reading, and
-        # the reading is announced rather than taken quietly.
+        # Outside the tree is an anomaly: prune against the absolute parts, and say so.
         logger.warning(f"[INVENTORY] {path} sits outside {root}; pruned against its absolute path instead")
         parts = path.parts[:-1]
     return any(fnmatch.fnmatch(part, pattern) for part in parts for pattern in patterns)
@@ -249,10 +213,7 @@ def _pruned(path: Path, root: Path, patterns: Sequence[str]) -> bool:
 def _parse(path: Path) -> Optional[ast.Module]:
     """The parsed module, or None when it will not parse or read.
 
-    An unparseable file is counted by the caller and published. "Could not
-    read" must never render as "read and found nothing", which is exactly the
-    shape that turns a hole in a measurement into a clean-looking report.
-    """
+    "Could not read" must never render as "read and found nothing"."""
     try:
         return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (SyntaxError, OSError, UnicodeDecodeError) as exc:
@@ -290,10 +251,7 @@ def _is_test_function(node: ast.AST, rules: CorpusRules) -> bool:
 def _is_collectable_class(node: ast.ClassDef, rules: CorpusRules) -> bool:
     """A class pytest would collect: name matches, and it has no __init__.
 
-    The `__init__` rule is pytest's, not ours - a test class with a constructor
-    is skipped with a warning and collects NOTHING, so counting its methods
-    would inflate the inventory with tests that never run.
-    """
+    pytest skips a test class with a constructor and collects NOTHING from it."""
     if not any(fnmatch.fnmatch(node.name, pattern) for pattern in rules.python_classes):
         return False
     return not any(
@@ -304,11 +262,7 @@ def _is_collectable_class(node: ast.ClassDef, rules: CorpusRules) -> bool:
 def _build(node, relpath: str, class_path: Tuple[str, ...]) -> TestFunction:
     """One TestFunction, with the line range blame will be attributed over.
 
-    `blame_from` starts at the first DECORATOR line, not at `def`. A
-    `@parametrize` table is part of the test - editing it edits the test - and
-    attributing those lines to whatever function happens to sit above would
-    put one test's churn on its neighbour's row.
-    """
+    `blame_from` starts at the first decorator: a `@parametrize` table is part of the test."""
     decorator_lines = [dec.lineno for dec in node.decorator_list]
     return TestFunction(
         relpath=relpath,

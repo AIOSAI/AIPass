@@ -3,58 +3,13 @@
 # Description: Self Set Assert Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-10-17
 # =============================================
 
 """
 Self Set Assert Standards Checker Handler
 
-Crack class E from the 2026-09-22 eyes-on review of @backup's tests. A test
-writes a value and then asserts that the value is there::
-
-    r = BackupResult(mode="snapshot")
-    r.files_deleted = 5
-    assert r.files_deleted == 5
-
-Nothing about the product decided that. Python's attribute assignment did, and
-it would pass against an empty class. The test reads as coverage of
-``BackupResult`` and covers only ``setattr``.
-
-The shapes, all three the same defect:
-
-  * ``target.attr = X`` then ``assert target.attr == X``
-  * ``d[key] = X`` then ``assert d[key] == X``
-  * a CONSTRUCTOR KWARG, ``obj = C(attr=X)`` then ``assert obj.attr == X``,
-    which is 14 of the fleet's 15 and the shape nobody sees while writing it.
-
-THE JUDGEMENT THIS RULE MAKES: score only when NOTHING RAN in between. If a
-call sits between the assignment and the assertion, the assert is a durability
-oracle -- "the product did not clobber this" -- and that is a real claim about
-the product. ``test_drive_pipeline.py`` sets ``client.file_tracker``, calls
-``get_or_create_backup_folder()``, and then asserts the tracker is unchanged:
-that is the test's whole point, and convicting it would be wrong. Those ride in
-the passing message as a count.
-
-The other line this rule holds: the comparison must be ``==`` against the SAME
-literal. ``client._drive_service = service`` followed by ``assert
-client.drive_service is service`` sets the backing field and asserts the
-PROPERTY -- different name, and ``is`` not ``==``. The product's getter is
-under test there, so the rule declines it.
-
-``weak_oracle`` reads a self-set assert as STRONG, because it is a real value
-comparison. This rule is the other half of that verdict: the comparison is
-strong, the value is the test's own.
-
-CHECK FIRST, measured 2026-09-23 over the fleet's 572 test files:
-
-  * 5 files scored, 15 hits; 8 more reported across 5 other files. Shapes:
-    constructor kwarg 14, attribute assign 1.
-  * The largest single cluster is one ``Event`` built with eight keyword
-    arguments and all eight read straight back.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: with no call in between there is no
-product between the write and the read. The assertion is a statement about
-Python, and it passes with the product deleted.
+Reference: self_set_assert.md
 """
 
 import ast
@@ -224,15 +179,7 @@ def _clean_message(reported: int) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for assertions that only read back what the test wrote.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for assertions that only read back what the test wrote."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -248,9 +195,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, _clean_message(reported)), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per assertion would show the
-    # first and hide the rest behind a count.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(
         f"{path.name}:{line} {path_} was set by this test ({shape}) - {CURE}" for line, path_, shape in findings
     )

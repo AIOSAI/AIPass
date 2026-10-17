@@ -3,93 +3,31 @@
 # Description: CI ratchet — the owner's first name and a person's home path never regrow in the tracked tree
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """The name ratchet — the public tree never names its owner (DPLAN-0350).
 
-THE RULING. The owner ruled (2026-09-15 and 2026-09-19) that the public tree
-never names him. A seat that reads his first name in a prompt, a config note,
-a refusal or a rendered standard on another user's machine is told who its
-user is, and gets it wrong. Five sweep waves took the fleet from 682 lines in
-316 files down to a residue the owner is still ruling on. This is the part
-that keeps the count from regrowing with the next citizen who quotes a ruling.
+Rule ``name``: the owner's first name, case-insensitive, as a substring of every tracked
+text file's lines and of its path. Rule ``home_path``: an absolute home directory in a
+``.md`` or ``*_content.py`` (the files rendered to a reader); ``PLACEHOLDER_SEGMENTS``
+and template openers name nobody. Home paths in code are ``hardcoded_path``'s.
 
-TWO RULES, ONE CAUSE
---------------------
-* ``name`` — the owner's first name, case-insensitive, as a SUBSTRING of any
-  line of any tracked text file, and of the tracked path itself. Substring on
-  purpose: a test called ``test_the_<name>_ruling`` ships the name as surely as
-  prose does, and five of the residual lines were exactly that.
-* ``home_path`` — an absolute home directory, ``/home/<x>/``, ``/Users/<x>/``
-  or ``C:\\Users\\<x>\\`` (either slash, doubled backslashes too, and with no
-  trailing separator — ``/home/<x>`` alone names <x> just the same), in a ``.md``
-  file — every prompt is one — or a ``*_content.py``: the two kinds of file
-  that are rendered to a reader. A home directory names a person the same way
-  a name does. Code is not this rule's: ``hardcoded_path`` is the scored
-  standard for a home path in ``apps/``. A segment that names nobody passes —
-  ``user``, ``username``, ``you``, ``me``, ``someone``, anything opening with
-  ``<``, ``{``, ``$`` or ``%``, and GitHub's runner accounts
-  (``PLACEHOLDER_SEGMENTS``). Docs need examples.
+The name is assembled from two pieces so this source is not a hit, and every reported
+line is masked: a public repo's CI log is public too.
 
-The name is never written whole in this file: it is assembled from two pieces,
-so the ratchet's own source is not a hit. Nothing it returns carries it either
-— every line it reports is masked to ``<owner-name>``, because the CI log of a
-public repository is public too.
+Never opened (an exemption is that file, not its family; tests read this list off the doc):
+``EXEMPT_PATHS`` by whole path: ``.claude/CLAUDE.md``, ``.claude/hooks/*.jsonl``,
+``.claude/hooks/*.log``, ``.claude/settings.json``, ``src/aipass/skills/tools/suspend/*``,
+``src/aipass/seedgo/tests/test_checkers_batch10.py`` (``hardcoded_path``'s own inputs);
+``EXEMPT_NAMES`` by leaf at any depth: ``CHANGELOG.md``, ``*PLAN-*.md`` (history).
 
-EXEMPT — HISTORY, AND THE OWNER'S OPEN CALLS
---------------------------------------------
-Never opened, for either rule. Full repo-relative paths (``EXEMPT_PATHS``):
+``name_ratchet_baseline.json`` holds counts per file per rule, never a line or a hash,
+so it cannot ship the name. Over is red; at or below passes, below is reported LOOSE.
+A tracked path carrying the name cannot be baselined, so it is always red.
 
-* ``.claude/CLAUDE.md`` — the culture doc. History; it stays (the ruling).
-* ``.claude/hooks/*.jsonl`` and ``.claude/hooks/*.log`` — the tracked hook run
-  logs. The owner's call, pending.
-* ``.claude/settings.json`` — the owner's call, pending.
-* ``src/aipass/seedgo/tests/test_checkers_batch10.py`` — ``hardcoded_path``'s
-  own inputs are home paths with a real name in them, and must stay.
-* ``src/aipass/skills/tools/suspend/*`` — the suspend tool. The owner's call,
-  pending.
-
-File names at any depth (``EXEMPT_NAMES``):
-
-* ``CHANGELOG.md`` — history; it stays (the ruling).
-* ``*PLAN-*.md`` — plans are history; they stay (the ruling).
-
-An exemption is that file, not its family: another branch's ``.claude/settings.json``,
-a ``CLAUDE.md`` outside ``.claude/`` and ``test_checkers_batch11.py`` are all read.
-
-THE BASELINE IS WHAT MAKES IT A RATCHET
----------------------------------------
-Everything else that hits today is written down in ``name_ratchet_baseline.json``
-as a COUNT of lines per file per rule. The file holds paths and numbers only —
-never a line and never a hash of one — so the baseline cannot become the next
-place the name ships. A file is red when its count for a rule is GREATER than
-its baseline; a file the baseline does not list has a baseline of zero. At the
-baseline passes. Below it passes too — the cure is never red — and is reported
-as LOOSE with the number to write, because a ratchet only turns one way when
-somebody tightens it.
-
-Counts, not line hashes: a baselined fixture line that moves, or is edited
-around, is the same line, and a hash would call it new. What a count cannot see
-is one hit swapped for another inside a file already on the baseline — accepted,
-because the residue is a handful of test and config files the owner rules on
-one by one. A tracked PATH carrying the name cannot be baselined at all (its
-key would carry the name); it is always red. Rename it.
-
-ADVISORY FIRST. ``.github/scripts/seedgo_audit.py`` runs this after the startup
-ratchet and prints it; while ``NAME_RATCHET_GATES`` there is False, a red prints
-and the job carries on. Flipping it is @devpulse's call, once the owner has
-ruled on the exempt set.
-
-TRACKED MEANS ``git ls-files``. An untracked scratch file does not ship, so it is
-not read. A tree git cannot list is RED, never clean — no file list is not the
-same fact as no hits. A binary file (a NUL byte) is skipped and counted in the
-report; anything else is decoded as utf-8, an undecodable byte replaced, which
-cannot hide an ASCII name.
-
-IT NEVER PRINTS. It returns lines; the ``.github`` runner prints them.
-
-Design: DPLAN-0350 (the last step), @devpulse brief 69992eaf.
+Tracked means ``git ls-files``; a tree that cannot be listed is red, never clean. Advisory
+while ``NAME_RATCHET_GATES`` in ``.github/scripts/seedgo_audit.py`` is False. Never prints.
 """
 
 import fnmatch
@@ -102,16 +40,10 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-#: Two pieces, so this file never holds the word it looks for and never flags
-#: itself. Joined once; every test reads the joined value off this module.
+#: Tests read the joined value off this module; never write the name whole here.
 _NAME_PIECES = ("pat", "rick")
 OWNER_NAME = "".join(_NAME_PIECES)
 
-#: What every reported line shows in the name's place.
 MASK = "<owner-name>"
 
 RULE_NAME = "name"
@@ -130,7 +62,6 @@ EXEMPT_PATHS: Tuple[str, ...] = (
 #: File names, fnmatch-matched against the last path segment at any depth.
 EXEMPT_NAMES: Tuple[str, ...] = ("CHANGELOG.md", "*PLAN-*.md")
 
-#: The files the home-path rule reads: the ones rendered to a reader.
 HOME_PATH_SUFFIXES: Tuple[str, ...] = (".md", "_content.py")
 
 #: Home segments that name nobody. Compared lower-cased.
@@ -179,11 +110,6 @@ class Hit(NamedTuple):
     text: str
 
 
-# =============================================================================
-# ONE FILE
-# =============================================================================
-
-
 def mask(text: str) -> str:
     """The text with every spelling of the name replaced by :data:`MASK`."""
     return _NAME.sub(MASK, text)
@@ -218,15 +144,7 @@ def _shown(line: str) -> str:
 
 
 def scan_text(rel: str, text: str) -> List[Hit]:
-    """Every rule-breaking line of one file, masked.
-
-    Args:
-        rel: Repo-relative posix path — decides whether the home-path rule reads it.
-        text: The file's decoded content.
-
-    Returns:
-        One :class:`Hit` per (line, rule); a line breaking both rules is two hits.
-    """
+    """Every rule-breaking line of one file, masked; a line breaking both rules is two hits."""
     hits: List[Hit] = []
     if _NAME.search(rel):
         hits.append(Hit(rel, 0, RULE_NAME, mask(rel)))
@@ -239,18 +157,8 @@ def scan_text(rel: str, text: str) -> List[Hit]:
     return hits
 
 
-# =============================================================================
-# THE TREE
-# =============================================================================
-
-
 def tracked_files(repo_root: Path | str) -> Tuple[List[str], str]:
-    """What git says ships: ``git ls-files`` from ``repo_root``.
-
-    Returns:
-        ``(paths, "")``, or ``([], reason)`` when git could not answer — which
-        the caller turns into a red, never into an empty, clean tree.
-    """
+    """What git says ships: ``(paths, "")``, or ``([], reason)``, which the caller turns red."""
     try:
         done = subprocess.run(
             ["git", "ls-files", "-z"], cwd=str(repo_root), capture_output=True, timeout=120, check=False
@@ -279,12 +187,7 @@ def _read(path: Path) -> Tuple[str, Optional[str]]:
 
 
 def scan_tree(repo_root: Path | str, files: Sequence[str]) -> Tuple[List[Hit], Dict[str, int], List[str]]:
-    """Scan every non-exempt file. Exempt files are never opened.
-
-    Returns:
-        ``(hits, tally, errors)`` — tally counts ``read``/``exempt``/``binary``/
-        ``missing`` files; errors are files that exist and could not be read.
-    """
+    """Scan every non-exempt file into ``(hits, tally, errors)``; exempt files are never opened."""
     root = Path(repo_root)
     hits: List[Hit] = []
     tally = {"read": 0, "exempt": 0, "binary": 0, "missing": 0}
@@ -314,18 +217,8 @@ def count_hits(hits: Sequence[Hit]) -> Dict[str, Dict[str, int]]:
     return counts
 
 
-# =============================================================================
-# THE BASELINE
-# =============================================================================
-
-
 def load_baseline(path: Path | str) -> Tuple[Dict[str, Dict[str, int]], str]:
-    """Read the baseline: ``{"files": {rel: {rule: count}}}``.
-
-    Returns:
-        ``(baseline, "")``, or ``({}, reason)`` when the file is missing,
-        unparseable or misshapen — the caller reds the run on any reason.
-    """
+    """Read the baseline ``{"files": {rel: {rule: count}}}``; any reason returned is a red."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -361,11 +254,6 @@ def compare(
         if counts.get(rel, {}).get(rule, 0) < allowed
     ]
     return over, loose
-
-
-# =============================================================================
-# THE LINES
-# =============================================================================
 
 
 def failure_lines(over: Sequence[Dict[str, Any]], hits: Sequence[Hit], reasons: Sequence[str]) -> List[str]:
@@ -404,27 +292,10 @@ def report_lines(
     return lines
 
 
-# =============================================================================
-# PUBLIC ENTRY POINT
-# =============================================================================
-
-
 def run(
     repo_root: Path | str, files: Optional[Sequence[str]] = None, baseline_path: Optional[Path | str] = None
 ) -> Dict[str, Any]:
-    """Hold the tree at its baseline. The whole verdict, once.
-
-    Args:
-        repo_root: The checkout's root; every path is read relative to it.
-        files: Repo-relative paths to scan. None asks git (``git ls-files``).
-        baseline_path: The baseline to hold. None is the shipped one.
-
-    Returns:
-        ``{"passed", "hits", "counts", "over", "loose", "tally", "failure_lines", "report"}``.
-        ``passed`` is False when any file is over its baseline OR when the run
-        could not measure — git could not list, the baseline could not be read,
-        a tracked file could not be opened.
-    """
+    """Hold the tree at its baseline; ``passed`` is False when over OR when anything went unmeasured."""
     reasons: List[str] = []
     if files is None:
         files, reason = tracked_files(repo_root)

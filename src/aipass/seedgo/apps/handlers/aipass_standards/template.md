@@ -10,7 +10,7 @@ Detects files still in un-configured template form after spawn scaffolding.
 
 - `.aipass/aipass_local_prompt.md` — branch prompt
 - `README.md` — branch documentation
-- `.trinity/*.json` — identity files (passport, local, observations)
+- `.trinity/passport.json` — identity file, the only spawn-templated `.trinity` artifact; checked when present
 
 ## Detection Markers
 

@@ -70,7 +70,9 @@ def test_it_works(tmp_path):
     assert (tmp_path / "out").exists()
 ```
 
-Species `NO_DOCSTRING` — there is nothing to anchor.
+Species `NO_DOCSTRING` — there is nothing to anchor. An empty docstring is
+not this species: a present-but-empty string is a docstring that names nothing,
+which is `UNANCHORED_DOCSTRING`. Each unit yields at most one row.
 
 ## Good
 

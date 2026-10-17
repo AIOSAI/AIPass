@@ -3,28 +3,12 @@
 # Description: Self-proof orchestrator — discovers and runs proof packs
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Seedgo Proof — Self-check orchestrator for standards pack integrity.
 
-Discovers *_proof/ directories in handlers/, runs all proof handler .py files
-inside, aggregates results, and reports CERTIFIED or NOT CERTIFIED.
-
-Commands:
-    seedgo proof              — List available proof packs
-    seedgo proof aipass       — Run all proofs for aipass pack
-    seedgo proof aipass --json — Machine-readable JSON output
-
-Discovery pattern mirrors standards_audit.py:
-    handlers/*_proof/ dirs → handler .py files → scan(pack_dir) interface
-
-Interface per proof handler:
-    scan(pack_dir: Path) -> dict with keys: passed, issues, summary
-
-Related:
-    DPLAN-0048 (seedgo self-check system)
-    tools/ (original prototypes — standalone, not connected)
+A proof handler's contract: scan(pack_dir: Path) -> dict with keys passed, issues, summary.
 """
 
 import json
@@ -34,47 +18,18 @@ from typing import List
 
 from rich.table import Table
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
 
-# =============================================================================
-# PACK DISCOVERY
-# =============================================================================
-
-
 def _discover_proof_packs() -> dict:
-    """Discover available proof packs from handlers/ directory.
-
-    Convention: directories named *_proof/ containing at least one .py handler file.
-    Pack display name strips the _proof suffix.
-
-    Excludes from handler counting:
-        - __init__.py
-        - *_content.py
-        - files starting with _
-        - non-.py files
-
-    Returns:
-        Dict mapping pack name to Path, e.g. {"aipass": Path("handlers/aipass_proof")}
-    """
+    """Discover available proof packs from handlers/ directory."""
     handlers_dir = Path(__file__).parent.parent / "handlers"
     packs = {}
     if not handlers_dir.exists():
@@ -84,7 +39,6 @@ def _discover_proof_packs() -> dict:
             continue
         if not d.name.endswith("_proof"):
             continue
-        # Must contain at least one valid handler .py file
         handler_files = _discover_proof_handlers(d)
         if handler_files:
             pack_name = d.name.removesuffix("_proof")
@@ -93,26 +47,7 @@ def _discover_proof_packs() -> dict:
 
 
 def _discover_proof_handlers(pack_dir: Path) -> List[Path]:
-    """Find all handler .py files in a proof pack directory.
-
-    Skips:
-        - __init__.py
-        - *_content.py
-        - *.md files
-        - files starting with _
-
-    Args:
-        pack_dir: Path to the *_proof/ directory
-
-    Returns:
-        Sorted list of handler Paths
-
-    Raises:
-        OSError: the directory cannot be listed. Every caller hands it a
-            directory that came out of handlers_dir.iterdir(); the guard that
-            answered a missing one with an empty list, in silence, was dropped
-            (seedgo, fleet green leg 6).
-    """
+    """Find all handler .py files in a proof pack directory."""
     handlers = []
     for f in sorted(pack_dir.iterdir()):
         if not f.is_file():
@@ -128,17 +63,7 @@ def _discover_proof_handlers(pack_dir: Path) -> List[Path]:
 
 
 def _resolve_target_pack(proof_pack_name: str) -> Path | None:
-    """Resolve the standards pack directory that a proof pack targets.
-
-    Mapping: strip '_proof' suffix from proof dir name, add '_standards'.
-    E.g., handlers/aipass_proof/ -> handlers/aipass_standards/
-
-    Args:
-        proof_pack_name: The display name of the proof pack (e.g. "aipass")
-
-    Returns:
-        Path to the target standards pack, or None if it does not exist
-    """
+    """Resolve the standards pack directory that a proof pack targets."""
     handlers_dir = Path(__file__).parent.parent / "handlers"
     target_dir = handlers_dir / f"{proof_pack_name}_standards"
     if target_dir.is_dir():
@@ -146,21 +71,8 @@ def _resolve_target_pack(proof_pack_name: str) -> Path | None:
     return None
 
 
-# =============================================================================
-# PROOF EXECUTION
-# =============================================================================
-
-
 def _load_and_run_proof(handler_path: Path, pack_dir: Path) -> dict:
-    """Import a proof handler module dynamically and call its scan() function.
-
-    Args:
-        handler_path: Path to the handler .py file
-        pack_dir: Path to the target standards pack directory (passed to scan())
-
-    Returns:
-        Result dict from scan(), or error dict on failure
-    """
+    """Import a proof handler module dynamically and call its scan() function."""
     handler_name = handler_path.stem
     try:
         spec = importlib.util.spec_from_file_location(handler_name, handler_path)
@@ -207,20 +119,7 @@ def _load_and_run_proof(handler_path: Path, pack_dir: Path) -> dict:
 
 
 def _run_proof_pack(pack_name: str, pack_dir: Path) -> dict:
-    """Run all proof handlers in a pack against the target standards pack.
-
-    For each handler: load, run scan(), collect results.
-    Aggregate: count passed/failed/errors.
-
-    Args:
-        pack_name: Display name of the proof pack (e.g. "aipass")
-        pack_dir: Path to the proof pack directory (e.g. handlers/aipass_proof/)
-
-    Returns:
-        Aggregated dict with keys:
-            pack_name, target_dir, results (per-handler), passed, failed,
-            errors, total, certified
-    """
+    """Run all proof handlers in a pack against the target standards pack."""
     handlers = _discover_proof_handlers(pack_dir)
     target_dir = _resolve_target_pack(pack_name)
 
@@ -270,20 +169,8 @@ def _run_proof_pack(pack_name: str, pack_dir: Path) -> dict:
     }
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def _display_proof_results(pack_name: str, results: dict) -> None:
-    """Rich console output for proof pack results.
-
-    Shows header, per-proof results table, and final verdict.
-
-    Args:
-        pack_name: Display name of the proof pack
-        results: Aggregated results dict from _run_proof_pack()
-    """
+    """Rich console output for proof pack results."""
     console.print()
     header(f"SEEDGO PROOF — {pack_name.upper()}")
     console.print()
@@ -298,7 +185,6 @@ def _display_proof_results(pack_name: str, results: dict) -> None:
     console.print(f"[dim]Proof handlers: {results['total']}[/dim]")
     console.print()
 
-    # Per-proof results table
     table = Table(
         title="Proof Results",
         show_header=True,
@@ -330,7 +216,6 @@ def _display_proof_results(pack_name: str, results: dict) -> None:
     console.print(table)
     console.print()
 
-    # Aggregate summary
     console.print(
         f"  [green]Passed:[/green] {results['passed']}  "
         f"[red]Failed:[/red] {results['failed']}  "
@@ -339,17 +224,11 @@ def _display_proof_results(pack_name: str, results: dict) -> None:
     )
     console.print()
 
-    # Final verdict
     if results["certified"]:
         console.print("[bold green]  CERTIFIED[/bold green]")
     else:
         error("NOT CERTIFIED")
     console.print()
-
-
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
 
 
 def _show_proof_introspection() -> None:
@@ -390,11 +269,6 @@ def print_introspection() -> None:
     _show_proof_introspection()
 
 
-# =============================================================================
-# HELP
-# =============================================================================
-
-
 def print_help() -> None:
     """Print help information."""
     console.print()
@@ -425,11 +299,6 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def _validate_pack(args: List[str]) -> tuple:
     pack_name: str | None = None
     json_output = False
@@ -454,19 +323,7 @@ def _validate_pack(args: List[str]) -> tuple:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle 'proof' command with pack-aware routing.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-            [] -> show proof introspection (available packs)
-            ["aipass"] -> run aipass proof pack
-            ["aipass", "--json"] -> JSON output
-            ["--help"] -> help
-
-    Returns:
-        True if handled, False if not this module's command
-    """
+    """Handle 'proof' command with pack-aware routing."""
     if command not in ("proof", "seedgo_proof"):
         return False
 
@@ -474,7 +331,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE means explain: `proof aipass --help` used to run the pack.
+    # A help flag anywhere means explain, never run the pack.
     if wants_help(None, args):
         print_help()
         return True

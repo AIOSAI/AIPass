@@ -3,22 +3,14 @@
 # Description: tests for the audit-tests runner, its target resolution and the verb
 # Version: 1.3.0
 # Created: 2026-08-29
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
 
-# Phase 4-5 of the audit-tests lane: the runner, its target and the verb. The
-# payload's write gate, the adapter and its env copy, and the statement
-# deletion operator live in the test_audit_tests_lane_*.py siblings (split
-# 2026-10-08 under oversize_test_file).
-#
-# THE CREATION-SIDE BAR THIS LANE PROPOSES, APPLIED TO ITSELF. Law L0 says a test
-# proves something when there EXISTS a change to production code that makes it
-# fail, so every test here is written to name one behaviour that a mutation could
-# remove. Assertions on a law's PREFIX rather than on its own message have
-# already let a deleted rule survive once in this suite; the fix was to assert
-# the branch's own words, and that discipline is kept here.
+# Phase 4-5 of the audit-tests lane: the runner, its target and the verb; the gate, adapter and statement
+# deletion live in the test_audit_tests_lane_*.py siblings. Each test names one behaviour a mutation could
+# remove, and asserts the law's own words, never its prefix.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/audit_tests/ and handlers/tests_pytest_standards/ parses
@@ -47,10 +39,6 @@ from aipass.seedgo.apps.modules import CommandRefused, audit_tests, standards_au
 from aipass.seedgo.apps.modules import audit_tests as verb
 from aipass.seedgo.tests.support_audit_tests_lane import _records, _spec_for
 
-# =============================================================================
-# THE RUNNER - where measurements become law-checked documents
-# =============================================================================
-
 
 def _target(tmp_path) -> target_module.Target:
     """A directory target the runner can carry through the pipeline."""
@@ -60,9 +48,7 @@ def _target(tmp_path) -> target_module.Target:
 class _SealedAdapter:
     """The pytest adapter with its subprocess edge sealed: `run_gated` hands back a canned run.
 
-    Everything between the claim and the published artifact is the real runner, so a
-    test reaches scoring, group composition, the M10 proof and the refusal wording the
-    way `audit-tests` does - through `runner.run_target` - and reads the document.
+    Everything after the claim is the real runner, reached through `runner.run_target` as `audit-tests` does.
     """
 
     ECOSYSTEM = "pytest"
@@ -121,8 +107,7 @@ def _proven_run(violations: int = 0) -> dict:
 def _suite_writes(path: Path, text: str):
     """A run that writes `path` from a CHILD process, as a measured suite would.
 
-    In-process writes inside the window are the audit's own carrier writes and are
-    subtracted by design; a child process is what the suite under measurement is.
+    In-process writes are the audit's own carrier writes, subtracted by design; a child process is the suite.
     """
 
     def run() -> dict:
@@ -153,9 +138,7 @@ class TestScoring:
         assert _hygiene(tmp_path, monkeypatch, violations=1)["score"] == 0
 
     def test_many_violations_score_the_same_zero_as_one(self, tmp_path, monkeypatch):
-        # No partial credit: forging 31 log entries instead of 79 is not a
-        # better suite, and a percentage would let a branch improve its number
-        # without fixing anything.
+        # No partial credit: a percentage would let a branch improve its number without fixing anything.
         assert _hygiene(tmp_path, monkeypatch, violations=31)["score"] == 0
 
     def test_a_measured_group_declares_itself_measured(self, tmp_path, monkeypatch):
@@ -165,8 +148,7 @@ class TestScoring:
         assert _hygiene(tmp_path, monkeypatch, violations=0)["gate_proven"] is True
 
     def test_the_published_group_carries_no_internal_proven_key(self, tmp_path, monkeypatch):
-        # `proven`/`unproven_reason` are the adapter's vocabulary. Leaking them
-        # into the artifact would publish two names for one fact.
+        # `proven`/`unproven_reason` are the adapter's vocabulary; leaking them publishes two names for one fact.
         document = _hygiene(tmp_path, monkeypatch, violations=0)
         assert "proven" not in document
         assert "unproven_reason" not in document
@@ -217,12 +199,7 @@ class TestGroupComposition:
 
 
 class TestM10Proof:
-    """The lane's central promise, measured — and proven able to fail.
-
-    A proof that has only ever come back green is indistinguishable from a
-    proof that cannot come back red, which is precisely the instrument species
-    this lane exists to catch. So the failing direction is pinned first.
-    """
+    """The lane's central promise, measured — and proven able to fail."""
 
     def test_an_untouched_tree_proves_m10_held(self, tmp_path, monkeypatch):
         (tmp_path / "real").mkdir()
@@ -250,9 +227,7 @@ class TestM10Proof:
         assert _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]["files_fingerprinted"] == 2
 
     def test_a_disturbed_tree_is_recorded_as_an_operational_event(self, tmp_path, monkeypatch):
-        # The most serious thing this lane can discover about ITSELF, so it is
-        # recorded where the fact is established rather than at a call site
-        # some future caller might not use.
+        # Recorded where the fact is established, not at a call site a future caller might skip.
         recorded = []
         monkeypatch.setattr(m10.json_handler, "log_operation", lambda name, payload: recorded.append(name))
         probe = tmp_path / "state.json"
@@ -271,8 +246,7 @@ class TestM10Proof:
         assert recorded == []
 
     def test_a_skipped_proof_says_not_probed_rather_than_reporting_clean(self, tmp_path, monkeypatch):
-        # not_probed and passed must never look the same - Law S1 applied to
-        # the lane's own harness.
+        # not_probed and passed must never look the same (Law S1 on the lane's own harness).
         proof = _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]
         assert proof["probed"] is False
         assert proof["real_tree_unchanged"] is None
@@ -320,10 +294,8 @@ class TestUnprovenRefusalWording:
         assert "did not catch its own planted canary" in built["reason"]
 
     def test_a_disabled_gate_is_not_reported_as_a_blind_gate(self, tmp_path, monkeypatch):
-        # --prove-refusal switches the hook OFF, and the canary is still
-        # written and still not caught - so the canary branch fires unless the
-        # hook check comes first. It reported a blind gate for a run where no
-        # gate existed, which is a wrong diagnosis, not a wording nit.
+        # --prove-refusal turns the hook OFF while the canary still goes uncaught: the hook check comes first,
+        # or a run with no gate is diagnosed as a blind one.
         gate = {
             "hook_installed": False,
             "canary": {"attempted": True, "caught": False},
@@ -332,8 +304,7 @@ class TestUnprovenRefusalWording:
         assert "was not installed" in _measured(tmp_path, monkeypatch, {"gate": gate})["refusal"]["reason"]
 
     def test_an_uninstalled_hook_keeps_the_measurements_own_reason(self, tmp_path, monkeypatch):
-        # Reaching for the canary builder here would restate a cause the run
-        # never established.
+        # The canary builder would restate a cause the run never established.
         gate = {"canary": {"attempted": False}, "unproven_reason": "the write gate was not installed"}
         built = _measured(tmp_path, monkeypatch, {"gate": gate})["refusal"]
         assert built["reason"] == "the write gate was not installed"
@@ -400,11 +371,6 @@ class TestFleetForm:
         assert "31 violation(s)" in result.summary_line()
 
 
-# =============================================================================
-# TARGET RESOLUTION
-# =============================================================================
-
-
 class TestBranchNameResolution:
     """The registry spells some branches uppercase and everyone types lowercase."""
 
@@ -413,8 +379,7 @@ class TestBranchNameResolution:
         assert resolved.name == "CANARY"
 
     def test_a_lowercase_argument_resolves_to_the_canonical_spelling(self, tmp_path):
-        # The CANONICAL name, not the typed one: two spellings of one branch
-        # must never produce two artifacts.
+        # The CANONICAL name: two spellings of one branch must never produce two artifacts.
         resolved = target_module.resolve("@canary", {"CANARY": tmp_path / "canary"})
         assert resolved.name == "CANARY"
         assert resolved.artifact_name() == "audit_tests_CANARY"
@@ -434,21 +399,8 @@ class TestBranchNameResolution:
         assert "not a registered branch" in str(caught.value)
 
 
-# =============================================================================
-# THE VERB
-# =============================================================================
-
-
 class TestVerbIsDiscoverable:
-    """The router hides a broken module, so loading it is its own pin.
-
-    `discover_modules()` wraps each module's import in try/except and logs the
-    failure to a line nobody reads, and `route_command()` then reports the verb
-    as UNKNOWN. This is not hypothetical: an import of a `cli` helper that does
-    not exist shipped during this build and the lane reported itself as an
-    unknown command — the exact indistinguishability the verb's own docstring
-    warns about, caught by nothing until a live run.
-    """
+    """The router hides a broken module, so loading it is its own pin."""
 
     def test_the_verb_module_imports_cleanly(self):
         assert callable(audit_tests.handle_command)
@@ -472,10 +424,7 @@ class TestVerbIsDiscoverable:
         assert seen == [True]
 
     def test_help_is_intercepted_before_any_target_is_resolved(self, monkeypatch):
-        # Written first as "raise inside _run", which could NEVER fail:
-        # handle_command catches every exception by design, so the assertion
-        # was swallowed and the mutant that deleted this whole gate survived.
-        # A vacuous pin, inside the suite that enforces the rule against them.
+        # Not "raise inside _run": handle_command catches every exception by design, so that pin could never fail.
         seen = []
         monkeypatch.setattr(verb, "_print_help", lambda: seen.append("help"))
         monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
@@ -487,11 +436,7 @@ class TestVerbClaiming:
     """Claim exactly, claim before working, and never claim a prefix."""
 
     def test_the_hyphenated_verb_is_claimed(self, monkeypatch):
-        # The True alone could not tell "claimed and ran" from "claimed and
-        # did nothing" — and doing nothing is what a broken claim looks like.
-        # It also hid that the old `[]` argument never reached _run at all:
-        # no args takes the introspection door, so patching _run and asserting
-        # True was green either way.
+        # True alone cannot tell "claimed and ran" from "claimed and did nothing"; no args takes introspection.
         ran = []
         monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
         assert verb.handle_command("audit-tests", ["@backup"]) is True
@@ -504,26 +449,11 @@ class TestVerbClaiming:
         assert ran == [["@backup"]], "the alias must forward its args, not just answer True"
 
     def test_the_audit_verb_is_never_swallowed(self):
-        # audit_tests.py sorts BEFORE standards_audit.py, so a prefix claim
-        # here would silently take the audit verb away from its owner.
+        # audit_tests.py sorts before standards_audit.py, so a prefix claim would take the audit verb from its owner.
         assert verb.handle_command("audit", []) is False
 
     def test_a_crash_after_claiming_refuses_with_the_unproven_code(self, monkeypatch):
-        """A crashed lane exits 2, and is never reported as an unknown command.
-
-        Renamed from `..._still_returns_true` on 2026-09-20. That test patched
-        `_run`, called `handle_command("audit-tests", [])` and asserted True —
-        but `[]` takes the introspection door and never enters `_run`, so it
-        was green over a crash that never happened, and it went on asserting a
-        contract the module had already replaced. The live behaviour is the
-        owner's 2026-09-07 exit-code ruling: a lane that could not run refuses
-        with EXIT_UNPROVEN (2) rather than telling the shell it succeeded.
-
-        `handle_command`'s own docstring still reads "Returns True once
-        claimed, always" and calls the unconditional True "the whole safety
-        property". That text is now wrong about its own function; it is
-        reported, not edited here.
-        """
+        """A crashed lane exits 2, and is never reported as an unknown command."""
         entered = []
 
         def explode(args):
@@ -575,22 +505,14 @@ class TestVerbParsing:
         assert _parsed(monkeypatch, ["--prove-refusal", "@backup"])[0] == "@backup"
 
     def test_symlink_siblings_is_off_unless_asked_for(self, monkeypatch):
-        # Copy-always is the default deliberately: a symlinked sibling is
-        # writable and a write through one lands in the real tree.
+        # Copy-always by default: a write through a symlinked sibling lands in the real tree.
         assert "symlink_siblings" not in _parsed(monkeypatch, ["@backup"])[1]
-
-
-# =============================================================================
-# LAW ARGV - the CLI seam refuses what it cannot read
-# =============================================================================
 
 
 def _audit_vocabulary():
     """The `audit` verb's own flag list and sibling verbs, never a copy.
 
-    Read off the module under test rather than restated here: a suggestion
-    built from a private duplicate would keep offering flags the verb had
-    stopped accepting, which is the same silent drift Law ARGV exists to end.
+    Read off the module: a private duplicate would keep offering flags the verb stopped accepting (Law ARGV).
     """
     return standards_audit.AUDIT_FLAGS, standards_audit.SIBLING_VERBS
 
@@ -613,9 +535,8 @@ class TestUnknownArgumentSuggestion:
     """The did-you-mean is a real command, rebuilt from what the caller typed."""
 
     def test_the_space_typo_is_glued_back_into_the_verb_it_was_reaching_for(self):
-        # THE DEFECT, as typed: `drone @seedgo audit -tests @backup`. A hyphen
-        # where nothing belonged, and the audit ran anyway. The suggestion is
-        # the CANONICAL surface: `audit tests <target>`, two words, no hyphen.
+        # The defect as typed: `drone @seedgo audit -tests @backup`. The suggestion is the canonical
+        # `audit tests <target>`.
         flags, siblings = _audit_vocabulary()
 
         assert (
@@ -624,10 +545,7 @@ class TestUnknownArgumentSuggestion:
         )
 
     def test_the_hyphenated_alias_is_still_a_suggestible_spelling(self):
-        # `audit-tests` did not stop existing when `audit tests` became
-        # canonical. A verb list that no longer carried it would be telling the
-        # caller a working command does not work - so the list is read off the
-        # module, and the glue is checked against a list holding only that form.
+        # `audit-tests` still works, so the verb list is read off the module and the glue is checked against it.
         _, siblings = _audit_vocabulary()
 
         assert "audit-tests" in siblings
@@ -650,10 +568,7 @@ class TestUnknownArgumentSuggestion:
         )
 
     def test_a_shared_verb_prefix_never_inflates_the_sibling_match(self):
-        # Measured against the whole glued spelling, `audit-zzz` scored 0.6
-        # against `audit-tests` on the shared `audit-` alone and offered the
-        # execution lane for a token that was only ever a bad flag. Only the
-        # DISTINGUISHING part is compared.
+        # Only the distinguishing part is compared: whole, `audit-zzz` scores 0.6 against `audit-tests` on `audit-`.
         flags, siblings = _audit_vocabulary()
 
         assert (
@@ -678,9 +593,7 @@ class TestUnknownArgumentSuggestion:
         )
 
     def test_the_verb_already_typed_is_never_suggested_back(self):
-        # A suggestion identical to the command that just failed is not a
-        # suggestion; it is the same twenty minutes again. Both guards are
-        # pinned: the exact spelling, and the fuzzy near-miss behind it.
+        # A suggestion identical to the failed command is not one; the exact and the fuzzy guard are both pinned.
         assert refusal.sibling_verb("-audit", "audit", ("audit", "audit-tests")) == ""
         assert refusal.sibling_verb("-tests", "audit-tests", ("audit-tests",)) == ""
 
@@ -724,9 +637,7 @@ class TestUnknownArgumentRefusal:
 
     def test_the_verb_prints_the_refused_line_the_code_and_the_detail(self, capsys):
         """The refusal is only real once a reader sees it."""
-        # Raises since 2026-09-07: the printed "exit code: 7" and the code the
-        # process leaves with are one number, not two (the owner's standing
-        # ruling, fleet sweep 2026-09-07).
+        # Raises: the printed "exit code: 7" and the process's exit code are one number.
         with pytest.raises(CommandRefused) as refused:
             verb.handle_command("audit-tests", ["@backup", "--nonsense"])
 
@@ -744,8 +655,7 @@ class TestLaneParsingRefusesTheUnrecognized:
         assert _parsed(monkeypatch, ["@backup", "--nonsense"])[2] == "--nonsense"
 
     def test_a_second_target_is_collected_because_a_run_measures_one(self, monkeypatch):
-        # `runner.run()` takes ONE argument, so a second bare word named
-        # nothing and used to vanish. `aipass` is the fleet form.
+        # `runner.run()` takes ONE argument, so a second bare word would vanish; `aipass` is the fleet form.
         assert _parsed(monkeypatch, ["@backup", "@flow"])[2] == "@flow"
 
     def test_argv_order_is_kept_so_the_first_mistake_is_the_one_reported(self, monkeypatch):
@@ -796,9 +706,7 @@ class TestLaneVerbRefusesTheUnrecognized:
         assert "REFUSED: [ARGV] unknown argument '--nonsense'" in capsys.readouterr().err
 
     def test_a_help_flag_beside_an_unknown_token_still_explains(self, monkeypatch):
-        # help_flag_safety: a help flag ANYWHERE means explain, never execute -
-        # and never refuse either. The unknown token is collected during the
-        # scan and acted on only after help has had its say.
+        # help_flag_safety: a help flag anywhere explains, never executes or refuses; the unknown token waits.
         seen: list = []
         monkeypatch.setattr(verb, "_print_help", lambda: seen.append("help"))
         monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
@@ -817,36 +725,10 @@ def _harness_rows(m10_proof: dict) -> list:
 
 
 class TestLiveWriterProbeWindowIsDisclosed:
-    """`live_writers_probed: true` must never read as "probed ADEQUATELY".
-
-    THE DEFECT THIS PINS, reported by @trigger 2026-08-30 with this lane's own
-    artifact as the evidence. Their artifact said `live_writers_probed: true`
-    and `attributed_to_concurrent_writers: []`, and ten files had changed
-    anyway - six of them written by a systemd USER unit (trigger-log-watcher,
-    up since 08-27) that writes continuously.
-
-    The probe is two BACK-TO-BACK snapshots, so its window is milliseconds
-    while the run it is meant to explain takes tens of seconds. `live_writers`
-    already confesses this in its own docstring ("a service that writes once a
-    minute will not show up"), and the confession is correct - but it lives in
-    the source, and the artifact published a bare `true`. A reader comparing a
-    0.02s probe against a 40s run cannot make that comparison unless BOTH
-    numbers are in the document.
-
-    So the fix is disclosure, not a path exemption and not a systemd name
-    match: @trigger proposed reading `systemctl --user list-units`, and that is
-    a DECLARED discriminator of exactly the kind `live_writers` refuses to be -
-    it would let anything that names itself a service explain away its writes.
-    The window is published instead, and the reader judges.
-    """
+    """`live_writers_probed: true` must never read as "probed ADEQUATELY"."""
 
     def test_the_not_probed_proof_carries_the_window_field_too(self, tmp_path, monkeypatch):
-        """A missing field and a zero window must not look the same.
-
-        The not-probed shape is built to mirror the probed one exactly - the
-        module says so in its own words - so a field added to one and not the
-        other reintroduces the drift that shape was created to prevent.
-        """
+        """A missing field and a zero window must not look the same."""
 
         assert "live_writer_probe_seconds" in _measured(tmp_path, monkeypatch, _proven_run())["m10_proof"]
 
@@ -876,13 +758,7 @@ class TestLiveWriterProbeWindowIsDisclosed:
         assert proof["live_writer_probe_seconds"] is None
 
     def test_the_unattributed_row_states_the_window_beside_the_probe_flag(self):
-        """The two numbers must meet in ONE sentence to be comparable.
-
-        Repointed to check 17 when the verdict was split (@trigger, same day):
-        the window is what makes an UNATTRIBUTED red judgeable, so it belongs on
-        the row that reds on unattributed changes, not on the forgery row.
-        Mutant: the window no longer stated beside the probe flag in apps/handlers/audit_tests/selfcheck.py — killed.
-        """
+        """The two numbers must meet in ONE sentence to be comparable."""
         proof = {
             "probed": True,
             "files_fingerprinted": 3,
@@ -897,14 +773,7 @@ class TestLiveWriterProbeWindowIsDisclosed:
         assert re.search(r"\(probe ran: True, window 0\.02s", row["detail"])
 
     def test_the_published_proof_carries_the_window_not_just_the_options_dict(self, tmp_path, monkeypatch):
-        """The reader of the ARTIFACT is who needs this number.
-
-        The first cut of this class pinned the options dict and the not-probed
-        shape and left the probed artifact block unpinned - deleting the line
-        that copies the window into the published proof kept all five tests
-        green. A disclosure nobody can read is not a disclosure, so the pin
-        belongs on the document, not on the intermediate state.
-        """
+        """The reader of the ARTIFACT is who needs this number."""
         (tmp_path / "real").mkdir()
         (tmp_path / "real" / "f.txt").write_text("x", encoding="utf-8")
 
@@ -916,24 +785,7 @@ class TestLiveWriterProbeWindowIsDisclosed:
 
 
 class TestCheck12VerdictIsSplitFromUnattributedChanges:
-    """A FAIL must name what it found, not what it could not explain.
-
-    THE MISREAD, reported by @trigger 2026-08-30. Check 12 is named "no change
-    to the real target that the run cannot account for" and it FAILED on their
-    branch - honestly, because ten files really did move. But it keyed the
-    verdict on `unattributed_changes` alone, while the artifact three fields up
-    said `changed_by_the_measured_suite: []`. To a recipient the red reads as
-    "your suite dirtied the real tree", and for @trigger it was six files
-    written by a systemd user unit that has run since 08-27 and four written by
-    the citizen answering their own mail WHILE the audit ran.
-
-    Both facts deserve a row. The suite-attributed finding is the one this lane
-    exists to make and it keeps check 12 and the OBSERVER-FORGERY name. The
-    unattributed set is a genuine "a human must look at this" and gets its own
-    row that says so. Nothing is downgraded, nothing is exempted - a path
-    allowance for `.ai_mail.local/` or a systemd name-match would both be
-    DECLARED discriminators, and `live_writers` refuses to be one.
-    """
+    """A FAIL must name what it found, not what it could not explain."""
 
     def _proof(self, *, by_suite, unattributed):
         return {

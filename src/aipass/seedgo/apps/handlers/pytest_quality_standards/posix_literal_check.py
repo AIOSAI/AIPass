@@ -3,256 +3,12 @@
 # Description: v5 - a path claim that is only true on the platform it was written on
 # Version: 1.2.0
 # Created: 2026-09-01
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
 r"""Does this test hardcode one platform's path shape?
 
-    slash_tmp = Path("/tmp").resolve()
-    assert slash_tmp in roots
-
-On POSIX that is `/tmp`. On Windows `/tmp` is DRIVE-RELATIVE: ntpath attaches the
-current drive and `resolve()` hands back `D:\tmp`. The same line therefore means a
-different thing on the other half of the matrix, and the assertion underneath it
-accuses code that is working perfectly.
-
-WHERE IT CAME FROM. A windows-setup leg went red on a return-value pin written the
-same morning to catch a platform assumption: it compared against `RESOLVED: /tmp`
-and CI handed it `D:\tmp`. The species was named in the report and the acquittal
-rate asked for before it became a rule, which is the right order to do it in.
-
-THE MEASUREMENT THAT DECIDED THE SHAPE, taken before the original nominator was
-written, over 721 test files and 32,841 assert statements:
-
-  - "an assert containing a rooted string literal" ........ 501 sites, 112 files
-  - "a rooted literal reaching any callable named
-     resolve / realpath / abspath" ....................... 10 sites, 3 files
-  - THIS RULE (the receiver must BE a path constructor, or
-     the callee an os.path-shaped function) ............... 4 sites, 1 file
-
-The middle arm is the instructive one. Six of its ten sites were
-`target_module.resolve("@canary", {...})` - a BRANCH-NAME resolver that happens to
-share a verb with pathlib, holding a rooted literal in a dict value it never
-resolves. A rule keyed on the method NAME nominates those six forever, and a rule
-with that acquittal rate teaches a fleet to ignore it inside a week. Keyed on the
-RECEIVER instead, it nominates none of them. That is the whole design.
-
-THE REVERSE SHAPE, AND WHY THIS FILE GREW TWO MORE ARMS ON 2026-09-08. A CI
-matrix ran Linux and Windows together for the first time after eight waves of
-test work had landed overnight on Linux-only verification. Four rows went red on
-a separator, and not one of them held a rooted literal or a resolver. They were
-the mirror image of arms 1 and 2:
-
-    assert bypassed[0]["name"] == "File: apps/something.py"   # RETURNED-PATH
-    reported = str(warned.call_args)                          # REPR-HAYSTACK
-    assert str(logs_dir / "app.log") in reported
-
-ARM 3, RENDERED-PATH / RETURNED-PATH. The code under test renders a Path to TEXT
-and the test compares that text with a literal that spells the separator
-forward. The
-producers are ordinary - `str(item.relative_to(template_path))` at
-architecture_check.py:452, `str(relative_path)` at prax scanner.py:57 - and
-`str()` of a Path is the HOST's dialect: `apps/something.py` here,
-`apps\something.py` there. The literal is right on exactly the leg it was
-written on.
-
-ARM 4, REPR-HAYSTACK. `str(mock.call_args)` renders its arguments through
-`repr()`, and `repr()` of a Windows path DOUBLES the separator. A needle built
-correctly - `str(logs_dir / "app.log")` - still cannot be found inside that
-haystack, because the haystack is not the argument, it is a rendering of the
-argument. The cure is to assert on `call_args.args[n]` (or `.kwargs`) directly
-and never on a rendered repr.
-
-ARM 3 IS SPLIT DOWN THE MIDDLE, AND THE MEASUREMENT IS WHY. The first fleet run
-of the undivided arm returned 64 rows and 27 of them were on seedgo - and most
-of seedgo's are correct, portable code. `corpus.py:202` returns
-`path.relative_to(root).as_posix()`, so every test asserting
-`"tests/test_broken.py" in named[0]["message"]` is reading a string that is
-posix on every host, forever, on purpose. Sixteen of those 27 are in this pack's
-own `test_pytest_quality_pack.py` alone.
-
-The trap is that they are the SAME AST SHAPE as the rows that broke CI. What
-separates `result["relative_path"] == "pkg/gamma.py"` (red on Windows) from
-`named[0]["message"]` (correct everywhere) is entirely off-screen: prax
-`scanner.py:57` renders with `str()`, seedgo `corpus.py:202` renders with
-`.as_posix()`. No AST reader of the TEST can see that, and this pack does not
-read production for this rule.
-
-A scoring arm that convicts correct code is how a standard gets switched off -
-`assertion_shape.md` says exactly that in its own text. So the arm is split by
-what the checker CAN see, WHO WROTE THE RENDERING DOWN:
-
-  - SCORING, species RENDERED-PATH. The rendering is visible in the unit -
-    `str(x)`, an f-string, `"%s" % x` - over something that looks like a path.
-    The TEST chose the dialect, on the line the reader is looking at, so nothing
-    off-screen can make it right and the row moves the number.
-  - NOMINATE-ONLY, species RETURNED-PATH. The compared value came BACK from the
-    code under test: a dict subscript, an attribute, a call result. Whether the
-    producer normalised is unreadable from here, so the row is reported in its
-    own check line with `passed: True` and is excluded from the score and from
-    the failing count. It is a place to look, not a charge.
-
-Both halves get the same cure, which is the other reason the split costs a
-reader nothing: compare Path to Path, or put `.as_posix()` on both sides.
-
-WHAT ARM 3 ACTUALLY KEYS ON, SAID PLAINLY, BECAUSE ITS WEAKEST EVIDENCE IS THE
-ONE IT MOST OFTEN USES. The scoring shapes are read only when the thing being
-rendered LOOKS like a path - a Path constructor, a `/` join, a `tmp_path`-shaped
-fixture, or a name, attribute or key spelled `path`, `dir`, `file`, `root`,
-`src`, `dest`, `target`, `location`. The nominate-only shapes - a SUBSCRIPT into
-a dict or a result (`result["gamma"]["relative_path"]`), an ATTRIBUTE
-(`parsed.path`), a CALL RESULT - cannot prove their value came from a Path at
-all. This file never claims they do. It reads the accompanying evidence instead:
-the spelling is path-ish, OR the unit builds a Path anywhere in its body (a
-`Path(...)`, a `/` join, a `tmp_path` fixture). That is circumstantial and it is
-written down here so nobody mistakes it for a proof - which is a second reason
-this half does not score. It fires on `result["path"] == "src/demo/vera"`; it
-does NOT fire on `payload["body"] == "a/b"` inside a unit that never touches a
-path, and it CANNOT fire on a dict a helper filled in another file.
-
-WHAT KEEPS ARM 3 OFF THE OTHER 497. A literal only counts when it is RELATIVE -
-a rooted one is arms 1 and 2's subject, and of the 501 rooted sites measured
-above, 497 are data. Then the text has to look like a filesystem path rather
-than a sentence with a slash in it: the run of path characters needs two
-segments AND either a trailing slash, a second separator, or a file extension on
-its last segment. Measured over the same 18 branches: 353 comparisons hold a
-literal with a slash between two path characters, 155 of those have a rendering
-or a returned value on the other side, and this narrowing takes it to 68. The 87
-it drops were read
-one by one, and they fall into six groups: a rooted literal the test wrote down
-as INPUT and got back (`/bin/bash`, `/usr/local/bin/claude`, `/logs/flow.log`)
-- much the largest group, and arms 1-2's subject, not this one; a fraction or a
-rate (`11/10`, `343/300`, `2/2 test scopes`, `150 lines/min`, `50/s`); prose
-carrying a slash (`Throwaway path (temp/scratchpad)`); a pytest nodeid; a name
-that is not a path at all (`anthropic/claude-3.5-sonnet`, `citizen/drone-fix`,
-an scp remote, the route `/v1/fleet`); and three two-segment relative paths with
-no extension (`src/daemon`, `src/my_agent`, `apps/handlers`). Only that last
-group is a real path, and the floor gives those three up on purpose, because the
-same floor is what removes the fractions.
-
-THE COST OF THE TWO NEW ARMS, MEASURED BEFORE AND AFTER over every branch with a
-`.trinity` directory. Arms 1-2 found 0 rows fleet-wide (the five sites the
-2026-09-07 dialect measurement named have since been cured), so all of this is
-new. 70 rows across 8 branches, and the split decides what they cost:
-
-  - SCORED: 2 rows, both REPR-HAYSTACK, both on trigger. Seventeen branches
-    stay at 100 and trigger goes to 99. RENDERED-PATH - the scoring half of arm
-    3 - finds ZERO rows in this fleet, and that is worth saying out loud rather
-    than hiding: nobody here writes `str(p) == "a/b.py"` in a test. The arm is
-    kept because it is the shape the cure turns INTO if it is done wrong.
-  - NOMINATED, scoring nothing: 68 RETURNED-PATH rows - seedgo 31, spawn 14,
-    daemon 9, api 6, drone 4, prax 3, aipass 1.
-
-The nominate-only half is a superset of the shape that broke CI, which is the
-point: seedgo's two rows and prax's one are in it, named by nodeid, in a check
-line a reader can act on, and they move no number they cannot be defended
-against.
-
-WIDENING THE NOMINATE-ONLY HALF FROM SUBSCRIPTS TO ATTRIBUTES AND CALL RESULTS
-COST 6 ROWS, measured: 62 -> 68, all of them unscored. seedgo +4, drone +1
-(`parsed.path == "foo/bar.txt"`), spawn +1 (`baud.relative_path ==
-"src/baud/baud"`). A returned value is a returned value whichever way the source
-spells the access, and reading only subscripts would have been a hole with no
-reason behind it.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM. It does not claim a flagged line is
-wrong. A test that deliberately exercises POSIX spelling - a fence refusing
-`/etc/passwd`, a parser fed a known-rooted input - is a legitimate site and stays.
-What the flag buys is that the decision gets MADE rather than inherited from
-whichever platform the author happened to be standing on.
-
-IT ALSO SAYS NOTHING ABOUT THE MACHINE IT RUNS ON. `"/tmp"` is judged by its first
-character and `"C:/tmp"` by its second and third, as text, never by asking the
-running interpreter what it would do with them. A rule about portability that
-consulted the host would be reporting a different standard on every leg of a
-matrix, which is the defect it exists to find. It is also why this file's own pins
-can be written on any host and mean the same thing.
-
-ITS HONEST LIMITS, all of them in the direction of FEWER flags:
-
-  - it reads the RECEIVER, so `home = Path("/tmp")` followed by `home.resolve()`
-    is invisible. Chasing the value through a variable would mean following
-    assignments, and the moment it does that it starts nominating the whole fleet.
-  - `from os.path import realpath` then `realpath("/tmp")` is invisible: the call
-    target is a bare name, and the module gate wants a dotted receiver whose last
-    segment ends in `path`. `import os.path as osp` defeats it for the same reason.
-  - a resolver reached through a module that NAMES ITS DIALECT - `ntpath.abspath`,
-    `posixpath.realpath` - is acquitted from 2026-09-07. It was convicted until
-    then, and that was this file contradicting its own premise: the hazard is that
-    `os.path` MEANS a different module per host, so the line means two things. A
-    call that spells `ntpath` means one thing everywhere, on every leg, and is the
-    cure a flagged site gets rewritten INTO. Measured across 22 branches before
-    the change: 5 rows fleet-wide, of which this acquits 2 - both in this pack's
-    own hazard demonstration - and no other branch moves, because @drone's three
-    are all the receiver arm, which is untouched.
-  - it walks TEST UNITS, so a literal resolved in a fixture, in a module-level
-    constant or in a helper the unit calls is not seen. Nothing here follows a
-    call.
-  - a rooted literal that is never resolved is not read at all. 501 sites carry
-    one; four of them put it through a resolver, and the other 497 are data.
-
-AND THE NEW ARMS' OWN LIMITS, in the same direction:
-
-  - arm 3 reads ONE comparison. A relpath rendered into a variable on one line
-    and compared on the next is invisible, because nothing here follows an
-    assignment except arm 4's single hop.
-  - arm 3 cannot see `.as_posix()` when the cure lives in PRODUCTION. That is
-    the seedgo cluster named above, and it is the whole reason the returned half
-    nominates instead of scoring: `corpus._relpath` returns `.as_posix()`, the
-    string is posix on every host, and the test asserting on it is right. The
-    acquittal it does honour is `.as_posix()`, `os.sep`, `os.path.join` or
-    `os.fspath` spelled inside the comparison itself.
-  - text that merely CONTAINS a path is read the same as text that is one -
-    `"   M src/x.py"`, a line of porcelain output, is nominated. Narrowing to
-    whole-literal paths would have dropped `"File: apps/something.py"`, which is
-    one of the four rows this arm exists for.
-  - arm 4 follows a rendered call record one hop through a local `name = ...`
-    and no further. A haystack built in a helper, or reassigned twice, is not
-    seen. It also reads only `in` / `not in`: a rendered repr compared with `==`
-    is a different and much rarer mistake.
-
-ARM 4 WIDENED ON 2026-09-14, BECAUSE BOTH OF ITS READINGS MISSED THE SAME RED.
-Windows CI 34882199024 failed on two rows in api's test_host_api.py, written the
-day before with this arm in the pack:
-
-    printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
-    assert str(bundle) in printed                    # bundle = _face_bundle(tmp_path / "face")
-    assert str(host_face.face_root()) in printed
-
-The haystack's `str()` sat inside a join, over a comprehension variable, and the
-old reading only looked at the outermost expression. The needles named no path
-by spelling - `bundle`, `face_root()` - and the old reading never followed a
-name or read a call's own name. Measured on those two rows, each widening alone
-catches neither; together they catch both. Over 18 branches the widened
-haystack reading sees 112 comparisons against 34 before, and not one outside
-the two rows carries a path-ish needle - 0 rows before, 0 after in the working
-tree (api cured them), 2 after at 9594a1a8. `pathish_expression` is untouched,
-so arms 1-3 read exactly what they read before.
-
-The comprehension reading is deliberately exact: a variable iterating a call
-RECORD is a call object, and `str()` of one renders through `repr()`. A variable
-iterating `call.args` is an argument, and `str()` of a Path argument spells one
-backslash - which is the cure, so it stays clean. The call-name reading is
-spelling (`load_profile()` holds `file`), used on the needle only.
-  - arm 4 nominates a rendered repr even when the argument was a plain string
-    all along. trigger/tests/test_log_watcher.py:1080 sets `event.src_path` to a
-    string and would pass on either host; it is the same shape as the row three
-    files over that does not, and telling them apart needs the producer.
-
-WHAT WAS DROPPED IN THE PORT, NAMED RATHER THAN CARRIED. The original nominator
-re-tested `isinstance(call.func, ast.Attribute)` at the top of BOTH detector
-helpers, and its only caller had already filtered on exactly that - neither guard
-could ever fail. Removing them changes no answer; the check now lives once, at the
-walker, where the filter actually happens. The same version then re-tested
-`isinstance(literal, ast.Constant)` on what the helpers returned, and both helpers
-only ever returned a node the rooted-literal predicate had already accepted - and
-that predicate opens with the same isinstance. It was always true. Here the helpers
-return `Optional[ast.Constant]` so the type carries the fact, instead of a branch
-that looks like a check and is really a decoration.
-
-STDLIB ONLY - `ast`, `pathlib`, `typing`, and the pack's own corpus reader. That
-constraint is the reason the pack exists and can be lifted onto any project.
-"""
+Reference: posix_literal.md"""
 
 import ast
 from pathlib import Path
@@ -260,97 +16,60 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "posix_literal"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
+#: Tried in order; a project matching none of them gets a whole-tree walk.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Constructors whose first argument is a path. A `.resolve()` hanging off one of
-#: these is pathlib's resolve and no other object's - which is what keeps a
-#: branch-name resolver sharing the verb out of the results.
+#: A `.resolve()` off one of these is pathlib's, which keeps a branch-name resolver sharing the verb out.
 PATH_CONSTRUCTORS: frozenset = frozenset(
     {"Path", "PurePath", "PurePosixPath", "PureWindowsPath", "PosixPath", "WindowsPath"}
 )
 
-#: Module-level functions that normalise a path against process state.
 RESOLVER_FUNCTIONS: frozenset = frozenset({"realpath", "abspath"})
 
-#: What the receiver of a resolver function has to look like. `os.path`,
-#: `posixpath` and `ntpath` all end in it; `registry`, `shutil` and `helper` do
-#: not, and a `helper.abspath(...)` is somebody else's method.
+#: `os.path`, `posixpath` and `ntpath` end in it; `helper.abspath(...)` is somebody else's method.
 RESOLVER_MODULE_SUFFIX: str = "path"
 
-#: The path modules that name their dialect out loud. `os.path` is an ALIAS -
-#: it is `posixpath` on one leg of the matrix and `ntpath` on the other, which
-#: is the entire hazard. These two are not: `ntpath.abspath("/x")` returns the
-#: same string on every host, because the module IS the answer to "which
-#: platform". Convicting them convicts the fix.
+#: `os.path` is an ALIAS that differs per host; these name their dialect, so convicting them convicts the fix.
 DIALECT_MODULES: frozenset = frozenset({"ntpath", "posixpath", "macpath"})
 
-#: The method whose receiver is read rather than whose name is trusted.
 RESOLVE_METHOD: str = "resolve"
 
-#: The finding vocabulary. Four species, one rule: a path claim that is only
-#: true on the platform it was written on. POSIX-LITERAL is arms 1-2 (a rooted
-#: literal put through a resolver); the other three are the reverse shape, a
-#: Path rendered to text and compared with a forward-slashed literal.
+#: POSIX-LITERAL is arms 1-2; the other three are a Path rendered to text and compared with a slashed literal.
 SPECIES_POSIX_LITERAL: str = "POSIX-LITERAL"
 SPECIES_RENDERED_PATH: str = "RENDERED-PATH"
 SPECIES_RETURNED_PATH: str = "RETURNED-PATH"
 SPECIES_REPR_HAYSTACK: str = "REPR-HAYSTACK"
 
-#: WHICH SPECIES MOVE THE NUMBER. Three of the four: each of them is a defect
-#: the checker can see whole, inside the unit. RETURNED-PATH is absent, and the
-#: module docstring gives the measurement that put it there - it flags the same
-#: AST shape whether production normalised the separator or not, and on the
-#: first fleet run 27 of its 62 rows were seedgo's own tests reading a relpath
-#: that `corpus._relpath` renders with `.as_posix()`. Correct, portable code.
+#: RETURNED-PATH is absent: it flags the same shape whether production normalised the separator or not.
 SCORING_SPECIES: tuple = (SPECIES_POSIX_LITERAL, SPECIES_RENDERED_PATH, SPECIES_REPR_HAYSTACK)
 
-#: How a compared value came to be text, split by WHO WROTE THE RENDERING DOWN.
-#: The test did, in the first group - `str(p)`, an f-string, `%s` - so the test
-#: owns the dialect and the row scores. The code under test did, in the second,
-#: and whether it normalised is off-screen, so the row nominates.
+#: Split by WHO WROTE THE RENDERING DOWN: the test (the row scores) or the code under test (it nominates).
 WRITTEN_RENDERINGS: tuple = ("str()", "f-string", "%-format")
 RETURNED_PROVENANCES: tuple = ("subscript", "attribute", "call result")
 
-#: Characters a path SEGMENT is made of. Deliberately not `str.isalnum` - a
-#: segment carries dots, dashes and underscores, and nothing else here does.
+#: Deliberately not `str.isalnum`: a segment carries dots, dashes and underscores.
 PATH_SEGMENT_CHARS: frozenset = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
 
-#: The separator arm 3 is about. Only the forward one: a literal spelled with a
-#: backslash is already a Windows claim, which is arms 1-2's drive test.
+#: Forward only: a backslash literal is already a Windows claim, which is arms 1-2's drive test.
 POSIX_SEPARATOR: str = "/"
 
-#: Text that is NOT a filesystem path however many slashes it holds. `://` and
-#: a bare `@` between path characters are a URL and an scp-style remote; `::`
-#: is a pytest nodeid, and pytest spells those posix on every platform, by
-#: contract, which makes a nodeid assertion correct rather than a finding.
+#: A URL, an scp-style remote, a pytest nodeid (posix on every platform, by contract).
 NON_PATH_MARKERS: tuple = ("://", "@", "::")
 
-#: How long a trailing `.thing` may be and still read as a file extension. Five
-#: covers `.py`, `.json`, `.local`; it does not cover `claude-3.5-sonnet`, which
-#: is the model name this bound was measured against.
+#: Covers `.py`, `.json`, `.local`; not `claude-3.5-sonnet`.
 MAX_EXTENSION_LENGTH: int = 5
 
-#: Builtins that turn an object into text. A Path handed to any of them comes
-#: back in the HOST's dialect - that is the whole of arm 3.
+#: A Path handed to any of these comes back in the HOST's dialect.
 RENDER_BUILTINS: frozenset = frozenset({"str", "repr", "format", "ascii"})
 
-#: Name fragments that say an expression is holding a path. Read against a
-#: variable, an attribute or a dict key - the three places a rendered relpath
-#: is found sitting in the fleet.
 PATHISH_NAME_TOKENS: tuple = ("path", "dir", "file", "relpath", "root", "src", "dest", "target", "location")
 
-#: pathlib attributes and methods whose presence identifies the receiver as a
-#: Path without having to follow where it came from.
+#: Their presence identifies a Path without following where it came from.
 PATH_ATTRIBUTES: frozenset = frozenset(
     {
         "parent",
@@ -368,59 +87,33 @@ PATH_ATTRIBUTES: frozenset = frozenset(
     }
 )
 
-#: Fixture names whose value pytest creates. A path rooted at one of these was
-#: derived, not written down - the same reading `host_state` uses.
+#: A path rooted at one of these was derived, not written down.
 SANDBOX_FIXTURES: frozenset = frozenset({"tmp_path", "tmp_path_factory", "tmpdir", "tmpdir_factory"})
 
-#: The spelling that ends the argument. `.as_posix()` says "posix on purpose",
-#: and the rest name the separator instead of assuming one. Any of them inside
-#: the comparison acquits the whole site.
+#: Any of these inside the comparison acquits the site: they are the cure.
 POSIX_SPELLING_METHOD: str = "as_posix"
 SEPARATOR_ACQUITTALS: frozenset = frozenset(
     {"os.sep", "os.path.sep", "os.path.join", "posixpath.join", "ntpath.join", "os.fspath", "os.path.normpath"}
 )
 
-#: String methods that read a value against a literal prefix or suffix. The
-#: comparison operators are read structurally; these two are calls.
 STRING_COMPARISON_METHODS: frozenset = frozenset({"startswith", "endswith"})
 
-#: Mock attributes that hold a RECORD of a call rather than the call's
-#: arguments. Rendering one of these runs its contents through `repr()`, which
-#: is where a backslash separator doubles - the arm 4 defect.
+#: Rendering a call record runs its arguments through `repr()`, which doubles a backslash.
 MOCK_CALL_RECORDS: frozenset = frozenset(
     {"call_args", "call_args_list", "mock_calls", "await_args", "await_args_list", "method_calls"}
 )
 
-#: The records that hold MANY calls. The cure for one of these indexes a call
-#: before it reads the arguments - `call_args_list[i].args[n]` - because the
-#: list itself has no `.args`.
+#: These hold MANY calls and have no `.args`, so the cure indexes first.
 MOCK_CALL_LISTS: frozenset = frozenset({"call_args_list", "mock_calls", "await_args_list", "method_calls"})
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
+#: The full list lives in the report artifact.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def is_rooted(text: str) -> bool:
     """True when a string starts at a filesystem root in either dialect.
 
-    Split out of `rooted_literal` on 2026-09-08 with its answers unchanged,
-    because arm 3 has to ask the same question about a SUBSTRING - the path run
-    inside `"File: apps/something.py"` - and a node-shaped predicate cannot be
-    asked about text. One definition of "rooted", read by both.
-
-    Args:
-        text: Any string.
-
-    Returns:
-        True for `/tmp`, `\\\\server` and `C:/tmp`; False for `tmp` and for the
-        empty string.
-    """
+    Text-shaped because arm 3 asks it of a substring; `C:/tmp` counts by its second and third characters."""
     if not text:
         return False
     if text[0] in ("/", "\\"):
@@ -429,15 +122,7 @@ def is_rooted(text: str) -> bool:
 
 
 def rooted_literal(node: ast.AST) -> Optional[ast.Constant]:
-    """The node itself when it is a string literal that starts at a root.
-
-    Args:
-        node: Any AST node.
-
-    Returns:
-        The constant for `"/tmp"`, `"\\\\server"` and `"C:/tmp"`; None for
-        `"tmp"`, for the empty string and for anything that is not a string.
-    """
+    """The node itself when it is a string literal that starts at a root."""
     if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
         return None
     return node if is_rooted(node.value) else None
@@ -446,17 +131,7 @@ def rooted_literal(node: ast.AST) -> Optional[ast.Constant]:
 def _receiver_literal(func: ast.Attribute) -> Optional[ast.Constant]:
     """The rooted literal a `.resolve()` receiver was constructed from.
 
-    Keyed on the RECEIVER and never on the method name: `Path("/tmp").resolve()`
-    is pathlib, while `registry.resolve("@canary", ...)` is a branch-name lookup
-    that happens to share a verb. Measured before choosing - the name test
-    nominates six such sites fleet-wide and this one nominates none of them.
-
-    Args:
-        func: The attribute a call hangs off.
-
-    Returns:
-        The literal node, or None.
-    """
+    Keyed on the RECEIVER, never the method name: `registry.resolve("@canary", ...)` shares the verb."""
     if func.attr != RESOLVE_METHOD:
         return None
     receiver = func.value
@@ -468,15 +143,7 @@ def _receiver_literal(func: ast.Attribute) -> Optional[ast.Constant]:
 
 
 def _argument_literal(call: ast.Call, func: ast.Attribute) -> Optional[ast.Constant]:
-    """The rooted literal an `os.path.realpath`-shaped call was handed.
-
-    Args:
-        call: The call node, read for its arguments.
-        func: The attribute the call hangs off, read for the module it names.
-
-    Returns:
-        The literal node, or None.
-    """
+    """The rooted literal an `os.path.realpath`-shaped call was handed."""
     if func.attr not in RESOLVER_FUNCTIONS or not call.args:
         return None
     module = corpus.dotted_name(func.value)
@@ -490,16 +157,7 @@ def _argument_literal(call: ast.Call, func: ast.Attribute) -> Optional[ast.Const
 def resolved_literals(unit: corpus.TestUnit) -> List[Tuple[str, int]]:
     """Every rooted literal this unit puts through a resolver.
 
-    The public entry point for the rule's reading - the report lane and the tests
-    both ask the question here rather than re-deriving it.
-
-    Args:
-        unit: One test unit.
-
-    Returns:
-        `(literal_text, lineno)` pairs, in source order. The line is the CALL's,
-        because that is the line a reader has to go and look at.
-    """
+    The rule's public entry point; the line is the CALL's, the one a reader has to go and look at."""
     found: List[Tuple[str, int]] = []
     for node in ast.walk(unit.node):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -512,29 +170,10 @@ def resolved_literals(unit: corpus.TestUnit) -> List[Tuple[str, int]]:
     return found
 
 
-# =============================================================================
-# READING A LITERAL AS TEXT
-#
-# Arm 3 asks whether a string LOOKS like a filesystem path. Everything in this
-# block reads characters and never the host - same premise as arms 1-2, so the
-# answers are identical on every leg of a matrix.
-# =============================================================================
-
-
 def _path_runs(text: str) -> List[str]:
     """Maximal runs of path-segment characters and forward slashes.
 
-    `"File: apps/something.py"` yields `["File:", "apps/something.py"]` - the
-    colon and the space end a run - so a path embedded in a sentence is still
-    read as a path. That is deliberate: two of the four rows this arm exists
-    for are a rendered relpath with a `File: ` or `Dir: ` label in front.
-
-    Args:
-        text: The literal's value.
-
-    Returns:
-        The runs, in source order. Empty when the text holds no path character.
-    """
+    A colon or a space ends a run, so `"File: apps/something.py"` still yields its path."""
     runs: List[str] = []
     current = ""
     for char in text:
@@ -552,10 +191,7 @@ def _path_runs(text: str) -> List[str]:
 def _carries_extension(segment: str) -> bool:
     """True when a segment ends in a plausible file extension.
 
-    Bounded at `MAX_EXTENSION_LENGTH` and required to be alphabetic, which is
-    what tells `gamma.py` from `claude-3.5-sonnet`: the tail of the model name
-    is `5-sonnet`, and it is neither.
-    """
+    Alphabetic and bounded, which tells `gamma.py` from `claude-3.5-sonnet`."""
     if "." not in segment:
         return False
     tail = segment.rsplit(".", 1)[1]
@@ -565,13 +201,7 @@ def _carries_extension(segment: str) -> bool:
 def _reads_as_a_path(run: str) -> bool:
     """True when a run of path characters is evidence of a filesystem path.
 
-    Two segments is the floor, and then ONE of three things has to be true: a
-    trailing slash (`apps/handlers/`), a second separator (`src/aipass/prax`),
-    or an extension on the last segment (`pkg/gamma.py`). Measured over 18
-    branches, dropping this test costs 51 nominations and every one of them is
-    correct code: a model name, a branch name, `50/s`, `150 lines/min`,
-    `Owner/identity OK`, `temp/scratchpad`.
-    """
+    Two segments, then a trailing slash, a second separator, or an extension on the last one."""
     segments = [part for part in run.split(POSIX_SEPARATOR) if part]
     if len(segments) < 2:
         return False
@@ -581,19 +211,7 @@ def _reads_as_a_path(run: str) -> bool:
 def path_run(text: str, allow_rooted: bool) -> Optional[str]:
     """The filesystem path spelled inside a string literal, or None.
 
-    Acquits a URL, an scp-style remote and a pytest nodeid by marker, because
-    none of those is a path the host gets to spell - pytest in particular
-    guarantees a posix nodeid on every platform.
-
-    Args:
-        text: The literal's value.
-        allow_rooted: False for arm 3, where a rooted literal belongs to arms
-            1-2 and 497 of the 501 rooted sites in the fleet are data. True for
-            arm 4, where the root is not the hazard and the separator is.
-
-    Returns:
-        The offending run, or None.
-    """
+    ``allow_rooted`` is False for arm 3 (rooted literals are arms 1-2's) and True for arm 4, where the separator is the hazard."""
     if any(marker in text for marker in NON_PATH_MARKERS):
         return None
     for run in _path_runs(text):
@@ -614,11 +232,6 @@ def _literal_run(node: ast.AST) -> Optional[str]:
     if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
         return None
     return relative_path_run(node.value)
-
-
-# =============================================================================
-# READING AN EXPRESSION AS A PATH
-# =============================================================================
 
 
 def _is_pathish_name(text: str) -> bool:
@@ -646,20 +259,7 @@ def _pathish_subscript(node: ast.Subscript) -> bool:
 def pathish_expression(node: ast.AST) -> bool:
     """Does this expression look like it is holding a path?
 
-    THE HONEST STATEMENT OF WHAT THIS IS. It is a reading of SPELLING, not a
-    type inference - `Path(...)`, a `/` join, a `tmp_path` fixture, a pathlib
-    attribute, or a name/attribute/key containing one of `PATHISH_NAME_TOKENS`.
-    A path held in a variable called `x` is invisible to it, and a variable
-    called `target` that holds a hostname is a false positive. It exists so the
-    rendering arms (`str(x)`, an f-string, `%s`) fire on a path and not on every
-    string in the fleet.
-
-    Args:
-        node: Any AST node.
-
-    Returns:
-        True when the spelling is evidence of a path.
-    """
+    A reading of SPELLING, not a type inference: a path in `x` is invisible, a hostname in `target` a false positive."""
     if isinstance(node, ast.Call):
         return _pathish_call(node)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
@@ -678,11 +278,7 @@ def pathish_expression(node: ast.AST) -> bool:
 def _separator_is_spelled_out(node: ast.AST) -> bool:
     """True when the site names the separator instead of assuming one.
 
-    `.as_posix()` anywhere, or `os.sep` / `os.path.join` / `os.fspath` by their
-    dotted spelling. This is the acquittal a flagged site is rewritten INTO, so
-    convicting it would convict the cure - the same reasoning that acquits
-    `ntpath` and `posixpath` in arm 2.
-    """
+    This is the acquittal a flagged site is rewritten INTO, so convicting it would convict the cure."""
     for sub in ast.walk(node):
         if not isinstance(sub, (ast.Name, ast.Attribute)):
             continue
@@ -695,14 +291,7 @@ def _separator_is_spelled_out(node: ast.AST) -> bool:
 def _builds_a_path(unit: corpus.TestUnit) -> bool:
     """Does this unit construct a Path anywhere in its body?
 
-    THE WEAKEST EVIDENCE THIS RULE USES, AND IT IS USED ON PURPOSE. A subscript
-    into a result dict cannot tell a reader where its value came from, so when
-    the key is not path-ish the arm falls back to asking whether the unit is
-    working with paths at all. It is circumstantial. It is also what separates
-    `bypassed[0]["name"] == "File: apps/something.py"`, in a unit that builds a
-    whole tree under `tmp_path`, from a payload assertion in a unit that never
-    touches the filesystem.
-    """
+    THE WEAKEST EVIDENCE THIS RULE USES, on purpose: circumstantial, and one reason that half does not score."""
     for node in ast.walk(unit.node):
         if isinstance(node, ast.arg) and node.arg in SANDBOX_FIXTURES:
             return True
@@ -720,21 +309,10 @@ def _literal_operand(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-# =============================================================================
-# ARM 3 - RENDERED-PATH
-# =============================================================================
-
-
 def _written_rendering(node: ast.AST) -> str:
     """The rendering the TEST wrote down, or "" when it wrote none.
 
-    `str(p)`, an f-string over a path, `"%s" % p`. The dialect is chosen on the
-    line the reader is looking at, by the test, which is what makes this half
-    scoreable: nothing off-screen can make it right.
-
-    Returns:
-        `str()`, `f-string`, `%-format`, or "".
-    """
+    The test chose the dialect on this line, so nothing off-screen can make it right: this half scores."""
     if isinstance(node, ast.Call) and corpus.dotted_name(node.func) in RENDER_BUILTINS:
         return "str()" if node.args and pathish_expression(node.args[0]) else ""
     if isinstance(node, ast.JoinedStr):
@@ -747,19 +325,7 @@ def _written_rendering(node: ast.AST) -> str:
 def _returned_value(node: ast.AST, builds_path: bool) -> str:
     """How a value CAME BACK from the code under test, or "".
 
-    A dict subscript, an attribute, a call result. The string was rendered
-    somewhere this file cannot read, so whether the producer normalised the
-    separator is off-screen - which is exactly why these rows nominate instead
-    of scoring.
-
-    Args:
-        node: The non-literal side of a comparison.
-        builds_path: Whether the enclosing unit builds a Path at all - the
-            fallback evidence when the spelling names no path.
-
-    Returns:
-        `subscript`, `attribute`, `call result`, or "".
-    """
+    Rendered somewhere this file cannot read, so the row nominates; ``builds_path`` is the fallback evidence."""
     if isinstance(node, ast.Subscript):
         return "subscript" if builds_path or _pathish_subscript(node) else ""
     if isinstance(node, ast.Attribute) and node.attr not in PATH_ATTRIBUTES:
@@ -772,10 +338,7 @@ def _returned_value(node: ast.AST, builds_path: bool) -> str:
 def _rendered_side(node: ast.AST, builds_path: bool) -> str:
     """How this expression came to be text, named, or "" when it did not.
 
-    The written rendering is asked for FIRST. `str(entry["path"])` is both a
-    subscript and a `str()`, and the `str()` is the honest reading: the test
-    put the value through the renderer itself, so the test owns the dialect.
-    """
+    The written rendering is asked FIRST: in `str(entry["path"])` the test put the value through the renderer."""
     return _written_rendering(node) or _returned_value(node, builds_path)
 
 
@@ -798,9 +361,7 @@ def _rendered_partner(sides: List[ast.expr], subject: ast.AST, builds_path: bool
 def _compare_rows(node: ast.Compare, builds_path: bool) -> List[Tuple[str, int, str]]:
     """Every rendered-path row in one comparison.
 
-    Reads `==`, `!=`, `in` and `not in`. `is` is deliberately absent: a string
-    compared with `is` is a different bug, and this rule is not it.
-    """
+    `is` is deliberately absent: a string compared with `is` is a different bug."""
     if not any(isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
         return []
     if _separator_is_spelled_out(node):
@@ -831,17 +392,7 @@ def _string_method_rows(node: ast.Call, builds_path: bool) -> List[Tuple[str, in
 def rendered_path_literals(unit: corpus.TestUnit) -> List[Tuple[str, int, str]]:
     """Every rendered path this unit compares with a forward-slashed literal.
 
-    The public entry point for arm 3's reading, matching `resolved_literals`:
-    the report lane and the tests ask the question here rather than re-deriving
-    it.
-
-    Args:
-        unit: One test unit.
-
-    Returns:
-        `(path_run, lineno, rendering)` triples, in source order, deduped by
-        line and run so a chained comparison is one row.
-    """
+    Arm 3's public entry point; rows are deduped by line and run so a chained comparison is one row."""
     builds_path = _builds_a_path(unit)
     found: List[Tuple[str, int, str]] = []
     seen: Set[Tuple[str, int]] = set()
@@ -863,11 +414,6 @@ def _rows_for_node(node: ast.AST, builds_path: bool) -> List[Tuple[str, int, str
     return []
 
 
-# =============================================================================
-# ARM 4 - REPR-HAYSTACK
-# =============================================================================
-
-
 def _render_targets(node: ast.AST) -> List[ast.expr]:
     """What an expression renders to text, or [] when it renders nothing."""
     if isinstance(node, ast.Call) and corpus.dotted_name(node.func) in RENDER_BUILTINS:
@@ -882,12 +428,7 @@ def _render_targets(node: ast.AST) -> List[ast.expr]:
 def _iterated_records(node: ast.AST) -> Dict[str, str]:
     """Comprehension variables that iterate a call record directly, and the record.
 
-    `for call in console.print.call_args_list` binds `call` to one call object,
-    and `str(call)` renders its arguments through `repr()` exactly as
-    `str(console.print.call_args)` does. `for arg in call.args` is NOT in here:
-    its elements are the arguments themselves, and `str()` of a Path argument
-    spells a single backslash - the cure, which has to stay clean.
-    """
+    `for call in m.call_args_list` renders through `repr()`; `for arg in call.args` is the cure and stays clean."""
     records: Dict[str, str] = {}
     for sub in ast.walk(node):
         if not isinstance(sub, ast.comprehension) or not isinstance(sub.target, ast.Name):
@@ -910,15 +451,7 @@ def _record_in_target(target: ast.expr, iterated: Dict[str, str]) -> str:
 def _renders_a_call_record(node: ast.AST) -> str:
     """The mock call record this expression renders, by source spelling, or "".
 
-    `str(warned.call_args)` answers `warned.call_args`. The record is what makes
-    the site wrong: rendering it runs every argument through `repr()`, and a
-    Windows path comes back with its separators doubled.
-
-    ANYWHERE IN THE EXPRESSION, since 2026-09-14. Until then only the outermost
-    node was asked, and `" ".join(str(call) for call in m.call_args_list)` - a
-    join around the rendering, over a comprehension variable - read as clean.
-    That is the haystack of both rows in Windows CI red 34882199024.
-    """
+    Read ANYWHERE in the expression: a join around the rendering, over a comprehension variable, still counts."""
     iterated = _iterated_records(node)
     for render in ast.walk(node):
         for target in _render_targets(render):
@@ -931,11 +464,7 @@ def _renders_a_call_record(node: ast.AST) -> str:
 def _local_bindings(unit: corpus.TestUnit) -> Dict[str, ast.expr]:
     """First value bound to each plain local name in the unit.
 
-    ONE HOP, FIRST BINDING ONLY. `reported = str(warned.call_args)` on one line
-    and the assertion on the next is the shape in every one of the fleet's
-    sites, and following further would mean tracking flow. A name rebound later
-    keeps its first reading, which is the direction that under-reports.
-    """
+    ONE HOP, FIRST BINDING ONLY: a name rebound later keeps its first reading, which under-reports."""
     bindings: Dict[str, ast.expr] = {}
     for node in ast.walk(unit.node):
         name = _bound_name(node)
@@ -956,16 +485,8 @@ def _bound_name(node: ast.AST) -> str:
 def _pathish_needle(node: ast.AST, bindings: Dict[str, ast.expr]) -> bool:
     """Is the thing being searched for a path?
 
-    A literal is read as text and may be ROOTED here - unlike arm 3, where a
-    rooted literal belongs to arms 1-2. Inside a rendered repr the root is not
-    the hazard; the separator is, and `/some/core.log` carries one.
-
-    TWO MORE READINGS SINCE 2026-09-14, on the needle only, so arms 1-3 do not
-    move: a local bound to a path-ish value one hop back (`str(bundle)` where
-    `bundle = _face_bundle(tmp_path / "face")`), and a call whose own name
-    carries a path word (`str(host_face.face_root())`). Both needles of Windows
-    CI red 34882199024 read as not-a-path without them.
-    """
+    A rooted literal counts here: inside a rendered repr the separator is the hazard, not the root.
+    Needle only: a local bound one hop to a path-ish value, or a call whose own name carries a path word."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return path_run(node.value, allow_rooted=True) is not None
     if pathish_expression(node):
@@ -1008,14 +529,7 @@ def _rendered_record(node: ast.AST, bindings: Dict[str, ast.expr]) -> str:
 
 
 def repr_haystack_needles(unit: corpus.TestUnit) -> List[Tuple[str, int, str]]:
-    """Every path searched for inside a rendered mock call record.
-
-    Args:
-        unit: One test unit.
-
-    Returns:
-        `(needle_source, lineno, record)` triples, in source order.
-    """
+    """Every path searched for inside a rendered mock call record."""
     bindings = _local_bindings(unit)
     found: List[Tuple[str, int, str]] = []
     for node in ast.walk(unit.node):
@@ -1042,11 +556,7 @@ def _finding(unit: corpus.TestUnit, line: int, text: str) -> Dict:
 def _rendered_finding(unit: corpus.TestUnit, line: int, text: str, rendering: str) -> Dict:
     """One arm-3 row: a rendered Path compared with a slashed literal.
 
-    The species follows the provenance, and so does the sentence. A rendering
-    the TEST wrote down is a statement about this line; a value that came back
-    from the code under test is a question about a producer this file cannot
-    read, and it must not be phrased as an accusation.
-    """
+    The sentence follows the provenance: a returned value is a question about a producer, never an accusation."""
     species = _species_for(rendering)
     if species == SPECIES_RENDERED_PATH:
         reason = (
@@ -1073,10 +583,7 @@ def _rendered_finding(unit: corpus.TestUnit, line: int, text: str, rendering: st
 def _haystack_finding(unit: corpus.TestUnit, line: int, needle: str, record: str) -> Dict:
     """One arm-4 row: a path searched for inside a rendered call record.
 
-    The cure names an index first when the record is a LIST of calls - a
-    `call_args_list` has no `.args`, and a reason that says it does sends the
-    owner to a line that raises.
-    """
+    A `call_args_list` has no `.args`, so the cure names an index first."""
     index = "[i]" if record.rsplit(".", 1)[-1] in MOCK_CALL_LISTS else ""
     return {
         "nodeid": unit.nodeid,
@@ -1123,26 +630,14 @@ def find_repr_haystacks(scanned: corpus.Corpus) -> List[Dict]:
 def find_violations(scanned: corpus.Corpus) -> List[Dict]:
     """Every finding in the corpus, grouped by arm.
 
-    ARM ORDER, NOT SOURCE ORDER, and that is the readable one: the four arms
-    describe four different mistakes, and a reader working through a report
-    wants all the resolver rows together and then all the rendering rows. The
-    score does not care - it dedupes by nodeid either way.
-    """
+    ARM ORDER, NOT SOURCE ORDER: a reader wants each arm's rows together; the score dedupes by nodeid anyway."""
     return find_rooted_literals(scanned) + find_rendered_paths(scanned) + find_repr_haystacks(scanned)
 
 
 def split_rows(rows: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
     """(scored, nominated), split by species and NOT deduped.
 
-    NOT DEDUPED, WHICH IS WHERE THIS DIFFERS FROM `platform_oracle`, on purpose.
-    Both lists carry every line, because a reader chasing a separator wants each
-    one; the dedupe happens later, at `flagged_nodeids`, where the SCORE is
-    computed. A unit with three rooted literals is three lines to fix and one
-    unit to charge, and collapsing the list would lose the other two lines.
-
-    A unit can appear in both lists. The second list is not a penalty - it is a
-    place to look - so hiding a nomination behind a scored row would lose it.
-    """
+    NOT DEDUPED, unlike `platform_oracle`: every line is a fix; the dedupe happens at `flagged_nodeids`."""
     scored = [row for row in rows if row["species"] in SCORING_SPECIES]
     nominated = [row for row in rows if row["species"] not in SCORING_SPECIES]
     return scored, nominated
@@ -1151,14 +646,7 @@ def split_rows(rows: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
 def _nomination_check(nominated: List[Dict], total: int) -> Dict:
     """The nominations line: reported, never scored, always passed.
 
-    PASSED TRUE AND OUTSIDE THE NUMBER. RETURNED-PATH flags the same AST shape
-    whether the producer normalised or not, and the first fleet run measured 27
-    of its 62 rows on seedgo alone as correct portable code - tests reading a
-    relpath that `corpus._relpath` renders with `.as_posix()`. An arm that would
-    convict correct code must not move a number. The first time a fleet watches
-    its score drop for a test that was right, the score stops being read, and
-    the arms that ARE sound stop being read with it.
-    """
+    An arm that would convict correct code must not move a number (posix_literal.md)."""
     units = flagged_nodeids(nominated)
     if not units:
         return {
@@ -1182,11 +670,7 @@ def _nomination_check(nominated: List[Dict], total: int) -> Dict:
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct units named by a list of findings, first-seen order.
 
-    THE SCORE IS PER UNIT, NOT PER FINDING. A unit resolving four rooted literals
-    is one unit a reader has to go and look at; counting the findings would let a
-    single loop-heavy test drive a project's score below zero, and a score that
-    can go negative is one nobody believes twice.
-    """
+    THE SCORE IS PER UNIT, NOT PER FINDING, so one loop-heavy test cannot drive it below zero."""
     seen: List[str] = []
     for row in rows:
         if row["nodeid"] not in seen:
@@ -1197,13 +681,7 @@ def flagged_nodeids(rows: List[Dict]) -> List[str]:
 def _flagged_message(rows: List[Dict], units: List[str], total: int) -> str:
     """The check line, naming what was actually found rather than a guess.
 
-    THE SENTENCE FOLLOWS THE SPECIES. A project flagged only by arms 1-2 gets
-    the resolver sentence it has always had - the shape has not changed and the
-    line should not either. The moment a rendering row is in the list, "put a
-    rooted path literal through a resolver" would be describing a finding that
-    is neither rooted nor resolved, so the line widens to what the four arms
-    have in common: a path claim that is only true on one dialect.
-    """
+    Arms 1-2 alone keep the resolver sentence; any rendering row widens it to the claim all four arms share."""
     species = {row["species"] for row in rows}
     if species == {SPECIES_POSIX_LITERAL}:
         head = f"{len(units)}/{total} test units put a rooted path literal through a resolver: "
@@ -1213,40 +691,17 @@ def _flagged_message(rows: List[Dict], units: List[str], total: int) -> str:
     return head + ", ".join(units[:MAX_REPORTED]) + overflow
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its tests hardcode one platform's root.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory, violations and nominations. The nominate-only species is
-        reported in its own check line, with passed True, and is excluded from
-        both the score and the failing count. A project with no tests reports
-        not_applicable rather than a number, because zero tests measured is not
-        zero quality found.
-    """
+    ``bypass_rules`` is accepted for the scoring-API contract and not read: shadow mode gates nothing.
+    RETURNED-PATH rides in its own passed nominations line, outside the score.
+    No tests reports not_applicable: zero tests measured is not zero quality found."""
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty path: a broken only-test-file must never read as no tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

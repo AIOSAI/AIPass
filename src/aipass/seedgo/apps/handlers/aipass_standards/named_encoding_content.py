@@ -3,25 +3,18 @@
 # Description: Named Encoding Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Named Encoding Standards Content Handler
-
-Provides formatted Named Encoding standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_named_encoding_standards() -> str:
-    """Return formatted named_encoding standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted named_encoding standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (test template v1, item 21):[/bold cyan]",
         "  Every file read or write in a test [green]names its encoding[/green].",

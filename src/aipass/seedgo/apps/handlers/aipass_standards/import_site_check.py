@@ -3,59 +3,13 @@
 # Description: Import Site Standards Checker Handler
 # Version: 1.3.0
 # Created: 2026-09-21
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Import Site Standards Checker Handler
 
-Test template v1, item 8: product imports at the top of the file, never
-inside a test.
-
-Not tidiness. An import that happens inside a test happens AFTER the test has
-had a chance to replace what it is about to import, and that is the whole
-mechanism by which a test can pass against a unit that is not the product. The
-readme tests this branch retired on 2026-09-20 are the worked example: source
-mutants survived them because the module under test was rebuilt from a stub
-inside the test body, so deleting a real `return` changed nothing anyone asked
-about.
-
-Two shapes, both convicted:
-
-  * A product import (``aipass...``) inside any function, method or class
-    body. Module-level imports are never convicted -- including under a
-    module-level ``try``/``except`` or ``if TYPE_CHECKING``, because nothing
-    at module level can be preceded by a test's own patching.
-  * A write to ``sys.modules`` naming an aipass module, or an
-    ``importlib.reload`` / ``importlib.import_module`` of one inside a
-    function body. This is the stub-and-reimport mechanism itself, and it
-    convicts wherever it sits: a module-level ``sys.modules`` write poisons
-    every test in the file rather than one.
-
-Not convicted: a stdlib or third-party import inside a function. Those cannot
-fake the unit under test, and asking for them at the top would be tidiness.
-
-Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
-
-  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
-    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
-    real row with a percentage and it moves the branch score.
-  * ``check_module`` in the per-file checklist lane -- the same function, fired
-    by the PostToolUse hook, so the rule also meets an author on the write.
-
-The ``check_branch_info`` backlog line retired with that ruling: an unscored
-grey line was the workaround for a corpus that handed this checker no files,
-and the scored row is the record now.
-
-What is read, and the limit that remains, stated rather than hidden. The
-aipass module is named in the statement itself, or (seedgo, fleet green leg
-17) as the key of ``sys.modules[KEY] = ...`` / ``del sys.modules[KEY]`` where
-``KEY`` is bound ONCE at module level to a string naming an aipass module
-(``module_constants.string_constants``). A name bound inside the function,
-bound twice, or used as an argument to ``pop``/``setitem`` is not read: the
-checker reads one statement and a module's constants, not dataflow. Widening
-to every sys.modules write, product or not, would convict a test stubbing a
-third-party module it has every right to stub.
+Reference: import_site.md
 """
 
 import ast
@@ -73,18 +27,12 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "IMPORT_SITE"
 STANDARD_KEY = "import_site"
 
-# The product namespace. A single root, because every branch in the fleet
-# imports through it -- `from aipass.<branch>.apps...` is the house rule, and
-# a test that reaches the product any other way is already a different defect.
+# The product namespace: every branch imports through `aipass.<branch>...`; any other route is a different defect.
 PRODUCT_ROOT = "aipass"
 
-# Bodies whose contents run later than module import. ClassDef is in the list
-# because a class body inside a test module is still executed at import time --
-# but an import there is unreachable to the module's top-level namespace, which
-# is the whole point of asking for the import at the top.
+# ClassDef is listed: a class-body import runs at import time but never reaches the module's top-level namespace.
 _SCOPES: Tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
-# importlib entry points that re-run a module's code on demand.
 _RELOADERS: frozenset[str] = frozenset({"reload", "import_module"})
 
 FIX_IMPORT = "move the import to the top of the file"
@@ -125,10 +73,7 @@ def _names_product(node: ast.AST) -> bool:
 def _deferred_imports(tree: ast.Module) -> List[Tuple[int, str]]:
     """Every product import sitting inside a function or class body, once each.
 
-    Each node is judged once. An import inside a method has both a ClassDef
-    and a FunctionDef ancestor, so walking every scope separately and
-    collecting its imports counts that one line twice -- measured on the fleet
-    the difference was 9,174 reported against 5,175 real.
+    Each node is judged once: an import inside a method has both a ClassDef and a FunctionDef ancestor.
     """
     found: List[Tuple[int, str]] = []
 
@@ -151,9 +96,7 @@ def _deferred_imports(tree: ast.Module) -> List[Tuple[int, str]]:
 def _stub_mechanism(node: ast.AST, inside_function: bool) -> str | None:
     """Name the stub-and-reimport mechanism this node is, or None.
 
-    ``sys.modules`` writes count wherever they sit; an importlib reload only
-    counts inside a function body, because at module level it runs before any
-    test could have staged a replacement for it to pick up.
+    An importlib reload counts only inside a function: at module level no test has staged a replacement yet.
     """
     if isinstance(node, ast.Assign) and any(
         isinstance(t, ast.Subscript) and _is_sys_modules(t.value) for t in node.targets
@@ -180,9 +123,7 @@ def _stub_mechanism(node: ast.AST, inside_function: bool) -> str | None:
 def _keyed_by_product_constant(node: ast.AST, constants: Dict[str, str]) -> bool:
     """True when a ``sys.modules[NAME]`` target's NAME is a module constant naming aipass.
 
-    ``constants`` is ``module_constants.string_constants``: names bound once at
-    module level to a string (seedgo, fleet green leg 17). Only a subscript key
-    is read, nothing wider.
+    ``constants`` is ``module_constants.string_constants``. Only a subscript key is read, nothing wider.
     """
     targets = getattr(node, "targets", [])
     for target in targets:
@@ -195,8 +136,7 @@ def _keyed_by_product_constant(node: ast.AST, constants: Dict[str, str]) -> bool
 def _stubs(tree: ast.Module, path: Path | None) -> List[Tuple[int, str]]:
     """Every sys.modules write or in-function reload that names a product module.
 
-    A key imported from the file's own support module resolves like a local
-    constant (``module_constants.file_constants``, 1.3.0).
+    A key imported from the file's own support module resolves like a local constant.
     """
     found: List[Tuple[int, str]] = []
     constants = module_constants.file_constants(tree, path)
@@ -216,9 +156,7 @@ def _stubs(tree: ast.Module, path: Path | None) -> List[Tuple[int, str]]:
 def scan(source: str, path: Path | None = None) -> List[Tuple[int, str, str]]:
     """(line, shape, fix) for every hit in one test file's source, in line order.
 
-    A file that does not parse yields nothing: ruff already convicts the
-    syntax error, and guessing at the import sites of a file Python cannot
-    read would put a line number on a statement that may not exist.
+    A file that does not parse yields nothing: ruff already convicts the syntax error.
     """
     try:
         tree = ast.parse(source)
@@ -250,15 +188,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for product imports away from the top, and for stubs.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for product imports away from the top, and for stubs."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -271,11 +201,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, "Every product import is at the top of the file"), 100)
 
-    # One line per hit, all inside ONE check rather than one check each. The
-    # cure is per-line and an author told "17 violations" has to re-derive the
-    # list this checker already holds -- but checklist._format_failure prints
-    # the FIRST failed check and appends "(+N more)", so N checks would show
-    # one hit and hide the rest. A single message carries them all through.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {shape} - {fix}" for line, shape, fix in hits)
 
     json_handler.log_operation(

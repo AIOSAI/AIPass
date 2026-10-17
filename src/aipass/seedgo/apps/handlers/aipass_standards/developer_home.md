@@ -91,6 +91,8 @@ EXAMPLE = "/home/<user>/Projects/AIPass"        # a placeholder in prose
   CI runs it from the repo root as `python -m aipass.seedgo.apps.seedgo home-paths scan`: exit
   0 clean, 1 a hit, 2 could not measure, 7 an unknown argument.
 
+Every lane calls the same `scan_text`: one implementation judges a file and a tree.
+
 ---
 
 ## Bypass

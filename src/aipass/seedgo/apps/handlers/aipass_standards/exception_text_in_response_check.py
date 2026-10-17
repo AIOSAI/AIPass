@@ -3,69 +3,13 @@
 # Description: Exception Text In Response Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-10-10
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Exception Text In Response Standards Checker Handler
 
-An exception's text is written for the operator: a path, a module name, an
-argv, the state the code was in. A web server that copies it into a response
-body hands all of that to whoever sent the request. CodeQL calls it
-py/stack-trace-exposure, and it went red on PR #774's head 38166f35 with three
-rows in @api's ``apps/handlers/host/server.py`` (848, 974, 995).
-
-THE SHAPE. Inside an ``except`` clause, exception text reaches a response:
-
-  * the text: the bound name (``except X as e``), any attribute or subscript
-    of it (``e.detail``, ``e.args[0]``), any call that takes it (``str(e)``,
-    ``repr(e)``, a helper), an f-string, ``%`` or ``+`` that carries it, a
-    local assigned from any of those earlier in the clause, and
-    ``traceback.format_exc()`` / ``format_exception()`` /
-    ``format_exception_only()`` / ``format_tb()`` in ANY except clause, bound or
-    not, because the traceback needs no name to leak;
-  * the response: ``HTTPException(detail=...)`` (or its second positional),
-    a ``JSONResponse`` / ``PlainTextResponse`` / ``HTMLResponse`` /
-    ``Response`` content (keyword or first positional), a local helper named
-    ``deny``, ``refuse``, ``error_response`` or ``respond`` (leading
-    underscores ignored) taking the text in any argument, or a ``return`` of
-    the text itself or of a dict, list or tuple that holds it.
-
-The row is the sink's line. Only modules that import ``fastapi`` or
-``starlette``, or define a route (a decorator ``<x>.get/post/put/delete/patch/
-head/options/route/api_route/websocket("/...")``), are judged; any other file
-DECLINES, because no response is built there to leak into.
-
-NOT A ROW, each for its reason:
-  * the text goes only to a logger call: the log is the operator's;
-  * ``type(e)``, ``type(e).__name__``, ``isinstance(e, ...)``: a class name is
-    the fixed typed message the cure asks for;
-  * ``raise Other(str(e)) from e``: a domain exception is not a response;
-    wherever it is caught and turned into one, that clause is judged;
-  * a local re-assigned to a fixed value before it is used.
-
-WHAT IT CANNOT SEE (HELD, measured on the CodeQL rows themselves). The three
-rows CodeQL flagged are not the ``_deny`` lines: the alert's columns are the
-``return host_x.read_y()`` expression of each route. The text comes from
-other modules, through @api's ``ReadCache.get(key, producer)`` (the one helper
-those three routes, and only those three, share) out of the dicts @skills'
-``system_status`` and ``screen_lock`` doors build from caught exceptions. That
-flow crosses files, branches and a callable parameter; a file-local rule
-cannot follow it and does not pretend to.
-
-THE WIDENING (devpulse steer bb431525), MEASURED AND HELD. Sinks widened to
-any value a handler returns or publishes (a same-file helper hop such as
-skills' ``_describe(exc)``, a store into a local the function returns), scope
-widened past web modules: over 1,306 files in apps/, lib/ and shared/ that
-convicts 494 lines in 17 branch dirs (471 without the hop), and at 38166f35 it
-does convict all six skills lines api traced. But whether a returned value
-reaches a client is not written in the file that returns it: @skills' two
-doors are served because @api imports them, @drone's git handlers are served
-because api relays their ``--json`` message through a subprocess, and the same
-``{"success": False, "error": str(e)}`` return elsewhere goes to a CLI. No
-decorator, registry or door shape marks "served". The in-scope rule already
-crosses any helper call (a call taking the text carries it), so the hop adds
-nothing inside the web modules.
+Reference: exception_text_in_response.md
 """
 
 import ast
@@ -273,15 +217,7 @@ def _declined(reason: str) -> Dict:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a product file for exception text that reaches an HTTP response.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a product file for exception text that reaches an HTTP response."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 

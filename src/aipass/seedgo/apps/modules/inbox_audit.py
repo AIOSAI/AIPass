@@ -3,7 +3,7 @@
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
 # Version: 1.1.0
 # Created: 2026-04-21
-# Modified: 2026-08-13
+# Modified: 2026-10-17
 # =============================================
 
 """Inbox ID validator for the drone @seedgo audit inbox-ids command.
@@ -36,13 +36,7 @@ _DEAD_TREE_DIRS = frozenset({".backup", ".archive"})
 def _is_live_inbox(inbox_path: Path) -> bool:
     """Return True if *inbox_path* is a live inbox a branch can actually act on.
 
-    Two un-actionable shapes are excluded. Anything under `.backup/` or
-    `.archive/` is a snapshot of mail that has already been delivered or of a
-    branch that no longer exists. And a *directory* named `inbox.json` is how
-    @backup's versioned store holds a file — the current copy, a dated baseline
-    and an `inbox.json_diffs/` sibling all sit inside a directory carrying the
-    original name. `read_text()` on one raises IsADirectoryError; that is not an
-    unreadable inbox, it is not an inbox.
+    A directory named `inbox.json` is how @backup's versioned store holds a file: not an inbox.
     """
     if _DEAD_TREE_DIRS.intersection(inbox_path.parts):
         return False
@@ -143,9 +137,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
     if not args or args[0] != "inbox-ids":
         return False
-    # Ownership is settled, so the help gate comes here: `audit inbox-ids
-    # --help` had args[0] == "inbox-ids", so the gate above never saw the flag
-    # and the scan rglob'd every inbox under the repo root to answer a question.
+    # After ownership is settled: args[0] is "inbox-ids", so the gate above never sees the flag.
     if wants_help(None, args):
         print_introspection()
         return True

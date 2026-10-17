@@ -3,7 +3,7 @@
 # Description: Unit tests for the standards_query module
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/standards_query.py."""
@@ -22,11 +22,6 @@ from aipass.seedgo.apps.modules import CommandRefused, standards_query
 from aipass.seedgo.apps.modules.standards_query import ALIAS_COMMAND, QUERY_COMMAND, handle_command
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def two_packs(tmp_path, monkeypatch):
     """Two packs on disk, both defining `dupe` and only b defining `extra`: the only packs the module finds."""
@@ -42,11 +37,6 @@ def two_packs(tmp_path, monkeypatch):
     # The disk edge: the real discovery walks seedgo's own handlers/ directory.
     monkeypatch.setattr(standards_query, "_discover_packs", lambda: packs)
     return packs
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -77,12 +67,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag AFTER a pack name explains it, never looks up a standard named '-h'.
-
-    The cured defect this pins, stated in handle_command itself: `standards_query
-    <pack> --help` used to look up a standard called '--help'. The return value
-    is True on both sides of that bug, so only the effect tells them apart.
-    """
+    """A help flag AFTER a pack name explains it, never looks up a standard named '-h'."""
     with (
         patch.object(standards_query, "print_help") as helped,
         patch.object(standards_query, "_discover_packs") as discovered,
@@ -104,12 +89,7 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_pack():
-    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
-
-    It returned True until 2026-09-07 and `seedgo.py` turned that into exit 0,
-    so a script reading the exit code saw a successful query of a pack that
-    does not exist (the owner's standing ruling, fleet sweep 2026-09-07).
-    """
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly."""
     with pytest.raises(CommandRefused) as refused:
         handle_command("standards_query", ["nonexistent_pack_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -117,16 +97,7 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs(capsys):
-    """print_introspection lists the discovered packs and how to open each one.
-
-    Was a bare call that asserted nothing (no_oracle): a print_introspection
-    that discovered nothing passed just as happily. Lines measured 2026-09-07;
-    read off the real console through capsys since 2026-09-27.
-    Mutant: `[cyan]handlers/{name}/[/cyan]` -> `[cyan]{name}/[/cyan]` reddens it.
-    Each line is matched whole, never as a substring of the whole output
-    (seedgo, fleet green leg 4). Mutant: `  [cyan]handlers/{name}/` ->
-    `  [cyan]handlers/{name}/ ` (a trailing space) reddens it.
-    """
+    """print_introspection lists the discovered packs and how to open each one."""
     standards_query.print_introspection()
 
     lines = capsys.readouterr().out.splitlines()
@@ -137,12 +108,7 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """print_help documents all three call forms and names its own commands.
-
-    Was a bare call that asserted nothing (no_oracle). Lines measured
-    2026-09-07; read off the real console through capsys since 2026-09-27.
-    Mutant: `Commands: standards_query, standard, --help` -> `Commands: standards_query, --help` reddens it.
-    """
+    """print_help documents all three call forms and names its own commands."""
     standards_query.print_help()
 
     out = capsys.readouterr().out
@@ -153,16 +119,7 @@ def test_print_help_runs(capsys):
 
 
 def test_introspection_finds_the_four_packs_each_mapped_to_its_own_directory(capsys):
-    """The bare command names seedgo's four packs and lists each pack's own content files.
-
-    An isinstance check alone once pinned the return TYPE and nothing about the
-    value (assertion_shape), so a discovery that found no pack at all scored a
-    pass. The four names below are the *_standards directories under
-    apps/handlers/ that hold a *_check.py, measured 2026-09-15 when
-    context_standards landed (DPLAN-0347 -- `drone @seedgo audit context`); the
-    last assertion pins that each pack maps to the pack directory itself, not
-    its parent. Mutant: `packs[d.name] = d` -> `packs[d.name] = d.parent` reddens it.
-    """
+    """The bare command names seedgo's four packs and lists each pack's own content files."""
     assert handle_command(QUERY_COMMAND, []) is True
 
     out = capsys.readouterr().out
@@ -178,10 +135,7 @@ def test_introspection_finds_the_four_packs_each_mapped_to_its_own_directory(cap
 
 
 def test_a_pack_with_no_content_files_says_so_and_lists_nothing(tmp_path, monkeypatch, capsys):
-    """A pack directory holding no *_content.py is reported empty, not listed.
-
-    Mutant: `if not standards:` -> `if not standards and False:` reddens it.
-    """
+    """A pack directory holding no *_content.py is reported empty, not listed."""
     monkeypatch.setattr(standards_query, "_discover_packs", lambda: {"empty_standards": tmp_path})
 
     assert handle_command(QUERY_COMMAND, ["empty_standards"]) is True
@@ -193,10 +147,7 @@ def test_a_pack_with_no_content_files_says_so_and_lists_nothing(tmp_path, monkey
 
 
 def test_a_pack_lists_its_content_files_and_nothing_else(tmp_path, monkeypatch, capsys):
-    """A pack lists the standards its *_content.py files name, never another .py beside them.
-
-    Mutant: `glob("*_content.py")` -> `glob("*.py")` reddens it.
-    """
+    """A pack lists the standards its *_content.py files name, never another .py beside them."""
     (tmp_path / "architecture_content.py").write_text("# fake", encoding="utf-8")
     (tmp_path / "architecture_check.py").write_text("# fake", encoding="utf-8")
     monkeypatch.setattr(standards_query, "_discover_packs", lambda: {"tmp_standards": tmp_path})
@@ -209,19 +160,8 @@ def test_a_pack_lists_its_content_files_and_nothing_else(tmp_path, monkeypatch, 
     assert "architecture_check" not in out
 
 
-# ---------------------------------------------------------------------------
-# `standard <name>` short alias
-# ---------------------------------------------------------------------------
-
-
 def test_alias_no_args_lists_all_standards(capsys):
-    """`standard` with no args puts real standard names on the console.
-
-    Was `assert handle_command("standard", []) is True` under a docstring
-    promising a list — and the alias returns True unconditionally, so the
-    test passed with _show_all_standards() emptied out.
-    Mutant: `for name in ordered:` -> `for name in ordered[:1]:` reddens it.
-    """
+    """`standard` with no args puts real standard names on the console."""
     assert handle_command("standard", []) is True
 
     out = capsys.readouterr().out
@@ -230,13 +170,7 @@ def test_alias_no_args_lists_all_standards(capsys):
 
 
 def test_alias_shows_content_for_known_standard(capsys):
-    """`standard json_structure` resolves the pack itself and prints THAT content.
-
-    Pinned against the content module's own first line, so resolving to the
-    wrong standard — or to the alias help — reddens this instead of passing
-    on the alias's unconditional True.
-    Mutant: `console.print(content)` -> `console.print(str(content)[:10])` reddens it.
-    """
+    """`standard json_structure` resolves the pack itself and prints THAT content."""
     assert handle_command("standard", ["json_structure"]) is True
 
     out = capsys.readouterr().out
@@ -245,12 +179,7 @@ def test_alias_shows_content_for_known_standard(capsys):
 
 
 def test_alias_unknown_standard_refuses_with_a_non_zero_code():
-    """Unknown standard name is REFUSED, not reported and then called a success.
-
-    Renamed from `..._returns_true` on 2026-09-07: returning True was the
-    defect. `seedgo.py` turned it into exit 0, so `drone @seedgo standard
-    <typo>` printed ❌ and told the shell it had worked.
-    """
+    """Unknown standard name is REFUSED, not reported and then called a success."""
     with pytest.raises(CommandRefused) as refused:
         handle_command("standard", ["nonexistent_standard_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -269,13 +198,7 @@ def test_alias_help_flag():
 
 
 def test_print_alias_help_runs(capsys):
-    """print_alias_help explains the short form and points back at the long one.
-
-    Was a bare call that asserted nothing (no_oracle) — it could not tell the
-    alias help from the query help. Lines measured 2026-09-07; read off the
-    real console through capsys since 2026-09-27.
-    Mutant: `"  Short form of [green]standards_query ..."` -> the line without "Short form of " reddens it.
-    """
+    """print_alias_help explains the short form and points back at the long one."""
     standards_query.print_alias_help()
 
     out = capsys.readouterr().out
@@ -286,22 +209,14 @@ def test_print_alias_help_runs(capsys):
 
 
 def test_alias_resolves_a_name_one_pack_defines_to_that_packs_content(two_packs, capsys):
-    """`standard extra` finds the one pack that defines it and prints that pack's content.
-
-    Mutant: `matches.append((pack_name, standards[standard_name]))` ->
-    `matches.extend([(pack_name, standards[standard_name])] * 2)` reddens it.
-    """
+    """`standard extra` finds the one pack that defines it and prints that pack's content."""
     assert handle_command(ALIAS_COMMAND, ["extra"]) is True
 
     assert "CONTENT OF b_standards extra" in capsys.readouterr().out
 
 
 def test_alias_unknown_name_is_refused_and_lists_the_names_it_knows(two_packs, capsys):
-    """A name no pack defines is refused, and the landing list shows what does exist.
-
-    Mutant: `return matches` -> `return matches or [("b_standards", pack_path / "extra_content.py")]`
-    reddens it.
-    """
+    """A name no pack defines is refused, and the landing list shows what does exist."""
     with pytest.raises(CommandRefused) as refused:
         handle_command(ALIAS_COMMAND, ["nope"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -313,11 +228,7 @@ def test_alias_unknown_name_is_refused_and_lists_the_names_it_knows(two_packs, c
 
 
 def test_alias_landing_lists_each_name_once_across_every_pack(two_packs, capsys):
-    """The landing counts a name two packs define once, and still lists the second pack's own names.
-
-    Mutant: `for std_name in _discover_standards(pack_path):` ->
-    `for std_name in list(_discover_standards(pack_path))[:1]:` reddens it.
-    """
+    """The landing counts a name two packs define once, and still lists the second pack's own names."""
     assert handle_command(ALIAS_COMMAND, []) is True
 
     out = capsys.readouterr().out
@@ -328,10 +239,7 @@ def test_alias_landing_lists_each_name_once_across_every_pack(two_packs, capsys)
 
 
 def test_alias_ambiguous_name_refuses_to_guess(two_packs, capsys):
-    """Two packs defining one name → error + explicit form, no content loaded.
-
-    Mutant: `if len(matches) > 1:` -> `if len(matches) > 2:` reddens it.
-    """
+    """Two packs defining one name → error + explicit form, no content loaded."""
     with pytest.raises(CommandRefused) as refused:
         handle_command(ALIAS_COMMAND, ["dupe"])
     assert refused.value.code == 7, "refusing to guess is a refusal, and a refusal is not exit 0"
@@ -349,19 +257,8 @@ def test_alias_does_not_swallow_other_commands():
     assert handle_command("checklist", ["some_file.py"]) is False
 
 
-# ---------------------------------------------------------------------------
-# Embedded pointer canary
-# ---------------------------------------------------------------------------
-
-
 def test_custom_config_guide_pointer_actually_resolves(capsys):
-    """The guide command embedded in audit output must be a real, working command.
-
-    The whole point of the info line is that a reader can paste it and get the
-    standard. A command that errors makes the pointer worse than useless, so
-    this parses the shipped constant and runs it through handle_command for real.
-    Mutant: CUSTOM_CONFIG_GUIDE's `standard json_structure` -> `standard json_structur` reddens it.
-    """
+    """The guide command embedded in audit output must be a real, working command."""
     command_text = CUSTOM_CONFIG_GUIDE.split("Guide:", 1)[-1].strip()
     tokens = [str(token) for token in command_text.split()]
     assert tokens[:2] == ["drone", "@seedgo"], f"Pointer is not a drone command: {command_text}"
@@ -373,16 +270,8 @@ def test_custom_config_guide_pointer_actually_resolves(capsys):
     assert args[-1].replace("_", " ").upper() + " STANDARD" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------------------
-# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
-# ---------------------------------------------------------------------------
-
-
 def test_help_after_the_pack_name_does_not_display_content(capsys):
-    """`drone @seedgo standards_query aipass_standards --help` looked up a standard named '--help'.
-
-    Mutant: the query's `if wants_help(None, args):` -> `if False:` reddens it.
-    """
+    """`drone @seedgo standards_query aipass_standards --help` looked up a standard named '--help'."""
     assert handle_command(QUERY_COMMAND, ["aipass_standards", "--help"]) is True
 
     out = capsys.readouterr().out
@@ -391,10 +280,7 @@ def test_help_after_the_pack_name_does_not_display_content(capsys):
 
 
 def test_standards_query_still_displays_content_without_a_help_flag(capsys):
-    """The gate must not swallow the real command.
-
-    Mutant: the query's `if wants_help(None, args):` -> `if True:` reddens it.
-    """
+    """The gate must not swallow the real command."""
     assert handle_command(QUERY_COMMAND, ["aipass_standards", "json_structure"]) is True
 
     out = capsys.readouterr().out
@@ -403,10 +289,7 @@ def test_standards_query_still_displays_content_without_a_help_flag(capsys):
 
 
 def test_alias_help_after_the_standard_name_does_not_display_content(capsys):
-    """`drone @seedgo standard cli --help` printed the whole standard instead of the alias help.
-
-    Mutant: the alias's `if wants_help(None, args):` -> `if False:` reddens it.
-    """
+    """`drone @seedgo standard cli --help` printed the whole standard instead of the alias help."""
     assert handle_command(ALIAS_COMMAND, ["json_structure", "--help"]) is True
 
     out = capsys.readouterr().out
@@ -415,10 +298,7 @@ def test_alias_help_after_the_standard_name_does_not_display_content(capsys):
 
 
 def test_alias_still_displays_content_without_a_help_flag(capsys):
-    """The gate must not swallow the real command.
-
-    Mutant: the alias's `if wants_help(None, args):` -> `if True:` reddens it.
-    """
+    """The gate must not swallow the real command."""
     assert handle_command(ALIAS_COMMAND, ["json_structure"]) is True
 
     out = capsys.readouterr().out
@@ -427,10 +307,7 @@ def test_alias_still_displays_content_without_a_help_flag(capsys):
 
 
 def test_standards_query_does_not_answer_for_another_command(capsys):
-    """Ownership first: a help flag never makes a module claim a command it does not own.
-
-    Mutant: `if command != QUERY_COMMAND:` -> `if command == "never":` reddens it.
-    """
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
     assert handle_command("proof_query", ["--help"]) is False
 
     assert capsys.readouterr().out == ""

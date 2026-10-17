@@ -3,27 +3,13 @@
 # Description: runs the target's pytest and reads the verdict out of its output
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The pytest subprocess, and everything read back out of what it printed.
+"""The pytest subprocess, and everything read back out of what it printed.
 
-WHY THIS IS ITS OWN MODULE. Split out of ``gutting.py`` on the day that file
-crossed the branch's 1500-line architecture cap; this is the section its
-``EXECUTION`` banner already marked, moved whole. It owns one job: build the
-fixed invocation, run it under a wall-clock ceiling, and turn the bytes that
-come back into counts, passing nodeids, the contract-1 kill split and the
-baseline verdict. It knows nothing about mutation, coverage or campaigns, and
-it imports only ``mutation_shapes``.
-
-THE OUTPUT PARSING IS ITSELF A MEASUREMENT, WHICH IS WHY IT LIVES BESIDE THE
-INVOCATION. Both traps this module works around were found by running the probe
-rather than by reading pytest's docs - the terminal width that truncates a
-short-summary line out of its exception class, and the ``AssertionError: ``
-prefix pytest strips from every rewritten assert - and the constants that fix
-them sit here next to the patterns that depend on them. The full reasoning is
-in ``gutting``'s module docstring, which remains the probe's specification.
+Knows nothing about mutation, coverage or campaigns; imports only ``mutation_shapes``.
+``gutting``'s module docstring remains the probe's specification.
 """
 
 import os
@@ -37,33 +23,25 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_shapes import B
 
 LOG_TAG = "[AUDIT-TESTS]"
 
-#: Contract 1 buckets.
 KILL_CAUSE_ASSERTION = "assertion"
 KILL_CAUSE_ERROR = "error"
 KILL_CAUSE_UNKNOWN = "unknown"
 ASSERTION_EXCEPTION_NAME = "AssertionError"
 
-#: The invocation. Fixed shape, serial, no plugin autoload surprises. `-B` and
-#: `-p no:cacheprovider` are not tidiness: a suite reading a `.pyc` of a body
-#: that no longer exists measures a tree that does not exist either.
+#: Not tidiness: a suite reading a `.pyc` of a replaced body measures a tree that does not exist.
 NO_BYTECODE_ARG = "-B"
 PYTHON_ARGS: tuple = (NO_BYTECODE_ARG, "-m", "pytest")
 PYTEST_COMMON_ARGS: tuple = ("-p", "no:cacheprovider", "-q", "--no-header")
 
-#: `-rA` lists every PASSED nodeid, which is how the baseline captures the
-#: passing set under `-q` without giving up the quiet output.
+#: `-rA` lists every PASSED nodeid, so the baseline gets the passing set under `-q`.
 BASELINE_EXTRA_ARGS: tuple = ("--tb=line", "-rA")
 
 PYTHONPATH_VAR = "PYTHONPATH"
 NO_BYTECODE_VAR = "PYTHONDONTWRITEBYTECODE"
 NO_BYTECODE_VALUE = "1"
 
-#: MEASURED, NOT DECORATIVE. pytest appends the crash message to a short-summary
-#: line only if the whole line fits the terminal width, and a non-tty child gets
-#: 80 columns. Real nodeids are longer than that on their own, so every FAILED
-#: line arrived stripped of its exception class and the first campaign posted
-#: four honest `unknown` kills that were all AssertionError underneath. Widening
-#: the child's reported terminal is what makes the class readable at all.
+#: pytest drops the crash message from a short-summary line wider than the terminal
+#: (80 in a non-tty child); widening it is what keeps the exception class readable.
 TERMINAL_WIDTH_VAR = "COLUMNS"
 TERMINAL_WIDTH_VALUE = "300"
 
@@ -77,41 +55,23 @@ EXCEPTION_HEAD_PATTERN = re.compile(r"^(?P<exc>[A-Za-z_][A-Za-z0-9_.]*)\s*(?::|$
 TB_LINE_PATTERN = re.compile(r"^.+?:\d+:\s+(?P<detail>\S.*)$")
 ERROR_MARKER_PATTERN = re.compile(r"^E\s+(?P<detail>\S.*)$")
 
-#: THE SECOND MEASURED TRAP, AND THE WORSE ONE. pytest renders a crash message
-#: through `ExceptionInfo.exconly(tryshort=True)`, which strips the leading
-#: `AssertionError: ` from a REWRITTEN assert - so `assert 1 == 2` reaches every
-#: output mode with no class name on it at all. Reading that as "class unknown"
-#: would dump the single most important bucket into the unknown pile in every
-#: run. pytest only sets that strip text when the exception IS an AssertionError
-#: whose message begins `assert`, so the inverse rule is exact rather than a
-#: guess: a detail that starts with a bare `assert` is an AssertionError.
+#: `exconly(tryshort=True)` strips `AssertionError: ` from a rewritten assert, and only
+#: then; so a detail starting with a bare `assert` is exactly an AssertionError.
 ASSERTION_REWRITE_PREFIX = "assert"
 COUNT_PATTERN = re.compile(r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b")
 TOTALS_LINE_PATTERN = re.compile(r"\bin\s+\d+(?:\.\d+)?s\b")
 
 
-# =============================================================================
-# EXECUTION
-# =============================================================================
-
-
 def _pytest_command(target: SuiteTarget, test_args: Sequence[str], extra_args: Sequence[str]) -> List[str]:
     """The serial pytest invocation for one run.
 
-    `test_args` is the whole suite's path for a full run and an explicit list
-    of nodeids for a selected one. Both forms are relative to `target.cwd`,
-    which is the form pytest's own short-summary lines print.
+    `test_args` are relative to `target.cwd`, the form pytest's short-summary lines print.
     """
     return [str(target.python), *PYTHON_ARGS, *test_args, *PYTEST_COMMON_ARGS, *extra_args]
 
 
 def _pytest_environment(target: SuiteTarget, extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """The caller's PYTHONPATH laid over the current environment.
-
-    The isolated env is built elsewhere. All this does is point the child at
-    the PYTHONPATH it was handed and forbid bytecode, so a mutant can never be
-    shadowed by a `.pyc` of the body it replaced.
-    """
+    """The caller's PYTHONPATH laid over the current environment."""
     environment = dict(os.environ)
     environment[PYTHONPATH_VAR] = target.pythonpath
     environment[NO_BYTECODE_VAR] = NO_BYTECODE_VALUE
@@ -131,18 +91,7 @@ def _run_pytest(
 ) -> SuiteRun:
     """One pytest subprocess, with a wall-clock ceiling.
 
-    Args:
-        target: Where and how to run the suite.
-        extra_args: Run-specific arguments appended to the fixed command.
-        timeout_seconds: Ceiling for this single run.
-        test_args: Explicit nodeids to run; the whole suite when None.
-        extra_env: Environment entries this run needs on top of the standard
-            ones, such as the coverage pass's data-file location.
-
-    Returns:
-        The raw run. A timeout and a launch failure are both returned as
-        recorded states, never raised, because both are measurements about the
-        mutant rather than crashes of the campaign.
+    A timeout and a launch failure are returned as recorded states, never raised.
     """
     started = time.monotonic()
     selected = (target.test_arg,) if test_args is None else test_args
@@ -180,15 +129,7 @@ def _totals_line(stdout: str) -> str:
 
 
 def parse_counts(stdout: str) -> Dict[str, int]:
-    """The pass/fail/error/skip counts from a pytest run.
-
-    Args:
-        stdout: The run's standard output.
-
-    Returns:
-        A dict keyed `passed`, `failed`, `error`, `skipped` and friends. A
-        missing key means pytest printed no such count.
-    """
+    """The pass/fail/error/skip counts from a pytest run."""
     counts: Dict[str, int] = {}
     for amount, label in COUNT_PATTERN.findall(_totals_line(stdout)):
         counts[label.rstrip("s") if label.startswith("error") else label] = int(amount)
@@ -237,23 +178,7 @@ def _cause_from_detail(detail: str) -> Tuple[str, Optional[str]]:
 def classify_kill(stdout: str, stderr: str) -> Tuple[str, Optional[str], Optional[str]]:
     """Split one kill by exception class, as contract 1 requires.
 
-    An `AssertionError` means a test looked at what the function produced and
-    said it was wrong. Any other class usually means the gutted `None` reached
-    a caller that could not use it, which is the duck-typing collapse this
-    split exists to expose. A class that cannot be read from pytest's output is
-    reported `unknown` and counted on its own; it is never guessed into either
-    side.
-
-    A crash message beginning with a bare `assert` is an AssertionError whose
-    class name pytest stripped on the way out - see ASSERTION_REWRITE_PREFIX.
-    That is a rule pytest's own behaviour makes exact, not an inference.
-
-    Args:
-        stdout: The mutant run's standard output.
-        stderr: The mutant run's standard error.
-
-    Returns:
-        `(kill_cause, exception_class_or_None, first_failing_nodeid_or_None)`.
+    An unreadable class is `unknown`, counted on its own and never guessed into either side.
     """
     lines = stdout.splitlines() + stderr.splitlines()
     detail, nodeid = _detail_from_summary(lines)
@@ -269,19 +194,7 @@ def classify_kill(stdout: str, stderr: str) -> Tuple[str, Optional[str], Optiona
 def baseline(target: SuiteTarget, *, timeout_seconds: int = DEFAULT_BASELINE_TIMEOUT_SECONDS) -> BaselineResult:
     """Run the unmutated suite once and decide whether it can carry a verdict.
 
-    A RED BASELINE IS A REFUSAL, NOT A ZERO. A mutant is killed when the suite
-    goes red; against a suite that is already red every mutant is killed for
-    free and every survivor is an accident of ordering. There is no number to
-    report in that world, so this returns `green=False` with a `refusal_reason`
-    and the campaign publishes the refusal instead of a rate.
-
-    Args:
-        target: Where and how to run the suite.
-        timeout_seconds: Ceiling for the single baseline run.
-
-    Returns:
-        The baseline counts, the passing nodeids, and a refusal reason when the
-        suite cannot support a measurement.
+    A red baseline is a refusal, not a zero: against it every mutant is killed for free.
     """
     return _baseline_from_run(_run_pytest(target, BASELINE_EXTRA_ARGS, timeout_seconds), timeout_seconds)
 

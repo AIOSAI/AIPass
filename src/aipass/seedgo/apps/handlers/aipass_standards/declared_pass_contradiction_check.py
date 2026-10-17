@@ -3,61 +3,12 @@
 # Description: Declared Pass Contradiction Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-09-23
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Declared Pass Contradiction Standards Checker Handler
+"""Declared Pass Contradiction Standards Checker Handler
 
-Crack class H from the 2026-09-22 eyes-on review of @backup's tests. A test
-file's declared pass -- the ``# seedgo: no-test-needed(X) -- prose`` block that
-test template v1 item 4 asks for -- is a promise about what this file does NOT
-cover. The promise is worth exactly as much as its accuracy, and two ways of
-breaking it are mechanical.
-
-  THE DECLARATION IS CONTRADICTED. The file says a constant's value needs no
-  test, and then asserts that value as a literal. ``TRACKER_FILENAME``'s string
-  is declared untested in ``test_drive_pipeline.py`` while three asserts pin
-  ``"drive_tracker.json"``.
-
-  THE DECLARATION NAMES NOTHING. ``test_ceiling_guard.py`` declares
-  ``DEFAULT_MAX_SIZE_GB``; the constant is ``DEFAULT_MAX_TOTAL_GB``. A promise
-  about a symbol that does not exist covers nothing at all, and the real
-  constant stays uncovered behind it.
-
-THE JUDGEMENT THIS RULE MAKES, and it is the whole rule: USING a declared
-constant BY NAME is consistent with declaring it untested. ``assert CURE in
-message`` survives any change to ``CURE``'s text -- it pins the wiring, not the
-prose. ASSERTING ITS VALUE as a literal does not: ``assert x == "drive_tracker
-.json"`` pins exactly the thing the file said it would not. So the rule reads
-the constant's value out of the branch's ``apps/`` and looks for that literal
-inside an assert in a test body. A bare mention of the name is never convicted.
-
-SEARCH THE SOURCE TEXT FOR AN ABSENT NAME, NOT THE AST's NAMES. A declared
-symbol can be an environment variable (a string, never an identifier), an
-annotated dataclass field, or a directory segment inside a path. Collecting
-def/class/Name/Attribute nodes missed all three and convicted 86 live symbols;
-a word-boundary search of ``apps/`` leaves 3, and all three are real.
-
-CHECK FIRST, measured 2026-09-23 over the fleet's 572 test files:
-
-  * 37 files carry a declared pass at all, 137 lines between them.
-  * 7 files, 8 scored: 5 contradicted constants, 3 absent names.
-  * Reported with a count and charged to nobody, 106 in all: 39 lines that
-    name no symbol (``mock call arguments and assertion shapes`` is prose, and
-    prose is a legitimate declaration) and 67 dotted stdlib names
-    (``Path.resolve``, ``os.scandir``), where a test's incidental use of the
-    call is indistinguishable from testing it. Plus 3 declared LIBRARIES whose call
-    feeds an assert. That last one is not scored on purpose --
-    ``no_product_call`` already convicts ``test_ignore_pathspec.py:46``, the
-    one case where the library really is the subject, and the other two files
-    score 100 there, which proves their library call is the test's reading
-    tool rather than its subject. A second verdict on the same defect sends
-    the owner to the same place twice.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: both scored forms are contradictions
-between two statements in the same file. There is no threshold and nothing to
-tune; the cure is to fix the declaration or drop the assert.
+Reference: declared_pass_contradiction.md
 """
 
 import ast
@@ -87,10 +38,8 @@ CONSTANT = "constant"
 UPPER = re.compile(r"\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{3,})\b")
 SNAKE = re.compile(r"\b(_?[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
 
-#: A dotted name in the prose: reported, never scored.
 DOTTED = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
 
-#: Covered-elsewhere references name a test file, not a symbol under test.
 ELSEWHERE = "test_"
 
 CURE_PINNED = "assert the constant by name, or drop the line that declares it untested"
@@ -100,8 +49,7 @@ CURE_ABSENT = "name the symbol that exists, or drop the line"
 def _parse(source: str, filename: str = "<unknown>") -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
     """
     try:
         return ast.parse(source, filename=filename)
@@ -142,10 +90,8 @@ def _branch_root(path: Path) -> Path | None:
 def product_facts(branch_root: Path) -> Tuple[Dict[str, object], str]:
     """(module-level constants and their values, the whole apps/ source text).
 
-    The text is what answers "does this name exist": a name can be an env-var
-    string, an annotated field, or a path segment, and only the text sees all
-    three. ``.archive`` and the other SOURCE_SKIP_DIRS are not apps/: a name
-    only a retired file defines exists nowhere the product runs.
+    The text answers "does this name exist": an env-var string, an annotated field or a
+    path segment is only visible there. SOURCE_SKIP_DIRS are not apps/.
     """
     values: Dict[str, object] = {}
     chunks: List[str] = []
@@ -253,15 +199,7 @@ def _clean_message(reported: int) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file's declared pass against what the file actually does.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file's declared pass against what the file actually does."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -278,8 +216,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, _clean_message(reported)), 100)
 
     # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per declaration would show the
-    # first and hide the rest behind a count.
+    # check and appends "(+N more)", so one check per declaration would hide the rest.
     detail = "\n".join(f"{path.name}:{line} declares {name} needs no test, but {why}" for line, name, why in findings)
 
     json_handler.log_operation(

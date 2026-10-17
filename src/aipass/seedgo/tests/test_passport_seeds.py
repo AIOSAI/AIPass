@@ -3,50 +3,15 @@
 # Description: Repo pins for tracked passport seeds - shape, leak-guard, naming
 # Version: 1.0.4
 # Created: 2026-08-28
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the passport seeds that spawn/apps/modules/export_seeds.py writes (TDPLAN-0017)."""
 
-# Pins for the tracked passport seeds (TDPLAN-0017).
-#
-# A seed is ``src/aipass/<branch>/.aipass/passport.seed.json``: the branch's
-# evolved identity, TRACKED, so a fresh clone receives a soul instead of a blank
-# template. The live ``.trinity/passport.json`` stays gitignored -- the ignore IS
-# the pull protection -- and the seed is its shipped counterpart, MINUS the facts
-# that belong to one machine.
-#
-# Three rules, and the middle one is the reason this file exists
-# --------------------------------------------------------------
-# 1. SHAPE -- a seed parses and carries the 2.0 passport shape, because an
-#    invalid seed reaching mint would write a broken passport onto a new install.
-# 2. THE LEAK-GUARD -- no seed carries a machine-local field. ``registry_id``,
-#    ``citizen_id`` and ``registered`` are facts about one installation's
-#    registry, and ``citizenship.seed`` is the mint stamp a LIVE passport gets
-#    when it is born FROM a seed; a seed carrying its own stamp is a snake eating
-#    its tail. Live passports may carry all four. Seeds never may: these files are
-#    pushed to a public repo, so a leak here is published, and published is
-#    forever even after a later commit removes it.
-# 3. NAMING -- ``branch_info.branch_name`` matches the branch directory the seed
-#    sits in, so a copy-paste export cannot hand one branch another's identity.
-#
-# The guard is deliberately INDEPENDENT of the machinery it guards: it re-reads
-# the files from disk and re-derives the rules here rather than importing spawn's
-# exporter. A guard that asks the exporter what it exported would agree with it
-# about a bug.
-#
-# Zero seeds is a SKIP, never a pass
-# ----------------------------------
-# The exporter (``drone @spawn export-seeds``) lands in a parallel lane, so this
-# suite is written before its subject exists. An empty glob skips loudly and
-# names why. Because a suite that skips forever is itself a silent pass, the
-# discovery is pinned separately against a synthetic tree, and every rule is
-# proved RED against a synthetic violating seed -- so these pins are known to
-# bite before the first real seed is ever written.
-#
-# What is NOT judged here: extra top-level sections, prose, or dates. The seed is
-# a passport's identity carried forward; only the shape that mint depends on, the
-# fields that must never ship, and the name are pinned.
+# A seed (src/aipass/<branch>/.aipass/passport.seed.json) is a branch's identity, tracked and pushed to a
+# public repo. Rules: SHAPE (mint reads it), LEAK-GUARD (no machine-local field: a leak is published
+# for good), NAMING (branch_name matches its directory). The guard re-derives the rules rather than
+# importing spawn's exporter, which would agree with itself about a bug. Zero seeds is a SKIP, never a pass.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json's parse of a seed; a seed that does not parse fails SHAPE here
@@ -56,14 +21,11 @@ from pathlib import Path
 
 import pytest
 
-# The machine-local set, per the TDPLAN ruling. Each name is a fact about one
-# installation, never about the agent: the first three are the registry's own
-# bookkeeping and the fourth is the mint stamp, which records WHICH seed a live
-# passport was born from and is therefore meaningless inside a seed.
+# Facts about one installation, never the agent: the registry's bookkeeping, and the mint stamp
+# recording which seed a live passport was born from, meaningless inside a seed.
 _MACHINE_LOCAL_FIELDS = ("registry_id", "citizen_id", "registered", "seed")
 
-# The 2.0 passport sections. document_metadata carries the schema version; the
-# other three are the identity itself.
+# The 2.0 passport sections; document_metadata carries the schema version.
 _REQUIRED_SECTIONS = ("document_metadata", "branch_info", "citizenship", "identity")
 
 _SCHEMA_VERSION = "2.0.0"
@@ -78,11 +40,6 @@ _NO_SEEDS_REASON = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
-
 def _repo_root() -> Path | None:
     """Walk up from this file to the repo root -- the dir holding src/aipass."""
     for parent in Path(__file__).resolve().parents:
@@ -92,24 +49,14 @@ def _repo_root() -> Path | None:
 
 
 def _seed_paths(root: Path | None) -> list[Path]:
-    """Every tracked seed under *root*, sorted by branch name.
-
-    Exactly one level deep on purpose: ``src/aipass/<branch>/.aipass/``. Spawn's
-    class templates live deeper and are not citizens, so they must not be
-    measured as though they were.
-    """
+    """Every tracked seed under *root*, sorted by branch name."""
     if root is None:
         return []
     return sorted(root.glob(f"src/aipass/*/{_SEED_DIR}/{_SEED_NAME}"))
 
 
 def _seed_params() -> list:
-    """One param per seed on disk, or a single sentinel that skips.
-
-    pytest generates NO tests from an empty parametrize list, and no tests is
-    indistinguishable from passing tests in a summary line. The sentinel keeps
-    the absence visible in the report.
-    """
+    """One param per seed on disk, or a single sentinel that skips."""
     seeds = _seed_paths(_repo_root())
     if not seeds:
         return [pytest.param(None, id="no-seeds-on-disk")]
@@ -122,12 +69,7 @@ def _branch_of(seed: Path) -> str:
 
 
 def _load(seed: Path | None):
-    """Read one seed, skipping when there are none yet.
-
-    Returns the parsed object. Both failure modes are re-raised as an
-    AssertionError naming the FILE, because a bare OSError or JSONDecodeError
-    in the report tells a reader a test crashed rather than which seed is bad.
-    """
+    """Read one seed, skipping when there are none yet."""
     if seed is None:
         pytest.skip(_NO_SEEDS_REASON)
     try:
@@ -140,20 +82,8 @@ def _load(seed: Path | None):
         raise AssertionError(f"{seed}: not valid JSON ({exc})") from exc
 
 
-# ---------------------------------------------------------------------------
-# The three rules, as pure functions over a parsed seed
-# ---------------------------------------------------------------------------
-
-
 def _leaks(data) -> list[str]:
-    """Every machine-local field in *data*, as a dotted path, deepest first found.
-
-    The whole document is walked rather than just ``citizenship``: a leak that
-    moved is still a leak, and an export bug that writes ``citizen_id`` under
-    ``branch_info`` publishes exactly as much as one that leaves it in place.
-    Keys are matched, never values -- a passport whose PROSE mentions a citizen
-    id is a different problem and not this guard's to invent.
-    """
+    """Every machine-local field in *data*, as a dotted path, deepest first found."""
     found: list[str] = []
 
     def walk(node, path: str) -> None:
@@ -172,12 +102,7 @@ def _leaks(data) -> list[str]:
 
 
 def _shape_violations(data) -> list[str]:
-    """Why *data* is not a 2.0 passport, or an empty list.
-
-    Presence and type of the four sections plus the schema version. Mint reads
-    these; anything softer would let a seed through that cannot become a
-    passport.
-    """
+    """Why *data* is not a 2.0 passport, or an empty list."""
     if not isinstance(data, dict):
         return [f"top level must be an object, found {type(data).__name__}"]
 
@@ -202,11 +127,6 @@ def _name_violation(data, branch: str) -> str:
     if declared == branch:
         return ""
     return f"branch_info.branch_name is {declared!r} but the seed sits in {branch!r}/"
-
-
-# ---------------------------------------------------------------------------
-# Synthetic fixtures -- the deviant corpus, since the live population is zero
-# ---------------------------------------------------------------------------
 
 
 def _clean_seed(branch: str = "testbranch") -> dict:
@@ -251,11 +171,7 @@ def _clean_seed(branch: str = "testbranch") -> dict:
 
 @pytest.fixture
 def planted(tmp_path):
-    """Write a synthetic seed into a synthetic tree and hand back its path.
-
-    The tree mirrors the real layout exactly -- ``src/aipass/<branch>/.aipass/``
-    -- so discovery is exercised by the same glob the repo pins use.
-    """
+    """Write a synthetic seed into a synthetic tree and hand back its path."""
 
     def _plant(data, branch: str = "testbranch") -> Path:
         seed = tmp_path / "src" / "aipass" / branch / _SEED_DIR / _SEED_NAME
@@ -267,36 +183,11 @@ def planted(tmp_path):
     return _plant
 
 
-# ===========================================================================
-# A. THE REPO PINS -- every seed on disk, one param per branch
-# ===========================================================================
-
-
 class TestEverySeedInTheRepo:
-    """The live population. Skips loudly while the exporter is still being
-    built; the moment a seed lands, each rule reports per branch by name.
-    """
+    """The live population: skips loudly while no seed exists; each rule reports per branch by name."""
 
     def test_the_population_is_every_citizen_and_not_the_sentinel(self):
-        """The table the three tests below iterate, counted before they run.
-
-        VANISHING-TABLE (empty_parametrize, 2026-09-07). Those three build their
-        cases at COLLECTION time from `_seed_params()`. If the glob ever stops
-        matching - a moved seed directory, a renamed file, a repo root resolved
-        one level off - the table collapses to the single `no-seeds-on-disk`
-        sentinel, every one of them reports SKIPPED, and a suite that is no
-        longer checking a single passport in the fleet still reads green.
-
-        `_seed_params` already refuses to hand back an EMPTY list, which is the
-        right half of the cure and the reason this file was never at risk of the
-        worst spelling. What it cannot do is say whether the rows it produced
-        are the fleet. That claim is here: one seed per citizen, where a citizen
-        is a branch directory carrying `.aipass/`, so the count follows the fleet
-        instead of being a literal somebody has to remember to bump.
-
-        Mutant: _seed_paths swaps the last seed for a copy of the first (same count,
-        wrong branch) in tests/test_passport_seeds.py — killed; the count alone survived it.
-        """
+        """The table the three tests below iterate, counted before they run."""
         root = _repo_root()
         assert root is not None, "the repo root did not resolve - every seed test below would skip"
 
@@ -322,9 +213,7 @@ class TestEverySeedInTheRepo:
 
     @pytest.mark.parametrize("seed", _seed_params())
     def test_the_seed_carries_no_machine_local_field(self, seed):
-        """THE LEAK-GUARD. A seed is pushed; a machine-local field in one is
-        published identity bookkeeping that no clone should ever receive.
-        """
+        """THE LEAK-GUARD: a machine-local field in a pushed seed is published bookkeeping no clone should get."""
         data = _load(seed)
 
         leaks = _leaks(data)
@@ -343,16 +232,8 @@ class TestEverySeedInTheRepo:
         assert violation == "", f"{seed}: {violation}"
 
 
-# ===========================================================================
-# B. THE GUARD BITES -- proved against a synthetic corpus, live population zero
-# ===========================================================================
-
-
 class TestTheLeakGuardBites:
-    """Red-first, and it has to be: with no seeds on disk the repo pins above
-    skip, so nothing else in this file would prove the rule can see. Each field
-    is planted separately because each could be missed alone.
-    """
+    """Red-first: each machine-local field is planted separately, because each could be missed alone."""
 
     @pytest.mark.parametrize(
         "field, value",
@@ -373,9 +254,7 @@ class TestTheLeakGuardBites:
         assert leaks == [f"citizenship.{field}"]
 
     def test_a_leak_that_moved_out_of_citizenship_is_still_found(self, planted):
-        """The walk is over the whole document, not over one section. An export
-        bug that writes the id somewhere else publishes just as much.
-        """
+        """The walk covers the whole document, not one section: an id written elsewhere publishes just as much."""
         data = _clean_seed()
         data["branch_info"]["citizen_id"] = "a41235f5-1ca9-489f-8191-b106d398c0fa"
         seed = planted(data)
@@ -393,12 +272,7 @@ class TestTheLeakGuardBites:
         assert sorted(leaks) == ["citizenship.citizen_id", "citizenship.registered"]
 
     def test_the_mint_stamp_is_a_leak_in_a_seed_though_it_is_canonical_in_a_passport(self, planted):
-        """The asymmetry, pinned on purpose. seedgo's trinity checker accepts
-        ``citizenship.seed`` in a live passport (it never reads passport content
-        at all -- see TestTheMintStampIsNotAViolation in test_trinity_check).
-        Here the same field is a violation, because a seed that stamps itself
-        claims to have been minted from something.
-        """
+        """The asymmetry: ``citizenship.seed`` is fine in a live passport and a violation in a seed."""
         data = _clean_seed()
         data["citizenship"]["seed"] = {"version": "1.0.0", "sha256": "0" * 64}
         seed = planted(data)
@@ -412,11 +286,7 @@ class TestTheLeakGuardBites:
         assert _leaks(_load(seed)) == []
 
     def test_a_key_named_like_a_leak_deeper_in_the_identity_is_still_reported(self, planted):
-        """Deliberately strict, and stated rather than discovered later: the
-        walk matches key NAMES at any depth, so a nested ``seed`` key inside
-        identity would be flagged too. No live passport has one; if a legitimate
-        use ever appears, this test is where the exception gets argued.
-        """
+        """Deliberately strict: key NAMES match at any depth, so a nested ``seed`` key in identity is flagged."""
         data = _clean_seed()
         data["identity"]["provenance"] = {"seed": "hand-written"}
         seed = planted(data)
@@ -425,9 +295,7 @@ class TestTheLeakGuardBites:
 
 
 class TestTheShapeGuardBites:
-    """An invalid seed must never reach mint: it would write a broken passport
-    into a fresh install, where nobody is watching.
-    """
+    """An invalid seed must never reach mint: it would write a broken passport into a fresh install."""
 
     @pytest.mark.parametrize("section", _REQUIRED_SECTIONS)
     def test_a_missing_section_is_named(self, planted, section):
@@ -512,16 +380,8 @@ class TestTheNameGuardBites:
         assert _name_violation(_load(seed), _branch_of(seed)) == ""
 
 
-# ===========================================================================
-# C. THE SKIP IS NOT A HIDING PLACE
-# ===========================================================================
-
-
 class TestDiscoveryItself:
-    """A suite that skips because its glob is wrong would report green forever
-    -- the same silent-pass shape the trinity standard exists to end. So the
-    glob is pinned against a synthetic tree, where seeds are known to exist.
-    """
+    """The glob is pinned against a synthetic tree, so a wrong glob cannot skip green forever."""
 
     def test_the_glob_finds_a_seed_in_a_real_shaped_tree(self, planted, tmp_path):
         planted(_clean_seed(branch="alpha"), branch="alpha")
@@ -532,9 +392,7 @@ class TestDiscoveryItself:
         assert [_branch_of(path) for path in found] == ["alpha", "beta"]
 
     def test_a_seed_deeper_than_one_level_is_not_a_citizen_seed(self, tmp_path):
-        """Spawn's class templates sit deeper and are not branches. Measuring
-        them would fail the branch-name rule for a file that never claimed one.
-        """
+        """Spawn's class templates sit deeper and are not branches, so they are not measured."""
         deep = tmp_path / "src" / "aipass" / "spawn" / "templates" / "specialist" / _SEED_DIR / _SEED_NAME
         deep.parent.mkdir(parents=True)
         deep.write_text("{}", encoding="utf-8")
@@ -548,9 +406,7 @@ class TestDiscoveryItself:
         assert _seed_paths(None) == []
 
     def test_the_repo_root_resolves_from_this_file(self):
-        """If this ever returns None inside the repo, every pin above skips and
-        the suite protects nothing.
-        """
+        """_repo_root resolves inside the repo; None would make every pin above skip."""
         root = _repo_root()
 
         assert root is not None

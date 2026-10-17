@@ -3,18 +3,10 @@
 # Description: Handler Encapsulation Standards Checker
 # Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Handler Encapsulation Standards Checker
-
-Validates that handlers are properly encapsulated:
-- No cross-branch handler imports (Branch A importing Branch B's handlers)
-- No cross-package handler imports (handlers/X importing handlers/Y)
-- Handlers should be accessed through module entry points, not directly
-- Handler security guards present in handlers/__init__.py (inspect.stack guard)
-"""
+"""Handler Encapsulation Standards Checker"""
 
 import ast
 import re
@@ -29,12 +21,9 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.seedgo.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
-# Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
-# Applies everywhere since DPLAN-0404 leg 1, but a test file is asked ONE thing.
-# Reaching into its own branch's internals is what a unit test is FOR (247 of 456
-# fleet test files once failed the production rules for doing their job), so a
-# test is judged only on another branch's handlers: see check_test_file.
+# A test file is asked ONE thing: reaching into its own branch's internals is what a
+# unit test is for, so a test is judged only on another branch's handlers (check_test_file).
 APPLIES_TO = "everywhere"
 
 # Cross-branch/cross-package handler imports are import-statement checks, so a
@@ -54,11 +43,7 @@ def _find_registry() -> Path:
 
 
 def _infer_branch_from_path(file_path: str) -> Optional[Dict]:
-    """Infer branch info from filesystem path when registry is unavailable.
-
-    Looks for the ``src/aipass/{branch}/apps/`` or ``{branch}/apps/`` pattern
-    and returns a minimal branch dict with name and path.
-    """
+    """Infer branch info from filesystem path when registry is unavailable."""
     resolved = Path(file_path).resolve()
     parts = resolved.parts
     for i, part in enumerate(parts):
@@ -91,7 +76,6 @@ def get_branch_from_path(file_path: str) -> Optional[Dict]:
         registry_dir = registry_path.parent
         resolved_path = str(Path(file_path).resolve())
 
-        # Sort branches by path length (longest first) to match most specific
         branches = sorted(registry.get("branches", []), key=lambda b: len(b.get("path", "")), reverse=True)
 
         for branch in branches:
@@ -110,26 +94,16 @@ def get_branch_from_path(file_path: str) -> Optional[Dict]:
 
 
 def extract_branch_from_import(import_line: str) -> Optional[str]:
-    """
-    Extract branch name from an import statement
-
-    Examples:
-        'from flow.apps.handlers.plan.validator import X' -> 'flow'
-        'from aipass.api.apps.handlers.openrouter import X' -> 'api'
-        'from apps.handlers.json import X' -> None (local, no branch)
-    """
-    # Pattern 1: branch.apps.handlers...
+    """Extract branch name from an import statement"""
     match = re.search(r"from\s+(\w+)\.apps\.handlers", import_line)
     if match:
         return match.group(1)
 
-    # Pattern 2: aipass.branch[.nested...].apps.handlers... -- handlers anywhere
-    # under a branch's tree are that branch's (skills' lib/telegram, 10-08)
+    # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.telegram).
     match = re.search(r"from\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
 
-    # Pattern 3: import branch.apps.handlers...
     match = re.search(r"import\s+(\w+)\.apps\.handlers", import_line)
     if match:
         return match.group(1)
@@ -138,14 +112,7 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
 
 
 def extract_handler_package(import_line: str) -> Optional[str]:
-    """
-    Extract the handler package name from an import
-
-    Examples:
-        'from apps.handlers.json.json_handler import X' -> 'json'
-        'from apps.handlers.dashboard.refresh import X' -> 'dashboard'
-        'from flow.apps.handlers.plan.validator import X' -> 'plan'
-    """
+    """Extract the handler package name from an import"""
     match = re.search(r"apps\.handlers\.(\w+)", import_line)
     if match:
         return match.group(1)
@@ -156,28 +123,18 @@ def _posix(file_path: str) -> str:
     """The path as a string with forward slashes, whatever host handed it in.
 
     The checks below search the path for "apps/handlers/" and "apps/modules/";
-    Windows hands in C:\\...\\apps\\modules\\door.py, which matched neither,
-    and a door was judged as an entry point on Windows only (PR #774, round
-    two). Same idiom as apps/handlers/__init__.py.
+    a Windows path with backslashes matches neither.
     """
     return str(file_path).replace("\\", "/")
 
 
 def get_file_handler_package(file_path: str) -> Optional[str]:
-    """
-    Get the handler package a file belongs to
-
-    Examples:
-        '/home/.../apps/handlers/json/json_handler.py' -> 'json'
-        'C:\\...\\apps\\handlers\\json\\json_handler.py' -> 'json'
-        '/home/.../apps/modules/something.py' -> None (not a handler)
-    """
+    """Get the handler package a file belongs to"""
     path_str = _posix(file_path)
 
     if "apps/handlers/" not in path_str:
         return None
 
-    # Extract package after apps/handlers/
     match = re.search(r"apps/handlers/(\w+)", path_str)
     if match:
         return match.group(1)
@@ -256,26 +213,16 @@ def _calls_the_guard(content: str) -> bool:
 
 
 def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
-    """
-    Check that a branch's handlers/__init__.py contains a security guard.
-
-    The guard uses inspect.stack() to block cross-branch handler imports
-    at runtime. Branches without this guard have unprotected handlers.
-
-    Returns a check dict, or None if the check is not applicable
-    (e.g., no handlers/ directory in the branch).
-    """
+    """Check that a branch's handlers/__init__.py contains a security guard."""
     branch_path = _resolve_branch_path(module_path)
     if branch_path is None:
         return None
 
     branch_key = str(branch_path)
 
-    # Return cached result if already checked this branch
     if branch_key in _handler_guard_cache:
         return _handler_guard_cache[branch_key]
 
-    # Check if bypassed
     init_path = branch_path / "apps" / "handlers" / "__init__.py"
     if is_bypassed(str(init_path), "encapsulation", bypass_rules=bypass_rules):
         result = {"name": "Handler security guard", "passed": True, "message": "Handler guard check bypassed"}
@@ -284,13 +231,11 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
 
     handlers_dir = branch_path / "apps" / "handlers"
     if not handlers_dir.is_dir():
-        # No handlers directory — check not applicable
         _handler_guard_cache[branch_key] = None
         return None
 
-    # The package above the guard (DPLAN-0404 leg 1): an apps/__init__.py that
-    # imports handlers makes itself the first frame the guard sees, so every
-    # caller reads as kin. One line in all 18 branches since 2026-04-25.
+    # An apps/__init__.py that imports handlers makes itself the first frame the guard
+    # sees, so every caller reads as kin.
     eager = _apps_package_imports_handlers(branch_path / "apps" / "__init__.py")
     if eager is not None:
         _handler_guard_cache[branch_key] = eager
@@ -305,7 +250,6 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
         _handler_guard_cache[branch_key] = result
         return result
 
-    # Read the init file and check for guard patterns
     try:
         content = init_path.read_text(encoding="utf-8")
     except Exception:
@@ -314,10 +258,8 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
         _handler_guard_cache[branch_key] = result
         return result
 
-    # Count non-empty, non-comment lines
     code_lines = [ln for ln in content.split("\n") if ln.strip() and not ln.strip().startswith("#")]
 
-    # Guard detection: look for key patterns
     guard_patterns = ["_guard_branch_access", "inspect.stack", "ImportError"]
     has_guard = any(pattern in content for pattern in guard_patterns)
 
@@ -340,7 +282,6 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
             "message": "Missing handler security guard — cross-branch imports unprotected",
         }
     else:
-        # File has substantial code but no recognized guard patterns
         result = {
             "name": "Handler security guard",
             "passed": False,
@@ -352,25 +293,10 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if file respects handler encapsulation
-
-    Args:
-        module_path: Path to Python file to check
-        bypass_rules: Optional list of bypass rules to apply
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if file respects handler encapsulation"""
     checks = []
     path = Path(module_path)
 
-    # Check if entire standard is bypassed
     if is_bypassed(module_path, "encapsulation", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -379,7 +305,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ENCAPSULATION",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -388,7 +313,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ENCAPSULATION",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -411,33 +335,27 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         )
         return {"passed": test_check["passed"], "checks": [test_check], "score": score, "standard": "ENCAPSULATION"}
 
-    # Detect this file's context
     file_branch = get_branch_from_path(module_path)
     file_branch_name = file_branch.get("name", "").lower() if file_branch else None
     file_handler_package = get_file_handler_package(module_path)
     is_handler_file = file_handler_package is not None
     is_module_file = "apps/modules/" in _posix(module_path)
 
-    # Check 1: Cross-branch handler imports
     cross_branch_check = check_cross_branch_imports(lines, module_path, file_branch_name, bypass_rules)
     checks.append(cross_branch_check)
 
-    # Check 2: Cross-package handler imports (only for handler files)
     if is_handler_file:
         cross_package_check = check_cross_package_imports(lines, module_path, file_handler_package, bypass_rules)
         checks.append(cross_package_check)
 
-    # Check 3: Direct handler imports from non-handler/non-module files
     if not is_handler_file and not is_module_file:
         direct_import_check = check_direct_handler_imports(lines, module_path, bypass_rules)
         checks.append(direct_import_check)
 
-    # Check 4: Handler security guard presence (branch-level, cached)
     guard_check = check_handler_guard(module_path, bypass_rules)
     if guard_check is not None:
         checks.append(guard_check)
 
-    # Calculate score
     if not checks:
         return {
             "passed": True,
@@ -459,24 +377,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 def check_cross_branch_imports(
     lines: List[str], module_path: str, file_branch: Optional[str], bypass_rules: list | None = None
 ) -> Dict:
-    """
-    Check for cross-branch handler imports
-
-    BAD: from flow.apps.handlers.plan.validator import X (when not in flow branch)
-    BAD: from api.apps.handlers.openrouter.client import X (when not in api branch)
-
-    EXCEPTIONS:
-    - Prax logger (from prax.apps.modules.logger) - allowed everywhere
-    - CLI services (from cli.apps.modules) - allowed everywhere
-    - Same branch imports - allowed
-    """
+    """Check for cross-branch handler imports"""
     violations = []
 
     in_docstring = False
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Track docstrings
         if stripped.startswith('"""') or stripped.startswith("'''"):
             quote_marker = '"""' if stripped.startswith('"""') else "'''"
             quote_count = stripped.count(quote_marker)
@@ -488,50 +395,38 @@ def check_cross_branch_imports(
         if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
-        # Check for imports
         if not ("from " in stripped or "import " in stripped):
             continue
 
-        # Skip string literals - check if line is a string or apps.handlers is inside quotes
         if stripped.startswith('"') or stripped.startswith("'"):
             continue
         if '"from ' in stripped or "'from " in stripped:
             continue
-        # Check if apps.handlers appears inside quotes (documentation examples)
         if '"apps.handlers' in stripped or "'apps.handlers" in stripped:
             continue
         if "apps.handlers" in stripped:
-            # Check if it's inside a string by looking for quotes before it
             handler_pos = stripped.find("apps.handlers")
             before = stripped[:handler_pos]
-            # If there's an odd number of quotes before, it's inside a string
             if before.count('"') % 2 == 1 or before.count("'") % 2 == 1:
                 continue
 
-        # Extract code part (before comment)
         code_part = stripped.split("#")[0] if "#" in stripped else stripped
 
-        # Check for handler imports
         if "apps.handlers" not in code_part:
             continue
 
-        # Check if bypassed
         if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
             continue
 
-        # Extract the branch being imported from
         imported_branch = extract_branch_from_import(code_part)
 
         if imported_branch is None:
             # Local import (from apps.handlers.X) - will be caught by cross-package check
             continue
 
-        # Allow same-branch imports
         if file_branch and imported_branch.lower() == file_branch.lower():
             continue
 
-        # Disallow cross-branch handler imports (even from service branches)
-        # Service branches should be accessed via modules, not handlers
         violations.append(
             {
                 "line": i,
@@ -541,9 +436,8 @@ def check_cross_branch_imports(
             }
         )
 
-    # A target named as a call's string is an import too (DPLAN-0404 leg 1).
-    # The line reader above skips quoted handlers by design; the parse tree
-    # tells an import argument from prose, so the acquittal stands.
+    # A target named as a call's string is an import too; the parse tree tells an import
+    # argument from prose, where the line reader above skips quoted handlers by design.
     violations.extend(_string_violations(lines, module_path, file_branch, bypass_rules))
     violations.sort(key=lambda v: v["line"])
 
@@ -570,8 +464,7 @@ def _target_branch(target: str) -> str:
 
     ``aipass.<branch>.`` names it whatever nests below: skills' telegram lives at
     ``aipass.skills.lib.telegram.apps.handlers`` and is skills' own, where the
-    segment before ``apps`` would answer "telegram" (measured 10-07: skills'
-    own test convicted, daemon's patch of it named the wrong owner).
+    segment before ``apps`` would answer "telegram".
     """
     parts = target.split(".")
     if parts[0] == "aipass" and len(parts) > 1:
@@ -639,22 +532,8 @@ def _import_violations(
 def check_test_file(content: str, lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
     """A test is kin to its own branch only (DPLAN-0404 leg 1).
 
-    Reaching into a module's internals is what a unit test is for, so the
-    same-branch shapes the production lane convicts (direct handler imports,
-    the guard) are not asked here. Another branch's handlers are another
-    matter: a test that imports or patches them is a cross-branch caller like
-    any product file, and it is what keeps the import alive after the
-    product side moves to the door.
-
-    Args:
-        content: Source of the test file.
-        lines: The same source split into lines, for quoting.
-        module_path: Path of the test file; its branch is the directory
-            under ``aipass/`` that carries an ``apps/``.
-        bypass_rules: Optional bypass rules.
-
-    Returns:
-        The one check dict, "Cross-branch handler imports".
+    Reaching into a module's internals is what a unit test is for; a test that imports
+    or patches ANOTHER branch's handlers is a cross-branch caller like any product file.
     """
     branch_root = _branch_root(module_path)
     file_branch = branch_root.name if branch_root else None
@@ -671,16 +550,13 @@ def check_test_file(content: str, lines: List[str], module_path: str, bypass_rul
 
 
 #: Handlers every module may import by name, because a branch cannot function
-#: without them. Kept as NAMES only for the two that were always here; anything
-#: else must EARN the exemption structurally — see :func:`_infrastructure_handlers`.
+#: without them. Anything else must EARN the exemption structurally (_infrastructure_handlers).
 _DEFAULT_HANDLERS = frozenset({"json_handler", "file_handler"})
 
 
 #: The fleet-ratified spellings of the guarded ``__file__`` / repo-root
 #: resolution shim. A module that DEFINES one of these at module level IS that
-#: shim; a module that merely calls it is not. Names, not files, because the
-#: file name varies by branch (module_root.py, paths.py, repo_root.py,
-#: module_paths.py) while the function it publishes does not.
+#: shim; a module that merely calls it is not. Names, not files: the file name varies by branch.
 _RESOLUTION_SHIM_FUNCTIONS = frozenset({"module_file", "find_repo_root", "source_root", "resolved_file"})
 
 
@@ -688,52 +564,8 @@ _RESOLUTION_SHIM_FUNCTIONS = frozenset({"module_file", "find_repo_root", "source
 def _infrastructure_handlers(branch_root_str: str) -> frozenset:
     """Handler modules that sit BENEATH everything else in the branch.
 
-    THE ARGUMENT, and it is why this is not just a longer allow-list: a module
-    every other module stands on cannot be encapsulated behind one of them.
-    Nothing can import it "through" a module entry point, because the entry
-    point needs it first.
-
-    WHERE IT CAME FROM. @daemon, 2026-08-31, two adjacent lines in their entry
-    point: the json_handler import passed and the module_root import scored the
-    file 66%. Both are same-branch handler imports by the branch's own entry
-    point, and the handlers guard itself permits exactly this — it blocks
-    CROSS-branch imports. The checker was exempting json_handler by NAME rather
-    than by the property that makes it fine.
-
-    HOW IT USED TO BE DERIVED, AND WHY THAT STOPPED WORKING. The original read
-    the branch's own ``json_handler.py`` and took whatever it imported from
-    under ``handlers/``: measured 2026-08-31, 8 of 9 branches carrying the
-    resolution cure had json_handler importing it, so the set found it without
-    anyone naming a file. DPLAN-0325 removed that basis. Every branch's handler
-    is now the one canonical shim, which imports ``aipass.prax`` and nothing
-    else — measured 2026-09-04 across all eighteen branches, the old derivation
-    returns the EMPTY SET for every one of them. It did not become wrong, it
-    became blind, and blind in the silent direction: @daemon reddened on CI
-    (f8d7867f) because its entry point is the only one importing the shim
-    directly, and the other seventeen were one edit away from the same red.
-
-    WHAT REPLACED IT. The resolution shim is identified by what it PUBLISHES,
-    which is the property that made it infrastructure in the first place: it
-    has to live under ``handlers/`` to be the one guarded spelling for
-    ``Path(__file__)`` on a machine with no readable working directory, and
-    every module in the branch resolves through it. A top-level module under
-    ``apps/handlers/`` that defines one of :data:`_RESOLUTION_SHIM_FUNCTIONS`
-    at module level is that file. Measured 2026-09-04 over the fleet: fifteen
-    branches carry one and are found; ``spawn/passport_migration.py`` defines a
-    ``repo_root`` of its own and is correctly NOT found, because it publishes
-    none of the ratified spellings.
-
-    Deliberately NOT a leaf test ("imports nothing from its own apps/"), which
-    was measured first: it blesses ``json_flags.py``, ``metadata.py``,
-    ``class_registry.py`` and six others that are ordinary handlers which
-    happen to have no local dependencies. Being at the bottom of the import
-    graph is not the same as being the thing everything stands on.
-
-    Args:
-        branch_root_str: The branch directory, e.g. ``.../src/aipass/daemon``.
-
-    Returns:
-        Module basenames (no extension) importable anywhere in the branch.
+    A module every other module stands on cannot be encapsulated behind one of them: the
+    entry point needs it first. Reference: encapsulation.md (allowed handler imports).
     """
     handlers_root = Path(branch_root_str) / "apps" / "handlers"
     names: set = set()
@@ -771,26 +603,15 @@ def _allowed_handler_names(module_path: str) -> frozenset:
 def check_cross_package_imports(
     lines: List[str], module_path: str, file_package: str, bypass_rules: list | None = None
 ) -> Dict:
-    """
-    Check for cross-package handler imports within same branch
-
-    BAD (in handlers/standards/): from apps.handlers.json.json_handler import X
-    GOOD: Use relative imports or module entry points
-
-    EXCEPTIONS:
-    - json_handler is allowed (default handler pattern)
-    - Same package relative imports (from .something import X)
-    """
+    """Check for cross-package handler imports within same branch"""
     violations = []
 
-    # Allowed default handlers that can be imported anywhere
     allowed_handlers = _allowed_handler_names(module_path)
 
     in_docstring = False
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Track docstrings
         if stripped.startswith('"""') or stripped.startswith("'''"):
             quote_marker = '"""' if stripped.startswith('"""') else "'''"
             quote_count = stripped.count(quote_marker)
@@ -802,11 +623,9 @@ def check_cross_package_imports(
         if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
-        # Check for imports
         if not ("from " in stripped or "import " in stripped):
             continue
 
-        # Skip string literals
         if stripped.startswith('"') or stripped.startswith("'"):
             continue
         if '"from ' in stripped or "'from " in stripped:
@@ -819,37 +638,29 @@ def check_cross_package_imports(
             if before.count('"') % 2 == 1 or before.count("'") % 2 == 1:
                 continue
 
-        # Skip relative imports (same package)
         if stripped.startswith("from ."):
             continue
 
-        # Extract code part
         code_part = stripped.split("#")[0] if "#" in stripped else stripped
 
-        # Check for handler imports (local, not cross-branch)
         if "apps.handlers" not in code_part:
             continue
 
-        # Skip cross-branch imports (handled by other check)
         imported_branch = extract_branch_from_import(code_part)
         if imported_branch is not None:
             continue
 
-        # Check if bypassed
         if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
             continue
 
-        # Extract the handler package being imported
         imported_package = extract_handler_package(code_part)
 
         if imported_package is None:
             continue
 
-        # Allow same-package imports
         if imported_package == file_package:
             continue
 
-        # Allow default handlers
         is_allowed = False
         for allowed in allowed_handlers:
             if allowed in code_part:
@@ -859,7 +670,6 @@ def check_cross_package_imports(
         if is_allowed:
             continue
 
-        # This is a cross-package handler import
         violations.append(
             {"line": i, "code": code_part.strip(), "from_package": imported_package, "to_package": file_package}
         )
@@ -882,28 +692,15 @@ def check_cross_package_imports(
 
 
 def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that non-handler, non-module files don't import handlers directly
-
-    Entry points and other files should use module entry points, not handlers.
-
-    BAD (in api.py): from apps.handlers.openrouter.client import get_response
-    GOOD: from apps.modules.openrouter_client import get_response
-
-    EXCEPTIONS:
-    - json_handler is allowed (default pattern)
-    - file_handler is allowed (default pattern)
-    """
+    """Check that non-handler, non-module files don't import handlers directly"""
     violations = []
 
-    # Allowed default handlers
     allowed_handlers = _allowed_handler_names(module_path)
 
     in_docstring = False
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Track docstrings
         if stripped.startswith('"""') or stripped.startswith("'''"):
             quote_marker = '"""' if stripped.startswith('"""') else "'''"
             quote_count = stripped.count(quote_marker)
@@ -915,11 +712,9 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
         if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
-        # Check for imports
         if not ("from " in stripped or "import " in stripped):
             continue
 
-        # Skip string literals
         if stripped.startswith('"') or stripped.startswith("'"):
             continue
         if '"from ' in stripped or "'from " in stripped:
@@ -932,18 +727,14 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
             if before.count('"') % 2 == 1 or before.count("'") % 2 == 1:
                 continue
 
-        # Extract code part
         code_part = stripped.split("#")[0] if "#" in stripped else stripped
 
-        # Check for handler imports
         if "apps.handlers" not in code_part:
             continue
 
-        # Check if bypassed
         if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
             continue
 
-        # Allow default handlers
         is_allowed = False
         for allowed in allowed_handlers:
             if allowed in code_part:
@@ -953,7 +744,6 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
         if is_allowed:
             continue
 
-        # This file shouldn't be importing handlers directly
         violations.append({"line": i, "code": code_part.strip()})
 
     if violations:

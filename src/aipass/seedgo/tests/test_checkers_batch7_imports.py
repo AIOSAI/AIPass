@@ -3,7 +3,7 @@
 # Description: imports_check sub-functions and rulings (split from test_checkers_batch7.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/imports_check.py."""
@@ -27,14 +27,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
 from aipass.seedgo.tests.support_checkers_batch7 import _lines
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
-
-
-# ===========================================================================
-# 2. imports_check sub-functions
-# ===========================================================================
-
-
-# -- filter_docstrings -------------------------------------------------------
 
 
 class TestFilterDocstrings:
@@ -61,9 +53,6 @@ class TestFilterDocstrings:
         assert len([ln for ln in result if ln.strip()]) == 2
 
 
-# -- find_import_section_end -------------------------------------------------
-
-
 class TestFindImportSectionEnd:
     """Tests for find_import_section_end."""
 
@@ -86,9 +75,6 @@ class TestFindImportSectionEnd:
         assert result == len(lines)
 
 
-# -- check_no_aipass_root ----------------------------------------------------
-
-
 class TestCheckNoAipassRoot:
     """Tests for check_no_aipass_root."""
 
@@ -104,9 +90,6 @@ class TestCheckNoAipassRoot:
         result = check_no_aipass_root(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is False
         assert "AIPASS_ROOT" in result["message"]
-
-
-# -- check_no_sys_path ------------------------------------------------------
 
 
 class TestCheckNoSysPath:
@@ -132,9 +115,6 @@ class TestCheckNoSysPath:
         assert result["passed"] is False
 
 
-# -- check_prax_logger -------------------------------------------------------
-
-
 class TestCheckPraxLogger:
     """Tests for check_prax_logger."""
 
@@ -155,16 +135,7 @@ class TestCheckPraxLogger:
 
 
 class TestCheckPraxLoggerAcceptsBothBindings:
-    """The standard is about ROUTING; both bindings route identically.
-
-    Raised by @memory 2026-08-30: `from aipass.prax import logger` binds the
-    logger OBJECT at import and is UNREBINDABLE, so a conftest swapping
-    sys.modules cannot reach it and real writes escape into @prax's live state
-    directory. Measured here: ONE daemon test under plain pytest made 23 atomic
-    writes into the real prax_json/. The module form is rebindable because the
-    attribute resolves at CALL time. Rejecting it was this checker enforcing a
-    binding style the standard never asked for.
-    """
+    """The standard is about ROUTING; both bindings route identically."""
 
     def _check(self, source: str, tmp_path) -> dict:
         result = check_prax_logger(_lines(source), (tmp_path / "test.py").as_posix())
@@ -202,18 +173,14 @@ class TestCheckPraxLoggerAcceptsBothBindings:
         assert self._check("# from aipass import prax\n", tmp_path)["passed"] is False
 
     def test_a_commented_out_object_form_import_does_not_count_either(self, tmp_path):
-        # The module form is rejected by the source-package guard even without
-        # the comment skip, so only the OBJECT form actually exercises it -
-        # found by mutation, the comment-skip mutant survived until this test.
+        # The module form is rejected by the source-package guard even without the comment skip, so only the
+        # OBJECT form exercises it.
         assert self._check("# from aipass.prax import logger\n", tmp_path)["passed"] is False
 
     def test_the_failure_message_offers_both_spellings(self, tmp_path):
         message = self._check("import os\n", tmp_path)["message"]
         assert "from aipass.prax import logger" in message
         assert "from aipass import prax" in message
-
-
-# -- check_handler_independence (imports) ------------------------------------
 
 
 class TestImportsHandlerIndependence:
@@ -250,9 +217,6 @@ class TestImportsHandlerIndependence:
         assert result["passed"] is True
 
 
-# -- check_import_order ------------------------------------------------------
-
-
 class TestCheckImportOrder:
     """Tests for check_import_order."""
 
@@ -276,9 +240,6 @@ class TestCheckImportOrder:
         lines = _lines("x = 42\n")
         result = check_import_order(lines, (tmp_path / "test.py").as_posix())
         assert result is None
-
-
-# -- check_no_bare_imports ---------------------------------------------------
 
 
 class TestCheckNoBareImports:
@@ -316,19 +277,7 @@ class TestCheckNoBareImports:
 
 
 class TestAipassRootIsMatchedAsATokenNotASubstring:
-    """`AIPASS_ROOTS.json` is a FILENAME, not the AIPASS_ROOT env var.
-
-    Reported by @memory 2026-08-30: their audit dropped to 99% on
-    `DECLARED_ROOTS = "AIPASS_ROOTS.json"` — a machine-managed file that sits
-    beside AIPASS_REGISTRY.json because it is the same species. Nothing in that
-    tree reads an env var of any name.
-
-    They declined to rename the file to satisfy the grep, and they were right
-    to: renaming a thing so a checker stops shouting is drift-by-linting, and
-    the name would then have been chosen for a tool rather than a reader. The
-    check means a TOKEN and was written as a SUBSTRING, so every present and
-    future `AIPASS_ROOT*` collides.
-    """
+    """`AIPASS_ROOTS.json` is a FILENAME, not the AIPASS_ROOT env var."""
 
     def _check(self, line):
         return check_no_aipass_root([line + "\n"], "mod.py", [])
@@ -362,19 +311,7 @@ class TestAipassRootIsMatchedAsATokenNotASubstring:
 
 
 class TestImportsCheckLineNumbersSurviveDocstringFiltering:
-    """A reported line number must name the line in the FILE.
-
-    @memory reported the violation at line 40 when the only occurrence is at
-    line 106 — off by 66, which is more than a docstring's worth of slack and
-    sends a reader to the wrong place.
-
-    THE CAUSE, and it is bigger than the check they reported: `filter_docstrings`
-    `continue`s past docstring lines, COMPACTING the list. Every check that runs
-    on `import_lines` then enumerates a shorter list and reports an index into
-    it — so `check_no_sys_path`, `check_prax_logger`, `check_import_order` and
-    `check_no_bare_imports` all carry the same defect. Blanking the lines
-    instead of dropping them keeps every index aligned with the file.
-    """
+    """A reported line number must name the line in the FILE."""
 
     def test_filter_docstrings_preserves_the_line_count(self):
         source = ['"""doc\n', "more doc\n", '"""\n', "import os\n"]

@@ -162,6 +162,12 @@ It stops at one hop on purpose. A rule that chased an arbitrary call graph would
 be an interpreter, and an interpreter that runs the subject is the thing this pack
 refuses to be.
 
+Each source carries where it came from, so a finding names the source that
+actually carried the answer: one proved by a module-level name is never reported
+as coming from a helper the same condition also calls. Findings are deduped per
+(unit, line, species), so a `@skip()` decorator that both the decorator walk and
+the body walk see is one row.
+
 ## It nominates, it does not convict
 
 A suite testing an optional plugin legitimately asks whether the plugin is there,

@@ -3,18 +3,13 @@
 # Description: TODO/FIXME Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 TODO/FIXME Standards Checker Handler
 
-Detects TODO, FIXME, HACK, and XXX comments in Python source files.
-These tags indicate incomplete work, known hacks, or code needing attention.
-Only a real comment counts: comments are read from the tokenizer, so a tag
-inside a string or a docstring is never one.
-Each file is scored: passed if zero tags found, failed otherwise with
-a count and tag breakdown in the message.
+Reference: todo.md
 """
 
 import io
@@ -31,11 +26,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
-# Tags to detect, case-insensitive
 _TAGS = ("TODO", "FIXME", "HACK", "XXX")
 
-# Regex: matches # TODO: text, # FIXME(user): text, inline # HACK ..., etc.
-# Captures (tag, comment_text). Handles inline and standalone comments.
 _TAG_RE = re.compile(
     r"#\s*(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)",
     re.IGNORECASE,
@@ -62,24 +54,9 @@ def _comments(content: str) -> list[str] | None:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check a Python file for TODO/FIXME/HACK/XXX comments.
-
-    Args:
-        module_path: Path to the Python file to check.
-        bypass_rules: Optional list of bypass rules to skip certain checks.
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str,
-        }
-    """
+    """Check a Python file for TODO/FIXME/HACK/XXX comments."""
     path = Path(module_path)
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -95,7 +72,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "TODO",
         }
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "todo", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -110,7 +86,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "TODO",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -125,7 +100,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "TODO",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -144,8 +118,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "TODO",
         }
 
-    # Read the comments from the tokenizer: a tag inside a string or a
-    # docstring is never a COMMENT token (seedgo fleet green leg 13)
+    # Tokenizer, not a line scan: a tag inside a string or docstring is no COMMENT token.
     comments = _comments(content)
     if comments is None:
         return {
@@ -170,7 +143,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
             total_found += 1
 
-    # Build the single check result
     if total_found == 0:
         check_result = {
             "name": "TODO/FIXME comments",
@@ -187,7 +159,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     checks = [check_result]
 
-    # Score: one check, so 100 if passed, 0 if failed
     passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks) * 100) if total_checks > 0 else 0

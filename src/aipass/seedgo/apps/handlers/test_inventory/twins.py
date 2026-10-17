@@ -3,56 +3,16 @@
 # Description: cross-branch test twins by shape identity, and the residue a merge would destroy
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
-"""
-CROSS-BRANCH TWINS, GATED ON SHAPE AND NEVER ON FILENAME.
+"""CROSS-BRANCH TWINS, GATED ON SHAPE AND NEVER ON FILENAME.
 
-THE MEASUREMENT THAT FORCED THIS MODULE. Five test filenames were stamped into
-branch after branch - test_json_handler.py, test_json_durability.py,
-test_import_dead_cwd.py, test_cli_routing.py, test_help_flag_safety.py - and
-between them they hold over a thousand test functions. Read as filenames they
-look like one file copied eighteen times. Read as SHAPES they are not: of the
-function names that appear in six or more branches, the overwhelming majority
-carry a different body in at least one of them. The families were stamped once
-and then every copy evolved.
-
-SO THE CONSOLIDATION UNIT IS (name, body fingerprint), NOT (filename). A merge
-keyed on filename collapses every diverged copy into whichever one the merger
-happened to open, and the coverage the other seventeen branches grew since the
-stamp is gone with no diff that shows it leaving. That is the failure this
-report exists to make impossible to commit by accident.
-
-WHAT THE THREE OUTPUTS ARE FOR.
-
-  twin_groups               every (name, fingerprint) identity living in 2+
-                            branches. The raw duplication surface.
-  consolidation_candidates  the identities spanning 6+ branches. These and only
-                            these are put forward, because their shape is the
-                            same everywhere it appears.
-  residue                   for each stamped family, every test in it that is
-                            NOT in a candidate group. This is the important
-                            output: it is the list of branch-specific behaviour
-                            that a filename-keyed merge would destroy.
-
-THE FINGERPRINT IS SHAPE.PY'S, NOT A SECOND ONE. `shape.fingerprint` already
-publishes a statement-kind signature with names and literals dropped, it is
-already hashed stably across processes, and the inventory's twins column is
-already computed from it. A second fingerprinter here would mean two answers to
-one question and a future reader with no way to tell which the artifact used.
-
-THIS PHASE NAMES CANDIDATES AND NOTHING ELSE. It removes no test, edits no
-file, and emits no verdict. `assert_publishable` refuses to write a report that
-carries no caveats, for the reason the sibling `report.py` refuses one with no
-blind spots: a limitation a reader has to go looking for will not be found.
-
-WHY `ranking.delete_language_in` IS RUN OVER THE KEYS AND NOT THE VALUES. The
-package's rule is that no published CATEGORY may read as a verdict, and the
-keys minted here are a closed set that rule belongs on. The values are not:
-one of the five stamped families is literally named `test_import_dead_cwd.py`,
-and refusing to publish a report because a real filename contains the word
-"dead" is the guard convicting the data it was built to describe.
+The consolidation unit is (name, body fingerprint), not filename: a
+filename-keyed merge collapses every diverged copy into one and loses the
+coverage the others grew. The fingerprint is `shape.fingerprint`, never a
+second one. Delete-language is checked over keys only: a real stamped
+filename (`test_import_dead_cwd.py`) contains "dead".
 """
 
 import json
@@ -75,20 +35,13 @@ REPORT_NAME = "test_twins.json"
 ARTIFACT_VERSION = "test-twins/1"
 TOOL_VERSION = "1.0.0"
 
-#: An identity has to live in at least this many branches to be duplication at
-#: all. Two is the floor because one branch holding two copies of a test is a
-#: within-branch matter and this report is about the fleet.
+#: Two copies inside one branch are a within-branch matter, not fleet duplication.
 TWIN_BRANCHES = 2
 
-#: An identity has to span at least this many branches before it is put forward
-#: for consolidation. Six is the threshold the prior measurement used, and it
-#: is deliberately a THIRD of the fleet: below it, "the same test everywhere"
-#: is a claim about a handful of branches rather than about the fleet.
+#: A third of the fleet: below it "the same test everywhere" means a handful of branches.
 CONSOLIDATION_BRANCHES = 6
 
-#: The five filenames that were stamped fleet-wide. Named here as data, because
-#: the residue block has to be able to say "this family is absent from this
-#: tree" rather than reporting a clean zero for a family it never looked at.
+#: Named as data so the residue can say a family is absent rather than a clean zero.
 STAMPED_FAMILIES: tuple = (
     "test_json_handler.py",
     "test_json_durability.py",
@@ -97,8 +50,7 @@ STAMPED_FAMILIES: tuple = (
     "test_help_flag_safety.py",
 )
 
-#: What this report cannot see. Published beside the numbers, and the writer
-#: refuses to publish an empty list.
+#: What this report cannot see; the writer refuses to publish an empty list.
 CAVEATS: tuple = (
     "THE FINGERPRINT DROPS NAMES AND LITERALS. Two tests that assert opposite values through the "
     "same statement shape are one identity here. A candidate group is a list for a human to READ "
@@ -119,11 +71,6 @@ CAVEATS: tuple = (
     "NOTHING HERE DELETES ANYTHING. This phase names candidates. The decision to remove any test "
     "is a human one taken with the two bodies open, and no count in this file substitutes for it.",
 )
-
-
-# =============================================================================
-# THE UNIT
-# =============================================================================
 
 
 @dataclass(frozen=True)
@@ -179,19 +126,10 @@ class TwinGroup:
         }
 
 
-# =============================================================================
-# THE CORPUS
-# =============================================================================
-
-
 def corpus_rules() -> collection.CorpusRules:
     """The collection rules this report walks, fixed rather than discovered.
 
-    `testpaths` is pinned to the branch's own tests/ directory instead of being
-    read from a config file, because the twin comparison is only meaningful if
-    every branch is measured under the same rule. A per-branch config would let
-    one citizen widen its own corpus and read as more duplicated than the rest
-    for a reason that has nothing to do with duplication.
+    Pinned, not read from config: every branch is measured under the same rule.
     """
     return collection.CorpusRules(
         testpaths=("tests",),
@@ -207,9 +145,7 @@ def corpus_rules() -> collection.CorpusRules:
 def branch_dirs(root: Path) -> List[Tuple[str, Path]]:
     """Every immediate subdirectory of `root` that holds a tests/ directory.
 
-    A directory with no tests/ is not a branch that contributes nothing - it is
-    not a branch at all for this measurement, and counting it would put a zero
-    in the denominator of every "how many branches carry this" number.
+    A directory with no tests/ would put a zero in every branch-count denominator.
     """
     root = Path(root)
     if not root.is_dir():
@@ -255,17 +191,10 @@ def occurrences(branches: Sequence[Tuple[str, Path]]) -> Tuple[List[Occurrence],
     return found, {"files": files, "tests": len(found)}
 
 
-# =============================================================================
-# TWIN GROUPS
-# =============================================================================
-
-
 def twin_groups(found: Sequence[Occurrence], minimum_branches: int = TWIN_BRANCHES) -> List[TwinGroup]:
     """Every identity living in `minimum_branches` or more branches.
 
-    Sorted by branch count descending - the widest spread is the one a reader
-    should see first - then by test count, then by name and fingerprint so two
-    runs over an unchanged tree publish byte-identical order.
+    Sorted down to name and fingerprint so runs over an unchanged tree publish identical order.
     """
     by_identity: Dict[Tuple[str, str], List[Occurrence]] = defaultdict(list)
     for occurrence in found:
@@ -293,28 +222,12 @@ def _group(identity: Tuple[str, str], members: List[Occurrence]) -> TwinGroup:
 
 
 def consolidation_candidates(groups: Sequence[TwinGroup]) -> List[TwinGroup]:
-    """The groups wide enough to put forward, in the order `twin_groups` set.
-
-    Nothing narrower is offered. A shape shared by five branches is still a
-    shape that thirteen branches disagree with, and the whole finding behind
-    this module is that the disagreement is where the real coverage lives.
-    """
+    """The groups wide enough to put forward, in the order `twin_groups` set."""
     return [group for group in groups if group.branch_count >= CONSOLIDATION_BRANCHES]
 
 
-# =============================================================================
-# THE RESIDUE
-# =============================================================================
-
-
 def residue(found: Sequence[Occurrence], candidates: Sequence[TwinGroup]) -> List[dict]:
-    """Per stamped family, every test in it that no candidate group covers.
-
-    This is the block that decides whether a consolidation is safe. Each entry
-    is a test that shares a filename with the family and shares its shape with
-    nobody at fleet scale - branch-specific behaviour, grown after the stamp,
-    with nothing else in the fleet standing behind it.
-    """
+    """Per stamped family, every test in it that no candidate group covers."""
     covered = {(group.name, group.fingerprint) for group in candidates}
     by_family: Dict[str, List[Occurrence]] = defaultdict(list)
     for occurrence in found:
@@ -327,9 +240,8 @@ def residue(found: Sequence[Occurrence], candidates: Sequence[TwinGroup]) -> Lis
 def _family_block(family: str, members: List[Occurrence], covered: set) -> dict:
     """One family's totals and the full list of what a merge would destroy.
 
-    `present` is published rather than inferred from a zero: a family absent
-    from the tree and a family every one of whose tests is a candidate both
-    report a residue of zero, and they mean opposite things.
+    `present` is published, not inferred: an absent family and a fully-covered
+    family both report a residue of zero.
     """
     survivors = [member for member in members if member.identity not in covered]
 
@@ -357,19 +269,8 @@ def _family_block(family: str, members: List[Occurrence], covered: set) -> dict:
     }
 
 
-# =============================================================================
-# NAME SPREAD - THE COLUMN THAT PROVES THE GATE IS NEEDED
-# =============================================================================
-
-
 def name_spread(found: Sequence[Occurrence], minimum_branches: int = CONSOLIDATION_BRANCHES) -> dict:
-    """How many widespread NAMES keep one shape, and how many have diverged.
-
-    This is the number that decides the whole design. If a name in six-plus
-    branches nearly always carried one shape, a filename-keyed merge would be
-    close enough to safe. It does not, and this block is the receipt: `diverged`
-    counts the names a name-keyed consolidation would have flattened.
-    """
+    """How many widespread NAMES keep one shape, and how many have diverged."""
     by_name: Dict[str, List[Occurrence]] = defaultdict(list)
     for occurrence in found:
         by_name[occurrence.name].append(occurrence)
@@ -389,11 +290,6 @@ def name_spread(found: Sequence[Occurrence], minimum_branches: int = CONSOLIDATI
         "diverged": len(widespread) - len(identical),
         "identical_names": sorted(identical),
     }
-
-
-# =============================================================================
-# THE REPORT
-# =============================================================================
 
 
 def build(root: Path) -> dict:
@@ -451,11 +347,6 @@ def _summary(
     }
 
 
-# =============================================================================
-# PUBLICATION
-# =============================================================================
-
-
 def publish(report: dict, directory: Optional[Path] = None) -> Path:
     """Write the report and return the path it landed on."""
     assert_publishable(report)
@@ -492,12 +383,7 @@ def assert_publishable(report: dict) -> None:
 
 
 def _keys(value, seen: Optional[List[str]] = None) -> List[str]:
-    """Every key name the report publishes, at any depth.
-
-    Keys only. The values carry filenames the fleet chose, one of which is
-    `test_import_dead_cwd.py`, and a guard that refuses a report because the
-    data contains a word is a guard that has started editing the measurement.
-    """
+    """Every key name the report publishes, at any depth."""
     seen = seen if seen is not None else []
 
     if isinstance(value, dict):

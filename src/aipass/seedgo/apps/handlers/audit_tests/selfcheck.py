@@ -3,60 +3,30 @@
 # Description: the harness's verdict on itself - the 16 instrument checks
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 The lane auditing itself. Design section 10, published with every verdict.
 
-*"A checker that cannot fail these is not entitled to publish a species
-table."* — TAXONOMY section 3.
-
-NOT A PRE-FLIGHT THAT GATES SILENTLY. Every one of the sixteen checks is
-published in the artifact's `harness` block WHETHER IT PASSES OR FAILS. A
-pre-flight that quietly aborts leaves a reader unable to distinguish "the
-instrument was sound" from "the instrument was never asked", and the whole
-argument of this lane is that those two are different documents.
-
-A CHECK BOUND TO A GROUP THAT IS NOT BUILT REPORTS `not_applicable` WITH THE
-GROUP'S NAME, exactly as the group does. Law S1 at the harness level: a check
-that was skipped and a check that passed must never look the same.
-
-THE ONE THAT MATTERS MOST IS 14. Law M2 says a measurement that agrees with
-you everywhere is not evidence — and it points at the lane's own scored gate
-as readily as at the standard the lane retires. `gate_coverage` is the answer:
-a hard 100/0 whose mechanism is per-interpreter, whose blind spot is real, and
-which states the size of that blind spot per run rather than in a paragraph.
-
-CHECK 2 DESERVES ITS OWN NOTE. Stale bytecode biases UNIFORMLY TOWARD SURVIVED
-- toward "this suite is bad" - and is invisible to hash verification. It bit
-the MVP's builder during the MVP's own construction, and it bit a live
-mutation run in this campaign exactly as the research warned.
+Every check is published whether it passes or fails, never gated silently; a
+check bound to an unbuilt group reports `not_applicable` with the group's name.
 """
 
 from typing import Dict, List, Optional
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: Verdict vocabulary for one harness check.
 PASS = "pass"
 FAIL = "fail"
 NOT_APPLICABLE = "not_applicable"
 
-#: Line prefixes pytest's short summary uses for a unit that did not pass.
-#: Check 4 names the failing nodeids because "control exit 1" on its own costs
-#: the reader a full rebuild of the sandbox to learn WHICH test failed - which
-#: @canary paid once, and which is the whole of the cost this constant removes.
+#: Pytest short-summary prefixes; check 4 names failing nodeids so a reader need not rebuild the sandbox.
 FAILURE_SUMMARY_PREFIXES: tuple = ("FAILED ", "ERROR ")
 
-#: How many failing nodeids the detail names before it summarises the rest. A
-#: control run that is comprehensively red does not become more actionable at
-#: fifty names, and the artifact carries the full stdout tail either way.
 MAX_NAMED_FAILURES = 5
 
-#: Checks that cannot run until their group does. Named here so an unbuilt
-#: group produces a `not_applicable` with the group's own name rather than a
-#: silent absence.
+#: Checks that cannot run until their group does.
 GROUP_BOUND: Dict[int, str] = {
     5: "pytest.scoped_survival",
     6: "pytest.targeted_mutation",
@@ -64,7 +34,6 @@ GROUP_BOUND: Dict[int, str] = {
     8: "pytest.scoped_survival",
 }
 
-#: What each group-bound check would prevent once its group exists.
 GROUP_BOUND_NAMES: Dict[int, tuple] = {
     5: ("positive and negative control, plus a key-match assertion", "FALSE-CONTROL (mutmut #515)"),
     6: ("is the mutant already equal to the original?", "NO-OP-MUTANT"),
@@ -79,13 +48,7 @@ def _check(number: int, name: str, prevents: str, status: str, detail: str) -> d
 
 
 def _verdict(condition: Optional[bool], detail: str, unknown: str = "") -> tuple:
-    """`(status, detail)` from a tri-state condition.
-
-    `None` is a legitimate third answer - a non-package target has nothing to
-    resolve - and it becomes `not_applicable` rather than being flattened into
-    a failure, because "could not apply" and "applied and failed" are the two
-    things this whole lane exists to keep apart.
-    """
+    """`(status, detail)` from a tri-state condition; `None` is `not_applicable`, never a failure."""
     if condition is None:
         return NOT_APPLICABLE, unknown or detail
     return (PASS if condition else FAIL), detail
@@ -174,14 +137,8 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
     by_the_suite = m10_proof.get("changed_by_the_measured_suite", [])
     concurrent = m10_proof.get("attributed_to_concurrent_writers", [])
 
-    # Check 12 fails on what NOTHING ELSE was seen writing. A live citizen's
-    # own daemon and server write into the real tree throughout the window, so
-    # keying the check on the raw diff makes it fail on every live target - and
-    # a check that always fails is a check nobody reads, which costs more than
-    # the check is worth. The discriminator is MEASURED (two back-to-back
-    # snapshots with no suite running), never a path exemption: exempting
-    # logs/ would blind this to the exact forge it convicted a branch for. The
-    # full diff and both partitions travel in the artifact either way.
+    # Live daemons write the real tree during the run, so concurrent writers are
+    # MEASURED (an idle snapshot pair), never path-exempted: exempting logs/ blinds the forge check.
     detail = (
         f"{count} file(s) re-hashed after teardown; {len(unattributed)} change(s) nothing else "
         f"was observed writing, {len(concurrent)} attributed to the target's own concurrent "
@@ -198,13 +155,7 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
             PASS,
             f"{count} file(s) hashed before the copy was made",
         ),
-        # SPLIT FROM THE UNATTRIBUTED SET, on @trigger's report 2026-08-30.
-        # This row is the finding the lane exists to make: the gate watched the
-        # suite in-process and NAMED the real-tree paths it opened for writing.
-        # Keying the red on that, and only that, is what stops a recipient
-        # reading "your suite dirtied the real tree" off a branch whose suite
-        # wrote nothing and whose ten moved files were a systemd unit and the
-        # citizen answering their own mail mid-audit.
+        # Red only on paths the gate saw the suite itself open for writing, not on unattributed changes.
         _check(
             12,
             "the measured suite wrote nothing into the real target",
@@ -216,10 +167,7 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
                 else f"{count} file(s) re-hashed after teardown; the gate recorded the suite writing none of them"
             ),
         ),
-        # The honest remainder, never folded into the row above and never
-        # exempted away. A path allowance for `.ai_mail.local/` or a systemd
-        # name match would both be DECLARED discriminators, which is precisely
-        # what `live_writers` refuses to be - so this stays red and says why.
+        # The unattributed remainder stays red; a declared path allowance would defeat `live_writers`.
         _check(
             17,
             "every real-tree change was ATTRIBUTED",
@@ -233,22 +181,8 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
 def _failing_units(run: dict, returncode: Optional[int]) -> str:
     """The nodeids behind a non-zero control, as a clause appended to check 4.
 
-    A green control needs no names, so this returns "" and check 4's sentence
-    is unchanged. A red one names the units: pytest's short summary prints
-    `FAILED <nodeid> - <message>` even under `-q`, and while it truncates the
-    MESSAGE to the reported terminal width, the nodeid itself always survives.
-
-    An unreadable or summary-free tail returns a clause saying so rather than
-    an empty one. "control exit 1" and "control exit 1, and the summary did not
-    reach the captured tail" send a reader to different places, and collapsing
-    them is the species this whole lane refuses.
-
-    Args:
-        run: The gated run's result, carrying `stdout_tail`.
-        returncode: The suite's own exit status.
-
-    Returns:
-        A clause to append to check 4's detail, or "" when the control was green.
+    Pytest truncates the summary MESSAGE to terminal width but never the nodeid;
+    a tail with no summary says so rather than returning "".
     """
     if returncode == 0:
         return ""
@@ -353,11 +287,7 @@ def harness_block(
 ) -> dict:
     """The harness's verdict on itself, for one run.
 
-    Returns the block the artifact publishes under `harness`. Failures are
-    NOT raised: a harness failure is a fact about the run, and a fact removed
-    from the document because it was inconvenient is the thing this whole
-    campaign is against. The run's own refusal path decides what a failure
-    costs; this function only reports.
+    Failures are reported, never raised; the run's refusal path decides what they cost.
     """
     rows: List[dict] = []
     rows.extend(_m10_rows(m10_proof))
@@ -370,9 +300,7 @@ def harness_block(
 
     failed = [row for row in rows if row["status"] == FAIL]
     if failed:
-        # Published AND logged. A harness check that failed is the single most
-        # important thing about a run, and it must be findable without opening
-        # the artifact.
+        # Logged too, so a failed harness check is findable without opening the artifact.
         json_handler.log_operation(
             "harness_checks_failed",
             {

@@ -3,42 +3,17 @@
 # Description: pytest write-hygiene gate - stdlib only, injected into a copy
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The write gate. A pytest plugin injected into a COPY of somebody else's tree.
+"""The write gate. A pytest plugin injected into a COPY of somebody else's tree.
 
-THIS FILE IMPORTS NOTHING FROM AIPASS AND MUST NEVER BE MADE TO. It is loaded
-inside a scratch copy of a foreign branch, so an aipass import here would be
-the instrument reaching back into the tree it measures (Law M10) — and worse,
-it would hand this gate every defect the measured tree has. The property is not
-documented, it is PROVEN: `adapters.execution_isolation()` parses every file
-under `payload/` and the pack fails registration if any of them imports aipass.
-@devpulse's bypass grant (boardroom post 6) is conditional on exactly that
-check, so the exception cannot widen without a machine noticing.
-
-Configuration is entirely by environment variable, because the launching
-process is not importable from in here:
-
-    AUDIT_TESTS_LOG            JSONL sink; the plugin REFUSES to run without one
-    AUDIT_TESTS_ENV_ROOT       the scratch copy's root; writes under it are violations
-    AUDIT_TESTS_TARGET_ROOT    the copied target; where the canary is planted
-    AUDIT_TESTS_TARGET_MODULE  dotted module asserted to resolve inside the copy
-    AUDIT_TESTS_TMPDIR_ALLOWED "0" removes the blanket TMPDIR allowance
-    AUDIT_TESTS_DISABLE_HOOK   "1" leaves the hook OFF - the seam that proves a
-                               run without a gate REFUSES (canary point C, Law
-                               T10). Never set on a real run.
-
-WHAT THIS GATE CANNOT SEE, and why it counts rather than claims. The hook is
-per-interpreter, so a child process writes through an interpreter it was never
-installed in; and sqlite3 does its writing in C, below the io/os layer — a
-probe measured `sqlite3.connect` firing with the path and CREATE/INSERT/COMMIT
-firing nothing at all, with 8 KB landing on disk unseen. Neither is a
-violation and neither is silently ignored: both are OBSERVED and counted, and
-the counts travel into `gate_coverage` so a reader can weigh a 100 against
-them. A score of 100 means "no violation seen by this gate", never "no
-violation".
+Imports nothing from aipass, ever (Law M10): `adapters.execution_isolation()` parses
+this directory and fails registration on an aipass import. Configured only by
+`AUDIT_TESTS_*` environment variables, since the launcher is not importable here;
+`AUDIT_TESTS_DISABLE_HOOK=1` exists only to prove a gateless run refuses (T10).
+Child processes and sqlite's C-level writes are invisible to the hook, so they are
+counted into `gate_coverage`: 100 means no violation seen by this gate.
 """
 
 import json
@@ -53,13 +28,8 @@ __version__ = "1.0.0"
 
 logger = logging.getLogger("audit_tests.hygiene_gate")
 
-# =============================================================================
-# THE DECLARED SANDBOX
-# =============================================================================
 
-#: Every allowance, in the order the classifier applies them. Copied verbatim
-#: into the artifact: a gate that widens its own sandbox without saying so is
-#: the fail-open shape this whole lane exists to refuse.
+#: In classifier order, copied verbatim into the artifact: a sandbox never widens unsaid.
 ALLOWANCES: Tuple[Tuple[str, str], ...] = (
     ("plugin_log", "the hygiene log this plugin writes, by exact path"),
     ("canary", "the plugin's own canary sentinel, by exact path"),
@@ -72,8 +42,7 @@ ALLOWANCES: Tuple[Tuple[str, str], ...] = (
     ("tmpdir", "anything under TMPDIR"),
 )
 
-#: Write-ish audit events, and which positional args carry a path. Verified by
-#: direct probe against CPython 3.12 rather than read off the documentation.
+#: Positional path args verified by probe against CPython 3.12, not read off the docs.
 PATH_ARGS: Dict[str, Tuple[int, ...]] = {
     "open": (0,),
     "os.rename": (0, 1),
@@ -93,10 +62,7 @@ PATH_ARGS: Dict[str, Tuple[int, ...]] = {
     "shutil.unpack_archive": (1,),
 }
 
-#: Events that are NEVER violations and are counted anyway. These are the
-#: gate's own blind spots made numeric: a child process and an sqlite handle
-#: both write where this hook cannot follow, so the run reports how many of
-#: each happened instead of leaving the hole unquantified.
+#: Never violations, always counted: the gate's blind spots made numeric.
 SPAWN_EVENTS: Tuple[str, ...] = (
     "subprocess.Popen",
     "os.exec",
@@ -106,8 +72,7 @@ SPAWN_EVENTS: Tuple[str, ...] = (
 
 SQLITE_EVENT = "sqlite3.connect"
 
-#: `open()` reports (path, mode, flags). `mode` is None when the call arrived
-#: through os.open, so `flags` is the only universally present signal.
+#: `mode` is None via os.open, so `flags` is the only universally present signal.
 WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
 MAX_RECORDS = 20000
@@ -152,34 +117,12 @@ class GateState:
 STATE = GateState()
 
 
-# =============================================================================
-# CLASSIFICATION
-# =============================================================================
-
-
-#: Every character THIS platform accepts as a path separator.
-#:
-#: On Windows that is BOTH "\\" and "/" - CPython accepts either in every path
-#: API, so an audit event can carry either depending on how the test spelled it.
-#: On POSIX it is "/" ALONE, because "\\" is a legal FILENAME character there and
-#: splitting on it would tear real names apart. `os.altsep` is exactly that
-#: distinction, which is why the set is derived rather than written out.
-#:
-#: THE DEFECT THIS ANSWERS (Windows CI, PR#749). `path.split(os.sep)` returned
-#: the whole POSIX-spelled path as ONE part on Windows, so `__pycache__` was
-#: never seen as a component and the basename was the entire string. A pycache
-#: write was classified `bytecode`, and a `.coverage` write fell all the way
-#: through to `violation/outside_copy` - a FALSE VIOLATION in hygiene evidence
-#: on any Windows suite that spells its paths with forward slashes.
+#: Windows accepts both "\\" and "/"; on POSIX "\\" is a legal filename character, so
+#: splitting on `os.sep` alone misclassifies forward-slash paths on Windows.
 def accepted_separators(sep: str = os.sep, altsep: Optional[str] = os.altsep) -> Tuple[str, ...]:
     """The separators a platform honours, as a pure function of its two values.
 
-    A FUNCTION, not an inline expression, because the inline form was
-    untestable: on POSIX `altsep` is None, so `(os.sep,)` and the full
-    derivation are the SAME TUPLE and no assertion on this machine could tell
-    a broken derivation from a correct one. That is the mirror-expect shape -
-    the test restates the implementation and dies with it. Taking sep/altsep
-    as arguments makes the Windows derivation checkable from Linux.
+    A function so the Windows derivation is testable from Linux, where `altsep` is None.
     """
     return tuple(dict.fromkeys(candidate for candidate in (sep, altsep) if candidate))
 
@@ -190,11 +133,7 @@ SEPARATORS: Tuple[str, ...] = accepted_separators()
 def _split_path(path: str, separators: Optional[Tuple[str, ...]] = None) -> List[str]:
     """Split `path` on every separator this platform honours.
 
-    `separators` is a parameter, and the default is read at CALL time rather
-    than bound at def time, so a test can monkeypatch `SEPARATORS` and drive
-    the whole of `classify()` through the Windows branch from Linux. A
-    cross-platform classifier whose other platform can only be exercised by CI
-    is a branch nobody can red-first.
+    The default is read at call time, so a test can monkeypatch `SEPARATORS` from Linux.
     """
     separators = SEPARATORS if separators is None else separators
     parts = [path]
@@ -204,10 +143,7 @@ def _split_path(path: str, separators: Optional[Tuple[str, ...]] = None) -> List
 
 
 def _norm_sep(path: str, separators: Optional[Tuple[str, ...]] = None) -> str:
-    """Rewrite every accepted separator to `os.sep` so prefixes compare.
-
-    A no-op on POSIX, where the only accepted separator IS `os.sep`.
-    """
+    """Rewrite every accepted separator to `os.sep` so prefixes compare."""
     separators = SEPARATORS if separators is None else separators
     for sep in separators:
         if sep != os.sep:
@@ -218,10 +154,7 @@ def _norm_sep(path: str, separators: Optional[Tuple[str, ...]] = None) -> str:
 def _under(path: str, root: str, separators: Optional[Tuple[str, ...]] = None) -> bool:
     """True if `path` is `root` itself or lives beneath it.
 
-    Both sides are separator-normalised first: the copy root is built by the
-    lane (native separators) while the path comes from whatever the measured
-    test typed, so a mixed-spelling comparison would put a write INSIDE the
-    copy on the outside of it.
+    Both sides are normalised: the root is native, the path is however the test typed it.
     """
     if not root:
         return False
@@ -232,14 +165,8 @@ def _under(path: str, root: str, separators: Optional[Tuple[str, ...]] = None) -
 def classify(path: str, state: GateState = STATE) -> Tuple[str, str]:
     """Return `(verdict, reason)` for one absolute path.
 
-    `verdict` is `allowed`, `violation` or `canary`; `reason` names the
-    allowance that acquitted it or where the violation landed.
-
-    THE PRECEDENCE IS THE POINT. The copied tree is checked BEFORE every tmp
-    allowance, because the scratch copy usually lives under TMPDIR — and when
-    the copy was made from inside another pytest run it lives under a
-    `pytest-of-*` tree as well. Either tmp allowance checked first would
-    acquit exactly the writes this gate exists to catch.
+    The copied tree is checked before every tmp allowance: the copy usually lives under
+    TMPDIR (and `pytest-of-*`), so a tmp check first would acquit exactly these writes.
     """
     if path == state.log_path:
         return "allowed", "plugin_log"
@@ -275,11 +202,7 @@ def classify(path: str, state: GateState = STATE) -> Tuple[str, str]:
 def classify_sqlite(path: str) -> str:
     """Which sqlite bucket a connect target falls into.
 
-    Measured, not assumed: `sqlite3.connect` fires identically for `:memory:`,
-    for a `file:...?mode=ro` URI and for a real database. A bare count would
-    therefore OVER-report the blind spot, which is the same sin as
-    under-reporting it. So the three are separated and all three are published
-    — a reader checks the subtraction rather than trusting mine.
+    `connect` fires the same for `:memory:`, a read-only URI and a real file, so all three publish.
     """
     if path == ":memory:" or path.startswith("file::memory:"):
         return "memory"
@@ -291,9 +214,7 @@ def classify_sqlite(path: str) -> str:
 def _note_error(state: GateState, where: str, exc: BaseException) -> None:
     """Record a swallowed exception rather than losing it.
 
-    The hook must never raise — a gate that kills the suite it measures is
-    worse than no gate. But an exception nobody ever sees IS a fail-open mode,
-    so the count and the first few messages travel to the artifact.
+    The hook must never raise, but an unseen exception is a fail-open mode.
     """
     if len(state.errors) < 20:
         state.errors.append(f"{where}: {type(exc).__name__}: {exc}"[:200])
@@ -302,9 +223,7 @@ def _note_error(state: GateState, where: str, exc: BaseException) -> None:
 def escapes_via_symlink(path: str, state: GateState = STATE) -> bool:
     """True when a path that looks contained really lands outside the copy.
 
-    Only reachable in symlink-sibling mode, which is off by default precisely
-    because a write through a symlinked sibling reaches the REAL tree. Saying
-    so out loud is Law M10's business.
+    Only reachable in symlink-sibling mode.
     """
     if not state.env_root:
         return False
@@ -314,11 +233,6 @@ def escapes_via_symlink(path: str, state: GateState = STATE) -> bool:
         logger.debug("realpath failed for %s", path, exc_info=exc)
         _note_error(state, "realpath", exc)
         return False
-
-
-# =============================================================================
-# THE HOOK
-# =============================================================================
 
 
 def is_write_open(args: tuple) -> bool:
@@ -336,8 +250,7 @@ def _record_write(event: str, path: str) -> None:
     if not isinstance(path, str) or not path:
         return
     if not os.path.isabs(path):
-        # A dir_fd-relative path (shutil.rmtree's inner unlinks). Unresolvable
-        # from here, so it is COUNTED rather than guessed at.
+        # dir_fd-relative (shutil.rmtree's inner unlinks): unresolvable here, so counted.
         state.relative_unattributable += 1
         return
 
@@ -363,12 +276,7 @@ def _record_write(event: str, path: str) -> None:
 
 
 def _record_observation(event: str, args: tuple) -> bool:
-    """Count a blind-spot event. Returns True if the event was one.
-
-    Never a violation and never a score input: spawning a child and opening a
-    database are ordinary things to do. What is not ordinary is doing them
-    unrecorded while a 100 is published beside them.
-    """
+    """Count a blind-spot event. Returns True if the event was one."""
     state = STATE
 
     if event.startswith(SPAWN_EVENTS):
@@ -409,11 +317,6 @@ def audit_hook(event: str, args: tuple) -> None:
         _note_error(state, f"hook:{event}", exc)
 
 
-# =============================================================================
-# SINK
-# =============================================================================
-
-
 def emit(record: dict) -> None:
     """Write one JSONL record, with the hook muted for the duration."""
     state = STATE
@@ -430,16 +333,10 @@ def emit(record: dict) -> None:
         state.emitting = False
 
 
-# =============================================================================
-# PYTEST HOOKS
-# =============================================================================
-
-
 def _factory_basetemp(config) -> str:
     """pytest's basetemp if it already exists; never create it from here.
 
-    `getbasetemp()` MAKES the directory, and a gate that writes while deciding
-    what counts as a write is measuring itself.
+    `getbasetemp()` makes the directory: a gate writing while deciding what a write is.
     """
     factory = getattr(config, "_tmp_path_factory", None)
     existing = getattr(factory, "_basetemp", None)
@@ -462,10 +359,7 @@ def pytest_configure(config) -> None:
     state.tmpdir_allowed = os.environ.get("AUDIT_TESTS_TMPDIR_ALLOWED", "1") != "0"
     state.tmp_root = os.path.normpath(tempfile.gettempdir())
 
-    # By layout, not by private attribute: the factory does not exist yet at
-    # configure time, so reading it here yields "" and leaves the whole
-    # allowance dead — a defect the MVP found only when mutating it killed
-    # nothing.
+    # By layout: the factory does not exist yet at configure time, so it would read "".
     state.pytest_tmp_prefix = os.path.join(state.tmp_root, "pytest-of-")
     state.pytest_basetemp = _factory_basetemp(config)
 
@@ -505,10 +399,7 @@ def pytest_configure(config) -> None:
 def pytest_sessionstart(session) -> None:
     """Assert the module under test is the COPY, before anything is measured.
 
-    An editable install resolves `aipass.*` straight back to the real repo
-    unless PYTHONPATH wins, and a run that measured the real repo is worse
-    than no run at all — it is a measurement of a tree we were not allowed to
-    touch, reported as a measurement of the copy.
+    An editable install resolves `aipass.*` to the real repo unless PYTHONPATH wins.
     """
     state = STATE
     if not state.pytest_basetemp:
@@ -548,12 +439,7 @@ def _resolve_target_module(state: GateState) -> Tuple[bool, str]:
 def pytest_runtest_logstart(nodeid, location) -> None:
     """Attribute what follows to this test, and record that it ran.
 
-    THE ORDER IS RECORDED HERE, not inferred from the violations. Deriving it
-    from violation records would only ever list the units that wrote
-    something, which is a different sequence wearing the right name — and the
-    whole reason to capture it (design section 9.2) is that a serial run and
-    an xdist run execute DIFFERENT orders and the difference cannot be
-    reconstructed after the fact.
+    Recorded here, not inferred from violations, which would list only the units that wrote.
     """
     STATE.nodeid, STATE.phase = nodeid, "setup"
     if nodeid not in STATE.executed_order:
@@ -590,8 +476,7 @@ pytest_runtest_teardown.tryfirst = True  # type: ignore[attr-defined]
 def fire_canary() -> dict:
     """Write outside the sandbox on purpose and check the gate noticed.
 
-    Law T10, and the only thing that separates a clean suite from a gate that
-    is switched off. Both report zero violations; only this tells them apart.
+    Law T10: a clean suite and a switched-off gate both report zero; only this tells them apart.
     """
     state = STATE
     if not state.target_root:
@@ -604,14 +489,12 @@ def fire_canary() -> dict:
         with open(state.canary_path, "w", encoding="utf-8") as handle:
             handle.write("audit-tests canary; removed immediately after the check\n")
     except OSError as exc:
-        # A canary that cannot even be written leaves the gate UNPROVEN, so the
-        # reason travels out to the artifact rather than dying in a log.
+        # An unwritable canary leaves the gate unproven; the reason travels to the artifact.
         logger.warning("canary write failed: %s", exc)
         error = f"{type(exc).__name__}: {exc}"
     finally:
         try:
-            # Exactly one path is ever removed here: the sentinel this function
-            # created, seconds ago, inside the scratch copy.
+            # Only the sentinel this function created inside the scratch copy.
             os.unlink(state.canary_path)
         except OSError as exc:
             logger.debug("canary cleanup failed", exc_info=exc)
@@ -623,11 +506,7 @@ def fire_canary() -> dict:
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Fire the canary, then publish every violation and the session summary.
 
-    Nothing here runs if the suite was killed by the wall-clock budget, which
-    is deliberate: no summary means no canary result, and canary-or-refuse then
-    converts the hang into a refusal on its own. The T-BUDGET law falls out of
-    a mechanism already present rather than needing a special case somebody
-    could later "fix" into a partial publication.
+    Never runs on a budget kill: no summary means no canary, and canary-or-refuse refuses.
     """
     state = STATE
     canary = fire_canary()

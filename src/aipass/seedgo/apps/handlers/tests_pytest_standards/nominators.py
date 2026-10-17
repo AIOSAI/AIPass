@@ -3,39 +3,14 @@
 # Description: discovers and runs the pack's static nominators over one corpus
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The static tier's orchestrator. Discovers nominators, parses once, runs each.
+"""The static tier's orchestrator. Discovers nominators, parses once, runs each.
 
-THE SHAPE GATE, APPLIED A SECOND TIME. A nominator lives in `<name>_check.py`
-beside the adapter, and the audit engine's `discover_checkers()` keeps a
-module only if it defines `check_module` or `check_branch`. A nominator
-defines `nominate()` and NEITHER of those, so the audit's scoring engine
-cannot see it — with zero change to that engine, and without depending on any
-manifest flag that CI does not read. This is the same gate that keeps
-`adapter.py` invisible, and it is enforced here rather than assumed: a module
-in this directory that defines either function is REJECTED with a reason.
-
-ONE PARSE, NINE RULES. Nine nominators over an eighteen-branch fleet would
-otherwise parse every test file nine times, and the research budget for the
-whole static tier is under four seconds fleet-wide.
-
-A NOMINATOR THAT FAILS PRODUCES A `not_applicable` GROUP WITH THE REASON, and
-never an empty `measured` one. This is Law S1 at the group level: a rule that
-crashed and a rule that found nothing must never produce the same document.
-Ruff's absence is the live case — the linter is not guaranteed present on a
-machine measuring an external target, and a group reporting clean because the
-tool was missing is exactly the lie this lane exists to stop telling.
-
-CONTRACT 0 (design section 4.2a-bis) BINDS THIS FILE. The static tier may
-never be retired on the grounds that execution got good. Mutation's unit of
-judgement is the MUTANT, not the TEST, so any healthy test on a symbol masks
-every weak one beside it; a per-mutant verdict structurally cannot name a
-per-test defect. Measured, not asserted: a MIRROR-EXPECT test survived a
-constant mutant while its spelled-out twin killed it, so nothing was reported
-at all.
+A nominator never defines `check_module`/`check_branch`, so `discover_checkers()`
+cannot see it; a module defining either is rejected. A failed nominator publishes
+`not_applicable` with the reason, never an empty `measured` (Law S1).
 """
 
 import importlib
@@ -49,19 +24,15 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 from aipass.seedgo.apps.handlers.module_root import module_file
 
-#: Where nominators live, and the filename shape that declares one.
 PACK_DIR = module_file(__file__).parent
 NOMINATOR_GLOB = "*_check.py"
 
-#: What a nominator must expose.
 REQUIRED_ATTRIBUTES: tuple = ("GROUP", "SPECIFICATION", "nominate")
 
-#: What a nominator may never expose. Either of these would make the module
-#: visible to the audit's file-walk scoring engine.
+#: Either would make the module visible to the audit's file-walk scoring engine.
 FORBIDDEN_ATTRIBUTES: tuple = ("check_module", "check_branch")
 
-#: Directories a target keeps its tests in. Searched in order; an unknown
-#: external target falls back to the whole tree.
+#: Searched in order; an unknown external target falls back to the whole tree.
 TEST_DIRS: tuple = ("tests", "test")
 
 
@@ -69,26 +40,11 @@ class NominatorError(Exception):
     """A module in the pack directory that may not be registered as a nominator."""
 
 
-# =============================================================================
-# DISCOVERY
-# =============================================================================
-
-
 def _load(path: Path) -> ModuleType:
     """Import one nominator module, as THE module and not as a copy of it.
 
-    A sibling of this file is imported THROUGH THE PACKAGE, so the object the
-    orchestrator runs is the object every other importer already holds. Loading
-    the same source by path instead produces a SECOND module with the same
-    code: `sys.modules` never sees it, so discovery re-executes all nine on
-    every call, and anything that reads a nominator's `SPECIFICATION` through
-    the package is reading a different object than the one that ran. Two module
-    objects for one rule is the same species of defect as two statements of one
-    rule, which is why `render_spec` exists.
-
-    A pack directory that is NOT this package's own is still supported and is
-    loaded by path — a second ecosystem ships its own pack, and a pack that
-    cannot be imported must not silently disappear.
+    Through the package, so the object that runs is the one every importer holds; by path
+    makes a second module object. A foreign pack directory is still loaded by path.
     """
     if path.parent == PACK_DIR and __package__:
         return importlib.import_module(f"{__package__}.{path.stem}")
@@ -125,9 +81,7 @@ def shape_problems(module: ModuleType) -> List[str]:
 def discover(pack_dir: Path = PACK_DIR) -> Tuple[Dict[str, ModuleType], List[str]]:
     """Find every nominator in the pack. Returns `(by_group, rejections)`.
 
-    A rejected module is never silently dropped: a nominator that vanished
-    without explanation is how a fleet quietly stops being measured on a
-    species it believes is covered.
+    A rejected module is never silently dropped.
     """
     found: Dict[str, ModuleType] = {}
     rejections: List[str] = []
@@ -163,11 +117,6 @@ def declared_groups(pack_dir: Path = PACK_DIR) -> List[str]:
     return sorted(found)
 
 
-# =============================================================================
-# RUNNING
-# =============================================================================
-
-
 def build_corpus(target_root: Path) -> corpus.Corpus:
     """Parse the target's test corpus once, for every nominator to share."""
     scanned = corpus.build(target_root, TEST_DIRS)
@@ -179,10 +128,7 @@ def build_corpus(target_root: Path) -> corpus.Corpus:
 def _production_limits(module: ModuleType, scanned: corpus.Corpus) -> List[str]:
     """The corpus's unreadable-production count, for rules that read production.
 
-    Only merged for a rule that declares `READS_PRODUCTION`. A rule whose whole
-    subject is the test corpus is not made less complete by a production file
-    that will not parse, and adding the line anyway would be a limit that is
-    not true - which is the same defect as omitting one that is.
+    Only for `READS_PRODUCTION` rules: a limit that is not true is the same defect as a missing one.
     """
     if not getattr(module, "READS_PRODUCTION", False):
         return []
@@ -218,12 +164,7 @@ def _measured_group(module: ModuleType, rows: List[dict], scanned: corpus.Corpus
 
 
 def _not_applicable(module: ModuleType, reason: str) -> dict:
-    """A group document for a nominator that could not run.
-
-    Law S1: not-run is `not_applicable` WITH A REASON, never 0 and never an
-    empty `measured`. A rule that crashed and a rule that found nothing must
-    never produce the same document.
-    """
+    """A group document for a nominator that could not run."""
     specification = dict(getattr(module, "SPECIFICATION", {}))
     return {
         "tier": "static",
@@ -241,11 +182,7 @@ def _not_applicable(module: ModuleType, reason: str) -> dict:
 def run(target_root: Path, pack_dir: Path = PACK_DIR) -> Dict[str, dict]:
     """Run every discovered nominator over one target. Returns group documents.
 
-    `target_root` is the COPY, never the real tree (Law M10). The nominators
-    only read, but pointing them at the real tree would make the static tier
-    the one part of the lane that measured a different program from the rest
-    of it — and a rule reading one tree while the gate reads another is a
-    measurement nobody can reconcile.
+    `target_root` is the copy, never the real tree (Law M10).
     """
     found, rejections = discover(pack_dir)
     scanned = build_corpus(Path(target_root))
@@ -255,9 +192,7 @@ def run(target_root: Path, pack_dir: Path = PACK_DIR) -> Dict[str, dict]:
         try:
             rows = list(module.nominate(scanned))
         except Exception as exc:
-            # Never converted into an empty measured group. The reason travels
-            # into the artifact so a reader can tell a rule that found nothing
-            # from a rule that could not look.
+            # Never an empty measured group: the reason travels into the artifact.
             logger.warning(f"[AUDIT-TESTS] nominator '{group}' could not run: {type(exc).__name__}: {exc}")
             groups[group] = _not_applicable(module, f"{type(exc).__name__}: {exc}")
             continue

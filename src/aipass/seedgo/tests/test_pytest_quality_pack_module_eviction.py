@@ -3,7 +3,7 @@
 # Description: pytest_quality pack, module_eviction checker pins (split from test_pytest_quality_pack.py)
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/module_eviction_check.py."""
@@ -19,15 +19,8 @@ import pytest
 from aipass.seedgo.apps.handlers.pytest_quality_standards import module_eviction_check
 from aipass.seedgo.tests.support_pytest_quality_pack import _write
 
-# =============================================================================
-# MODULE EVICTION - DID THE TEST PUT THE IMPORT CACHE BACK
-# =============================================================================
 
-# NOTHING IN THIS SECTION EVICTS A MODULE, and the rule under test is why that is
-# written down. A pin for a checker about sys.modules is the one place in this
-# file where a real `sys.modules.pop` would read as ordinary setup. There is none:
-# every project below is source TEXT written into tmp_path, and every assertion is
-# about what the CHECKER reported over that text.
+# Every project here is source text in tmp_path: a real `sys.modules.pop` in this file would read as ordinary setup.
 
 
 def _eviction_rows(root: Path) -> list:
@@ -42,14 +35,7 @@ def _first_line(path: Path, prefix: str) -> int:
 
 
 def _module_eviction_project(root: Path) -> Path:
-    """Six functions, two of which leave the import cache changed.
-
-    The four whose cache is put back are acquitted for four DIFFERENT reasons -
-    recorded first, patch.dict, a restore in a finally, a fixture teardown. Three
-    of those still re-import after the eviction and leave pkg.modules.rollover
-    rebound (PARENT_ATTRIBUTE_REBIND), so the fixture teardown is the one clean
-    function and the score is 16.
-    """
+    """Six functions, two of which leave the import cache changed."""
     _write(
         root,
         "tests/test_reimport.py",
@@ -102,25 +88,10 @@ def _module_eviction_project(root: Path) -> Path:
 
 
 class TestModuleEvictionDetection:
-    """What counts as an eviction, and the incident that is the reason for the rule.
-
-    Each test names the one-line mutation of `module_eviction_check` it was
-    confirmed RED against, so a later reader can check the pin still bites.
-    """
+    """What counts as an eviction, and the incident that is the reason for the rule."""
 
     def test_the_incident_helper_before_its_cure_is_flagged_on_both_lines(self, tmp_path):
-        """THE INCIDENT SHAPE: a helper, not a test, evicting both homes of a module bare.
-
-        memory's `_import_rollover` popped the rollover module and deleted the
-        parent package's attribute with nothing recording either, then re-imported
-        it against a MagicMock cli. The mock-bound module outlived the test and a
-        later in-process `memory.main()` exited 0 where the contract says 2. The
-        site is a module-level helper, so a rule reading only test units would be
-        blind to it, and the row has to name both lines or a reader fixes one half
-        and ships the other. Mutation caught: `if dotted == "sys.modules.pop" and
-        node.args:` becoming `... == "sys.modules.popitem" ...`, which leaves the
-        delattr half standing and drops the cache half from the row.
-        """
+        """THE INCIDENT SHAPE: a helper, not a test, evicting both homes of a module bare."""
         path = _write(
             tmp_path,
             "tests/test_reimport.py",
@@ -155,16 +126,7 @@ class TestModuleEvictionDetection:
         assert f"line {_first_line(path, 'delattr(')} delattr(parent, 'rollover')" in rows[0]["detail"]
 
     def test_del_sys_modules_in_a_class_level_helper_is_flagged_under_the_class_path(self, tmp_path):
-        """`del sys.modules[key]` is the same eviction as `pop`, and a class helper is still a subject.
-
-        prax and backup evict by prefix in a loop, and some of those loops live in
-        methods of a test class that are not tests themselves. The row has to carry
-        the class in its nodeid or a reader cannot tell which `_fresh_module` it
-        means. Mutations caught: the Delete arm's `corpus.dotted_name(target.value)
-        == SYS_MODULES` becoming `== "sys.nothing"`, which reads no `del` at all;
-        and `ast.ClassDef` dropped from the nodes that extend the path in
-        `functions_in`, which names a module-level function that does not exist.
-        """
+        """`del sys.modules[key]` is the same eviction as `pop`, and a class helper is still a subject."""
         _write(
             tmp_path,
             "tests/test_watcher.py",
@@ -193,15 +155,7 @@ class TestModuleEvictionDetection:
         assert "del sys.modules[key]" in rows[0]["detail"]
 
     def test_a_bare_delattr_beside_a_cured_cache_half_is_still_flagged(self, tmp_path):
-        """THE HALF-CURE: sys.modules moved onto monkeypatch, the parent attribute left bare.
-
-        memory's intake helper evicts its names with `monkeypatch.delitem` and then
-        deletes `parent.pool_processor` with a bare delattr on a `parent` read
-        through `sys.modules.get`. The attribute is the second home of the same
-        module - `from package import name` reads it - so leaving it changed is the
-        same leak. Mutation caught: "sys.modules.get" removed from MODULE_BINDERS,
-        which cannot prove `parent` a module and reports nothing.
-        """
+        """THE HALF-CURE: sys.modules moved onto monkeypatch, the parent attribute left bare."""
         _write(
             tmp_path,
             "tests/test_intake.py",
@@ -231,14 +185,7 @@ class TestModuleEvictionDetection:
         ]
 
     def test_a_delattr_on_a_module_bound_by_an_import_statement_is_flagged(self, tmp_path):
-        """A name an `import ... as` statement binds is a module, at the top of the file or inside the function.
-
-        `import pkg.modules as modules_pkg` can only bind a module, so deleting an
-        attribute from it evicts a cached submodule as surely as the
-        `sys.modules.get` spelling does. Mutation caught: `alias.asname or
-        alias.name.split(".")[0]` becoming `alias.name.split(".")[0]`, which binds
-        `pkg` and never the alias, so neither deletion reads as one from a module.
-        """
+        """A name an `import ... as` statement binds is a module, at the top of the file or inside the function."""
         _write(
             tmp_path,
             "tests/test_modules.py",
@@ -265,16 +212,7 @@ class TestModuleEvictionDetection:
         ]
 
     def test_a_delattr_on_anything_not_provably_a_module_is_not_read(self, tmp_path):
-        """FEWER FLAGS BY DESIGN: a from-import name, a parameter, a rebound name.
-
-        `from pkg import helper` may bind a function; a parameter may hold
-        anything; a name bound from `import_module` and then rebound from a factory
-        holds whichever ran last, and a reader cannot tell which. seedgo's own
-        suite deletes keys from a `types.ModuleType` it built in the test, which is
-        not a cached module at all. Mutation caught: `return (module_imports |
-        proven) - disproven` becoming `return module_imports | proven`, which keeps
-        the rebound name proven.
-        """
+        """FEWER FLAGS BY DESIGN: a from-import name, a parameter, a rebound name."""
         _write(
             tmp_path,
             "tests/test_adapters.py",
@@ -303,13 +241,7 @@ class TestModuleEvictionDetection:
         assert _eviction_rows(tmp_path) == []
 
     def test_monkeypatch_delitem_and_delattr_are_the_cure_and_never_an_eviction(self, tmp_path):
-        """The spellings the rule recommends must not be the spellings it flags.
-
-        `monkeypatch.delattr(parent, "search")` ends in the same word as the
-        eviction it replaces; a reader matching the tail would convict the cure
-        and teach every owner to go back to the bare call. Mutation caught: `elif
-        dotted == "delattr"` becoming `elif dotted.endswith("delattr")`.
-        """
+        """The spellings the rule recommends must not be the spellings it flags."""
         _write(
             tmp_path,
             "tests/test_cured.py",
@@ -333,15 +265,7 @@ class TestModuleEvictionDetection:
         assert _eviction_rows(tmp_path) == []
 
     def test_a_nested_helper_is_its_own_subject_and_is_reported_once(self, tmp_path):
-        """ONE SCOPE, ONE OWNER - a nested def's eviction belongs to the nested def.
-
-        Walking the whole outer function would report the inner eviction twice,
-        once under each name, and let a restore written in the outer body acquit
-        an eviction that runs whenever the inner function is called. Mutation
-        caught: `ast.FunctionDef, ast.AsyncFunctionDef` dropped from
-        SEPARATE_SCOPES, which folds the inner body into the outer one and reports
-        the outer test as a second row.
-        """
+        """ONE SCOPE, ONE OWNER - a nested def's eviction belongs to the nested def."""
         _write(
             tmp_path,
             "tests/test_nested.py",
@@ -364,23 +288,10 @@ class TestModuleEvictionDetection:
 
 
 class TestModuleEvictionAcquittals:
-    """The difference between a rule and a nuisance.
-
-    Every acquittal below is a line a later edit could delete without any test
-    noticing. These are those tests.
-    """
+    """The difference between a rule and a nuisance."""
 
     def test_the_cure_on_disk_records_first_then_evicts_and_is_not_flagged(self, tmp_path):
-        """THE CURE memory shipped for the incident, in its own shape: record, then evict.
-
-        `monkeypatch.setitem(sys.modules, K, None)` then `del sys.modules[K]`, and
-        `monkeypatch.setattr(parent, "rollover", None, raising=False)` then
-        `delattr(parent, "rollover")`. monkeypatch saw the real module before the
-        eviction and puts it back at teardown. If the cure does not acquit, the
-        rule has nothing to recommend. Mutations caught: the cache arm's `method in
-        RECORDING_ITEM_METHODS` becoming `method in ()`, and the attribute arm's
-        `method in RECORDING_ATTR_METHODS` becoming `method in ()`.
-        """
+        """THE CURE memory shipped for the incident, in its own shape: record, then evict."""
         _write(
             tmp_path,
             "tests/test_reimport.py",
@@ -414,13 +325,7 @@ class TestModuleEvictionAcquittals:
         assert result["score"] == 100
 
     def test_a_record_made_after_the_eviction_restores_the_hole_and_does_not_acquit(self, tmp_path):
-        """EARLIER, NOT MERELY PRESENT - monkeypatch restores what it saw when it was called.
-
-        Called after the eviction, it saw the eviction, and teardown faithfully
-        puts the hole back. Order is the whole cure, so it is the whole pin.
-        Mutation caught: the position comparison in `_recorded_first` becoming
-        `if False:`, which lets a later record acquit an earlier eviction.
-        """
+        """EARLIER, NOT MERELY PRESENT - monkeypatch restores what it saw when it was called."""
         _write(
             tmp_path,
             "tests/test_reimport.py",
@@ -440,14 +345,7 @@ class TestModuleEvictionAcquittals:
         assert [row["nodeid"] for row in rows] == ["tests/test_reimport.py::test_the_record_comes_too_late"]
 
     def test_a_record_of_a_different_key_does_not_acquit(self, tmp_path):
-        """The key has to be the same key - prax's logger test records one module and pops another.
-
-        `monkeypatch.delitem(sys.modules, "...display")` first, then a bare
-        `sys.modules.pop(MODULE_NAME)`: the display module comes back at teardown
-        and the logger module does not. Mutation caught: the cache arm's `and
-        _same(second, eviction.target)` dropped, which lets any sys.modules record
-        acquit every cache eviction in its function.
-        """
+        """The key has to be the same key - prax's logger test records one module and pops another."""
         path = _write(
             tmp_path,
             "tests/test_logger_module.py",
@@ -469,15 +367,7 @@ class TestModuleEvictionAcquittals:
         assert [row["line"] for row in rows] == [_first_line(path, "sys.modules.pop(")]
 
     def test_patch_dict_around_or_above_a_cache_eviction_acquits_it(self, tmp_path):
-        """patch.dict snapshots the whole dict and restores it on exit, in the spellings people write.
-
-        A `with patch.dict(sys.modules, mocks):` block, a
-        `@mock.patch.dict("sys.modules", {})` decorator, and the fully qualified
-        `unittest.mock.patch.dict`. prax wraps thirty-six of its evictions this
-        way; convicting them would be convicting the idiom. Mutations caught: the
-        `with` arm of `_patch_dict_guarded` becoming `if False:`, and its
-        decorator arm becoming `if False:`.
-        """
+        """patch.dict snapshots the whole dict and restores it on exit, in the spellings people write."""
         _write(
             tmp_path,
             "tests/test_drive.py",
@@ -519,13 +409,7 @@ class TestModuleEvictionAcquittals:
         ]
 
     def test_patch_dict_never_restores_a_package_attribute_so_a_delattr_inside_it_is_still_read(self, tmp_path):
-        """backup's conftest names it exactly: patch.dict restores the DICT, never the parent's ATTRIBUTE.
-
-        So a `delattr(parent, ...)` inside the block leaves the package pointing at
-        whatever the re-import bound, after the dict is put back. Mutation caught:
-        the `cache and` guard on the patch.dict acquittal dropped, which lets
-        patch.dict acquit the attribute too.
-        """
+        """backup's conftest names it exactly: patch.dict restores the DICT, never the parent's ATTRIBUTE."""
         _write(
             tmp_path,
             "tests/test_drive.py",
@@ -587,17 +471,7 @@ class TestModuleEvictionAcquittals:
         ],
     )
     def test_an_explicit_restore_after_the_eviction_or_in_a_finally_acquits_it(self, tmp_path, body):
-        """A restore written out by hand is a restore, on every path the reader can see.
-
-        The finally case is drone's registry test in shape: pop, block the name,
-        try, and in the finally either put the saved module back or pop the
-        blocker. The second pop sits AFTER the only restore in the file, and it is
-        still correct code - a restore in a finally covers the key on every path.
-        Mutations caught, one per case: `and id(node) not in finally_ids` dropped
-        from `_restored_explicitly`; `_restores_attribute`'s `== "setattr"`
-        becoming `== "settattr"`; and its `t.attr == eviction.attr.value` becoming
-        `t.attr != eviction.attr.value`.
-        """
+        """A restore written out by hand is a restore, on every path the reader can see."""
         source = (
             "import importlib\nimport sys\n\n\ndef test_the_restore_is_written_out():\n"
             + textwrap.indent(textwrap.dedent(body).strip(), "    ")
@@ -608,16 +482,7 @@ class TestModuleEvictionAcquittals:
         assert _eviction_rows(tmp_path) == []
 
     def test_a_re_import_or_a_restore_of_another_key_is_not_a_restore(self, tmp_path):
-        """A RE-IMPORT IS THE POLLUTION, NOT THE CURE - and putting back a different module puts back nothing.
-
-        `importlib.import_module(K)` after the eviction caches a NEW module object,
-        which is precisely the object the incident left behind. And
-        `sys.modules[OTHER] = saved` restores OTHER. Mutations caught:
-        `_restores_cache`'s last line becoming `return isinstance(node, ast.Call)`,
-        which reads any later call as a restore; and `and _same(t.slice,
-        eviction.target)` dropped, which reads any assignment into sys.modules as
-        this one.
-        """
+        """A RE-IMPORT IS THE POLLUTION, NOT THE CURE - and putting back a different module puts back nothing."""
         _write(
             tmp_path,
             "tests/test_dashboard.py",
@@ -648,16 +513,7 @@ class TestModuleEvictionAcquittals:
         ]
 
     def test_a_fixture_with_a_teardown_is_acquitted_and_one_without_is_not(self, tmp_path):
-        """host_state's convention: any statement after the last yield is the teardown.
-
-        A fixture that yields and stops has handed over a changed cache with
-        nothing to put it back, and a fixture that `return`s - memory's `verbs`,
-        which pops the rollover module and returns a namespace - never had a
-        teardown at all. A plain generator is not a fixture, so nothing runs its
-        tail when a test fails. Mutations caught: `teardown_after_yield`'s last
-        line becoming `return True`, and its `if not _is_fixture(function):`
-        becoming `if False:`.
-        """
+        """host_state's convention: any statement after the last yield is the teardown."""
         _write(
             tmp_path,
             "tests/test_fixtures.py",
@@ -707,18 +563,7 @@ class TestModuleEvictionAcquittals:
         ]
 
     def test_an_autouse_fixture_in_the_same_file_that_records_the_key_acquits_a_bare_helper(self, tmp_path):
-        """MEASURED ON THE FLEET: memory's test_symbolic_extras, five rows, zero leaks.
-
-        Its autouse `_mock_handler_deps` runs `monkeypatch.delitem(sys.modules,
-        mod_name)` over a literal list of five symbolic modules, and five
-        `_import_*` helpers then pop the same five bare. A runtime probe found
-        every one of those module objects unchanged after teardown, because the
-        autouse record puts back what stood there before each test. Resolved one
-        hop on both sides: a loop over a literal list, a loop over a module-level
-        tuple, a module-level string constant. Mutation caught: `facts.autouse_keys
-        |= _cache_keys_recorded(function, facts)` becoming `facts.autouse_keys |=
-        set()`.
-        """
+        """MEASURED ON THE FLEET: memory's test_symbolic_extras, five rows, zero leaks."""
         _write(
             tmp_path,
             "tests/test_symbolic_extras.py",
@@ -770,16 +615,7 @@ class TestModuleEvictionAcquittals:
         assert {row["species"] for row in rows} == {"PARENT_ATTRIBUTE_REBIND"}
 
     def test_what_an_autouse_record_does_not_cover_is_still_flagged(self, tmp_path):
-        """Autouse, the same literal key, resolvable at all - each boundary pinned.
-
-        A fixture declared `autouse=False` runs only for the tests that request it, and
-        a helper cannot be followed to them. A key no autouse fixture recorded comes
-        back to nothing. A key assembled at runtime resolves to no name, and a key
-        that resolves to nothing must acquit nothing - the empty set is a subset of
-        everything. Mutations caught: `_is_autouse_fixture`'s keyword test becoming
-        `if True:`; `return bool(names) and names <= facts.autouse_keys` becoming
-        `return bool(names)`; and becoming `return names <= facts.autouse_keys`.
-        """
+        """Autouse, the same literal key, resolvable at all - each boundary pinned."""
         _write(
             tmp_path,
             "tests/test_symbolic_extras.py",
@@ -829,16 +665,7 @@ class TestModuleEvictionBranchCheck:
     """The scoring-API contract, and the paths where silence reads as clean."""
 
     def test_the_score_is_the_share_of_functions_that_leave_the_cache_as_they_found_it(self, tmp_path):
-        """Clean over every function read, and four different acquittals hold it up.
-
-        Two of six functions leave the cache changed. The denominator is every
-        function the rule reads, not the units alone: one of the two rows is a
-        helper, and scoring helper rows against a count of tests lets a file of
-        helpers drive a project below zero. Mutation caught: `population =
-        function_count(scanned)` becoming `population = total`, which reports 33
-        over three units where the honest answer is 16 over six functions (two
-        cache rows, three parent-attribute rebinds).
-        """
+        """Clean over every function read, and four different acquittals hold it up."""
         result = module_eviction_check.check_branch(str(_module_eviction_project(tmp_path)))
 
         assert result["score"] == 16
@@ -855,14 +682,7 @@ class TestModuleEvictionBranchCheck:
         )
 
     def test_the_result_passes_and_stays_advisory_even_when_functions_are_flagged(self, tmp_path):
-        """SHADOW MODE GATES NOTHING - this rule scores before it is calibrated.
-
-        Top-level `passed` must stay True while flags exist and `advisory` must
-        stay True, so a caller can tell a report from a verdict. Mutation caught:
-        `"passed": True,` becoming `"passed": not flagged,` in the scored return,
-        which turns an uncalibrated advisory into a board failure on every branch
-        with one of these sites.
-        """
+        """SHADOW MODE GATES NOTHING - this rule scores before it is calibrated."""
         result = module_eviction_check.check_branch(str(_module_eviction_project(tmp_path)))
 
         assert result["passed"] is True
@@ -872,13 +692,7 @@ class TestModuleEvictionBranchCheck:
         assert sorted(result) == ["advisory", "checks", "passed", "score", "standard", "violations"]
 
     def test_a_project_with_no_test_files_is_not_applicable_not_zero_quality(self, tmp_path):
-        """ZERO TESTS MEASURED IS NOT ZERO QUALITY FOUND.
-
-        Production that evicts modules is not a test that does, and a project with
-        no tests has nothing this rule can score. Losing the early return here does
-        not print a wrong number, it divides by zero. Mutation caught:
-        `"not_applicable": True,` becoming `"not_applicable": False,`.
-        """
+        """ZERO TESTS MEASURED IS NOT ZERO QUALITY FOUND."""
         _write(tmp_path, "apps/loader.py", "import sys\n\n\ndef reload():\n    sys.modules.pop('pkg', None)\n")
 
         result = module_eviction_check.check_branch(str(tmp_path))
@@ -888,13 +702,7 @@ class TestModuleEvictionBranchCheck:
         assert "no test files found" in result["checks"][0]["message"]
 
     def test_a_project_whose_only_test_file_is_broken_is_not_reported_as_having_no_tests(self, tmp_path):
-        """A broken file must never read as an absent one - the ordering pin.
-
-        An unparseable file contributes no functions, so it cannot lower a score,
-        and silence about it reads as clean. Mutation caught: the `measured`
-        ternary's `if not scanned.unparseable` becoming `if True`, which makes the
-        two cases indistinguishable.
-        """
+        """A broken file must never read as an absent one - the ordering pin."""
         _write(tmp_path, "tests/test_broken.py", "def test_broken(:\n    sys.modules.pop('pkg')")
 
         result = module_eviction_check.check_branch(str(tmp_path))
@@ -905,12 +713,7 @@ class TestModuleEvictionBranchCheck:
         assert any("test_broken.py" in check["message"] for check in result["checks"])
 
     def test_an_unparseable_test_file_is_named_beside_a_scored_result(self, tmp_path):
-        """AN UNREAD FILE EVICTS NOTHING, so for this rule silence biases toward clean.
-
-        The scored path has to append the unreadable line deliberately; dropping it
-        leaves a healthy number and no hint a file was never read. Mutation caught:
-        `checks.extend(unreadable)` becoming `checks.extend([])`.
-        """
+        """AN UNREAD FILE EVICTS NOTHING, so for this rule silence biases toward clean."""
         _module_eviction_project(tmp_path)
         _write(tmp_path, "tests/test_broken.py", "def test_broken(:\n    sys.modules.pop('pkg')")
 
@@ -923,13 +726,7 @@ class TestModuleEvictionBranchCheck:
         assert "NOT measured" in named[0]["message"]
 
     def test_only_twelve_flagged_functions_are_named_and_the_rest_are_counted(self, tmp_path):
-        """A CHECK MESSAGE PRINTING HUNDREDS OF LINES IS ONE NOBODY READS.
-
-        prax alone carries thirty rows. Fourteen flagged helpers, twelve named, and
-        the remainder stated as a number rather than dropped; the violations list
-        itself is never truncated. Mutation caught: `MAX_REPORTED: int = 12`
-        becoming `MAX_REPORTED: int = 24`.
-        """
+        """A CHECK MESSAGE PRINTING HUNDREDS OF LINES IS ONE NOBODY READS."""
         helpers = "\n\n\n".join(
             f"def _load_{index:02d}():\n    sys.modules.pop('pkg.m{index:02d}', None)" for index in range(14)
         )

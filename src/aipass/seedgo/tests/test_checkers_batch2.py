@@ -3,7 +3,7 @@
 # Description: Tests for checker handlers batch 2
 # Version: 1.0.4
 # Created: 2026-03-29
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -47,11 +47,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
@@ -67,21 +62,11 @@ def _pin_bypass_log(monkeypatch):
     monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _write(tmp_path: Path, name: str, content: str) -> str:
     """Write a temp .py file and return its string path."""
     p = tmp_path / name
     p.write_text(content, encoding="utf-8")
     return str(p)
-
-
-# ===================================================================
-# 1. error_handling_check
-# ===================================================================
 
 
 class TestErrorHandling:
@@ -131,11 +116,6 @@ def do_work():
         bypass = [{"file": "bypass_errors.py", "standard": "error_handling"}]
         result = check_error_handling(fp, bypass_rules=bypass)
         assert result["score"] == 100
-
-
-# ===================================================================
-# 2. handlers_check
-# ===================================================================
 
 
 class TestHandlers:
@@ -206,12 +186,7 @@ def do_stuff():
         assert "line 2" in independence["message"]
 
     def test_handlers_reports_all_orchestration_imports(self, tmp_path: Path) -> None:
-        """A file with two module (orchestration) imports must report both, not just the first.
-
-        The fixture sits under a directory NAMED seedgo on purpose: orchestration
-        is now an own-branch rule, and a tmp_path-named branch would make these
-        two imports cross-branch -- the sanctioned gateway shape, not a violation.
-        """
+        """A file with two module (orchestration) imports must report both, not just the first."""
         handler_dir = tmp_path / "seedgo" / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
         code = """\
@@ -227,11 +202,6 @@ def do_stuff():
         orchestration = next(c for c in result["checks"] if c["name"] == "No orchestration")
         assert "line 1" in orchestration["message"]
         assert "line 2" in orchestration["message"]
-
-
-# ===================================================================
-# 3. hardcoded_key_check
-# ===================================================================
 
 
 class TestHardcodedKey:
@@ -278,17 +248,12 @@ API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
 
     def test_an_unreadable_file_fails_by_name(self, tmp_path: Path) -> None:
         # A directory named like a module: it exists, and no read of it
-        # succeeds. Unread is not "no key" (seedgo fleet green leg 15).
+        # succeeds. Unread is not "no key".
         target = tmp_path / "keys.py"
         target.mkdir()
         result = check_hardcoded_key(str(target))
         assert result["score"] == 0
         assert [c["message"] for c in result["checks"]] == ["Cannot read the file, so it was not scanned for keys"]
-
-
-# ===================================================================
-# 4. help_text_check
-# ===================================================================
 
 
 class TestHelpText:
@@ -325,11 +290,6 @@ def print_help():
         bypass = [{"file": "bypass_help.py", "standard": "help_text"}]
         result = check_help_text(fp, bypass_rules=bypass)
         assert result["score"] == 100
-
-
-# ===================================================================
-# 5. imports_check
-# ===================================================================
 
 
 class TestImports:
@@ -383,13 +343,7 @@ sys.path.insert(0, "/some/path")
 
 
 class TestTheLoggerSubRuleIsProductionOnly:
-    """A test file owes no logger; the checker's other five sub-rules still run.
-
-    When tests/ joined the audit corpus (2026-09-21) this one sub-rule scored
-    42 of @memory's 43 test files at 80% for not importing a logger they were
-    right not to import. The gate is on the PATH, not on APPLIES_TO, because
-    ordering, namespace, AIPASS_ROOT and sys.path all read the same in a test.
-    """
+    """A test file owes no logger; the checker's other five sub-rules still run."""
 
     # Over twenty code lines on purpose: the logger sub-rule already exempts
     # small files, so a short sample would pass for the wrong reason and the
@@ -459,12 +413,7 @@ def record(base):
 
 
 class TestADoorOwesNoLogger:
-    """A door re-exports and logs nothing, whatever its length (DPLAN-0404).
-
-    spawn's door_class_registry (21 code lines, one long import list) was
-    convicted for the logger while door_owner (3 lines) passed under the
-    small-file exemption. The same source under a plain module name keeps the row.
-    """
+    """A door re-exports and logs nothing, whatever its length (DPLAN-0404)."""
 
     NAMES = [f"name_{n:02d}" for n in range(20)]
     DOOR = (
@@ -486,11 +435,6 @@ class TestADoorOwesNoLogger:
         result = check_imports(str(target))
 
         assert [c["name"] for c in result["checks"] if not c["passed"]] == rows
-
-
-# ===================================================================
-# 6. introspection_check
-# ===================================================================
 
 
 class TestIntrospection:
@@ -549,11 +493,6 @@ def handle_command(command, args):
         assert result["score"] == 100
 
 
-# ===================================================================
-# 7. log_handler_check
-# ===================================================================
-
-
 class TestLogHandler:
     def test_log_handler_clean_passes(self, tmp_path: Path) -> None:
         code = """\
@@ -597,11 +536,6 @@ my_logger.addHandler(handler)
         bypass = [{"file": "bypass_logging.py", "standard": "log_handler"}]
         result = check_log_handler(fp, bypass_rules=bypass)
         assert result["score"] == 100
-
-
-# ===================================================================
-# 8. log_level_check
-# ===================================================================
 
 
 class TestLogLevel:

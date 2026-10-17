@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/bypass/
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -33,11 +33,6 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as utils_is_bypassed, matching_rule
 from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.modules import bypass as bypass_module
-
-
-# ---------------------------------------------------------------------------
-# Tests -- bypass_handler.load_bypass_rules
-# ---------------------------------------------------------------------------
 
 
 def test_load_bypass_rules_from_file(tmp_path):
@@ -81,11 +76,6 @@ def test_load_bypass_rules_creates_config_if_missing(tmp_path):
     assert (tmp_path / ".seedgo" / "bypass.json").exists()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- bypass_handler.is_bypassed
-# ---------------------------------------------------------------------------
-
-
 def test_is_bypassed_matching_rule(tmp_path):
     """is_bypassed returns True when file and standard match a rule."""
     rules = [{"file": "apps/foo.py", "standard": "naming", "reason": "legacy"}]
@@ -126,11 +116,6 @@ def test_is_bypassed_empty_rules(tmp_path):
     assert bypass_handler_is_bypassed(str(tmp_path / "apps" / "foo.py"), str(tmp_path), "naming", None, []) is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- bypass_handler.ensure_seedgo_config
-# ---------------------------------------------------------------------------
-
-
 def test_ensure_seedgo_config_creates_dir(tmp_path):
     """ensure_seedgo_config creates .seedgo directory and bypass.json."""
     result = ensure_seedgo_config(str(tmp_path))
@@ -145,11 +130,6 @@ def test_ensure_seedgo_config_idempotent(tmp_path):
     bypass_file = tmp_path / ".seedgo" / "bypass.json"
     data = json.loads(bypass_file.read_text(encoding="utf-8"))
     assert "bypass" in data
-
-
-# ---------------------------------------------------------------------------
-# Tests -- ignore_handler
-# ---------------------------------------------------------------------------
 
 
 def test_get_audit_ignore_patterns_returns_list():
@@ -182,11 +162,6 @@ def test_get_deprecated_patterns_returns_dict():
     for key, value in patterns.items():
         assert isinstance(key, str)
         assert isinstance(value, str)
-
-
-# ---------------------------------------------------------------------------
-# Tests -- .seedgoignore engine (load_ignore_entries / is_seedgo_ignored)
-# ---------------------------------------------------------------------------
 
 
 def test_global_default_ignores_tools_dir_with_no_dotfile(tmp_path):
@@ -273,11 +248,6 @@ def test_is_seedgo_ignored_accepts_precomputed_entries(tmp_path):
 
     entries = load_ignore_entries(tmp_path)
     assert is_seedgo_ignored(str(tools_file), tmp_path, entries) is True
-
-
-# ---------------------------------------------------------------------------
-# Tests -- utils.is_bypassed name-scoped bypass
-# ---------------------------------------------------------------------------
 
 
 def test_utils_name_match_suppresses_regardless_of_line(tmp_path):
@@ -472,18 +442,8 @@ def test_utils_multiple_functions_in_one_rule(tmp_path):
     )
 
 
-# ---------------------------------------------------------------------------
-# utils.is_bypassed -- scope must be SUPPLIED, not just declared (FPLAN-0382)
-# ---------------------------------------------------------------------------
-
-
 def test_utils_lines_rule_does_not_match_when_no_line_supplied(tmp_path):
-    """A lines rule is inert for a caller that passes no line -- never file-wide.
-
-    This is the whole defect: every checker's top-of-check_module gate calls
-    utils_is_bypassed(path, standard) with no line, so a rule reading "lines": [37, 66]
-    used to suppress the entire file for that standard.
-    """
+    """A lines rule is inert for a caller that passes no line -- never file-wide."""
     rules = [{"file": "apps/ops.py", "standard": "silent_catch", "lines": [37, 66], "reason": "test"}]
     ops_path = str(tmp_path / "apps" / "ops.py")
 
@@ -503,11 +463,7 @@ def test_utils_functions_rule_does_not_match_when_no_name_supplied(tmp_path):
 
 
 def test_utils_declared_scope_that_is_supplied_must_match(tmp_path):
-    """With both keys declared, a supplied scope that disagrees blocks the match.
-
-    A rule for update_command does not cover some other symbol that happens to
-    sit on the same line.
-    """
+    """With both keys declared, a supplied scope that disagrees blocks the match."""
     rules = [
         {
             "file": "apps/ops.py",
@@ -532,7 +488,7 @@ def test_utils_unscoped_rule_is_still_file_wide(tmp_path):
     assert utils_is_bypassed(ops_path, "silent_catch", line=12345, bypass_rules=rules) is True
 
 
-# inert.py -- a rule whose scope the checker can never evaluate must ANNOUNCE itself (FPLAN-0382 ruling a)
+# inert.py -- a rule whose scope the checker can never evaluate must ANNOUNCE itself
 
 
 def test_inert_scope_support_is_derived_not_hardcoded():
@@ -584,7 +540,7 @@ def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
 
 def test_inert_branch_info_names_an_unreadable_bypass_file(tmp_path):
     """A bypass.json that does not parse is named, never the [] of a branch with nothing
-    to report (fleet green leg 14). Red first: the handler returned []."""
+    to report."""
     (tmp_path / ".seedgo").mkdir()
     bypass_file = tmp_path / ".seedgo" / "bypass.json"
     bypass_file.write_text("{not json", encoding="utf-8")
@@ -646,15 +602,11 @@ def test_in_scope_rules_are_never_listed_as_out_of_scope(tmp_path):
     assert inert.check_branch_info(str(tmp_path)) == []
 
 
-# The scope map must read POSITIONAL scope args, not just keywords (FPLAN-0384)
+# The scope map must read POSITIONAL scope args, not just keywords
 
 
 def test_inert_scope_support_reads_positional_line_argument():
-    """is_bypassed(path, "debug_print", ln, rules) threads a line as much as line=ln does.
-
-    The first version of this map inspected keywords only and reported ten live
-    standards as line-blind, which nearly widened working rules to file-wide.
-    """
+    """is_bypassed(path, "debug_print", ln, rules) threads a line as much as line=ln does."""
     support = inert.scope_support()
 
     for standard in ("debug_print", "help_text", "log_handler", "output_routing", "windows_compat"):
@@ -667,15 +619,7 @@ def test_inert_scope_support_ignores_a_literal_none_line():
 
 
 def test_inert_scope_support_skips_modules_that_shadow_the_matcher(tmp_path, monkeypatch):
-    """A module defining its own matcher is left out rather than read wrongly.
-
-    bypass_handler.is_bypassed takes (file_path, branch_path, standard, line) --
-    reading positional args against that signature while assuming the shared one
-    yields confident nonsense, so resolve the binding first. The shadowing module
-    defines its own matcher BEFORE it imports the shared name, so only the
-    definition can disqualify it.
-    Mutant: the definition no longer disqualifies in apps/handlers/bypass/inert.py — killed.
-    """
+    """A module defining its own matcher is left out rather than read wrongly."""
     shared = "from aipass.seedgo.apps.handlers.bypass.utils import matching_rule\n"
     (tmp_path / "shadowing_check.py").write_text(
         "def is_bypassed(a, b, c):\n    return False\n\n\n"
@@ -725,7 +669,7 @@ def test_a_lines_rule_on_sleep_in_test_is_named_inert():
     ]
 
 
-# The trigger standard's third matcher, folded back into the shared one (FPLAN-0384)
+# The trigger standard's third matcher, folded back into the shared one
 
 
 def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
@@ -746,11 +690,7 @@ def _trigger_bypass_message(tmp_path, rules):
 
 
 def test_trigger_lines_rule_no_longer_suppresses_the_whole_file(tmp_path):
-    """The local copy never got the FPLAN-0382 fix: a lines rule fall-through-matched here.
-
-    Spawn's tests/conftest.py [trigger] rule was not inert, it was over-wide --
-    it muted the standard for the whole file while reading as two lines.
-    """
+    """The local copy never got the FPLAN-0382 fix: a lines rule fall-through-matched here."""
     scoped = [{"file": "apps/foo.py", "standard": "trigger", "lines": [10, 20], "reason": "x"}]
     assert _trigger_bypass_message(tmp_path, scoped) == []
 
@@ -763,15 +703,7 @@ def test_trigger_file_wide_rule_still_carries_its_category_and_reason(tmp_path):
 
 
 def test_functions_scoped_unused_function_rules_are_never_reported_dead():
-    """Attribution is source-derived, not record-derived.
-
-    unused_function's audit records carry no line and no name field -- the
-    function names live inside the issues strings ("handle_pr_created() line
-    47"). A liveness sweep that matches rules against record FIELDS therefore
-    reads every functions-scoped rule as dead, and an owner pruning in good
-    faith deletes a working rule. This map reads the checker's call sites
-    instead: unused_function passes name=, so the scope is evaluable.
-    """
+    """Attribution is source-derived, not record-derived."""
     assert "functions" in inert.scope_support()["unused_function"]
 
     live = {
@@ -855,13 +787,7 @@ def test_a_branch_with_nothing_to_report_gets_no_caveat(tmp_path):
 
 
 def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
-    """audit_display prints every info line as f"  [dim]ⓘ {message}[/dim]".
-
-    Rich eats "[handlers]" as a style tag at render time, so the standard name
-    in "apps/x.py [handlers]:" never reached the reader -- the advisory named a
-    file and swallowed which rule it meant. Asserted on rendered bytes: a
-    warning Rich deletes is a warning nobody was given.
-    """
+    """audit_display prints every info line as f"  [dim]ⓘ {message}[/dim]"."""
     import io
 
     from rich.console import Console
@@ -889,10 +815,6 @@ def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees(tmp_path):
     assert matching_rule(bar_path, "cli", None, rules) is None
     assert utils_is_bypassed(bar_path, "cli", None, rules) is False
 
-
-# ---------------------------------------------------------------------------
-# Tests -- the prune verb (drone @seedgo bypass prune @branch)
-# ---------------------------------------------------------------------------
 
 #: One dead rule, one live rule, and the two blank-field forms: dead too, but left for the owner.
 PRUNE_RULES = [

@@ -3,74 +3,13 @@
 # Description: No Product Call Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 No Product Call Standards Checker Handler
 
-Crack class A from the 2026-09-22 eyes-on review of @backup's tests: a
-``def test_*`` that never reaches the product. It runs, it asserts, it is
-green -- and no edit anywhere in ``aipass/`` can make it red. The reviewers
-called these LIBRARY tests, because what they usually pin is a third party's
-behaviour: ``pathspec`` matching a glob, ``StringIO`` returning what was
-written to it, ``capsys`` capturing a ``print``.
-
-Ten template checkers passed every one of the 107 tests that carry a finding.
-Those checkers measure SHAPE. This one measures whether the test is pointed at
-anything.
-
-THE RULE, and it is a REACHABILITY rule, not a call-site rule. A test is
-convicted when NOTHING in its reachable text names the product. Reachable
-means the test's own body, its decorators, every same-file helper it calls,
-and every fixture it requests. Naming the product means any of:
-
-  * a name bound by an ``aipass.*`` import;
-  * a module-level constant whose value reaches one of those (fixed point) --
-    ``SIMPLE_MODULES = [snapshot, versioned]`` is how a parametrized test
-    reaches ``mod.handle_command``, and the import is three screens up;
-  * a dotted string starting ``aipass.`` -- ``importlib.import_module`` and
-    ``mock.patch`` both take the product by name, not by binding;
-  * a multi-line string mentioning ``aipass`` -- a probe source a subprocess
-    runs is product code, written down;
-  * a path computed from ``__file__`` -- it points into the repo tree, and a
-    test that reads the guard file's text is testing the guard.
-
-TWO ACQUITTALS THAT ARE NOT ABOUT THE PRODUCT AT ALL:
-
-  * A CALL INTO THE FILE'S OWN APPARATUS -- a function defined in this file,
-    or a fixture defined in the branch conftest. A negative control that feeds
-    a synthetic source to the file's own detector is a meta-test, not a
-    library test, and @backup has nine of them. The class the review found is
-    "this test is pointed at nothing"; a control for the file's own apparatus
-    IS pointed at something.
-  * A METHOD OF A CLASS WHOSE OWN BODY REACHES THE PRODUCT. A
-    ``unittest.TestCase`` method reaches it through ``self.conn``, which
-    ``setUp`` built and the test body never mentions.
-
-CHECK FIRST, measured 2026-09-22 over the fleet's 559 test files:
-
-  * 23 files convicted, 82 hits, 7.9s. Top three: @prax 5 files, @commons 3,
-    @memory 3. The worst single file is @commons' ``test_commons.py`` at 29 --
-    29 methods that execute raw SQL against a sqlite connection and read the
-    row back, with no commons code anywhere on the path.
-  * AGAINST THE REVIEWERS' GROUND TRUTH IN @backup -- the nine reports name
-    12 LIBRARY rows, and this checker convicts all 12 and misses none:
-    ``test_ignore_pathspec.py`` 46, 53, 59, 70, 77, 88, 99, 106, 117, 124 and
-    ``test_cli_routing.py`` 581, 587.
-  * It convicts two more there, ``test_ignore_pathspec.py`` 135 and 142, which
-    the reviewers marked DUPLICATE. They are library tests as well --
-    ``pathspec.PathSpec.from_lines`` with no backup symbol on the path -- so
-    this is a second true reading of the same two rows, not a false one.
-  * NO OTHER FILE IN @backup IS TOUCHED. Eight of the nine reviewed files pass
-    clean.
-
-FOUR CUTS, AND THE NUMBER MOVED BY 70x. A call-site rule convicted 295 files
-and 5,807 hits, and nearly all of it was false. Parametrize argvalues, a probe
-source handed to a subprocess, a dotted module path built in an f-string, and
-a ``setUp`` that builds the world are four different ways to reach the product
-without a call site the checker can see. Every acquittal above is one of them,
-found by reading what an earlier cut convicted -- not by tuning to a number.
+Reference: no_product_call.md
 """
 
 import ast
@@ -200,8 +139,7 @@ def _reaches(
 ) -> bool:
     """Whether anything reachable from this function names the product.
 
-    ``seen`` closes the recursion over mutually recursive helpers; without it
-    a helper pair in @hooks' conftest recurses until the interpreter stops.
+    ``seen`` closes the recursion over mutually recursive helpers, which would otherwise never stop.
     """
     if id(function) in seen:
         return False
@@ -228,16 +166,9 @@ def _reaches(
 def _acquitted_by_class(tree: ast.Module, bound: Set[str]) -> Set[int]:
     """Node ids of methods defined in a class whose own body reaches the product.
 
-    A ``unittest.TestCase`` method reaches the product through ``self.conn``,
-    which ``setUp`` built and the test body never mentions. The class is the
-    apparatus there, exactly as the module is for a pytest fixture, so a
-    method of a reaching class is acquitted through its siblings. @commons'
-    ``test_commons.py`` was 67 hits before the class was consulted and is 29
-    after -- and those 29 are real, raw SQL against a sqlite connection with
-    no commons code on the path at all.
-
-    ONE DESCENT, carrying the enclosing class down. A walk per class re-walks
-    every node once for each class above it, which cost 3.6s over the fleet.
+    A ``unittest.TestCase`` method reaches the product through ``self.conn``, which ``setUp`` built:
+    the class is the apparatus, so a method of a reaching class is acquitted through its siblings.
+    ONE descent carries the enclosing class down; a walk per class re-walks every node per class above it.
     """
     nodes: Dict[int, List[ast.AST]] = {}
     methods: Dict[int, Set[int]] = {}
@@ -267,8 +198,7 @@ def _acquitted_by_class(tree: ast.Module, bound: Set[str]) -> Set[int]:
 def _parse(source: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ruff already convicts a syntax error; a verdict invented for an unparseable file misleads.
     """
     try:
         return ast.parse(source)
@@ -333,15 +263,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for tests that never reach the product.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for tests that never reach the product."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -362,9 +284,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, "Every test here reaches the product"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per test would show the first
-    # and hide the rest behind a count.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {name} reaches no aipass code - {CURE}" for line, name in findings)
 
     json_handler.log_operation(

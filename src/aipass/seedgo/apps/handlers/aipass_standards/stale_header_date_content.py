@@ -3,25 +3,18 @@
 # Description: Stale Header Date Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Stale Header Date Standards Content Handler
-
-Provides formatted Stale Header Date standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_stale_header_date_standards() -> str:
-    """Return formatted stale_header_date standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted stale_header_date standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (test template v1 item 5):[/bold cyan]",
         "  The META header's [green]# Modified: <date>[/green] is a claim about the file. It goes",

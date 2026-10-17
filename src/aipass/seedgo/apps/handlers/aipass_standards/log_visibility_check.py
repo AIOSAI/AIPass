@@ -3,21 +3,13 @@
 # Description: Log Visibility Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Log Visibility Standards Checker Handler
 
-Validates that logging output reaches system_logs/ for Prax monitor visibility.
-
-TWO CHECKS:
-1. ALL files using logging.getLogger() must also import prax system_logger
-   (No handler exemption — unified Prax logging everywhere)
-2. ANY file that creates logging.FileHandler writing to local paths (logs/,
-   not system_logs/) creates blind spots invisible to Prax monitor
-
-Prax logging infrastructure and test files are exempt from both checks.
+Reference: log_visibility.md
 """
 
 import re
@@ -27,7 +19,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 # APPLIES_TO: logging in key operations is a product decision.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
@@ -38,20 +29,7 @@ _FILEHANDLER_PAT = r"logging" + r"\.FileHandler\s*\("
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module's logging is visible to Prax monitor (system_logs/).
-
-    Two checks:
-    1. Modules using getLogger must also import prax system_logger
-    2. Any file creating FileHandler to local paths creates blind spots
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict with passed, checks, score, standard
-    """
+    """Check if module's logging is visible to Prax monitor (system_logs/)."""
     checks = []
     path = Path(module_path)
 
@@ -96,7 +74,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_VISIBILITY",
         }
 
-    # Exempt test files
     if path.name.startswith("test_") or path.name.endswith("_test.py") or "/tests/" in module_path:
         return {
             "passed": True,
@@ -108,7 +85,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     has_getlogger = bool(re.search(_GETLOGGER_PAT, content))
     has_filehandler = bool(re.search(_FILEHANDLER_PAT, content))
 
-    # If file doesn't use logging at all, skip
     if not has_getlogger and not has_filehandler:
         return {
             "passed": True,
@@ -124,18 +100,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_VISIBILITY",
         }
 
-    # CHECK 1: ALL files using getLogger must have prax import
-    # (No handler exemption — unified Prax logging everywhere)
     if has_getlogger:
         check1 = _check_prax_import(lines, content, module_path, bypass_rules)
         checks.append(check1)
 
-    # CHECK 2: ANY file creating FileHandler to local paths = blind spot
     if has_filehandler:
         check2 = _check_local_filehandler(lines, module_path, bypass_rules)
         checks.append(check2)
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
@@ -151,20 +123,15 @@ def _is_prax_logging_infra(file_path: str) -> bool:
     """Check if file is part of prax logging infrastructure"""
     if "prax" not in file_path:
         return False
-    # Prax logging handlers and setup
     if "/logging/" in file_path or "/logger" in file_path:
         return True
-    # Prax logger module
     if "logger.py" in file_path:
         return True
     return False
 
 
 def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check 1: Files using stdlib getLogger must also import prax system_logger.
-    Applies to ALL files — no handler exemption.
-    """
+    """Check 1: Files using stdlib getLogger must also import prax system_logger."""
     has_prax_import = bool(re.search(r"from\s+aipass\.prax\.apps\.modules\.logger\s+import", content))
 
     if has_prax_import:
@@ -174,7 +141,6 @@ def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_ru
             "message": "File imports prax system_logger alongside stdlib getLogger",
         }
 
-    # Find violation lines
     violation_lines = _find_pattern_lines(lines, _GETLOGGER_PAT, file_path, bypass_rules)
 
     if violation_lines:
@@ -188,12 +154,7 @@ def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_ru
 
 
 def _check_local_filehandler(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check 2: Any file creating logging.FileHandler to local paths = blind spot.
-    Applies to ALL files including handlers. No exemptions.
-    If FileHandler points to system_logs/, it's visible. Otherwise it's blind.
-    """
-    # Find FileHandler creation lines
+    """Check 2: Any file creating logging.FileHandler to local paths = blind spot."""
     violation_lines = _find_pattern_lines(lines, _FILEHANDLER_PAT, file_path, bypass_rules)
 
     if not violation_lines:
@@ -203,8 +164,6 @@ def _check_local_filehandler(lines: List[str], file_path: str, bypass_rules: lis
             "message": "No local-only FileHandler creating blind logs",
         }
 
-    # Check if any FileHandler points to system_logs (which would be OK)
-    # If ALL FileHandlers point to system_logs, pass
     blind_lines = []
     for line_num in violation_lines:
         # Check surrounding context (FileHandler path might be on previous/same line)
@@ -235,7 +194,6 @@ def _find_pattern_lines(lines: List[str], pattern: str, file_path: str, bypass_r
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Track docstrings
         if not in_docstring:
             if stripped.startswith('"""') or stripped.startswith("'''"):
                 docstring_char = stripped[:3]
@@ -247,7 +205,6 @@ def _find_pattern_lines(lines: List[str], pattern: str, file_path: str, bypass_r
                 in_docstring = False
             continue
 
-        # Skip comments
         if stripped.startswith("#"):
             continue
 

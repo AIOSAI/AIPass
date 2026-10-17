@@ -3,28 +3,13 @@
 # Description: Ruff Linter & Formatter Standards Checker Handler
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Ruff Linter & Formatter Standards Checker Handler
 
-Runs both ``ruff check`` (lint) and ``ruff format --check`` (formatting).
-
-Two modes:
-- check_branch(): runs ruff across the branch's apps/ and tests/ (used by the
-  audit pipeline, AUDIT_SCOPE = branch_level); the row GATES and counts in the
-  branch's Overall
-- check_module(): runs ruff on a single file (used by checklist/per-file hooks,
-  returns passed=False on violations so subagent_stop_gate can block)
-
-AUDIT_SCOPE: branch_level — audit pipeline uses check_branch() once per branch.
-  Checkers that also implement check_module() are eligible for per-file checklist runs.
-GATING since 2026-09-25 (owner ruling 00:33, DPLAN-0354): advisory from
-  123f3af2 (2026-04-16, DPLAN-0137) until CI ruff went green fleet-wide.
-  Both modes return passed=False on any non-bypassed lint or format finding;
-  ruff missing is still a skip (passed True, score 100), and a timeout or an
-  unreadable ruff answer is still a 0.
+Reference: ruff_check.md
 """
 
 import json
@@ -117,15 +102,7 @@ def _find_ruff_bypass_from_file(file_path: str) -> list:
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Run ruff check on a single file.
 
-    Used by checklist mode and subagent_stop_gate for per-file enforcement.
-    Returns passed=False when violations exist so hooks can block.
-
-    Args:
-        module_path: Absolute path to the Python file to check.
-        bypass_rules: Standard bypass rules from .seedgo/bypass.json
-
-    Returns:
-        dict with passed, checks, score, standard keys.
+    Returns passed=False on violations so the checklist and subagent_stop_gate can block.
     """
     fp = Path(module_path)
 
@@ -199,7 +176,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append({"name": "Ruff lint", "passed": False, "message": detail})
         passed = False
 
-    # --- ruff format --check ---
     needs_format = False
     try:
         fmt_proc = subprocess.run(
@@ -243,23 +219,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Run ruff against the branch and score based on violation count.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo)
-        bypass_rules: Standard bypass rules from .seedgo/bypass.json
-
-    Returns:
-        dict: {
-            'passed': bool (False on any non-bypassed lint or format finding),
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': 'RUFF_CHECK',
-        }
-    """
+    """Run ruff against the branch and score based on violation count."""
     bp = Path(branch_path)
 
-    # Standard-level bypass
     if is_bypassed(branch_path, "ruff_check", bypass_rules=bypass_rules):
         json_handler.log_operation(
             "check_completed",
@@ -272,7 +234,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "RUFF_CHECK",
         }
 
-    # Graceful degradation: ruff not installed
     if shutil.which("ruff") is None:
         json_handler.log_operation(
             "check_completed",
@@ -286,17 +247,12 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "RUFF_CHECK",
         }
 
-    # Scan apps/ AND tests/ — CI's gate is `ruff check src/ tests/` from the repo root,
-    # which reaches every branch's tests/ too. Scanning apps/ alone is why this branch
-    # read 100 on trigger while CI failed three of its test files on formatting
-    # (macOS run 34682737363, FPLAN-0554). Fall back to the whole branch when neither
-    # directory exists, so a branch with an unusual layout is still covered.
+    # apps/ AND tests/: CI's gate is `ruff check src/ tests/`, which reaches every branch's tests/.
+    # The whole branch when neither exists, so an unusual layout is still covered.
     scan_targets = [d for d in (bp / "apps", bp / "tests") if d.is_dir()] or [bp]
 
-    # Load ruff-specific bypass rules
     ruff_bypass = _load_ruff_bypass(bp)
 
-    # Run ruff
     try:
         proc = subprocess.run(
             ["ruff", "check", *(str(t) for t in scan_targets), "--output-format=json"],
@@ -340,7 +296,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                 "standard": "RUFF_CHECK",
             }
 
-    # Filter bypassed violations
     active = [v for v in violations if not _is_ruff_bypassed(v, ruff_bypass)]
     count = len(active)
     score = _score_from_count(count)
@@ -359,7 +314,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         message = f"{count} violation(s) — {codes}{suffix}"
         checks.append({"name": "Ruff lint", "passed": False, "message": message})
 
-    # --- ruff format --check ---
     fmt_files: list[str] = []
     try:
         fmt_proc = subprocess.run(
@@ -369,10 +323,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             timeout=60,
         )
         if fmt_proc.returncode != 0 and fmt_proc.stdout.strip():
-            # Only the "Would reformat: <path>" lines are files. ruff also prints a
-            # trailing summary ("2 files would be reformatted, 1 file already formatted");
-            # counting it inflated fmt_count by one and put that sentence into the
-            # message where a filename belongs (found while widening the corpus, FPLAN-0554).
+            # Only "Would reformat: <path>" lines are files; ruff also prints a trailing summary line.
             fmt_files = [
                 line.split(_FORMAT_PREFIX, 1)[1].strip()
                 for line in fmt_proc.stdout.splitlines()
@@ -396,7 +347,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                 "message": f"{fmt_count} file(s) need formatting — {names}{fmt_suffix}",
             }
         )
-        # Penalise score: subtract 2 points per unformatted file, floor at 25
         score = max(25, score - fmt_count * 2)
 
     json_handler.log_operation(

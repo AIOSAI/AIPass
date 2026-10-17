@@ -3,55 +3,12 @@
 # Description: nominator - an assert whose two sides are the same object (TAUTOLOGY-ASSERT)
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-An assertion whose two sides are provably the same thing cannot fail.
+"""An assertion whose two sides are provably the same thing cannot fail.
 
-    assert reloaded.__version__ == canary_entry.__version__
-
-`importlib.reload()` RETURNS THE MODULE IT WAS HANDED. It re-executes the
-module body into the existing module object and gives that same object back,
-so `reloaded is canary_entry` and the line above compares an attribute to
-itself. Whatever the production code does - whatever it stops doing - the
-assertion is green. The instrument reports the same colour a working one
-reports, which is the only failure mode that costs more than no instrument.
-
-WHY THIS ONE IS WORSE THAN A NO-OP. The calibration case carries a docstring
-explaining that the reload is what makes the test meaningful: "asserting on
-the already-imported module would pass even if the line were deleted". The
-reasoning is right and the code does not implement it - the reload happened,
-the module body really did re-execute, and then the assertion asked the
-re-executed module whether it agrees with itself. A no-op wearing a rationale
-survives review in a way a bare `assert True` never would.
-
-TWO LEGS, AND BOTH ARE EXACT:
-
-  structural  both sides of `==`, `!=`, `is` or `is not` inside an `assert`
-              are the SAME AST, compared with line information stripped. An
-              `==` or `is` of that shape can never fail; a `!=` or `is not` of
-              that shape can never pass, which is the same defect pointing the
-              other way and is reported with its own wording.
-  reload      a name bound from `importlib.reload(X)` compared attribute-wise
-              against a name that refers to the same module. Module identity is
-              resolved two ways - `sys.modules["<dotted>"]` and an import alias
-              (`from pkg import mod as alias`, `import pkg.mod as alias`) - and
-              the two must resolve to the SAME dotted name with the SAME
-              attribute chain before anything is reported.
-
-WHAT IT DELIBERATELY DOES NOT FLAG. Anything where the two sides differ. This
-rule's entire value is that it makes no judgement call: a reader who disagrees
-with a row here is disagreeing with `ast.dump`, not with a heuristic. It does
-not guess that two differently-spelled expressions might be equal, it does not
-reason about `sys.modules` lookups that no reload touched, and it does not
-follow a module object through an intermediate variable.
-
-NOMINATION, NEVER CONVICTION (Law M1). A self-comparison can be a deliberate
-pin on `__eq__` - a value type asserting it equals itself is a real test of a
-real dunder - and the reload shape can be one line away from correct, where
-the author meant to capture the version BEFORE reloading. The static tier
-names the shape and shows the resolved identity; the execution tier convicts.
+Reference: tautology_assert.md
 """
 
 import ast
@@ -60,24 +17,17 @@ from typing import Dict, List, Optional, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 
-#: The adapter group this nominator fills. Namespaced by the core.
 GROUP = "static_tautology_assert"
 
-#: Comparison operators whose self-comparison can NEVER FAIL.
 ALWAYS_TRUE_OPS: tuple = (ast.Eq, ast.Is)
 
-#: Comparison operators whose self-comparison can NEVER PASS. A different
-#: defect from a tautology - a guaranteed red rather than a guaranteed green -
-#: and reported in its own words rather than folded into the other.
+#: A guaranteed red, not a guaranteed green: reported in its own words.
 ALWAYS_FALSE_OPS: tuple = (ast.NotEq, ast.IsNot)
 
-#: The call that hands back the very module object it was given.
 RELOAD_FUNCTION = "reload"
 
-#: The module `reload` is expected to come from, in either spelling.
 RELOAD_MODULE = "importlib"
 
-#: The interpreter's module table, the other way a test names a module object.
 MODULE_TABLE = "sys.modules"
 
 
@@ -138,15 +88,7 @@ SPECIFICATION = {
 def _source(node: ast.AST) -> str:
     """Source text for an expression, or "" when it will not unparse.
 
-    An expression this rule could not read is one it never cleared, so the
-    failure is logged rather than swallowed: Law S1 forbids "could not read"
-    and "read and clean" producing the same document.
-
-    Args:
-        node: Any expression node.
-
-    Returns:
-        The unparsed source text, or "" when it could not be produced.
+    A failure is logged: "could not read" and "read and clean" must differ (Law S1).
     """
     try:
         return ast.unparse(node)
@@ -158,16 +100,7 @@ def _source(node: ast.AST) -> str:
 def _shape(node: ast.AST) -> str:
     """The node's structure with line and column information stripped.
 
-    Two expressions are the same expression when this string matches. Nothing
-    is normalised beyond position, on purpose: a rule that "helpfully" treated
-    `a.b` and `getattr(a, 'b')` as one thing would have a judgement call in it,
-    and this rule's whole value is that it has none.
-
-    Args:
-        node: Any expression node.
-
-    Returns:
-        A comparable structural dump.
+    Nothing normalised beyond position, on purpose: the rule has no judgement call in it.
     """
     return ast.dump(node, annotate_fields=True, include_attributes=False)
 
@@ -175,11 +108,6 @@ def _shape(node: ast.AST) -> str:
 def _operator_text(operator: ast.cmpop) -> str:
     """The comparison operator as a reader would type it."""
     return {ast.Eq: "==", ast.NotEq: "!=", ast.Is: "is", ast.IsNot: "is not"}.get(type(operator), "?")
-
-
-# =============================================================================
-# LEG ONE - structural self-comparison
-# =============================================================================
 
 
 def _self_comparisons(unit: corpus.TestUnit) -> List[Tuple[ast.Compare, ast.cmpop, ast.expr]]:
@@ -229,20 +157,8 @@ def _structural_rows(unit: corpus.TestUnit) -> List[dict]:
     return rows
 
 
-# =============================================================================
-# LEG TWO - the reload that returns its own argument
-# =============================================================================
-
-
 def _import_aliases(parsed: corpus.TestFile) -> Tuple[Dict[str, str], Set[str]]:
-    """Names this module binds to modules, and every module path it imports.
-
-    Args:
-        parsed: The test module.
-
-    Returns:
-        `(alias -> dotted module, every dotted module path imported)`.
-    """
+    """Names this module binds to modules, and every module path it imports."""
     aliases: Dict[str, str] = {}
     modules: Set[str] = set()
 
@@ -250,9 +166,7 @@ def _import_aliases(parsed: corpus.TestFile) -> Tuple[Dict[str, str], Set[str]]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 modules.update(_dotted_prefixes(alias.name))
-                # `import a.b.c` binds only `a`; `import a.b.c as x` binds the
-                # whole path to `x`. The chain walk in _resolve_module puts the
-                # rest of the path back on in the first case.
+                # `import a.b.c` binds only `a`; _resolve_module walks the rest back on.
                 bound = alias.asname or alias.name.split(".")[0]
                 aliases[bound] = alias.name if alias.asname else bound
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
@@ -280,16 +194,7 @@ def _is_reload_call(node: ast.AST) -> bool:
 
 
 def _reload_bindings(scope: List[ast.stmt], aliases: Dict[str, str], modules: Set[str]) -> Dict[str, str]:
-    """Names bound from a reload, mapped to the module the reload was handed.
-
-    Args:
-        scope: Statements to search for assignments.
-        aliases: Names bound to modules by import.
-        modules: Every dotted module path the file imports.
-
-    Returns:
-        `bound name -> dotted module path`.
-    """
+    """Names bound from a reload, mapped to the module the reload was handed."""
     bindings: Dict[str, str] = {}
 
     for statement in scope:
@@ -316,27 +221,13 @@ def _resolve_module(
 ) -> Tuple[str, Tuple[str, ...]]:
     """The module an expression names, and the attributes read off it.
 
-    Three routes to a module object, all three spelled out rather than
-    guessed: a reload binding, an import alias, and `sys.modules["<dotted>"]`.
-    A reload call met inline resolves to its own argument, because that is
-    exactly what it returns.
-
-    Args:
-        node: The expression to resolve.
-        aliases: Names bound to modules by import.
-        modules: Every dotted module path the file imports.
-        bindings: Names bound from a reload.
-
-    Returns:
-        `(dotted module path, attribute chain)`, or `("", ())`.
+    A reload met inline resolves to its own argument, because that is what it returns.
     """
     dotted, chain = _resolve_root(node, aliases, modules, bindings)
     if not dotted:
         return "", ()
 
-    # `import a.b.c` binds only `a`, so `a.b.c.__version__` arrives as the name
-    # `a` trailing three attributes. Walk the chain back onto the module path
-    # for as long as the result is something this file actually imported.
+    # `a.b.c.__version__` arrives as `a` plus attributes; fold back while still an imported path.
     while chain and f"{dotted}.{chain[0]}" in modules:
         dotted = f"{dotted}.{chain[0]}"
         chain = chain[1:]
@@ -430,8 +321,7 @@ def _reload_row(
     """One nomination when `left` and `right` are the same module object."""
     if not isinstance(operator, ALWAYS_TRUE_OPS + ALWAYS_FALSE_OPS):
         return None
-    # A structurally identical pair is leg one's row; reporting it here too
-    # would publish one defect as two.
+    # Leg one's row already; reporting it here would publish one defect as two.
     if _shape(left) == _shape(right):
         return None
 
@@ -470,9 +360,7 @@ def _reload_row(
 def _reload_side(left: ast.expr, right: ast.expr, bindings: Dict[str, str]) -> str:
     """The reload-bound name in the pair, or "" when neither side is one.
 
-    At least one side must come from a reload. Without this the rule would
-    also flag `sys.modules["x"].v == alias.v`, which is the same object by a
-    route this rule has not been calibrated on.
+    At least one side must be a reload: other same-object routes are uncalibrated.
     """
     for side in (left, right):
         for node in ast.walk(side):
@@ -484,14 +372,7 @@ def _reload_side(left: ast.expr, right: ast.expr, bindings: Dict[str, str]) -> s
 
 
 def nominate(scanned: corpus.Corpus) -> List[dict]:
-    """Every assertion whose two sides are provably the same thing.
-
-    Args:
-        scanned: The parsed corpus.
-
-    Returns:
-        Nomination rows, one per self-comparing assertion.
-    """
+    """Every assertion whose two sides are provably the same thing."""
     rows: List[dict] = []
 
     for parsed in scanned.files:

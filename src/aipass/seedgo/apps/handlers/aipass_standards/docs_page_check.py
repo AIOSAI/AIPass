@@ -3,38 +3,13 @@
 # Description: Docs Page Standards Checker Handler — one shape for every docs/*.md page
 # Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
 """
 Docs Page Standards Checker Handler (DPLAN-0351)
 
-A docs page is a guide a seat reads on arriving at a branch. The README is the
-face; ``docs/`` is the depth; every page has the same shape so a reader, and
-the owner sampling at random, meets one layout page to page.
-
-SCORED — six checks over every ``<branch>/docs/*.md`` (one level, the reach of
-readme_check's docs index):
-1. Back-link and one H1 — a README back-link above the purpose paragraph, and
-   exactly one ``# `` heading outside code fences with only blank lines, HTML
-   comments and the back-link above it. One rule for how a page opens: the
-   back-link is the one thing required in the slot this check already read.
-2. Purpose paragraph — the first line under the H1 (back-link lines skipped)
-   is prose: not a heading, list, table, quote, fence, rule or lone link.
-3. Heading depth — nothing deeper than ``###``.
-4. Links resolve — every relative link and image target exists, read from the
-   page's own directory.
-5. Size — the page is at most the context pack's ``caps["docs/*.md"]`` chars,
-   read at call time. An unreadable cap fails the check and names the key.
-6. Not a register — the page's name does not contain ``known_issues`` or
-   ``tech_debt``. The owner retired the defect registers on 2026-09-19; their
-   content lives in each branch's ``docs.local/``, open items on the pad or in
-   a plan. A register coming back under ``docs/`` is red.
-
-ADVISORY, NON-SCORED (check_branch_info) — nominations, never a number:
-- story: "used to", "previously", <fixed|cured|corrected|retired> ... <date>
-  (the arms that hand-sampled at 7/8 or better; history goes to the CHANGELOG)
-- defect prose: an open defect told as a paragraph (the owner's pad holds it)
+Reference: docs_page.md
 """
 
 import re
@@ -47,7 +22,6 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
 
-# Audit scope: entry points only (apps/{name}.py) — one call per branch
 # APPLIES_TO: scores docs/*.md through the entry point.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
@@ -58,7 +32,7 @@ BRANCH_INPUTS = ("docs/*.md",)
 _STANDARD = "docs_page"
 _DOCS_DIRNAME = "docs"
 
-#: Name fragments of the retired defect registers (the owner, 2026-09-19).
+#: Name fragments of the retired defect registers.
 REGISTER_NAME_PARTS: Tuple[str, ...] = ("known_issues", "tech_debt")
 _RETIRED = "a defect register, retired 2026-09-19: its content lives in docs.local/, open items on the pad"
 
@@ -111,11 +85,6 @@ class Page(NamedTuple):
     fenced: List[bool]
 
 
-# =============================================================================
-# THE CORPUS
-# =============================================================================
-
-
 def is_register(page_path: Path) -> bool:
     """True for a retired defect register by name, however spelt: known_issues, Known-Issues, tech debt."""
     name = re.sub(r"[-\s]", "_", page_path.name.lower())
@@ -155,11 +124,6 @@ def docs_pages(branch_root: Path, bypass_rules: list | None = None) -> List[Path
         for page in sorted(docs_dir.glob("*.md"))
         if page.is_file() and not is_bypassed(str(page), _STANDARD, None, bypass_rules)
     ]
-
-
-# =============================================================================
-# THE FIVE RULES — each returns "" for a pass, or why the page fails
-# =============================================================================
 
 
 def _links(line: str) -> List[str]:
@@ -288,11 +252,6 @@ def not_a_register(page: Page) -> str:
     return _RETIRED if is_register(page.path) else ""
 
 
-# =============================================================================
-# THE SCORE
-# =============================================================================
-
-
 def _safe(text: str) -> str:
     """Page text made safe for a Rich console: brackets would read as style tags."""
     return text.replace("[", "(").replace("]", ")")
@@ -332,16 +291,7 @@ def check_pages(pages: List[Path], cap: Optional[int], cap_error: str) -> List[D
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Score every docs/*.md page of the branch whose entry point is ``module_path``.
-
-    Args:
-        module_path: The branch entry point, ``<branch>/apps/<branch>.py``.
-        bypass_rules: Rules from .seedgo/bypass.json. A rule on the entry point
-            bypasses the standard; a rule on one page takes that page out.
-
-    Returns:
-        ``{"passed", "checks", "score", "standard"}`` — six checks.
-    """
+    """Score every docs/*.md page of the branch whose entry point is ``module_path``."""
     if is_bypassed(module_path, _STANDARD, bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -366,11 +316,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 def external_inputs() -> List[Path]:
     """The context pack's pack.json: the size cap is read from it, so a cap change re-scores."""
     return [budget.pack_manifest_path()]
-
-
-# =============================================================================
-# ADVISORY — check_branch_info, rendered at any score, never a number
-# =============================================================================
 
 
 def _prose(page: Page) -> List[Tuple[int, str]]:
@@ -408,15 +353,7 @@ def _nominations(pages: List[Page]) -> Tuple[List[str], List[str]]:
 
 
 def check_branch_info(branch_path: str) -> List[str]:
-    """Non-scored nominations: story lines and defect prose. The back-link scores under rule 1.
-
-    Args:
-        branch_path: Branch root to inspect.
-
-    Returns:
-        Advisory lines, each marked ``(advisory)``. Empty when the branch has
-        no docs pages.
-    """
+    """Non-scored nominations: story lines and defect prose. The back-link scores under rule 1."""
     branch_root = Path(branch_path)
     pages = [page for page, _ in (read_page(path) for path in docs_pages(branch_root)) if page is not None]
     if not pages:

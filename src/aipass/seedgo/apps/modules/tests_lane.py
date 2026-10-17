@@ -3,7 +3,7 @@
 # Description: Tests Lane Module — the retire lane and the test-template distribution
 # Version: 1.1.0
 # Created: 2026-09-21
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests Lane Module
@@ -15,51 +15,32 @@ The RETIRE lane: a test file leaves by a logged move to
 ``<repo>/.backup/tests/<branch>/`` and can come back. ``tests retired`` lists
 what is there with its log line; ``tests restore NAME`` moves one back.
 
-The TEMPLATE lane: seedgo is the gold source of the fleet's test template
-(owner 2026-09-20 22:50, DPLAN-0354), on @memory's trinity pattern.
-``tests template-status`` reads every branch's receipt against gold;
-``tests template bump`` reports, and with ``--confirm`` writes.
-
-Run: seedgo tests retired
+The TEMPLATE lane: seedgo is the gold source of the fleet's test template, on @memory's trinity pattern.
 """
 
 import json
 import sys
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error as display_error, warning
 
-# Handlers (implementation)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.module_root import module_file
 from aipass.seedgo.apps.handlers.tests_lane import retire_ops, template_ops
 from aipass.seedgo.apps.modules import CommandRefused
 
-#: An argument nobody recognised. The vocabulary is
-#: handlers/audit_tests/refusal.py's, so one code never means two things.
+#: The vocabulary is handlers/audit_tests/refusal.py's, so one code never means two things.
 EXIT_UNKNOWN_ARGUMENT = 7
 
-#: A bump that could not stamp what it was asked to: a lane that could not run,
-#: in the same vocabulary. A failed branch exited 0 until leg 4 of fleet green.
+#: A bump that could not stamp what it was asked to, in the same vocabulary.
 EXIT_NOT_STAMPED = 2
 
-#: This branch. The retire lane is per-branch and seedgo only ever operates its
-#: own: another branch's retirement is that branch's move to make.
+#: seedgo only operates its own retire lane: another branch's retirement is that branch's move.
 BRANCH = "seedgo"
 
 _SUBCOMMANDS = {
@@ -68,11 +49,6 @@ _SUBCOMMANDS = {
     "template-status": "Every branch's template receipt against gold",
     "template": "template bump [@branch] [--confirm] — report, or write the receipts",
 }
-
-
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -107,13 +83,6 @@ def print_introspection() -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'tests' command.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if handled, False if not this module's command
 
     Raises:
         CommandRefused: An unknown subcommand, carrying exit code 7.
@@ -158,11 +127,6 @@ def _refuse(subcommand: str) -> None:
     raise CommandRefused(EXIT_UNKNOWN_ARGUMENT, subcommand)
 
 
-# =============================================================================
-# SUBCOMMAND ORCHESTRATION — RETIRE LANE
-# =============================================================================
-
-
 def _handle_retired() -> None:
     """List what the retire lane holds."""
     rows = retire_ops.list_retired(BRANCH)
@@ -205,11 +169,6 @@ def _handle_restore(args: List[str]) -> None:
         console.print(f"  [green]Restored[/green] {message}")
     else:
         display_error(f"Cannot restore: {message}")
-
-
-# =============================================================================
-# SUBCOMMAND ORCHESTRATION — TEMPLATE LANE
-# =============================================================================
 
 
 def _handle_template_status() -> None:
@@ -302,15 +261,8 @@ def _run_bump(confirm: bool, only: str | None) -> None:
 def _announce_bump(outcome: dict) -> None:
     """Announce a bump on @trigger's bus. Best effort — the bus never gates a stamp.
 
-    Lives in the module layer, not beside the domain logic: reaching the bus
-    means importing @trigger's module layer, and a handler doing that is
-    orchestration in a handler's clothing. The handler owns the event's NAME
-    (``template_ops.BUMP_EVENT``); this owns the sending.
-
-    The two failures are logged differently on purpose. An ImportError means
-    @trigger is not installed here — an environment fact, nothing to repair.
-    Anything else raised on this path is OUR bug, and a broad "bus unavailable"
-    line would make it read as a missing dependency.
+    Lives in the module layer: reaching the bus imports @trigger's module layer, which a handler must not do.
+    ImportError means @trigger is not installed here; anything else is our bug and is logged as one.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -329,11 +281,6 @@ def _announce_bump(outcome: dict) -> None:
         )
     except Exception as exc:
         logger.error(f"Template bump announcement FAILED ({type(exc).__name__}): {exc}", exc_info=True)
-
-
-# =============================================================================
-# HELP
-# =============================================================================
 
 
 def print_help() -> None:

@@ -44,10 +44,18 @@ ways and the cost is stated rather than hidden: a confession written in the plur
 — *"these are coverage slots"* — is missed. Matching is case-insensitive: a
 sentence that opens with a confession is still one.
 
-The list, in full: *for coverage*, *coverage slot*, *to satisfy*, *satisfies the
-checker/standard/audit/linter*, *the standard requires*, *seedgo requires*,
-*keeps X honest*, *placeholder test*, *boilerplate test*, *exists (only)
-so/because the checker/audit/standard*.
+The list, in full: *for coverage*, *coverage slot*, *exists/added/written/kept/included
+(only) to satisfy*, *satisfies the checker/standard/audit/linter*, *the standard
+requires*, *seedgo requires*, *keeps X honest*, *placeholder test*, *boilerplate
+test*, *exists (only) so/because the checker/audit/standard*. A bare *to satisfy*
+is not enough: the test itself must be the subject, so prose about another test
+or a rejected design is not a confession.
+
+A phrase written **inside quotation marks** on its own line, straight or
+typographic, is being named, not said, and is not flagged; this is the data
+exclusion one layer up, and it keeps the detector's own tests from reading as
+confessions. A quoted phrase does not acquit an unquoted confession later in the
+same text. The cost: a real confession quoted for emphasis is missed.
 
 ## Where it looks
 
@@ -114,6 +122,10 @@ whose *name* looks like a confession is not flagged on its name alone: an
 identifier cannot contain whitespace, so none of the purposive phrases can match
 one, and splitting `TestCoverageSlotDetection` back into words would flag a class
 that is *about* the subject. That was considered and refused.
+
+Comments are read from the file's text a second time. A file that cannot be
+re-read is judged on its docstrings alone and named in a "Comments readable"
+line, because a file whose comments were never read is not a file with no comments.
 
 Its comment range ends at a unit's last statement, so a comment after the final
 line of a body is attributed to nobody. A trailing comment on a line of code is

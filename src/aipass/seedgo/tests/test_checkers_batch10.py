@@ -3,7 +3,7 @@
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
 # Version: 1.5.1
 # Created: 2026-06-18
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -36,11 +36,6 @@ from aipass.seedgo.apps.handlers.aipass_standards import router_assert_check as 
 from aipass.seedgo.apps.handlers.aipass_standards import oversize_test_file_check as oversize
 from aipass.seedgo.apps.handlers.aipass_standards import hardcoded_path_check
 from aipass.seedgo.apps.handlers.audit import branch_audit
-
-
-# ===========================================================================
-# 1. _scan_file — core scanning logic, through check_module
-# ===========================================================================
 
 
 def _scanned(tmp_path, content: str) -> str:
@@ -114,11 +109,6 @@ class TestScanFile:
         assert said.startswith("1 hardcoded path(s): L2: ")
 
 
-# ===========================================================================
-# 2. check_module — full integration via tmp files
-# ===========================================================================
-
-
 class TestCheckModule:
     """Tests for check_module entry point."""
 
@@ -189,20 +179,11 @@ class TestCheckModule:
         assert "and 2 more" in msg
 
 
-# ===========================================================================
-# 3. _in_docstring — edge cases
-# ===========================================================================
-
-
 class TestInDocstring:
     """Tests for docstring detection."""
 
     def test_single_line_docstring(self, tmp_path):
-        """A one-line docstring opens no block: neither it nor the line after is inside.
-
-        Reached through check_module, not _in_docstring (seedgo, fleet green
-        leg 8): a path on either line is still reported.
-        """
+        """A one-line docstring opens no block: neither it nor the line after is inside."""
         lines = ['"""Docstring at /home/someone/a."""', 'x = "/home/someone/y"']
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("2 hardcoded path(s): L1: POSIX home path ("), said
@@ -219,9 +200,6 @@ class TestInDocstring:
         assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
 
-# ===========================================================================
-# 4. startup_budget_check -- the context pack (DPLAN-0347, boardroom thread 16)
-# ===========================================================================
 #
 # Every test here names the defect or the contract it protects. What is pinned
 # is what a plausible future edit could break, and the whole standard rests on
@@ -278,13 +256,7 @@ class TestStartupBudgetCapsAreRead:
     """Each cap comes from its owner, on every call. Copy one and these go red."""
 
     def test_the_prompt_cap_moves_when_hooks_moves_it(self, monkeypatch, tmp_path):
-        """@hooks owns BRANCH_CHAR_BUDGET; seedgo must never carry a copy of 9,000.
-
-        A `from aipass.hooks... import BRANCH_CHAR_BUDGET` at module scope, or a
-        literal in this branch, would keep the row green against a number @hooks
-        has since moved -- the exact failure "read, never copy" was ruled to end
-        (DPLAN-0347, "Who owns each cap").
-        """
+        """@hooks owns BRANCH_CHAR_BUDGET; seedgo must never carry a copy of 9,000."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 100})
 
         monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 40)
@@ -319,12 +291,7 @@ class TestStartupBudgetCapsAreRead:
         assert (cell["cap"], cell["chars"], cell["state"]) == (40, 100, "over")
 
     def test_the_readme_cap_lives_in_the_packs_own_config(self, monkeypatch, tmp_path):
-        """seedgo owns 10,000, so seedgo keeps it in pack.json, not in Python.
-
-        Phase 5's per-file CI ratchet has to read and move that number without
-        importing Python; a constant in the checker would put the fleet's README
-        cap somewhere no non-Python tool can reach.
-        """
+        """seedgo owns 10,000, so seedgo keeps it in pack.json, not in Python."""
         manifest = tmp_path / "pack.json"
         manifest.write_text(json.dumps({"caps": {"README.md": {"max_chars": 5}}}), encoding="utf-8")
         root = _branch(tmp_path / "b", **{"README.md": "0123456789"})
@@ -335,12 +302,7 @@ class TestStartupBudgetCapsAreRead:
         assert (cell["cap"], cell["chars"], cell["state"]) == (5, 10, "over")
 
     def test_the_shipped_manifest_carries_the_owners_ruled_ten_thousand(self):
-        """The one live-tree pin: the ruled number, where the ratchet will read it.
-
-        The user ruled 10,000 on 2026-09-15 at 16:02. The room had proposed
-        6,000 and FPLAN-0593 lines 179/221 still say 6,000; if anyone edits
-        pack.json back to the stale number, this is what says so.
-        """
+        """The one live-tree pin: the ruled number, where the ratchet will read it."""
         assert sb.readme_cap() == (10000, "")
 
 
@@ -348,12 +310,7 @@ class TestStartupBudgetFailsHonestly:
     """An unreadable owner is an ERROR row. Never a default, never a pass."""
 
     def test_an_unreadable_memory_config_is_an_error_not_a_pass(self, monkeypatch, tmp_path):
-        """A broken config must not score; it must say who owns the number.
-
-        @memory's own loader serves a REGENERATION SEED when the config
-        publishes no budgets -- correct for @memory, fatal for an auditor, which
-        would then print a confident green against numbers no config contains.
-        """
+        """A broken config must not score; it must say who owns the number."""
         broken = tmp_path / "memory.config.json"
         broken.write_text("{ this is not json", encoding="utf-8")
         root = _branch(tmp_path / "b", **{"README.md": "x", ".trinity/local.json": "{}"})
@@ -381,12 +338,7 @@ class TestStartupBudgetFailsHonestly:
         assert "file_budgets" in trinity["message"]
 
     def test_an_unimportable_owner_module_is_an_error_row_naming_it(self, monkeypatch, tmp_path):
-        """@hooks unimportable: the row says hooks, and the standard does not vanish.
-
-        Guarded imports are why: discover_checkers() drops a pack module that
-        raises on exec, so a bare import would delete the whole standard from the
-        audit and the fleet would read a table that simply stopped existing.
-        """
+        """@hooks unimportable: the row says hooks, and the standard does not vanish."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y"})
         monkeypatch.setattr(sb, "hooks_grounding", None)
         monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ModuleNotFoundError: no aipass.hooks")
@@ -412,12 +364,7 @@ class TestStartupBudgetMeasurement:
     """Chars, absence, and the per-string cap no column can express."""
 
     def test_multibyte_characters_are_counted_as_characters_not_bytes(self, monkeypatch, tmp_path):
-        """wc -m, never wc -c. The boardroom corrected this three times in one day.
-
-        st_size or an encode() would report 30 bytes for these 10 characters and
-        a README would read three times its real length -- which is how a cap
-        gets set against a number nobody can reproduce.
-        """
+        """wc -m, never wc -c. The boardroom corrected this three times in one day."""
         text = "日" * 10  # 10 chars, 30 bytes in UTF-8
         root = _branch(tmp_path / "b", **{"README.md": text})
         manifest = tmp_path / "pack.json"
@@ -431,12 +378,7 @@ class TestStartupBudgetMeasurement:
         assert cell["state"] == "under", "30 bytes against a 20-char cap would have read OVER"
 
     def test_an_absent_file_is_absent_not_zero(self, tmp_path):
-        """A branch with no dashboard yet has not scored zero -- it has not been measured.
-
-        .trinity/ and DASHBOARD.local.json are gitignored. Counting a missing
-        file as 0 chars is a silent pass; counting it as a violation blames a
-        branch for a fact about git.
-        """
+        """A branch with no dashboard yet has not scored zero -- it has not been measured."""
         root = _branch(tmp_path / "b", **{"README.md": "x"})
 
         result = sb.check_branch(str(root))
@@ -449,12 +391,7 @@ class TestStartupBudgetMeasurement:
         assert "absent" in _group(result, "Dashboard")["message"]
 
     def test_a_branch_with_none_of_the_six_files_is_not_applicable(self, monkeypatch, tmp_path):
-        """Neither 0 nor 100 -- the third answer, as trinity_check rules it.
-
-        Every cap is pointed at a known-good source first, so this test answers
-        only its own question: an unreadable cap is an ERROR row by design, and
-        that is pinned above rather than smuggled in here.
-        """
+        """Neither 0 nor 100 -- the third answer, as trinity_check rules it."""
         config = _memory_config(
             tmp_path,
             **{
@@ -473,11 +410,7 @@ class TestStartupBudgetMeasurement:
         assert result["score"] is None and result["passed"] is None
 
     def test_an_oversized_string_in_a_small_passport_still_fails(self, monkeypatch, tmp_path):
-        """@memory caps passport.json twice: 6,000 for the file, 600 per string.
-
-        aipass' identity.purpose is 869 chars inside a 5,461-char passport. A
-        rule that only measured the file would call that branch clean.
-        """
+        """@memory caps passport.json twice: 6,000 for the file, 600 per string."""
         passport = json.dumps({"identity": {"purpose": "p" * 700}})
         root = _branch(tmp_path / "b", **{"README.md": "x", ".trinity/passport.json": passport})
         config = _memory_config(tmp_path, **{"passport.json": {"max_chars": 6000, "max_string_chars": 600}})
@@ -495,13 +428,7 @@ class TestStartupBudgetContract:
     """The module surface branch_audit and the cache read off this checker."""
 
     def test_the_standard_is_advisory_and_the_audit_can_see_it(self):
-        """ADVISORY keeps the row out of the gating average (branch_audit.py:638).
-
-        Read through discover_checkers(), which is how branch_audit meets this
-        module: a checker the pack loader cannot load is a standard that silently
-        does not exist, and ADVISORY read off the loaded module is the exact
-        expression `advisory_standards` uses.
-        """
+        """ADVISORY keeps the row out of the gating average (branch_audit.py:638)."""
         checkers = branch_audit.discover_checkers(sb.pack_manifest_path().parent)
 
         assert sorted(checkers) == ["startup_budget"], "the pack runs alone -- that is why it is a pack"
@@ -520,13 +447,7 @@ class TestStartupBudgetContract:
         assert result["passed"] is False and result["score"] < 100
 
     def test_external_inputs_names_memorys_config_and_the_other_owners(self):
-        """The cache watches the owners' files, or a moved cap re-scores nothing.
-
-        With only BRANCH_INPUTS declared, an owner editing its cap leaves every
-        branch serving the row it cached against the OLD number until someone
-        runs --full. That is what happened to trinity's rows on 2026-09-15, and
-        it is why branch_audit grew _external_input_files().
-        """
+        """The cache watches the owners' files, or a moved cap re-scores nothing."""
         named = [path.as_posix() for path in sb.external_inputs()]
 
         assert any(p.endswith("memory/memory_json/custom_config/memory.config.json") for p in named), named
@@ -542,9 +463,6 @@ class TestStartupBudgetContract:
             assert any(fnmatch(rel, pattern) for pattern in sb.BRANCH_INPUTS), f"{rel} is scored but never watched"
 
 
-# ===========================================================================
-# 5. startup_ratchet -- the per-file CI gate (DPLAN-0347 / FPLAN-0593 phase 5)
-# ===========================================================================
 #
 # The advisory row next door gates nothing on purpose. This is the part that
 # holds, so what is pinned here is what a red must be able to say and what it
@@ -586,11 +504,8 @@ def _pack_manifest(root, cap):
 
 
 # ---------------------------------------------------------------------------
-# THE NAME RATCHET (DPLAN-0350) shares these classes: same shape of gate, a
-# count held at a baseline instead of a size held at a cap. The owner's name
-# is never spelled in this file -- every fixture reads it off the module, so
-# the pattern lives in one place and these tests cannot become the next hit.
-# ---------------------------------------------------------------------------
+# The name ratchet shares these classes: a count held at a baseline instead of a size held at a cap. The
+# owner's name is never spelled here: fixtures read it off the module, so these tests cannot become a hit.
 
 NAME = names.OWNER_NAME
 
@@ -620,14 +535,7 @@ class TestRatchetRed:
     """What CI prints when a gated file grows past its cap."""
 
     def test_an_over_cap_readme_is_red_and_names_file_measured_cap_and_owner(self, monkeypatch, tmp_path):
-        """The four things a red must say, in one greppable line.
-
-        A failure line that says only "README too big" sends whoever reads it
-        looking for the number and then for whose number it is. The owner is
-        named inline because that is the difference between a fix and a round
-        trip -- and the cap is printed beside the measurement so nobody has to
-        go and find out what the limit was on the day the job ran.
-        """
+        """The four things a red must say, in one greppable line."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 40))
         root = _branch(tmp_path / "b", **{"README.md": "x" * 51})
 
@@ -643,11 +551,7 @@ class TestRatchetRed:
         assert "OVER by 11" in line
 
     def test_an_over_cap_branch_prompt_is_red_and_names_hooks(self, monkeypatch, tmp_path):
-        """The prompt is gated too, and its cap belongs to another branch.
-
-        @hooks owns BRANCH_CHAR_BUDGET, so an over-cap prompt must send the
-        reader to @hooks -- not to seedgo, which merely runs the measurement.
-        """
+        """The prompt is gated too, and its cap belongs to another branch."""
         monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 10)
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 30})
 
@@ -659,12 +563,7 @@ class TestRatchetRed:
         assert "30 chars" in line and "10 chars" in line and "@hooks" in line
 
     def test_a_file_that_cannot_be_decoded_is_red_not_skipped(self, monkeypatch, tmp_path):
-        """An unreadable README is not a small README.
-
-        Falling through to "no measurement, no problem" is how a gate goes
-        quiet: the one file it exists to hold becomes the one file it never
-        reads, and the run stays green.
-        """
+        """An unreadable README is not a small README."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
         root = tmp_path / "b"
         root.mkdir(parents=True, exist_ok=True)
@@ -677,12 +576,7 @@ class TestRatchetRed:
         assert "cannot be read" in result["failure_lines"][0]
 
     def test_a_new_line_naming_the_owner_is_red_and_the_log_never_names_him(self, tmp_path):
-        """The name ratchet's red says where, and masks what.
-
-        A CI log on a public repo is public: a red that quoted the line would
-        ship the very word it exists to stop. The file and line number are
-        enough to find it, and the mask says what was there.
-        """
+        """The name ratchet's red says where, and masks what."""
         result = _names(tmp_path, {"src/aipass/probe/README.md": f"intro\nAsk {NAME.title()} first.\n"})
         said = _said(result)
 
@@ -694,11 +588,7 @@ class TestRatchetRed:
         assert NAME not in said.lower(), "the log carried the name it guards"
 
     def test_the_name_is_matched_in_any_case_and_inside_an_identifier(self, tmp_path):
-        """Substring, case-insensitive: an identifier ships the name as surely as prose.
-
-        Five of the residual lines devpulse counted were test names. A
-        word-boundary match would have passed every one of them.
-        """
+        """Substring, case-insensitive: an identifier ships the name as surely as prose."""
         text = f"def test_the_{NAME}_ruling():\n    pass\nWHO = '{NAME.upper()}'\n"
 
         result = _names(tmp_path, {"src/aipass/probe/tests/test_x.py": text})
@@ -707,12 +597,7 @@ class TestRatchetRed:
         assert result["passed"] is False
 
     def test_a_real_home_path_in_a_prompt_or_a_content_file_is_red(self, tmp_path):
-        """Three OS spellings of a person's home, in the two file kinds that render.
-
-        A prompt is read by a seat on somebody else's machine and a
-        ``*_content.py`` is printed to one; a home directory there tells the
-        reader whose machine the text was written on.
-        """
+        """Three OS spellings of a person's home, in the two file kinds that render."""
         files = {
             ".aipass/aipass_local_prompt.md": "Logs live in /home/alice/logs\n",
             "src/aipass/probe/apps/handlers/x_content.py": 'WHERE = "C:\\\\Users\\\\bob\\\\AppData"\n',
@@ -729,11 +614,7 @@ class TestRatchetRed:
         }
 
     def test_a_tracked_path_carrying_the_name_is_red(self, tmp_path):
-        """A file NAME ships too, and it is not something a baseline can hold.
-
-        The baseline is keyed by path; baselining this one would write the name
-        into the baseline. So it is line 0 of the file, masked, and red.
-        """
+        """A file NAME ships too, and it is not something a baseline can hold."""
         rel = f"docs/{NAME}_notes.md"
 
         result = _names(tmp_path, {rel: "nothing in here\n"})
@@ -747,12 +628,7 @@ class TestRatchetBoundary:
     """`<=` passes. The boundary is the cap itself, and it is said out loud."""
 
     def test_a_file_exactly_at_its_cap_passes(self, monkeypatch, tmp_path):
-        """A branch that diets to precisely 10,000 is not failed by zero chars.
-
-        The same comparison the advisory checker makes (`chars > cap`), so the
-        gate and the table can never disagree about the branch sitting on the
-        line. The banner says it in words for the same reason.
-        """
+        """A branch that diets to precisely 10,000 is not failed by zero chars."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 40))
         root = _branch(tmp_path / "b", **{"README.md": "x" * 40})
 
@@ -771,11 +647,7 @@ class TestRatchetBoundary:
         assert _gate(root)["passed"] is False
 
     def test_chars_not_bytes_decides_the_boundary(self, monkeypatch, tmp_path):
-        """wc -m, never wc -c -- the unit the boardroom corrected three times.
-
-        Ten multi-byte characters are thirty bytes. A gate measuring st_size
-        would red-line a README three times shorter than its cap.
-        """
+        """wc -m, never wc -c -- the unit the boardroom corrected three times."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 20))
         root = _branch(tmp_path / "b", **{"README.md": "日" * 10})
 
@@ -784,12 +656,7 @@ class TestRatchetBoundary:
         assert row["chars"] == 10 and row["state"] == "under"
 
     def test_a_file_at_its_baseline_passes_and_one_more_line_is_red(self, tmp_path):
-        """The name ratchet's boundary is the baseline count itself, as with a cap.
-
-        Today's residue is written down and passes; the next line to join it is
-        the red. Two lines against a baseline of two is the fleet on the day
-        the ratchet landed.
-        """
+        """The name ratchet's boundary is the baseline count itself, as with a cap."""
         rel = "src/aipass/probe/tests/test_x.py"
         two = f"a = '{NAME}'\nb = '{NAME}'\n"
 
@@ -801,35 +668,20 @@ class TestRatchetBoundary:
         assert "3 name line(s), baseline 2" in _said(grown)
 
     def test_a_home_path_outside_markdown_and_content_files_is_not_this_rule(self, tmp_path):
-        """The home-path rule reads what renders; code is hardcoded_path's lane.
-
-        A ``/home/alice/`` fixture in a test or a handler is the scored
-        hardcoded_path standard's to judge, and two rules redding one line only
-        splits the diagnosis.
-        """
+        """The home-path rule reads what renders; code is hardcoded_path's lane."""
         result = _names(tmp_path, {"src/aipass/probe/apps/handlers/x.py": 'P = "/home/alice/x"\n'})
 
         assert result["passed"] is True, _said(result)
         assert result["hits"] == []
 
     def test_a_home_path_with_no_trailing_slash_still_names_someone(self, tmp_path):
-        """``/home/alice`` at the end of a table cell names alice as surely as ``/home/alice/``.
-
-        Measured at HEAD before widening: two lines in the telegram port map
-        spelled a home that way, and the brief's slash-terminated shape saw
-        neither.
-        """
+        """``/home/alice`` at the end of a table cell names alice as surely as ``/home/alice/``."""
         result = _names(tmp_path, {"docs/map.md": "| log dir | Hardcoded /home/alice in glob |\n"})
 
         assert result["counts"] == {"docs/map.md": {names.RULE_HOME: 1}}
 
     def test_a_placeholder_home_segment_is_not_a_person(self, tmp_path):
-        """Docs need examples. ``/home/user/`` names nobody, so it passes.
-
-        Only a segment that could be somebody's login is red; the allowlist is
-        the spellings the fleet's docs use for "your name here" plus the CI
-        runner accounts, which are GitHub's, not a person's.
-        """
+        """Docs need examples. ``/home/user/`` names nobody, so it passes."""
         text = (
             "/home/user/project and /home/<you>/x and /Users/me/Desktop\n"
             "C:\\Users\\someone\\x and /home/$USER/x and /home/runner/work/x\n"
@@ -846,12 +698,7 @@ class TestRatchetReadsTheOwnersCap:
     """Move the owner's number and the verdict moves. Copy it and these go red."""
 
     def test_the_prompt_verdict_flips_when_hooks_moves_its_constant(self, monkeypatch, tmp_path):
-        """The gate holds @hooks' number, not a remembered 9,000.
-
-        The file never changes between the two runs; only BRANCH_CHAR_BUDGET
-        does. A `from ... import BRANCH_CHAR_BUDGET` binding, or a literal in
-        seedgo, would keep one of these two verdicts wrong.
-        """
+        """The gate holds @hooks' number, not a remembered 9,000."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 100})
 
         monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 50)
@@ -879,23 +726,13 @@ class TestRatchetReadsTheOwnersCap:
         assert _gated_row(red, "README.md")["chars"] == 100, "only the manifest moved"
 
     def test_the_cap_reader_is_looked_up_by_name_at_measurement_time(self):
-        """Stored as a NAME, fetched with getattr -- never bound at import.
-
-        A bound function object is the owner's answer copied at import time.
-        The attribute spelling is what lets the lookup happen on every run, and
-        it is the same idiom the checker uses for @hooks' and @prax' constants.
-        """
+        """Stored as a NAME, fetched with getattr -- never bound at import."""
         for gated in ratchet.GATED_FILES:
             assert isinstance(gated.cap_reader, str), "a bound function is a copy taken at import"
             assert callable(getattr(sb, gated.cap_reader)), f"{gated.cap_reader} must resolve on the checker"
 
     def test_no_cap_number_is_written_into_the_gate(self):
-        """The gate carries paths and owner names. Never an integer cap.
-
-        Read with ast, so the prose that discusses 10,000 and 9,000 is not
-        mistaken for a constant -- what is forbidden is a literal the code can
-        compare against, not a sentence explaining why there isn't one.
-        """
+        """The gate carries paths and owner names. Never an integer cap."""
         import ast
 
         source = ratchet.__file__
@@ -916,12 +753,7 @@ class TestRatchetFailsHonestly:
     """An unreadable cap is a red naming the owner. Never a pass, never a default."""
 
     def test_an_unreadable_manifest_is_red_and_names_seedgo(self, monkeypatch, tmp_path):
-        """seedgo cannot read its own number: say so, do not remember one.
-
-        This is the defect the whole pack was written against, one layer up. A
-        gate that silently substitutes the cap it saw last week is a gate that
-        has stopped measuring and has not told anybody.
-        """
+        """seedgo cannot read its own number: say so, do not remember one."""
         broken = tmp_path / "pack.json"
         broken.write_text("{ this manifest no longer parses", encoding="utf-8")
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: broken)
@@ -949,12 +781,7 @@ class TestRatchetFailsHonestly:
         assert "@hooks" in line and "9,000" not in line and "9000" not in line
 
     def test_an_unreadable_baseline_is_red_not_an_empty_one(self, tmp_path):
-        """A baseline that will not parse is not "nothing baselined".
-
-        Reading it as empty would red all twenty residual lines at once and
-        teach the reader the gate is noise; reading it as "pass" would stop
-        the ratchet. Neither: the run is red and says which file.
-        """
+        """A baseline that will not parse is not "nothing baselined"."""
         base = tmp_path / "baseline.json"
         base.write_text("{not json", encoding="utf-8")
         (tmp_path / "clean.md").write_text("nothing here\n", encoding="utf-8")
@@ -978,11 +805,7 @@ class TestRatchetFailsHonestly:
         assert "git ls-files" in _said(result)
 
     def test_a_directory_that_is_no_checkout_is_red_not_empty(self, tmp_path):
-        """git runs, refuses (not a repository), prints nothing on stdout.
-
-        An empty stdout parses to an empty file list, and an empty list has no
-        hits. The exit code is the only thing that says the list is not real.
-        """
+        """git runs, refuses (not a repository), prints nothing on stdout."""
         import shutil
 
         if shutil.which("git") is None:
@@ -1019,12 +842,7 @@ class TestRatchetFailsHonestly:
         assert _gated_row(_gate(root), ".aipass/aipass_local_prompt.md")["state"] == "error"
 
     def test_an_absent_gated_file_is_not_a_failure(self, monkeypatch, tmp_path):
-        """A missing README is readme_check's red, not a second differently-worded one.
-
-        The scored pack already fails "README exists" and gates at 100% in the
-        same CI job. This rule is about GROWTH; duplicating that red here would
-        only split the diagnosis across two messages.
-        """
+        """A missing README is readme_check's red, not a second differently-worded one."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
         root = tmp_path / "bare"
         root.mkdir(parents=True, exist_ok=True)
@@ -1040,14 +858,7 @@ class TestRatchetScope:
     """Two files, both tracked in git. What is left out, and why."""
 
     def test_trinity_and_the_dashboard_and_docs_are_not_gated(self, monkeypatch, tmp_path):
-        """Gitignored files cannot be gated by a job that never sees them.
-
-        .trinity/ and DASHBOARD.local.json are machine-local; a CI checkout
-        holds neither, so a gate on them would measure nothing on every run and
-        pass by accident forever. docs/ is measured by the advisory lane but
-        left ungated while the fleet still holds pages that predate the
-        20,000-chars-per-page rule.
-        """
+        """Gitignored files cannot be gated by a job that never sees them."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
         huge = "z" * 200000
         root = _branch(
@@ -1076,11 +887,7 @@ class TestRatchetScope:
         assert {gated.rel for gated in ratchet.GATED_FILES} == {sb.README_REL, sb.PROMPT_REL}
 
     def test_the_states_match_the_advisory_checkers_vocabulary(self, monkeypatch, tmp_path):
-        """One table vocabulary across both rules, or two readers of one report.
-
-        Read off the cells check_branch writes, not its private constants
-        (seedgo, fleet green leg 8): one branch carries all four states.
-        """
+        """One table vocabulary across both rules, or two readers of one report."""
         manifest = tmp_path / "pack.json"
         manifest.write_text(json.dumps({"caps": {"README.md": {"max_chars": 5}}}), encoding="utf-8")
         config = _memory_config(tmp_path, **{"local.json": {}})
@@ -1095,13 +902,7 @@ class TestRatchetScope:
         assert ratchet.FAILING_STATES == (ratchet.STATE_OVER, ratchet.STATE_ERROR), "absent never fails the gate"
 
     def test_the_owners_history_and_open_calls_are_never_opened(self, tmp_path):
-        """Every exemption in the brief, each at a path that really takes it.
-
-        The culture doc, changelogs and plans are history and stay (the
-        ruling); the hook run logs, settings.json and the suspend tool wait on
-        the owner; batch10 is hardcoded_path's own inputs and this ratchet's
-        tests. Each file here names the owner and none of them is read.
-        """
+        """Every exemption in the brief, each at a path that really takes it."""
         exempt = [
             ".claude/CLAUDE.md",
             "CHANGELOG.md",
@@ -1121,12 +922,7 @@ class TestRatchetScope:
         assert result["hits"] == []
 
     def test_an_exemption_is_that_file_not_its_family(self, tmp_path):
-        """A near miss of an exempt path is an ordinary file and is read.
-
-        An exemption written a character too wide becomes the place the name
-        regrows -- another branch's settings.json, a CLAUDE.md outside
-        ``.claude/``, the next batch of checker tests.
-        """
+        """A near miss of an exempt path is an ordinary file and is read."""
         near = [
             "CLAUDE.md",
             "src/aipass/probe/.claude/settings.json",
@@ -1142,12 +938,7 @@ class TestRatchetScope:
 
     def test_the_pattern_is_the_owners_name_by_a_digest_the_module_does_not_hold(self):
         """An oracle the module does not control: every other case reads the name
-        off the module, so a wrong name would agree with itself and pass them all.
-
-        It used to count the real name in hardcoded_path's inputs above; those
-        inputs name nobody now (the owner, 2026-10-04: no home path of his in the
-        public tree). A sha256 of the name pins it without spelling it here.
-        """
+        off the module, so a wrong name would agree with itself and pass them all."""
         digest = hashlib.sha256(names.OWNER_NAME.encode("utf-8")).hexdigest()
 
         assert digest == "23ddda4810068cc44360dffd31b6c5a9ad13fb9e6a69c9354a5d1b07f1b9843f"
@@ -1158,11 +949,7 @@ class TestRatchetScope:
             assert pattern in (names.__doc__ or ""), f"{pattern} is exempt but the doc never says so"
 
     def test_an_untracked_file_is_never_read(self, tmp_path):
-        """Tracked means ``git ls-files``: scratch that does not ship is not the ratchet's.
-
-        Built as a real repository, because this is the one fact a handed-in
-        file list cannot prove.
-        """
+        """Tracked means ``git ls-files``: scratch that does not ship is not the ratchet's."""
         import shutil
         import subprocess
 
@@ -1184,11 +971,7 @@ class TestRatchetFleetWalk:
     """The branch list: the audit's rule, from whatever root the caller names."""
 
     def test_a_directory_is_a_branch_when_it_has_apps(self, tmp_path):
-        """The same rule .github/scripts/seedgo_audit.py applies, so one fleet.
-
-        A file gated on a branch the audit does not score -- or the reverse --
-        is a hole nobody would find until it was used.
-        """
+        """The same rule .github/scripts/seedgo_audit.py applies, so one fleet."""
         fleet = tmp_path / "src" / "aipass"
         for name in ("alpha", "bravo"):
             (fleet / name / "apps").mkdir(parents=True)
@@ -1201,11 +984,7 @@ class TestRatchetFleetWalk:
         assert [branch["name"] for branch in found] == ["alpha", "bravo"]
 
     def test_the_paths_stay_relative_to_the_root_it_was_given(self, tmp_path):
-        """No absolute path is invented, so CI logs read repo-relative.
-
-        A gate that resolved to an absolute path would print lines shaped like
-        one host and unusable from anywhere else.
-        """
+        """No absolute path is invented, so CI logs read repo-relative."""
         (tmp_path / "src" / "aipass" / "alpha" / "apps").mkdir(parents=True)
 
         from pathlib import Path as _Path
@@ -1218,11 +997,7 @@ class TestRatchetFleetWalk:
         assert ratchet.discover_branches(tmp_path / "nowhere") == []
 
     def test_the_live_fleet_is_under_every_gated_cap(self):
-        """The one live-tree pin: the state the ratchet was dropped on.
-
-        Seventeen README diets landed on 2026-09-15 to make this true. If this
-        goes red, a gated file grew -- and the failure lines say which.
-        """
+        """The one live-tree pin: the state the ratchet was dropped on."""
         from pathlib import Path as _Path
 
         repo_root = _Path(__file__).resolve().parents[4]
@@ -1236,10 +1011,7 @@ class TestRatchetReport:
     """What the job prints when nothing is wrong -- which is most runs."""
 
     def test_every_branch_is_printed_not_only_the_failing_ones(self, monkeypatch, tmp_path):
-        """A gate whose log only appears on red hides how close a branch is running.
-
-        The reading that lets a diet happen BEFORE the red is the green one.
-        """
+        """A gate whose log only appears on red hides how close a branch is running."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
         alpha = _branch(tmp_path / "alpha", **{"README.md": "x" * 10})
         bravo = _branch(tmp_path / "bravo", **{"README.md": "y" * 20})
@@ -1252,11 +1024,7 @@ class TestRatchetReport:
         assert "0 over cap, 0 unmeasurable" in report[-1]
 
     def test_the_gate_never_prints_it_returns_lines(self, capsys, monkeypatch, tmp_path):
-        """A handler that writes to stdout cannot be called from a test or a dashboard.
-
-        The .github runner prints; this module hands it strings. Anything else
-        makes the module unusable anywhere output is not already expected.
-        """
+        """A handler that writes to stdout cannot be called from a test or a dashboard."""
         monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 1))
         root = _branch(tmp_path / "b", **{"README.md": "x" * 50})
 
@@ -1265,12 +1033,7 @@ class TestRatchetReport:
         assert capsys.readouterr().out == "", "the gate printed instead of returning"
 
     def test_a_loose_baseline_is_reported_with_the_number_to_write(self, tmp_path):
-        """A ratchet only turns one way when somebody tightens it.
-
-        A file that drops below its baseline passes -- the cure is never red --
-        but the room it leaves is room for a new line nobody would see, so the
-        report names the entry and the number that closes it.
-        """
+        """A ratchet only turns one way when somebody tightens it."""
         rel = "src/aipass/probe/tests/test_x.py"
 
         result = _names(tmp_path, {rel: f"a = '{NAME}'\n"}, baseline={rel: {names.RULE_NAME: 3}})
@@ -1280,12 +1043,7 @@ class TestRatchetReport:
         assert any(rel in line and "write 1" in line for line in result["report"])
 
     def test_the_name_ratchet_never_prints_and_never_names_the_owner_itself(self, capsys):
-        """The checker is the one file that must know the name -- and is not a hit.
-
-        The module assembles the name from pieces, so its own source scans
-        clean; the shipped baseline carries paths and counts only, so it cannot
-        become the next place the name ships; and the run prints nothing.
-        """
+        """The checker is the one file that must know the name -- and is not a hit."""
         module = names.__file__
         with open(module, encoding="utf-8") as handle:
             source = handle.read()
@@ -1299,39 +1057,21 @@ class TestRatchetReport:
         assert capsys.readouterr().out == ""
 
 
-# =============================================
-# router_assert — the is-True router rule (gold seal phase 2, rule 1)
-# =============================================
-
-
 class TestRouterAssertFires:
     """The two shapes the rule exists to convict."""
 
     def test_the_one_liner_form_is_convicted(self):
-        """`assert handle_command(...) is True` and nothing else.
-
-        Reddens if the direct-call arm of _is_sole_router_true stops reading
-        the callee — the shape 86 of the fleet's 172 hits take.
-        """
+        """`assert handle_command(...) is True` and nothing else."""
         source = "def test_x():\n    assert handle_command('x', []) is True\n"
         assert router_assert.find_violations(source) == [(1, "test_x")]
 
     def test_the_assign_then_assert_form_is_convicted(self):
-        """`result = handle_command(...)` then `assert result is True`.
-
-        This is the majority shape and the one my own phase-1 grep missed,
-        which is how 169 was reported for a population of 223. Reddens if
-        _router_bound_names stops following the assignment.
-        """
+        """`result = handle_command(...)` then `assert result is True`."""
         source = "def test_x():\n    result = handle_command('x', [])\n    assert result is True\n"
         assert router_assert.find_violations(source) == [(1, "test_x")]
 
     def test_an_attribute_call_is_the_same_router(self):
-        """`mod.handle_command(...)` is the same protocol as the bare name.
-
-        Reddens if _callee_name stops reading ast.Attribute — most branches
-        import the module, not the function.
-        """
+        """`mod.handle_command(...)` is the same protocol as the bare name."""
         source = "def test_x():\n    assert mod.handle_command('x', []) is True\n"
         assert router_assert.find_violations(source) == [(1, "test_x")]
 
@@ -1340,42 +1080,24 @@ class TestRouterAssertStaysSilent:
     """Every acquittal, each for a different reason."""
 
     def test_a_decline_is_a_whole_contract(self):
-        """`is False` is never convicted — 117 fleet units depend on this.
-
-        Reddens if the rule is widened from `is True` to "the sole return
-        flag", which is the version that would delete correct tests.
-        """
+        """`is False` is never convicted — 117 fleet units depend on this."""
         source = "def test_x():\n    assert handle_command('not_mine', []) is False\n"
         assert router_assert.find_violations(source) == []
 
     def test_one_honest_assertion_acquits_the_unit(self):
-        """A second assert means the test proves something the True does not.
-
-        Reddens if `all()` becomes `any()` — the difference between convicting
-        a vacuous test and convicting every test that also checks routing.
-        """
+        """A second assert means the test proves something the True does not."""
         source = "def test_x():\n    assert handle_command('x', []) is True\n    assert con.print.called\n"
         assert router_assert.find_violations(source) == []
 
     def test_a_mock_assert_call_is_an_oracle(self):
-        """`assert_called_once_with` raises on its own; there is no `assert`.
-
-        Reddens if the effect scan drops mock's family — a test asserting
-        exactly the effect the message asks for would be convicted for it.
-        """
+        """`assert_called_once_with` raises on its own; there is no `assert`."""
         source = (
             "def test_x():\n    assert handle_command('x', []) is True\n    con.print.assert_called_once_with('hi')\n"
         )
         assert router_assert.find_violations(source) == []
 
     def test_an_underscore_helper_is_an_oracle(self):
-        """A module-local `_assert_*` helper carries the whole oracle.
-
-        This was a REAL false positive, found in the first precision sample:
-        aipass/tests/test_help_flag.py:174 asserts through
-        `_assert_nothing_happened` and the rule matched only "assert_".
-        Reddens if the lstrip("_") is removed.
-        """
+        """A module-local `_assert_*` helper carries the whole oracle."""
         source = (
             "def test_x():\n    assert handle_command('x', []) is True\n    _assert_nothing_happened(stub, 'init -h')\n"
         )
@@ -1392,20 +1114,12 @@ class TestRouterAssertStaysSilent:
         assert router_assert.find_violations(source) == []
 
     def test_a_predicate_is_not_a_router(self):
-        """`is_valid(...) is True` is a real claim: the True IS the behaviour.
-
-        Reddens if ROUTER_NAMES is widened to "anything returning a bool",
-        which would convict every predicate test in the fleet.
-        """
+        """`is_valid(...) is True` is a real claim: the True IS the behaviour."""
         source = "def test_x():\n    assert is_valid('abc') is True\n"
         assert router_assert.find_violations(source) == []
 
     def test_a_unit_with_no_assertions_is_not_this_rules_problem(self):
-        """No assert at all is no_oracle's finding, not router_assert's.
-
-        Reddens if the `if not asserts: continue` guard goes — `all([])` is
-        True, so every assertionless test would be convicted here.
-        """
+        """No assert at all is no_oracle's finding, not router_assert's."""
         assert router_assert.find_violations("def test_x():\n    handle_command('x', [])\n") == []
 
 
@@ -1425,8 +1139,7 @@ class TestRouterAssertLanes:
 
     def test_an_unparseable_file_is_not_judged_and_says_so(self, tmp_path):
         """A file that does not parse is named as not judged, never the clean "no test asserts"
-        of a judged file (fleet green leg 14). Red first: find_violations answered [] and the
-        file read as clean. The control above still convicts a parseable file."""
+        of a judged file."""
         f = tmp_path / "test_thing.py"
         f.write_text("def test_x(:\n    assert handle_command('x', []) is True\n", encoding="utf-8")
 
@@ -1439,11 +1152,7 @@ class TestRouterAssertLanes:
         )
 
     def test_a_line_bypass_silences_one_unit_and_not_the_file(self, tmp_path):
-        """The declared deviation is cheap; the silent one stays impossible.
-
-        Reddens if check_module stops passing the unit's line to is_bypassed —
-        a file-wide bypass would then be the only way out of one bad test.
-        """
+        """The declared deviation is cheap; the silent one stays impossible."""
         f = tmp_path / "test_thing.py"
         f.write_text(
             "def test_one():\n    assert handle_command('x', []) is True\n"
@@ -1460,28 +1169,15 @@ class TestRouterAssertLanes:
         assert "test_one" not in result["checks"][0]["message"]
 
     def test_the_standard_scores_nothing_because_it_declares_tests(self):
-        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.
-
-        This is the whole day-one guarantee: 172 fleet convictions and not one
-        branch's number moved. Reddens the moment the declaration changes.
-        """
+        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely."""
         assert router_assert.APPLIES_TO == applicability.TESTS
-
-
-# =============================================
-# oversize_test_file — the 1,500 code-line cap (gold seal phase 2, rule 2)
-# =============================================
 
 
 class TestOversizeTestFileMeasures:
     """What counts as a code line, and what is given back."""
 
     def test_payload_inside_a_multiline_string_is_not_code(self):
-        """A fixture blob is data the assertions read, not lines to split.
-
-        Reddens if _payload_lines stops subtracting — a file holding one
-        1,500-line JSON sample would then be convicted for the sample.
-        """
+        """A fixture blob is data the assertions read, not lines to split."""
         source = 'FIXTURE = """\n' + "line\n" * 50 + '"""\nx = 1\n'
 
         code, total, payload = oversize.measure(source)
@@ -1489,12 +1185,7 @@ class TestOversizeTestFileMeasures:
         assert (total, payload, code) == (53, 52, 1)
 
     def test_a_docstring_is_payload_too(self):
-        """A size rule must never be a reason to delete the bug a test names.
-
-        Reddens if payload is narrowed to "fixtures only" by, say, skipping
-        the first statement of a function — the gold standard asks authors to
-        write these sentences, so the size rule pays for them.
-        """
+        """A size rule must never be a reason to delete the bug a test names."""
         source = 'def test_x():\n    """\n' + "    why this test exists\n" * 20 + '    """\n    assert True\n'
 
         code, _total, payload = oversize.measure(source)
@@ -1503,12 +1194,7 @@ class TestOversizeTestFileMeasures:
         assert code == 2
 
     def test_an_fstring_span_is_counted_once(self):
-        """Nested constants inside one f-string must not double-count.
-
-        A sum of spans overstates a file by the lines an f-string shares with
-        its own children; measured 2026-09-20 that was 26 lines on this
-        branch's largest file. Reddens if the line SET becomes a sum.
-        """
+        """Nested constants inside one f-string must not double-count."""
         source = 'V = 1\nS = f"""\n{V}\nmiddle\n{V}\n"""\n'
 
         code, total, payload = oversize.measure(source)
@@ -1516,11 +1202,7 @@ class TestOversizeTestFileMeasures:
         assert (total, payload, code) == (6, 5, 1)
 
     def test_an_unparseable_file_is_measured_whole(self):
-        """Breaking the syntax must not be a way under the cap.
-
-        Reddens if the SyntaxError arm returns 0 or skips the file: "delete
-        one bracket" would become the cheapest way to silence this rule.
-        """
+        """Breaking the syntax must not be a way under the cap."""
         code, total, payload = oversize.measure("def test_x(:\n" + "x = 1\n" * 40)
 
         assert (total, payload, code) == (41, 0, 41)
@@ -1530,11 +1212,7 @@ class TestOversizeTestFileLanes:
     """The cap itself, the message, and the unscored backlog."""
 
     def test_the_cap_convicts_at_one_line_over_and_not_at_the_cap(self, tmp_path):
-        """The boundary is `>`, not `>=`.
-
-        Reddens on an off-by-one that convicts a file sitting exactly on a
-        published cap — the one number an author will aim for.
-        """
+        """The boundary is `>`, not `>=`."""
         at_cap = tmp_path / "test_at.py"
         over = tmp_path / "test_over.py"
         at_cap.write_text("x = 1\n" * oversize.CODE_LINE_CAP, encoding="utf-8")
@@ -1544,11 +1222,7 @@ class TestOversizeTestFileLanes:
         assert oversize.check_module(str(over))["passed"] is False
 
     def test_the_conviction_names_the_payload_it_already_forgave(self, tmp_path):
-        """An author at 10,524 lines needs to know 5,929 were already given back.
-
-        Reddens if the message drops to a bare count — the cap then reads as
-        unreachable and the rule gets bypassed instead of acted on.
-        """
+        """An author at 10,524 lines needs to know 5,929 were already given back."""
         big = tmp_path / "test_big.py"
         big.write_text(
             'P = """\n' + "pad\n" * 100 + '"""\n' + "x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8"
@@ -1560,11 +1234,7 @@ class TestOversizeTestFileLanes:
         assert "split it along the unit under test" in message
 
     def test_the_message_sends_the_author_to_the_gate_not_around_it(self, tmp_path):
-        """The cure needs new test files, which the hooks gate refuses.
-
-        Reddens if the message ever tells an author to just create the files.
-        The rule must not instruct anyone to route around a policy gate.
-        """
+        """The cure needs new test files, which the hooks gate refuses."""
         big = tmp_path / "test_big.py"
         big.write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8")
 
@@ -1574,17 +1244,9 @@ class TestOversizeTestFileLanes:
         assert "moving tests is not adding them" in message.lower()
 
     def test_the_standard_scores_nothing_because_it_declares_tests(self):
-        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.
-
-        34 fleet convictions on arrival and not one branch's number moved.
-        Reddens the moment the declaration changes.
-        """
+        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely."""
         assert oversize.APPLIES_TO == applicability.TESTS
 
-
-# =============================================
-# developer_home — no developer's home directory in a tracked text file (dispatch 79b012ed item 4)
-# =============================================
 
 # Module scope, never inside a test (template item 8). Here and not at the top because two
 # bypass rules pin this file's earlier lines by number; an import above them would move them.
@@ -1819,20 +1481,8 @@ class TestDeveloperHomeVerb:
         assert "--bogus" in err
 
 
-# ===========================================================================
-# hardcoded_path -- the docstring table, read once per file
-# ===========================================================================
-
-
 class TestTheDocstringTableIsReadOncePerFile:
-    """_scan_file reads one table of docstring states per file (seedgo, fleet green leg 19).
-
-    The walk from line 0 on every candidate line was 146503 calls of one
-    audit. The table keeps the toggle rule: a delimiter counted twice or more
-    on a stripped line changes nothing, counted once it flips the state.
-    Reached through check_module. Green on the per-line walk too: its proof
-    is its mutants.
-    """
+    """_scan_file reads one table of docstring states per file (seedgo, fleet green leg 19)."""
 
     def test_the_line_after_a_one_line_docstring_is_still_scanned(self, tmp_path):
         said = _scanned(tmp_path, '"""One line."""\np = "/home/someone/a"\n')

@@ -3,101 +3,15 @@
 # Description: Trinity Memory File Standards Checker
 # Version: 1.3.0
 # Created: 2026-08-25
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Trinity Memory File Standards Checker
 
-Enforces the trinity standard (devpulse dropbox/trinity_pattern.md) on the
-three in-scope files of every citizen's ``.trinity/``: ``local.json``,
-``observations.json`` and ``.template_version.json``.  ``passport.json``
-matters here for EXISTENCE only -- passports and compass are separate systems
-with their own rules, so nothing inside a passport is read or judged.
+``passport.json`` matters for EXISTENCE only: nothing inside a passport is read or judged.
 
-This module is the ENGINE: the module contract the audit reads
-(``AUDIT_SCOPE``, ``BRANCH_INPUTS``, ``external_inputs()``, ``GROUP_WEIGHTS``), the inputs every
-group shares (config, gold templates, the three files), the applicability
-decision, and the weighted roll-up.  The eight group checkers themselves live
-in ``trinity_groups.py`` -- they were split out on 2026-08-27 when this file
-crossed the 1500-line architecture cap, a relocation that changed no rule.
-
-The one law
------------
-A field the checker cannot measure is a VIOLATION, never a silent pass.  This
-standard exists because the old gate measured unparseable shapes as zero chars
-and passed them.  So: a missing, unreadable or invalid file fails every group
-that depends on it, loudly and by name; a field of the wrong type is reported
-with the type actually found and is never coerced or ``len()``-ed; an
-unreadable ``memory.config.json`` fails the Char caps AND Entry shapes groups
-instead of falling back to remembered numbers or a remembered shape;
-unreadable gold templates fail the Meta lines group instead of falling back to
-a copied-out prose string.  There is no code path where something unreadable
-produces a passing check.
-
-Unmeasurable has a THIRD answer, and it is not zero
----------------------------------------------------
-Refusing a group is right when the branch is at fault.  It is wrong when the
-whole environment cannot carry the evidence: ``.trinity/`` and
-``AIPASS_REGISTRY.json`` are both gitignored, so a fresh clone has no memory
-files at all, and refusing every group there scored all 18 branches at 0 on
-CI -- blaming the fleet for an environment fact.  ``is_clean_checkout()``
-detects that case and ``check_branch()`` returns ``not_applicable`` with a
-score of ``None``, which ``branch_audit`` leaves out of the gating average
-entirely.  0 lies about the branch and 100 lies about the run; ``None`` is the
-honest answer.  The detection needs BOTH signals absent -- no registry
-anywhere up the tree AND no citizen ``.trinity/`` beside this branch -- so a
-live installation that has genuinely lost a branch's memories still fails.
-
-The eight groups and their weights (GROUP_WEIGHTS, sums to 100)
----------------------------------------------------------------
-Shape and type weigh heaviest -- they break the machinery that caps, rolls and
-archives these files; freshness weighs lightest.  Each group reports its own
-0-100 subscore; the standard's score is the weighted mean, rounded, and never
-rounded up into a pass.
-
-Per-group subscore rule (proportional where a natural denominator exists,
-binary 0/100 otherwise):
-
-* Entry shapes (30) -- proportional over every entry in the four containers,
-  measured against the shape @memory's config publishes under
-  ``entry_limits.entry_types.<type>.fields`` (FPLAN-0593 Phase 2), never
-  against a shape carried here.  A container that is missing, is not a list,
-  or lives in an unreadable file counts as one failed unit rather than being
-  skipped.  Binary 0 when memory.config.json cannot be read, and an error row
-  naming the key when it publishes no ``fields`` for a section, because the
-  shape is never assumed any more than the cap numbers are.  Carries the 5
-  points of the retired Todos hygiene group (DPLAN-0345, 2026-09-15): todos
-  have no ``status`` field now, so a todo kept as done can only be spelled as
-  a key outside the closed shape, and this group already flags that by name.
-* Top-level keys (15) -- proportional over 17 fixed sub-rules: eight per file
-  (file parses, key set, key order, duplicate keys, document_metadata fields,
-  no ``status`` block, document_name, managed_by) plus one cross-file
-  managed_by agreement check.  An unreadable file fails all eight of its own.
-  ``document_metadata`` is a CLOSED set: any field beyond the declared ones is
-  flagged, with ``status`` keeping its own message because the contract
-  deletes it specifically.
-* Ordering & numbering (12) -- proportional over every entry.
-* Char caps (12) -- proportional over every entry; binary 0 when
-  memory.config.json cannot be read, because caps are never assumed.
-* File set (10) -- proportional over the five canonical names plus one unit
-  per stray file or directory found in ``.trinity/``.  A VERSIONED BACKUP is a
-  legal resident, not a stray: ``<canonical>.pre<sep><token>`` only, matched on
-  shape rather than a suffix list, and deliberately tight enough that a
-  torn-write ``.tmp`` stays visible.
-* Meta lines & _usage (10) -- proportional over seven byte-match units: four
-  ``*_meta`` lines, two ``_usage`` strings, and the ``guidelines`` block of
-  observations.json, which is compared byte-for-byte against the gold
-  template.  One slot is read by shape, not value: the todos tab's
-  ``next #N``, derived when the tab is rendered and stale by design once a
-  todo is added.  Binary 0 when config or the gold templates cannot be read.
-* Receipt (8) -- proportional over six units: file parses, template_versions
-  shape, template_versions values, and the three timestamp/actor strings.
-* Freshness (3) -- proportional over two units, one per file.
-
-Bypass
-------
-None, deliberately -- see check_branch().
+Reference: trinity.md
 """
 
 import json
@@ -124,13 +38,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.trinity_groups import (
     validate_entry_shape,
 )
 
-# The public surface other modules and the test suite reach through this
-# module. expected_meta_line, is_versioned_backup and validate_entry_shape now
-# live in trinity_groups; they are re-exported here because callers have always
-# imported them from the checker and the split must not move their address.
-# entry_shapes joins them for the same reason: validate_entry_shape now takes
-# the shape @memory publishes, and a caller reaching one address for the
-# validator and another for its input is how the two come to disagree.
+# Re-exported from trinity_groups so callers' import address never moves.
 __all__ = [
     "AUDIT_SCOPE",
     "BRANCH_INPUTS",
@@ -151,8 +59,7 @@ __all__ = [
 APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
-# Ruling 6: this checker scores files OUTSIDE apps/, so the audit cache must
-# watch them or a .trinity edit serves a stale score until --full.
+# Scored files live OUTSIDE apps/: unwatched, a .trinity edit serves a stale score until --full.
 BRANCH_INPUTS = (".trinity/*",)
 
 GROUP_WEIGHTS: dict[str, int] = {
@@ -198,11 +105,7 @@ def _fail_read(reason: str) -> dict:
 def _read_json_file(path: Path) -> dict:
     """Read one JSON object, recording duplicate keys.
 
-    Returns a dict with ``data`` (the parsed object or None), ``duplicates``
-    (every key seen more than once at any depth -- json.load keeps only the
-    last value, so the raw pairs are the only place a duplicate is visible)
-    and ``error`` (a reason string, or None on success).  The reason never
-    repeats the file name; callers prefix it themselves.
+    Duplicates show only in the raw pairs (json.load keeps the last); callers prefix ``error``.
     """
     if not path.is_file():
         return _fail_read("not found")
@@ -237,18 +140,7 @@ def _config_path(memory_dir: Path) -> Path:
 def external_inputs() -> list[Path]:
     """The files OUTSIDE this branch whose content decides the score.
 
-    ``BRANCH_INPUTS`` covers ``.trinity/*``; every branch is also scored
-    against @memory's config (caps, pad size) and gold templates (prose,
-    ``_usage``, guidelines, versions).  The incremental audit cache watches
-    what this returns, so a config or template edit re-scores every branch
-    instead of serving the Trinity row from before it.  Built from the same
-    helpers the loaders read, so the cache and the checker cannot name
-    different files.
-
-    Returns:
-        The config and both gold templates that exist now.  A file that is
-        absent is left out, and its later arrival or removal changes the
-        watch set, which busts the cache on its own.
+    The audit cache watches these, so a @memory config or template edit re-scores every branch.
     """
     memory_dir = _memory_dir()
     if memory_dir is None:
@@ -273,19 +165,8 @@ def _load_templates() -> dict | None:
     return loaded
 
 
-# =============================================================================
-# CONFIG AND GOLD TEMPLATES
-# =============================================================================
-
-
 def load_memory_config() -> dict | None:
-    """Load @memory's memory.config.json.
-
-    Returns:
-        The parsed config dict, or None when the repo root, the file, or its
-        JSON cannot be resolved.  None is a hard failure for the Char caps and
-        Meta lines groups -- there is no fallback set of numbers.
-    """
+    """Load @memory's memory.config.json."""
     memory_dir = _memory_dir()
     if memory_dir is None:
         return None
@@ -298,22 +179,7 @@ def load_memory_config() -> dict | None:
 
 
 def load_template_prose(templates: dict | None = None) -> dict | None:
-    """Load the per-section prose that the gold templates own.
-
-    Each ``*_meta`` value in a template is ``"{{PLACEHOLDER}} <prose>"``; the
-    prose is everything after the placeholder token and its single following
-    space.  The prose text is never carried in this module -- an unreadable
-    template returns None and fails the Meta lines group loud.
-
-    Args:
-        templates: Already-loaded gold templates, so a caller that also needs
-            the receipt's gold versions reads the two files once instead of
-            twice.  Omit to load them here.
-
-    Returns:
-        ``{"todos": ..., "key_learnings": ..., "sessions": ...,
-        "observations": ...}`` or None.
-    """
+    """Load the per-section prose that the gold templates own."""
     if templates is None:
         templates = _load_templates()
     return _prose_from_templates(templates)
@@ -322,24 +188,8 @@ def load_template_prose(templates: dict | None = None) -> dict | None:
 def is_clean_checkout(branch_path: Path) -> bool:
     """Whether this tree is a fresh clone rather than a live installation.
 
-    Both signals must be absent, because either one alone is ambiguous:
-
-      * ``AIPASS_REGISTRY.json`` -- gitignored, so a clone has none. Searched
-        upward from the branch, since it lives at the repo root.
-      * any ``<fleet>/<branch>/.trinity/`` -- also gitignored. Checked at
-        exactly one level down, which is where a citizen's memories live.
-        ``spawn/templates/*/.trinity`` IS tracked and does ship, and it sits
-        deeper than that, so it correctly does not make a clone look live.
-
-    Requiring both keeps the discrimination conservative: a real installation
-    that has lost one branch's .trinity still has the registry, so that stays
-    the violation it is.
-
-    Args:
-        branch_path: The branch being audited.
-
-    Returns:
-        True when no registry and no citizen memories exist anywhere.
+    Both gitignored signals must be absent, so a live install that lost one .trinity/
+    still fails; the tracked ``spawn/templates/*/.trinity`` sits deeper and must not count.
     """
     branch_path = Path(branch_path).resolve()
     for parent in [branch_path, *branch_path.parents]:
@@ -349,21 +199,14 @@ def is_clean_checkout(branch_path: Path) -> bool:
     try:
         siblings = list(fleet.iterdir())
     except OSError as exc:
-        # Unreadable fleet dir: answer "not a clean checkout", which keeps a
-        # missing .trinity a violation. Failing toward the strict answer is
-        # right here -- the loose one would silence the standard fleet-wide.
+        # Fail toward the strict answer: "clean checkout" here would silence the standard fleet-wide.
         logger.warning("trinity_check: cannot list %s (%s) -- assuming a live installation", fleet, exc)
         return False
     return not any((sibling / _TRINITY_DIR).is_dir() for sibling in siblings if sibling.is_dir())
 
 
 def _not_applicable_result(reason: str) -> dict:
-    """A refusal that is neither a 0 nor a 100 -- the standard steps out.
-
-    ``not_applicable`` tells branch_audit to leave this standard out of the
-    gating average entirely. Scoring 0 would blame the branch for the
-    environment; scoring 100 would claim a measurement that never happened.
-    """
+    """A refusal that is neither a 0 nor a 100 -- the standard steps out."""
     return {
         "standard": "TRINITY",
         "score": None,
@@ -376,16 +219,7 @@ def _not_applicable_result(reason: str) -> dict:
 def check_branch_info(branch_path: str) -> list[str]:
     """Non-scored info lines: one per stray file or directory in .trinity/.
 
-    The strays are also scored under the File set group; this channel exists
-    so the names stay visible in the audit output even when the renderer
-    truncates the group's failure message.
-
-    Args:
-        branch_path: Branch root to inspect.
-
-    Returns:
-        One line per stray, the not-applicable announcement on a clean
-        checkout, or empty when .trinity/ is clean or absent.
+    Also scored under File set; this keeps the names visible when that message truncates.
     """
     if is_clean_checkout(Path(branch_path)):
         return [_CLEAN_CHECKOUT_REASON]
@@ -395,17 +229,10 @@ def check_branch_info(branch_path: str) -> list[str]:
     return [f"trinity: stray .trinity/{name}" for name in _stray_names(trinity)]
 
 
-# =============================================================================
-# PUBLIC ENTRY POINT
-# =============================================================================
-
-
 def _build_context(branch_path: Path) -> dict:
     """Read every input once: the three files, the config, the gold templates.
 
-    The path is resolved first: Path(".").name is the empty string, so a
-    relative branch_path would measure Top-level keys against a branch called
-    "" and report correct files as drifted.
+    Resolved first: Path(".").name is "", which would report correct files as drifted.
     """
     branch_path = branch_path.resolve()
     trinity = branch_path / _TRINITY_DIR
@@ -436,27 +263,8 @@ def _weighted_score(checks: list) -> int:
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Check one branch's .trinity/ memory files against the trinity standard.
 
-    Eight groups are measured -- file set, top-level keys, entry shapes,
-    ordering and numbering, char caps, meta lines and _usage, freshness, and
-    the template version receipt.  Every group reports its own
-    0-100 subscore and the standard's score is their weighted mean.
-
-    Nothing here is skipped for being unreadable: a missing file, a broken
-    parse, a wrong type or an unreadable config each fail the groups that
-    depend on them, by name.
-
-    Args:
-        branch_path: Branch root (the directory holding .trinity/).
-        bypass_rules: Accepted for interface compatibility ONLY and never
-            consulted. The trinity contract's Bypass section reads: "None for
-            shape rules, by design -- a bypassable memory standard recreates
-            the drift it exists to end. A branch that genuinely needs
-            different numbers gets a per-branch entry in @memory's config (the
-            one source), not a bypass file." Do not add is_bypassed() here.
-
-    Returns:
-        ``{"standard": "TRINITY", "score": int, "passed": bool,
-        "checks": [eight group dicts]}``.
+    ``bypass_rules`` is accepted for interface compatibility and never consulted:
+    the trinity contract has no bypass by design. Do not add is_bypassed() here.
     """
     if is_clean_checkout(Path(branch_path)):
         logger.info("trinity_check: %s -- clean checkout, standard not applicable", branch_path)
