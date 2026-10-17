@@ -96,8 +96,11 @@ measured reasons:
 - **A timeout stops the whole process tree.** Drone runs every `@branch` verb in a child of its own
   (`drone/apps/handlers/executor.py`), so killing drone alone would orphan exactly the work that
   overran. On POSIX the command gets its own session, and the timeout sends SIGTERM to the group,
-  waits 2 s, then sends SIGKILL. Windows has no process group to signal: the direct child is killed
-  and a grandchild may outlive it. That is the known residual.
+  waits up to 2 s, then sends SIGKILL to the group, and only then reaps the leader. The wait polls
+  `os.waitid` with `WNOWAIT`, so a leader that exits on SIGTERM stays an unreaped zombie and still
+  holds the group id: a reaped pid can be reissued, and a SIGKILL to its group would reach a
+  stranger. Windows has no process group to signal: the direct child is killed and a grandchild
+  may outlive it. That is the known residual.
 
 stdin is `/dev/null`: a scheduled command has no human to answer a prompt.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.2.2
+# Version: 1.2.3
 # Created:2026-06-15
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -18,6 +18,7 @@ import os
 import re
 import select
 import signal
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -675,6 +676,17 @@ def pid_gone(pid: int, within: float = 5.0) -> bool:
     raise RuntimeError(f"pid_gone has no exit notifier on {sys.platform}")
 
 
+def leader_reaped(pid: int) -> bool:
+    """True once this process's child *pid* has been reaped; an exited, unreaped zombie is False."""
+    if hasattr(os, "waitid"):
+        try:
+            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            return True
+        return False
+    raise RuntimeError(f"leader_reaped has no non-reaping wait on {sys.platform}")
+
+
 def kill_quietly(pid: int) -> None:
     """Teardown for a test that started a background process. Already gone is fine, and said."""
     try:
@@ -790,6 +802,62 @@ class TestRunCommand:
             assert pid_gone(grandchild), f"grandchild {grandchild} outlived the timeout"
         finally:
             kill_quietly(grandchild)
+
+    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
+    @pytest.mark.parametrize("leader_on_term", ["exits", "ignores"])
+    def test_a_grandchild_that_ignores_sigterm_is_killed_with_its_group(self, tmp_path, monkeypatch, leader_on_term):
+        pidfile = tmp_path / "stubborn.pid"
+        stubborn = (
+            "import os, signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            "time.sleep(60)\n"
+        )
+        program = (
+            ("import signal\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if leader_on_term == "ignores" else "")
+            + f"subprocess.Popen([sys.executable, '-c', {stubborn!r}])\n"
+            + f"while not os.path.exists({str(pidfile)!r}): time.sleep(0.01)\n"
+            + "print('spawned', flush=True)\ntime.sleep(30)\n"
+        )
+        launcher, _ = fake_drone(tmp_path, program)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path, 2)
+        grandchild = int(pidfile.read_text(encoding="utf-8"))
+        try:
+            assert result.timed_out is True
+            assert pid_gone(grandchild), f"grandchild {grandchild} ignored SIGTERM and outlived the group's SIGKILL"
+        finally:
+            kill_quietly(grandchild)
+
+    @pytest.mark.skipif(not hasattr(os, "waitid"), reason="the reap check reads waitid's WNOWAIT")
+    def test_the_sigkill_never_reaches_a_pgid_reissued_after_the_leader_is_reaped(self, tmp_path, monkeypatch):
+        # The kernel reissues a reaped pid at will, so the reuse is modelled: a
+        # group signal sent once the leader is reaped lands on the test's sentinel.
+        sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+        sentinel = subprocess.Popen(sleeper, start_new_session=os.name == "posix")
+        real_signal_group = command_job.signal_group
+        sent = []
+
+        def reissuing_signal_group(pgid, sig):
+            if leader_reaped(pgid):
+                sent.append((sig, sentinel.pid))
+                real_signal_group(sentinel.pid, sig)
+                return
+            sent.append((sig, pgid))
+            real_signal_group(pgid, sig)
+
+        launcher, _ = fake_drone(tmp_path, "print('started', flush=True)\ntime.sleep(30)\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        monkeypatch.setattr(command_job, "signal_group", reissuing_signal_group)
+        try:
+            result = command_job.run_command("drone @daemon --help", tmp_path, 1)
+            assert result.timed_out is True
+            assert [sig for sig, _ in sent] == [signal.SIGTERM, signal.SIGKILL]
+            assert sentinel.pid not in [pgid for _, pgid in sent], f"a group signal reached the reissued pgid: {sent}"
+            assert sentinel.poll() is None, "the sentinel holding the reissued pgid was killed"
+        finally:
+            sentinel.kill()
+            sentinel.wait()
 
     def test_a_background_child_holding_the_output_is_not_a_timeout(self, tmp_path, monkeypatch):
         # Through a pipe, the read waits for EVERY holder of the write end, so a

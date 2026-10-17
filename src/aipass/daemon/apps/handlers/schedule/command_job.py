@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: command_job.py
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-11
-# Modified: 2026-09-27
+# Modified: 2026-10-16
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -80,6 +80,7 @@ TAIL_MAX_CHARS = 400
 
 #: Between SIGTERM to the group and SIGKILL to whatever ignored it.
 _STOP_GRACE_SECONDS = 2.0
+_STOP_POLL_SECONDS = 0.05
 
 _POSIX = os.name == "posix"
 
@@ -168,8 +169,11 @@ def output_tail(text: str, lines: int = TAIL_LINES, max_chars: int = TAIL_MAX_CH
     return tail
 
 
-def _killpg(pid: int, sig) -> None:
-    """Signal a whole process group. A group that is already gone is the answer we wanted."""
+def signal_group(pid: int, sig) -> None:
+    """Signal a whole process group. A group that is already gone is the answer we wanted.
+
+    The one seam every group signal goes through, so a test can see where each one lands.
+    """
     try:
         os.killpg(pid, sig)
     except ProcessLookupError:
@@ -178,17 +182,38 @@ def _killpg(pid: int, sig) -> None:
         logger.warning("[command_job] could not signal process group %s: %s", pid, e)
 
 
+def _leader_exited(pid: int) -> bool:
+    """True once the group leader has exited, WITHOUT reaping it. Raises ChildProcessError once reaped."""
+    if hasattr(os, "waitid"):
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    return False
+
+
+def _await_leader_unreaped(pid: int) -> None:
+    """Give the leader the grace to exit on SIGTERM, polling so it stays an unreaped zombie."""
+    deadline = time.monotonic() + _STOP_GRACE_SECONDS
+    while not _leader_exited(pid):
+        if time.monotonic() >= deadline:
+            logger.info("[command_job] pid %s ignored SIGTERM, killing its group", pid)
+            return
+        time.sleep(_STOP_POLL_SECONDS)
+
+
 def _stop_tree(proc: "subprocess.Popen[bytes]") -> None:
     """Stop an overrunning command and everything it started, then reap it."""
     if _POSIX:
-        _killpg(proc.pid, signal.SIGTERM)
+        signal_group(proc.pid, signal.SIGTERM)
+        # The pgid is ours only while the leader is unreaped: a reaped pid can be
+        # reissued, and a SIGKILL to its group would land on a stranger. So the
+        # grace is polled without reaping, the group killed, and only then reaped.
         try:
-            proc.wait(timeout=_STOP_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            logger.info("[command_job] pid %s ignored SIGTERM, killing its group", proc.pid)
-        # Unconditional: the leader exiting on TERM says nothing about a
-        # grandchild that ignored it, and the group outlives its leader.
-        _killpg(proc.pid, signal.SIGKILL)
+            _await_leader_unreaped(proc.pid)
+        except ChildProcessError:
+            logger.warning("[command_job] pid %s was reaped before SIGKILL; its pgid is not ours to signal", proc.pid)
+        else:
+            # Unconditional: the leader exiting on TERM says nothing about a
+            # grandchild that ignored it, and the group outlives its leader.
+            signal_group(proc.pid, signal.SIGKILL)
     else:
         proc.kill()
     try:
