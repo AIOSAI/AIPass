@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.2.3
+# Version: 2.3.0
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -301,6 +301,22 @@ class TestProbeSuppression:
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
         rollover.handle({})
         assert checked == ["checked"]
+
+    def test_a_probe_sandbox_without_a_registry_logs_no_fault(self, monkeypatch, tmp_path):
+        """devpulse 2fcad19b: the probe's skeleton has no registry by design; 5 ERROR lines hit the shipped log."""
+        faults = []
+        recorder = MagicMock()
+        recorder.error.side_effect = lambda *a: faults.append(a[0])
+        recorder.warning.side_effect = lambda *a: faults.append(a[0])
+        monkeypatch.setattr(rollover, "logger", recorder)
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
+        assert rollover.handle({}) == {"stdout": "", "exit_code": 0}
+        assert faults == []
+        monkeypatch.delenv("AIPASS_HOOK_PROBE")
+        rollover.handle({})
+        assert any("_find_repo_root failed" in fault for fault in faults)
 
     def test_only_the_exact_flag_value_suppresses(self, monkeypatch):
         """An unset-but-present variable must not silently dark the handler."""

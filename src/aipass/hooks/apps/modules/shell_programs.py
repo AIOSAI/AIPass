@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -61,6 +61,10 @@ _SED_LONG_FLAGS = frozenset(
 #: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs (hooks todo 80).
 _SED_PRINT_SCRIPT = re.compile(r"[0-9$,;!~pdq= ]+")
 
+#: The shells: with -n (noexec) among their leading options they parse a script and run nothing.
+SHELL_PROGRAMS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "yash"})
+_SHELL_OPTION_ARGS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
+
 #: Programs whose operands are data or files, never a program to run (P3).
 PLAIN_PROGRAMS = READ_ONLY_PROGRAMS | frozenset(
     {
@@ -91,14 +95,35 @@ def read_only(program: str, argv: tuple[str, ...]) -> bool:
         argv: Its whole argument vector, the program word first.
 
     Returns:
-        True for a READ_ONLY_PROGRAMS member, for find without an acting flag, and
-        for sed running only print scripts.
+        True for a READ_ONLY_PROGRAMS member, for find without an acting flag, for
+        sed running only print scripts, a shell's -n syntax check, and
+        `aipass init update --dry-run` (the owner, 2026-10-16).
     """
     if program == "find":
         return not any(arg in _FIND_ACTIONS for arg in argv[1:])
     if program == "sed":
         return _sed_only_prints(argv)
+    if program in SHELL_PROGRAMS:
+        return syntax_check_only(argv)
+    if program == "aipass":
+        return argv[1:3] == ("init", "update") and "--dry-run" in argv[3:]
     return program in READ_ONLY_PROGRAMS
+
+
+def syntax_check_only(argv: tuple[str, ...]) -> bool:
+    """True when a shell's options before its script carry -n: it parses and runs nothing (hooks todo 89)."""
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg in _SHELL_OPTION_ARGS:
+            index += 2
+            continue
+        if arg == "--" or len(arg) < 2 or arg[0] not in "-+":
+            return False
+        if arg[0] == "-" and not arg.startswith("--") and "n" in arg[1:]:
+            return True
+        index += 1
+    return False
 
 
 def _sed_only_prints(argv: tuple[str, ...]) -> bool:

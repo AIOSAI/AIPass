@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -38,7 +38,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.modules.bash_writes import _SOURCE_DELETE_SHAPES, _resolve, verb_name, write_targets
-from aipass.hooks.apps.modules.shell_programs import PLAIN_PROGRAMS, WATCHED_VERBS
+from aipass.hooks.apps.modules.shell_programs import PLAIN_PROGRAMS, SHELL_PROGRAMS, WATCHED_VERBS, syntax_check_only
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -101,7 +101,7 @@ _ANSI_SIMPLE = {
 _NAME = re.compile(r"[A-Za-z_]\w*")
 
 #: Shells whose program text is shell grammar, read back through this reader.
-_SHELL_PROGRAMS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash", "yash"})
+_SHELL_PROGRAMS = SHELL_PROGRAMS
 
 # Interpreter names to one language, a version suffix included: python3.12 is python.
 _LANGUAGE = re.compile(
@@ -1005,7 +1005,8 @@ class _Walker:
         cwd = str(ctx.cwd or "")
         if name in _SHELL_PROGRAMS:
             self.out.invocations.append(Invocation(name, argv, ctx.via, language="shell", cwd=cwd))
-            self._shell(name, rest, cmd, ctx)
+            if not syntax_check_only(argv):
+                self._shell(name, rest, cmd, ctx)
             return
         language = _language(name)
         if language:

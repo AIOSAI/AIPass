@@ -226,6 +226,12 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle",
       "matcher": ""
+    },
+    "release_notice": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.release_notice.handle",
+      "matcher": "",
+      "timeout": 30
     }
   }
 }
