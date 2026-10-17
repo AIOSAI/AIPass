@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-08-31
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
@@ -15,7 +15,6 @@
 
 import ast
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -174,20 +173,23 @@ class TestSafePathHelper:
         """In a healthy world it behaves like resolve()."""
         assert module_paths.module_file(__file__) == Path(__file__).resolve()
 
-    def test_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """An OSError from resolve() yields an absolute path, not an exception."""
+    def test_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """An OSError from resolve() yields the same file's absolute spelling, not an exception."""
+        # Spelled from the fixture, not the product's abspath: a cwd answer must fail.
+        module = tmp_path / "branch" / "apps" / "handlers" / "mod.py"
         monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
         monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-        result = module_paths.module_file(__file__)
 
-        assert result.is_absolute()
-        assert result.name == Path(__file__).name
+        assert module_paths.module_file(str(module)) == tmp_path / "branch" / "apps" / "handlers" / "mod.py"
 
-    def test_branch_root_climbs_without_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """branch_root still answers when resolve() is unavailable."""
+    def test_branch_root_climbs_without_resolve(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """branch_root lands on the exact ancestor the fixture built when resolve() is unavailable."""
+        branch = tmp_path / "branch"
+        module = branch / "apps" / "handlers" / "mod.py"
         monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
         monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-        assert module_paths.branch_root(__file__, 1) == Path(os.path.abspath(__file__)).parents[1]
+
+        assert module_paths.branch_root(str(module), 2) == branch
 
 
 class TestDegradedResolutionIsAnnouncedOnce:
