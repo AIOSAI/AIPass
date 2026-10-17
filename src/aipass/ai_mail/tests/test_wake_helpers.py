@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -135,7 +135,7 @@ def test_dispatch_status_format_output():
 
 
 # Read through fable_allowed(), the public reader of the wake config, not called
-# directly (ai_mail, leg 14). A missing file and a corrupt one both fall to the
+# directly. A missing file and a corrupt one both fall to the
 # default grant; only the corrupt one is warned about.
 
 
@@ -164,7 +164,7 @@ def test_read_json_missing_file(tmp_path, monkeypatch):
 
 
 def test_read_json_corrupt(tmp_path, monkeypatch):
-    """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
+    """Corrupt JSON raises JsonUnreadable, distinct from a missing file."""
     f = tmp_path / "bad.json"
     f.write_text("{not valid", encoding="utf-8")
     grant, log = _grant_from(monkeypatch, f)
@@ -225,7 +225,7 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
 # --- pid_lock's process readers, through is_branch_occupied -----------
 #
 # The cwd and session-type readers are reached through the occupancy check,
-# their one caller (ai_mail, leg 15): one claude pid, its cwd, its session type.
+# their one caller: one claude pid, its cwd, its session type.
 # A blocking session reads occupied; a dispatched/daemon one, a cwd elsewhere,
 # or a cwd that cannot be read, reads free. The darwin branch is a synthetic
 # POSIX literal, never a tmp_path: lsof output is DATA the parser reads, and on
@@ -383,7 +383,7 @@ def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
     assert is_branch_occupied(tmp_path) is False
 
 
-# test_is_zombie_linux_not_zombie and _zombie retired (ai_mail, leg 15): they
+# test_is_zombie_linux_not_zombie and _zombie retired: they
 # pinned the same two answers as test_check_pid_alive_running_non_zombie and
 # test_check_pid_alive_zombie above, which reach the reader through its caller.
 
@@ -471,7 +471,7 @@ def test_check_lock_permission_error_treated_active(tmp_path, monkeypatch):
 
 
 def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
-    """A corrupt lock younger than the grace is a writer mid-write: held, not removed (ai_mail, leg 13)."""
+    """A corrupt lock younger than the grace is a writer mid-write: held, not removed."""
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
@@ -482,7 +482,7 @@ def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
 
 
 def test_check_lock_old_corrupt_json_is_reclaimed(tmp_path):
-    """A corrupt lock an hour old is a crashed writer's leftover: removed, None (ai_mail, leg 13)."""
+    """A corrupt lock an hour old is a crashed writer's leftover: removed, None."""
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
@@ -495,7 +495,7 @@ def test_check_lock_old_corrupt_json_is_reclaimed(tmp_path):
 
 
 def test_check_lock_unreadable_is_held(tmp_path):
-    """A lock that cannot be read at all is held and left in place (ai_mail, leg 13).
+    """A lock that cannot be read at all is held and left in place.
 
     A directory where the lock file belongs cannot be read as text; the wake
     once answered None for it and the daemon tried to remove it.
@@ -715,7 +715,7 @@ def test_known_model_aliases_are_bare_names():
 
 
 class TestFindClaudeBin:
-    """The claude binary, resolved by the wake that spawns it (ai_mail, leg 16).
+    """The claude binary, resolved by the wake that spawns it.
 
     Each row reads the command the wake handed the monitor, so the answer is
     the one a spawn carries. HOME/USERPROFILE name tmp_path so Path.home
@@ -877,7 +877,7 @@ class TestLoadConfig:
     """The safety config's turn cap, read through the wake that spawns with it.
 
     The unreadable-config row is TestScheduledManagerLane's
-    test_an_unreadable_safety_config_refuses_the_wake (ai_mail, leg 15).
+    test_an_unreadable_safety_config_refuses_the_wake.
     """
 
     def _turns(self, tmp_path, monkeypatch, config_text=None):

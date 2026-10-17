@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
 # Version: 1.8.0
 # Created: 2026-03-05
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
 #   - v1.8.0 (2026-10-11): daemon_signals_restored - run_daemon now installs its stop handlers when started
@@ -22,8 +22,7 @@
 import os
 import tempfile
 
-# Redirect prax logs to temp directory during tests
-# Must be set before any prax imports to catch logger initialization
+# Must be set before any prax import: the logger reads it at initialization.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -47,17 +46,8 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.modules import email as email_mod
 from aipass.cli.apps.modules import display
 
-# Never collect out of an archive. apps/handlers/.archive/ and tests/.archive/
-# hold the pre-DPLAN-0325 handler and its internals tests verbatim: they import
-# a module that no longer exists, and @hooks' rglob generated a dotted name from
-# a dot-prefixed part that was a SyntaxError. pytest's own norecursedirs already
-# skips dot-directories — this states the rule rather than relying on it.
+# Archived tests import modules that no longer exist; state the skip rather than rely on norecursedirs.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
-
-
-# ---- The dispatch daemon's files (test_daemon*.py) ----------------------------
-# Requested by each daemon file's pytestmark, never autouse: they were the
-# autouse pair of test_daemon.py before its split (ai_mail, 2026-10-08).
 
 
 @pytest.fixture
@@ -78,32 +68,17 @@ def daemon_paths_in_tmp(tmp_path, monkeypatch):
 
 @pytest.fixture
 def daemon_signals_restored():
-    """Put SIGTERM and SIGINT back as found after a test that starts run_daemon.
-
-    run_daemon installs its stop handlers for the process it runs in; a test
-    that starts it must not leave them on the xdist worker (2026-10-11).
-    """
+    """Put SIGTERM and SIGINT back as found after a test that starts run_daemon."""
     saved = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
     yield
     for signum, handler in saved.items():
         signal.signal(signum, handler)
 
 
-# ---- The email modules' files (test_email_module*.py) ---------------------------
-# Requested by each file's pytestmark, never autouse: they were the autouse pair
-# of test_email_module.py before its split (ai_mail, 2026-10-08).
-
-
 @pytest.fixture
 def email_modules_pinned():
-    """Fail where a string-path patch would resolve to another module object.
-
-    The product imports some names at call time, through sys.modules; a patch
-    written against the objects imported at the top of this file must land on
-    those same objects. This compares and fails, rather than writing the
-    modules back into sys.modules: a quiet re-pin hid whichever test had
-    evicted them (compass 493, ai_mail leg 5).
-    """
+    """Fail where a string-path patch would resolve to another module object."""
+    # Fails rather than re-pinning: a quiet re-pin hides whichever test evicted them.
     assert sys.modules["aipass.ai_mail.apps.modules.email"] is email_mod
     assert sys.modules["aipass.ai_mail.apps.modules.email_send"] is email_send_mod
 
@@ -118,13 +93,6 @@ def email_json_silenced():
         mock_email_jh.log_operation.return_value = True
         mock_send_jh.log_operation.return_value = True
         yield
-
-
-# ---- The wake's files (test_wake*.py) -------------------------------------------
-# wake_log_operation_suppressed is requested by each wake file's pytestmark, never
-# autouse; repo_root is requested by name. Both were test_wake.py's own fixtures
-# before its split (ai_mail, 2026-10-08). A file that defines its own repo_root
-# keeps it: a module's fixture overrides this one.
 
 
 @pytest.fixture
@@ -143,13 +111,6 @@ def repo_root(tmp_path, monkeypatch):
     monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
     monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", registry_file)
     return tmp_path
-
-
-# ---- The dispatch monitor's files (test_dispatch_monitor*.py) -------------------
-# The three silencers are requested by each monitor file's pytestmark, never
-# autouse; main_argv is requested by name. All four were test_dispatch_monitor.py's
-# own fixtures before its split (ai_mail, 2026-10-08); the module is named
-# monitor_mod here where the file named it mod.
 
 
 @pytest.fixture
@@ -222,14 +183,7 @@ def clean_command_state() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def sandboxed_central(tmp_path, monkeypatch) -> None:
-    """No test reaches the live central file: update_central scans and writes under tmp_path.
-
-    test_message_correlation's mark_as_opened ran the real update_central through
-    inbox_cleanup's central-stats update and rewrote .ai_central/AI_MAIL.central.json from the live
-    inboxes on every suite run (found by mtime, 2026-09-27). Redirecting the
-    module's four paths, rather than stubbing the function, keeps update_central
-    runnable for any test that means to exercise it.
-    """
+    """No test reaches the live central file: update_central scans and writes under tmp_path."""
     central = tmp_path / "central_sandbox"
     monkeypatch.setattr(central_writer, "_REPO_ROOT", central)
     monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", central / "AIPASS_REGISTRY.json")
@@ -252,12 +206,8 @@ class _BusRecorder:
 
 @pytest.fixture(autouse=True)
 def recorded_bus(monkeypatch) -> _BusRecorder:
-    """No test fires on the real trigger bus; a test asserts what fired here.
-
-    The fleet bus probe counted 71 fires from this suite on the real bus
-    (2026-09-27): report.py, send.py and dispatch.py import trigger at call time
-    from its home, email_send.py binds it at import, so both homes are replaced.
-    """
+    """No test fires on the real trigger bus; a test asserts what fired here."""
+    # report/send/dispatch import trigger at call time, email_send binds it at import: both homes replaced.
     recorder = _BusRecorder()
     monkeypatch.setattr(trigger_core, "trigger", recorder)
     monkeypatch.setattr(trigger_core.Trigger, "fire", staticmethod(recorder.fire))
@@ -267,25 +217,8 @@ def recorded_bus(monkeypatch) -> _BusRecorder:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect this branch's json writes into a temp dir.
-
-    autouse=True on purpose: after DPLAN-0325 the shim's names are the fleet
-    service's own bound methods, which write into ai_mail_json/ unless the seam
-    says otherwise. There is no singleton and no private attribute left to
-    patch, so a test that forgets to redirect pollutes the live branch — and
-    ai_mail's 80 production log_operation call sites make that near-certain.
-
-    The service recomputes its directory on every call, so setting the variable
-    here — after import — still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/ai_mail/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    """Redirect this branch's json writes into a temp dir."""
+    # Own subdirectory: a seam AT tmp_path creates tmp_path/ai_mail/, colliding with tests that build it.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -294,31 +227,14 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def _isolate_notification_feed(tmp_path, monkeypatch):
-    """Point the notification feed at tmp_path for EVERY test.
-
-    Call sites in delivery, wake, dispatch_monitor and daemon write a feed line
-    as a side effect. Without this guard a test run appends fake dispatch events
-    to the real .aipass/notifications.jsonl that BAUD renders — the toast era
-    hid that leak because a toast vanishes; a feed line does not.
-    """
+    """Point the notification feed at tmp_path for EVERY test."""
     monkeypatch.setattr(notify_mod, "FEED_PATH", tmp_path / "feed" / "notifications.jsonl")
 
 
 @pytest.fixture(autouse=True)
 def _no_real_mail_from_tests(monkeypatch):
-    """Refuse any test that shells out to `drone @ai_mail send` (or dispatch).
-
-    Earned the hard way on 2026-08-21: two tests exercising the manager wake-back
-    called subprocess.run without mocking it, and BOTH delivered real mail into
-    @devpulse's live inbox. The identity fence did not stop them — this suite runs
-    inside a dispatched agent whose shell carries AIPASS_BRANCH_NAME, so drone
-    stamped source=assigned and the send was, correctly, allowed.
-
-    Same class as the notification-feed and contacts guards above: a test that
-    writes into a citizen's real state. Mail is the worst of the three, because a
-    delivered message asks a human to read it. Tests that mean to exercise the
-    send path mock subprocess.run themselves, which overrides this.
-    """
+    """Refuse any test that shells out to `drone @ai_mail send` (or dispatch)."""
+    # The identity fence allows a dispatched agent's shell; send-path tests mock subprocess.run themselves.
     import subprocess
 
     real_run = subprocess.run
@@ -338,68 +254,27 @@ def _no_real_mail_from_tests(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _strip_ambient_identity_source(monkeypatch):
-    """Clear AIPASS_CALLER_IDENTITY_SOURCE for EVERY test.
-
-    This var is a CREDENTIAL: "assigned" or "passport" lets the identity fence
-    accept a caller standing outside any branch. A dispatched agent's own shell
-    carries it (this suite was first run under one holding source=passport), so
-    an ambient value silently DISABLES the fence inside tests that never mention
-    it — two fence tests passed while asserting the opposite of what they meant.
-
-    Stripped globally rather than per-fixture: the leak defeats a security-shaped
-    check, and the next test written would have to remember on its own. Tests that
-    need a value set it themselves; monkeypatch.setenv in the body wins over this.
-    """
+    """Clear AIPASS_CALLER_IDENTITY_SOURCE for EVERY test."""
+    # A credential: an ambient value from a dispatched agent's shell silently disables the identity fence.
     monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
 
-    # AIPASS_DISPATCH_ID is the same shape of trap, stripped BEFORE it can cost
-    # anything (FPLAN-0452). This suite runs inside dispatched agents, and once
-    # wake.py stamps the spawn env every future run carries a live id ambiently.
-    # A test asserting "mail sent outside a dispatch carries no stamp" would then
-    # fail — or worse, one asserting the stamp would pass on the AMBIENT id
-    # rather than the one it set. Same lesson as the credential above, applied
-    # before the leak exists rather than after it burns a session.
+    # Same trap: an ambient dispatch id would let a stamp test pass on the wrong id.
     monkeypatch.delenv("AIPASS_DISPATCH_ID", raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_wake_depth(monkeypatch):
-    """Start EVERY test with AIPASS_WAKE_DEPTH absent, and undo whatever it becomes.
-
-    wake_sender() bumps the var with a raw os.environ write, which monkeypatch
-    never sees. The old per-test delenv(raising=False) recorded no undo when the
-    var was absent, so each wake-back test left depth=1 behind for the next test
-    on the worker (measured: 15 TestWakeSender tests, before None, after "1").
-
-    setenv first so the ORIGINAL state (absent, or an ambient depth from a woken
-    session) is what the undo restores; delenv then gives the test its clean start.
-    """
+    """Start EVERY test with AIPASS_WAKE_DEPTH absent, and undo whatever it becomes."""
+    # wake_sender() writes os.environ directly; setenv first records the undo, delenv gives the clean start.
     monkeypatch.setenv("AIPASS_WAKE_DEPTH", "0")
     monkeypatch.delenv("AIPASS_WAKE_DEPTH")
 
 
 @pytest.fixture(autouse=True)
 def _isolate_dispatch_register(tmp_path, monkeypatch):
-    """Point the register and the reports directory at tmp_path for EVERY test.
-
-    wake_branch() now registers every dispatch before it spawns, and the wake
-    tests exercise wake_branch with the spawn mocked — so the FIRST run of this
-    suite wrote 31 phantom "outstanding" entries into the live register. Every
-    one of them would have read as OVERDUE two hours later: a fleet of crashed
-    dispatches that never existed, in the one file whose whole job is to make
-    real crashes visible.
-
-    Both paths are re-rooted by patching the root they are DERIVED from, not the
-    functions themselves — so a test that passes repo_root= explicitly still gets
-    its own answer, and the raise-on-unrootable path stays reachable.
-
-    Third of its kind after FEED_PATH (S141) and CONTACTS_FILE (S146). A shared
-    file a handler writes to is production state, and the pattern is now: guard
-    it in conftest the day the writer lands, not the day someone notices.
-    """
-    # In its OWN subdirectory, never tmp_path itself: the marker file this needs
-    # is exactly what the find_caller_registry tests build tmp_path to control,
-    # and dropping a second AIPASS_REGISTRY.json beside theirs broke 15 of them.
+    """Point the register and the reports directory at tmp_path for EVERY test."""
+    # Patches the root, not the functions, so an explicit repo_root= still wins.
+    # Never tmp_path itself: find_caller_registry tests control tmp_path's own registry marker.
     root = tmp_path / ".dispatch_register_root"
     root.mkdir(exist_ok=True)
     (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -409,13 +284,6 @@ def _isolate_dispatch_register(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_contacts_file(tmp_path, monkeypatch):
-    """Point CONTACTS_FILE at tmp_path for EVERY test.
-
-    deliver_email_to_branch() auto-registers every recipient (and cross-project
-    sender) in the address book as a side effect. Without this guard a test run
-    upserts real rows into the live .ai_mail.local/contacts.json — 6 tmp/pytest
-    and scratchpad-probe rows leaked in this way and were then trusted as
-    "verified" identity by branch_detection's contact lookup, serving a fixture
-    mailbox in place of a real one (found live, 2026-08-16, @devpulse).
-    """
+    """Point CONTACTS_FILE at tmp_path for EVERY test."""
+    # Delivery auto-registers contacts; leaked rows get trusted as verified identity.
     monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", tmp_path / "contacts" / "contacts.json")

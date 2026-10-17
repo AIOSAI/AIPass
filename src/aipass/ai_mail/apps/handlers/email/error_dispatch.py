@@ -3,14 +3,11 @@
 # Description: Email Error Dispatch Handler
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Error Dispatch Handler
-
-Handles auto-dispatch of error reports when email delivery fails.
-Independent handler - no module or display dependencies.
 """
 
 import os
@@ -22,17 +19,7 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 
 
 def build_error_report(to_branch: str, subject: str, error_msg: str) -> Dict[str, Any]:
-    """
-    Build an error report email data dict for dispatch to @drone.
-
-    Args:
-        to_branch: Intended recipient that failed
-        subject: Original email subject
-        error_msg: Error message from delivery failure
-
-    Returns:
-        Email data dict ready for delivery, or empty dict on failure.
-    """
+    """Build an error report email data dict for dispatch to @drone."""
     sender = os.environ.get("AIPASS_CALLER_BRANCH", "ai_mail")
     sender = f"@{sender.lstrip('@')}"
 
@@ -54,11 +41,7 @@ def build_error_report(to_branch: str, subject: str, error_msg: str) -> Dict[str
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "auto_execute": False,
         "priority": "normal",
-        # reply.py routes a reply to `reply_to or from`, so this field decides where
-        # an answer to this report lands. It named @devpulse while the message read
-        # From: ai_mail, so @drone's reply went to the dispatcher instead of to the
-        # mailbox that raised the error. A reply addressed to a system mailbox has to
-        # reach that system mailbox; the failing sender stays evidence in the body.
+        # reply.py routes to `reply_to or from`: an answer must reach the mailbox that raised it.
         "reply_to": "@ai_mail",
     }
 
@@ -69,18 +52,7 @@ def dispatch_send_error(
     error_msg: str,
     deliver_fn: Callable,
 ) -> bool:
-    """
-    Auto-dispatch error report to @drone when email delivery fails.
-
-    Args:
-        to_branch: Intended recipient that failed
-        subject: Original email subject
-        error_msg: Error message from delivery failure
-        deliver_fn: Callable to deliver email (deliver_email_to_branch)
-
-    Returns:
-        True if error dispatched successfully, False otherwise.
-    """
+    """Auto-dispatch error report to @drone when email delivery fails."""
     json_handler.log_operation("dispatch_send_error", {"to_branch": to_branch, "subject": subject})
 
     try:
@@ -94,14 +66,9 @@ def dispatch_send_error(
 
 
 def on_email_delivered(update_central_fn: Optional[Callable] = None) -> None:
-    """
-    Post-delivery callback: update central.
+    """Post-delivery callback: update central.
 
-    update_central_fn takes no arguments — it rescans all branch inboxes
-    itself, so per-delivery counts aren't part of its contract.
-
-    Args:
-        update_central_fn: Callable for update_central
+    update_central_fn takes no arguments; it rescans every branch inbox itself.
     """
     if update_central_fn:
         try:

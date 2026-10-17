@@ -3,16 +3,11 @@
 # Description: Inbox Cleanup Handler
 # Version: 3.3.2
 # Created: 2025-11-27
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Inbox Cleanup Handler
-
-Handles marking emails as read and moving to deleted/ folder.
-Updates dashboard after cleanup.
-
-v3.0.0: Now uses deleted/ directory with individual JSON files (like sent/).
 """
 
 import json
@@ -33,7 +28,6 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 
-# Lazy import for inbox file lock
 _inbox_lock = None
 
 
@@ -55,27 +49,16 @@ def _get_update_central() -> Any:
 
 
 def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
-    """
-    Save a message to the deleted/ folder as individual JSON file.
-
-    Args:
-        mailbox_path: Path to .ai_mail.local directory
-        message: Email message dict to archive
-
-    Returns:
-        Path to created file
-    """
+    """Save a message to the deleted/ folder as individual JSON file."""
     deleted_folder = mailbox_path / "deleted"
     deleted_folder.mkdir(parents=True, exist_ok=True)
 
-    # Generate filename (same pattern as sent/)
     timestamp = datetime.now()
     subject = message.get("subject", "No Subject")
     safe_subject = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in subject)
     safe_subject = safe_subject[:50].strip()
     filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{safe_subject}.json"
 
-    # Add archived_at timestamp
     message["archived_at"] = timestamp.isoformat()
 
     email_file = deleted_folder / filename
@@ -86,15 +69,7 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
 
 
 def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
-    """
-    Migrate existing deleted.json to deleted/ directory on first access.
-
-    Args:
-        mailbox_path: Path to .ai_mail.local directory
-
-    Returns:
-        Number of messages migrated
-    """
+    """Migrate existing deleted.json to deleted/ directory on first access."""
     deleted_json = mailbox_path / "deleted.json"
 
     if not deleted_json.exists():
@@ -106,15 +81,12 @@ def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
 
         messages = data.get("messages", [])
         if not messages:
-            # Empty file, just archive it
             _archive_deleted_json(mailbox_path, deleted_json)
             return 0
 
-        # Migrate each message to deleted/ folder
         for msg in messages:
             _save_to_deleted_folder(mailbox_path, msg)
 
-        # Archive the old deleted.json
         _archive_deleted_json(mailbox_path, deleted_json)
 
         return len(messages)
@@ -135,27 +107,17 @@ def _archive_deleted_json(mailbox_path: Path, deleted_json: Path) -> None:
 
 
 def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
-    """
-    Mark all emails as read and move them to deleted/ folder.
-
-    Args:
-        branch_path: Path to branch directory
-
-    Returns:
-        Tuple of (success: bool, message: str, count: int)
-    """
+    """Mark all emails as read and move them to deleted/ folder."""
     mailbox_path = branch_path / ".ai_mail.local"
     inbox_file = mailbox_path / "inbox.json"
 
     if not inbox_file.exists():
         return False, f"Inbox not found: {inbox_file}", 0
 
-    # Run migration if deleted.json exists
     _migrate_deleted_json_if_exists(mailbox_path)
 
     try:
         with _get_inbox_lock()(inbox_file):
-            # Load inbox
             with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
@@ -165,24 +127,19 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
             if count == 0:
                 return True, "Inbox already empty", 0
 
-            # Mark all as read and save to deleted/ folder
             for msg in messages:
                 msg["read"] = True
                 _save_to_deleted_folder(mailbox_path, msg)
 
-            # Clear inbox
             inbox_data["messages"] = []
             inbox_data["total_messages"] = 0
             inbox_data["unread_count"] = 0
 
-            # Save inbox
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
-        # Update central stats (outside lock - not inbox.json)
         _update_central_stats()
 
-        # Trigger auto-purge of deleted folder
         _trigger_deleted_purge(branch_path)
 
         return True, f"Archived {count} messages", count
@@ -205,11 +162,7 @@ def _update_central_stats() -> None:
 
 
 def _trigger_deleted_purge(branch_path: Path) -> None:
-    """
-    Trigger auto-purge of deleted folder if threshold exceeded.
-
-    Non-blocking - failures silently ignored.
-    """
+    """Trigger auto-purge of deleted folder if threshold exceeded."""
     try:
         from aipass.ai_mail.apps.handlers.email.purge import purge_deleted_folder
 
@@ -222,21 +175,8 @@ def _trigger_deleted_purge(branch_path: Path) -> None:
 def sweep_closed(inbox_data: Dict, mailbox_path: Path) -> int:
     """Archive and remove closed messages still sitting in the inbox.
 
-    The cross-module sweep: delivery.py (both delivery writers) and
-    inbox_ops.load_inbox call it as well as this module, so it is public
-    since 2026-10-02 (ai_mail, leg 8); it was _sweep_closed before.
-
-    Safety net for messages set to status=closed by direct JSON edit
-    rather than through mark_as_closed_and_archive().  Modifies
-    inbox_data["messages"] in place (replaces the list).  Does NOT
-    update count fields -- callers recalculate after calling this.
-
-    Args:
-        inbox_data: Inbox data dict (modified in place).
-        mailbox_path: Path to .ai_mail.local directory.
-
-    Returns:
-        Number of messages swept.
+    Public: delivery.py and inbox_ops.load_inbox call it. Replaces inbox_data["messages"]
+    in place and does NOT update count fields; callers recalculate.
     """
     messages = inbox_data.get("messages", [])
     closed = [m for m in messages if m.get("status") == "closed"]
@@ -253,24 +193,8 @@ def sweep_closed(inbox_data: Dict, mailbox_path: Path) -> int:
     return len(closed)
 
 
-# =============================================================================
-# V2 SCHEMA FUNCTIONS (status: new/opened/closed)
-# =============================================================================
-
-
 def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optional[Dict]]:
-    """
-    Mark an email as opened (viewed). Does NOT archive.
-
-    v2 schema: changes status from "new" to "opened"
-
-    Args:
-        branch_path: Path to branch directory
-        message_id: ID of message to mark as opened
-
-    Returns:
-        Tuple of (success: bool, message: str, email_data: dict or None)
-    """
+    """Mark an email as opened (viewed). Does NOT archive."""
     json_handler.log_operation("mark_as_opened", {"branch_path": str(branch_path), "message_id": message_id})
     inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
 
@@ -290,14 +214,11 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             if target_msg is None:
                 return False, f"Message not found: {message_id}", None
 
-            # Update status to opened (v2 schema)
             target_msg["status"] = "opened"
-            # Keep backward compat
             target_msg["read"] = True
 
             sweep_closed(inbox_data, inbox_file.parent)
 
-            # Recalculate counts (sweep may have removed messages)
             inbox_data["total_messages"] = len(inbox_data["messages"])
             new_count = sum(
                 1
@@ -309,7 +230,6 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
-        # Update central stats (outside lock - not inbox.json)
         _update_central_stats()
 
         return True, f"Message {message_id} marked as opened", target_msg
@@ -320,18 +240,9 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
 
 
 def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops: bool = False) -> Tuple[bool, str]:
-    """
-    Mark an email as closed and archive to deleted/ folder.
+    """Mark an email as closed and archive to deleted/ folder.
 
-    v2 schema: changes status to "closed", moves to deleted/
-
-    Args:
-        branch_path: Path to branch directory
-        message_id: ID of message to close and archive
-        skip_post_ops: If True, skip dashboard update and purge (caller handles them)
-
-    Returns:
-        Tuple of (success: bool, message: str)
+    skip_post_ops: the caller runs the central update and purge (batch close).
     """
     mailbox_path = branch_path / ".ai_mail.local"
     inbox_file = mailbox_path / "inbox.json"
@@ -339,7 +250,6 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
     if not inbox_file.exists():
         return False, f"Inbox not found: {inbox_file}"
 
-    # Run migration if deleted.json exists
     _migrate_deleted_json_if_exists(mailbox_path)
 
     try:
@@ -356,19 +266,15 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             if message_to_archive is None:
                 return False, f"Message not found: {message_id}"
 
-            # Mark as closed (v2 schema)
             message_to_archive["status"] = "closed"
             message_to_archive["read"] = True  # backward compat
 
-            # Remove from inbox
             messages.pop(message_index)
             inbox_data["messages"] = messages
 
             sweep_closed(inbox_data, mailbox_path)
 
-            # Update inbox counts
             inbox_data["total_messages"] = len(inbox_data["messages"])
-            # v2 status counts
             new_count = sum(
                 1
                 for m in inbox_data["messages"]
@@ -379,14 +285,11 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
-            # Save to deleted/ folder (inside lock to ensure consistency)
             _save_to_deleted_folder(mailbox_path, message_to_archive)
 
         if not skip_post_ops:
-            # Update central stats (outside lock - not inbox.json)
             _update_central_stats()
 
-            # Trigger auto-purge of deleted folder
             _trigger_deleted_purge(branch_path)
 
         return True, f"Message {message_id} closed and archived"

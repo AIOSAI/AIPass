@@ -3,14 +3,11 @@
 # Description: Inbox Resolution Handler
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Inbox Resolution Handler
-
-Resolves inbox paths and branch info for inbox viewing.
-Independent handler - no module or display dependencies.
 """
 
 from pathlib import Path
@@ -25,23 +22,7 @@ def resolve_inbox_target(
     get_branch_by_email_fn: Callable,
     get_current_user_fn: Callable,
 ) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Resolve which inbox to display based on args.
-
-    Args:
-        args_first: First argument (e.g., '@branch') or None
-        repo_root: Repository root path
-        get_branch_by_email_fn: Callable to look up branch by email
-        get_current_user_fn: Callable to detect current user
-
-    Returns:
-        Tuple of (success, result_dict).
-        result_dict contains:
-            inbox_file: Path to inbox.json
-            display_name: str for display
-            target_branch: str | None (the explicit target, or None for current)
-            error: str | None (set when success is False)
-    """
+    """Resolve which inbox to display based on args."""
     json_handler.log_operation("resolve_inbox_target", {"target": args_first})
     target_branch = None
     if args_first and args_first.startswith("@"):

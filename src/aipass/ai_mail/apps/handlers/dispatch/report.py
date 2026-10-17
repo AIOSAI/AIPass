@@ -3,30 +3,12 @@
 # Description: Dispatch Completion Report
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """The completion report — what the finishing agent says about its own run.
 
-v1.0.0 — FPLAN-0452 P1
-
-The owner's rules 3 and 4 (DPLAN-0317): the COMPLETING AGENT pushes the news
-outward, and what it pushes is a REPORT, not a ping — which agent, when
-dispatched, how long it took, whether it wrote its memories, what mail it sent
-and to whom.
-
-THE REPORT IS DURABLE; DELIVERY IS OPPORTUNISTIC (rule 6). This is the
-load-bearing idea and it is why the report is a FILE THAT WAITS rather than a
-message that must be caught. A manager whose session is grey misses nothing:
-the report sits until someone reads it. Nothing here needs a retry, a queue, or
-a crash-recovery path, because nothing here can be missed by being late.
-
-Written BEFORE the dispatch lock is released. Under the old design the report
-was a garnish and losing it was a nuisance; now the report IS the event, so
-losing it means the dispatch never happened as far as the system is concerned
-while the lock says it finished cleanly. Ordering the write first turns that
-silent hole into a HELD LOCK — visible, and recoverable by the stale-lock path
-that already exists.
+Reference: docs/dispatch_register_and_feed.md
 """
 
 from __future__ import annotations
@@ -44,32 +26,19 @@ from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 REPORTS_DIRNAME = "dispatch_reports"
 
-# The environment variable carrying a running agent's own dispatch id. Set on
-# the spawn env by wake.py, inherited by the agent, and read at send time so
-# every mail the agent writes is STAMPED with the dispatch it belongs to.
+# Set on the spawn env by wake.py and read at send time to stamp the agent's mail.
 DISPATCH_ID_ENV = "AIPASS_DISPATCH_ID"
 
-# Ceiling for the reports directory, mirroring the feed's trim policy: reports
-# are durable, not eternal. Oldest are pruned on write.
 REPORTS_MAX_FILES = 400
 REPORTS_KEEP_FILES = 200
 
-# How much of the agent's own result text to carry. Enough to read what it
-# said, short enough that a report stays a report and not a transcript.
 RESULT_EXCERPT_CHARS = 600
 
 
 def reports_dir(repo_root: Optional[Path] = None) -> Path:
     """Where completion reports wait to be read.
 
-    Same discipline as ``register.register_file``, including the fix: the
-    transplant uses the root ``find_repo_root()`` just returned rather than
-    re-deriving it by hunting for a marker file. On a fresh checkout no marker
-    exists anywhere, and the old walk raised for every caller who passed a
-    ``repo_root``.
-
-    A caller who asks for ``repo_root`` can never be handed the live directory:
-    the return is always rooted at what they passed.
+    A caller who passes ``repo_root`` is never handed the live directory.
     """
     root = find_repo_root()
     resolved = root / ".aipass" / REPORTS_DIRNAME
@@ -82,24 +51,7 @@ def reports_dir(repo_root: Optional[Path] = None) -> Path:
 def memories_edited(branch_path: Path, since: float) -> bool:
     """Whether any ``.trinity`` memory file was WRITTEN after *since*.
 
-    THIS DETECTS A WRITE, NOT A GOOD ONE. An agent that rewrites local.json
-    with byte-identical content still trips it, and one that writes its memory
-    through a path this does not know about does not. It answers "did this run
-    touch its memories at all", which is the honest limit of a timestamp
-    comparison — do not let it grow into "did it update them well", because
-    nothing here can see that.
-
-    Args:
-        branch_path: The dispatched branch's directory
-        since: Unix timestamp the run started (``time.time()`` at spawn)
-
-    Returns:
-        True if at least one .trinity/*.json is newer than *since*
-
-    Raises:
-        OSError: the memory directory could not be listed. False would read as
-            "this run never touched its memories"; build_report records the
-            unknown as None instead (ai_mail, leg 10).
+    Detects a write, not a good one. Raises OSError if unlistable: False would mean "untouched".
     """
     trinity = Path(branch_path) / ".trinity"
     candidates = list(trinity.glob("*.json"))
@@ -117,23 +69,7 @@ def memories_edited(branch_path: Path, since: float) -> bool:
 def emails_sent(branch_path: Path, dispatch_id: Optional[str]) -> List[Dict[str, str]]:
     """Every mail this dispatch sent, read from the sender's own sent records.
 
-    A RECORD, NOT AN INFERENCE. Each sent file carries the ``dispatch_id`` that
-    was live when it was written, so attribution is by AUTHORSHIP. The earlier
-    proposal — scanning ``sent/`` by mtime against the run window — attributes
-    by TIME, which credits the agent with anything else that wrote the mailbox
-    during its run. The owner's ruling, on @ai_mail's reasoning: two sources
-    answering one question is the shape that cost $1.41 on 2026-08-20.
-
-    Returns an empty list when *dispatch_id* is None — an unregistered run
-    cannot attribute its mail, and guessing is exactly what this avoids.
-
-    Returns:
-        [{"to": "@devpulse", "kind": "reply"}, ...], oldest first
-
-    Raises:
-        OSError: the sent folder could not be listed. An empty list would read
-            as "sent nothing"; build_report records the unknown as None instead
-            (ai_mail, leg 10).
+    Attribution is by the stamped dispatch_id, never by mtime. Raises OSError if unlistable.
     """
     if not dispatch_id:
         return []
@@ -180,20 +116,7 @@ def build_report(
 ) -> Dict:
     """Assemble the completion report from what is already known at the terminal moment.
 
-    Everything here is free or nearly so: the run's own local variables, one
-    read of the result JSON the monitor already parses, three or four stats on
-    ``.trinity``, and a scan of the sent records this dispatch stamped.
-
-    ``bg_orphaned`` and ``max_turns_hit`` ship BESIDE ``emails_sent``, always,
-    and this is not decoration. When ``bg_orphaned`` is true the agent exited 0
-    while its background tasks were killed at the headless ceiling — its reply
-    may never have been sent — so the report will honestly say ZERO EMAILS SENT
-    for an agent that believed it had replied. Without those two flags beside
-    it, a reader concludes the agent ignored its mail. Never a bare exit 0.
-
-    A listing that fails is recorded as None ("could not tell"), never as False
-    or an empty list: those are answers about the run, and a raise from here
-    would lose the whole report at the monitor's terminal catch (ai_mail, leg 10).
+    bg_orphaned/max_turns_hit always ship beside emails_sent: they explain a zero. A failed listing is None.
     """
     parsed = result_json or {}
 
@@ -245,10 +168,7 @@ def _output_tokens(parsed: Dict) -> Optional[int]:
 def write_report(report: Dict, repo_root: Optional[Path] = None) -> Optional[str]:
     """Write the report where it can wait, and prune the directory's tail.
 
-    Returns:
-        The report's path as a string, or None if it could not be written.
-        The caller must treat None as a LOST DISPATCH RECORD and say so at
-        warning level — this is the one file the whole design rests on.
+    None means a LOST DISPATCH RECORD: the caller must say so at warning level.
     """
     dispatch_id = report.get("dispatch_id") or "unregistered"
     json_handler.log_operation("write_dispatch_report", {"dispatch_id": dispatch_id})
@@ -268,15 +188,7 @@ def write_report(report: Dict, repo_root: Optional[Path] = None) -> Optional[str
 
 
 def _prune_reports(directory: Path) -> int:
-    """Drop the oldest reports once the directory passes its ceiling.
-
-    Reports are durable, not eternal — the same reasoning as the feed's trim.
-    A report old enough to be pruned has either been read or has outlived
-    anyone who would.
-
-    Returns:
-        How many reports were removed
-    """
+    """Drop the oldest reports once the directory passes its ceiling."""
     try:
         reports = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime)
     except OSError as e:
@@ -303,18 +215,7 @@ def _prune_reports(directory: Path) -> int:
 def fire_completed(dispatch_id: Optional[str], sender: str, target: str, report_path: Optional[str]) -> bool:
     """Push the completion to in-process consumers via @trigger's existing bus.
 
-    trigger.fire() IS IN-PROCESS ONLY. @trigger cannot cross process boundaries
-    (DPLAN-0314), so this reaches consumers living inside THIS monitor process
-    and nothing else. Anyone who expects it to reach @devpulse's watchdog will
-    build something that silently never fires and never errors.
-
-    THE FEED FILE IS WHAT CARRIES THIS EVENT ACROSS THE PROCESS BOUNDARY. The
-    monitor's feed line — carrying dispatch_id, sender and report_path — is the
-    delivery mechanism for anything outside this process. This call is the
-    in-process half, and the two are not interchangeable.
-
-    Returns:
-        True if the event was fired
+    In-process only: the feed line is what carries the event to other processes.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -333,12 +234,7 @@ def fire_completed(dispatch_id: Optional[str], sender: str, target: str, report_
 
 
 def current_dispatch_id() -> Optional[str]:
-    """This process's own dispatch id, or None when not running under one.
-
-    None is a DEFINED EMPTY STATE, not a failure: an interactive agent, a test,
-    or a human at a terminal genuinely has no dispatch id, and mail they send
-    is correctly stamped with nothing.
-    """
+    """This process's own dispatch id, or None when not running under one."""
     value = os.environ.get(DISPATCH_ID_ENV, "").strip()
     return value or None
 
@@ -346,13 +242,7 @@ def current_dispatch_id() -> Optional[str]:
 def stamp_dispatch_id(email_data: Dict) -> Dict:
     """Stamp a sent record with the dispatch that authored it, if there is one.
 
-    The one place this stamping happens. Sends and replies write their sent
-    records through two different functions, and two hand-rolled copies of this
-    is how one of them silently stops carrying the id — leaving a completion
-    report that under-counts an agent's mail with nothing to show it did.
-
-    An unstamped record is CORRECT for mail sent outside a dispatch. It simply
-    belongs to no dispatch, and ``emails_sent`` will not claim it for one.
+    The one stamping site for both sends and replies; do not hand-roll a copy.
     """
     dispatch_id = current_dispatch_id()
     if dispatch_id:

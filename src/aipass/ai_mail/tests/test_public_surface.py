@@ -3,35 +3,13 @@
 # Description: Tests for ai_mail's package-level public surface (the feed path door)
 # Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
 
-# Asked by @api. @api serves the feed to the BAUD phone over /v1/feed and had no clean way to
-# locate ``notifications.jsonl``. The only route was
-# ``from aipass.ai_mail.apps.handlers.notify import FEED_PATH`` — a reach into
-# this branch's handlers layer that seedgo correctly flags — so they restated the
-# path as their own constant instead. That duplicate goes stale the day the feed
-# moves, and the symptom would be a phone quietly showing no notifications with
-# no error logged anywhere.
-#
-# ``notify.py`` publishes the path as a contract, so a second reader is inside
-# the contract. What was missing was a public surface, the way @drone publishes
-# ``get_registry_path()``. This adds one.
-#
-# Two properties matter here:
-#
-# Laziness
-#     ``notify`` imports prax's logger and the JSON handler, so re-exporting it
-#     eagerly would make ``import aipass.ai_mail`` drag in the logging stack.
-#     The door is a function, and ``FEED_PATH`` resolves through PEP 562
-#     ``__getattr__``.
-#
-# One construction site
-#     ``feed_path()`` is where the path is built; ``FEED_PATH`` is that
-#     function's value at import. Duplicating the expression is the exact rot
-#     @api was trying to avoid, so it must not reappear inside this branch.
+# notify.py imports prax's logger, so the door is a function and FEED_PATH resolves lazily
+# through PEP 562 __getattr__; feed_path() is the one construction site for the path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
@@ -66,12 +44,7 @@ class TestFeedPathDoor:
     def test_the_constant_door_reads_through_instead_of_snapshotting(self, monkeypatch, tmp_path):
         """``ai_mail.FEED_PATH`` must follow a patched ``notify.FEED_PATH``.
 
-        This branch's own conftest redirects the feed to tmp_path for every
-        test, so writes never land in the real ``notifications.jsonl`` BAUD
-        renders. @api needs the same escape hatch. Because ``__getattr__``
-        imports at access time rather than binding at package import, the door
-        sees the patch — a snapshotting export would silently hand their tests
-        the live feed and let a suite write into the owner's bell.
+        A snapshotting export would hand consumers' tests the live feed.
         """
         redirected = tmp_path / "elsewhere" / "notifications.jsonl"
         monkeypatch.setattr(notify, "FEED_PATH", redirected)
@@ -79,12 +52,7 @@ class TestFeedPathDoor:
         assert ai_mail.FEED_PATH == redirected
 
     def test_feed_path_returns_a_path_not_a_string(self):
-        """A Path — and an ABSOLUTE one, which is the half nothing else pins.
-
-        @api resolves this door from their own cwd, so a relative Path would be
-        a different file for every caller. ``isinstance`` alone passed for any
-        Path at all, including one built from a bare filename.
-        """
+        """A Path — and an ABSOLUTE one, which is the half nothing else pins."""
         resolved = ai_mail.feed_path()
 
         assert isinstance(resolved, Path)
@@ -97,12 +65,7 @@ class TestFeedPathDoor:
         assert resolved.parent.name == ".aipass"
 
     def test_feed_path_resolves_fresh_at_call_time(self, monkeypatch, tmp_path):
-        """A function, not a frozen constant.
-
-        ``FEED_PATH`` is computed once at import, so a process whose repo root
-        resolves differently later — or a test that relocates it — reads a
-        stale value. The callable is the honest export.
-        """
+        """A function, not a frozen constant."""
         monkeypatch.setattr(notify, "find_repo_root", lambda: tmp_path)
 
         assert notify.feed_path() == tmp_path / ".aipass" / "notifications.jsonl"
@@ -110,9 +73,7 @@ class TestFeedPathDoor:
     def test_the_constant_is_built_by_the_function(self):
         """One construction site — checked where conftest has not redirected it.
 
-        The autouse feed-isolation fixture patches ``notify.FEED_PATH``, so this
-        equality is unobservable in-process. A clean interpreter sees the real
-        import-time value and catches a re-inlined ``find_repo_root() / ...``.
+        The autouse fixture patches notify.FEED_PATH, so only a clean interpreter sees the import-time value.
         """
         probe = "import aipass.ai_mail.apps.handlers.notify as n; print(int(n.FEED_PATH == n.feed_path()))"
         result = subprocess.run(
@@ -127,15 +88,7 @@ class TestFeedPathDoor:
         assert result.stdout.strip() == "1"
 
     def test_unknown_attribute_still_raises_attribute_error(self):
-        """PEP 562 __getattr__ must not swallow real typos.
-
-        The try/except/return shape read as no oracle to the checker and it was
-        right to: a bare ``return`` on success is invisible, and the only
-        assert-shaped thing in the body was the failure path. pytest.raises says
-        the same thing in the spelling the rule recognises, and additionally
-        pins the message — a bare AttributeError from somewhere inside the
-        import machinery would have satisfied the old shape.
-        """
+        """PEP 562 __getattr__ must not swallow real typos."""
         with pytest.raises(AttributeError, match="no_such_thing"):
             ai_mail.no_such_thing  # type: ignore[attr-defined]
 
@@ -145,12 +98,7 @@ class TestFeedPathDoor:
 
 
 class TestRegisterDoor:
-    """The second door, asked for by @devpulse (FPLAN-0452 P0 addendum).
-
-    Same argument as the feed's: their wire resolves the register through this
-    package rather than assuming it sits beside the feed in ``.aipass/``, so the
-    location is learned from its owner instead of restated by a consumer.
-    """
+    """The second door, asked for by @devpulse."""
 
     def test_register_path_is_importable_from_the_package(self):
         assert callable(register_path)
@@ -165,12 +113,7 @@ class TestRegisterDoor:
         assert path.parent.name == ".aipass"
 
     def test_register_path_returns_a_path_not_a_string(self):
-        """The feed door's own lesson, reused: a Path, and an absolute one.
-
-        @devpulse's wire reads the register through this door from their branch,
-        not from mine. A relative Path resolves against THEIR cwd and finds
-        nothing, and ``isinstance`` could not tell the two apart.
-        """
+        """The feed door's own lesson, reused: a Path, and an absolute one."""
         resolved = ai_mail.register_path()
 
         assert isinstance(resolved, Path)
@@ -193,11 +136,7 @@ class TestOutstandingDoor:
     def test_a_closed_dispatch_is_not_outstanding_through_the_door(self, tmp_path):
         """The append-only trap, pinned at the public surface.
 
-        The register closes a dispatch by APPENDING a second record; the first
-        still reads "outstanding" forever. A consumer that parses the file
-        itself and takes the first record per id sees every dispatch ever made
-        as open — wrong, plausible, and silent. Exporting the reconstruction is
-        what stops a second implementation of that rule existing.
+        A dispatch closes by APPENDING a record; a parser taking the first record per id sees it open forever.
         """
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=tmp_path)
@@ -217,11 +156,7 @@ class TestOutstandingDoor:
     def test_a_tree_with_no_registry_marker_still_re_roots(self, monkeypatch, tmp_path):
         """@devpulse's wire raises at arm time if the register cannot be FOUND.
 
-        That decision is only safe if this door does not raise for the ordinary
-        case of a fresh checkout, where no marker exists anywhere. It used to,
-        which reddened 26 of their tests. What still must never happen is being
-        handed the LIVE register after asking for another tree — and that is now
-        structural: the return is always rooted at what the caller passed.
+        So a fresh checkout with no marker must not raise, and the return stays rooted at the caller's path.
         """
         orphan = tmp_path / "no-marker"
         orphan.mkdir()
@@ -238,10 +173,7 @@ class TestImportStaysLight:
     def test_importing_the_package_does_not_pull_in_the_logging_stack(self):
         """``import aipass.ai_mail`` must not cost a prax import.
 
-        Consumers like @api import this package to reach one path. If the
-        re-export were eager, every one of them would load prax's logger and
-        the JSON handler as a side effect. Run in a clean interpreter — an
-        in-process check would pass on modules the suite already imported.
+        Clean interpreter: an in-process check would pass on modules the suite already imported.
         """
         probe = "import sys; import aipass.ai_mail; print(int(any(m.startswith('aipass.prax') for m in sys.modules)))"
         result = subprocess.run(
@@ -269,12 +201,7 @@ class TestImportStaysLight:
         assert result.stdout.strip() == "1 dispatch_register.jsonl"
 
     def test_touching_the_door_does_load_it(self):
-        """The other half: laziness must not mean broken.
-
-        Same clean interpreter, but call through the door — prax should now be
-        loaded, proving the deferred import actually fires rather than the name
-        resolving to something hollow.
-        """
+        """The other half: laziness must not mean broken."""
         probe = (
             "import sys; import aipass.ai_mail as m; p = m.feed_path(); "
             "print(int(any(k.startswith('aipass.prax') for k in sys.modules)), p.name)"

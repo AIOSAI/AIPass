@@ -3,20 +3,15 @@
 # Description: Email Footer Handler
 # Version: 1.2.0
 # Created: 2026-01-29
-# Modified: 2026-08-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Footer Handler
-
-Generates and appends standard footer to all outgoing emails.
-Reminds branches of process steps: seedgo audit, memory update, FPLAN close, confirmation.
-Independent handler - no module dependencies.
 """
 
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-# Standard footer for all outgoing emails
 STANDARD_FOOTER = """
 ---
 ▶ BUILD/EDIT task? First: drone @trigger medic mute @<your-branch> — auto-expires 24h, no unmute.
@@ -32,25 +27,12 @@ Memories = Presence. No update = No learning.
 
 
 def get_footer() -> str:
-    """
-    Get the standard email footer.
-
-    Returns:
-        Standard footer string for all outgoing emails
-    """
+    """Get the standard email footer."""
     return STANDARD_FOOTER
 
 
 def append_footer(message: str) -> str:
-    """
-    Append standard footer to email message.
-
-    Args:
-        message: Original email message body
-
-    Returns:
-        Message with footer appended
-    """
+    """Append standard footer to email message."""
     json_handler.log_operation("append_footer", {"message_length": len(message)})
     return message + get_footer()
 

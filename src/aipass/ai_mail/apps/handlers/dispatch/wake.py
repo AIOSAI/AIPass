@@ -3,17 +3,13 @@
 # Description: Manual Branch Wake Handler
 # Version: 3.4.0
 # Created: 2026-03-02
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Manual Branch Wake Handler
 
-Spawns a Claude agent at a target branch using the same logic as daemon.py
-but triggered manually via 'drone wake @branch "optional message"'.
-
-v2.0: Now returns step-by-step status and spawns via dispatch_monitor.py
-which handles agent lifecycle (cleanup, bounce emails on failure).
+Reference: docs/wake_pipeline.md
 """
 
 import json
@@ -45,15 +41,8 @@ from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
 def _find_claude_bin() -> str:
     """Locate the claude binary, checking known install locations if not on PATH.
 
-    Background processes (trigger Medic, prax watchdog) may have a restricted
-    PATH without ~/.local/bin. This resolves the absolute path directly.
-    Called by wake_branch at each wake, not once at import: a binary installed
-    or moved after the module loaded is the one spawned (ai_mail, leg 16).
-
-    Raises:
-        FileNotFoundError: no claude on PATH or at a known location; the
-            message names what was searched. It used to answer the bare name,
-            and the headless lane then handed the monitor a binary nobody had.
+    Resolved per wake, not at import, so a binary installed after load is found.
+    Raises FileNotFoundError naming what was searched; never the bare name.
     """
     found = shutil.which("claude")
     if found:
@@ -70,58 +59,31 @@ def _find_claude_bin() -> str:
     raise FileNotFoundError(f"claude not found on PATH or at {searched}")
 
 
-# Infrastructure paths
 _REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
-# UNTRACKED ON PURPOSE (2026-09-08). This file now holds the Fable grant, and
-# a grant is the owner's to edit on his machine — the repo must not ship an answer
-# to "who may run Fable". `.ai_mail.local/` is gitignored (root .gitignore:30);
-# the branch root is not, and that is where this pointed until today. Measured
-# before the move: no file existed at EITHER spelling, so `_load_config` had
-# always returned its own defaults and nothing was carried across.
+# Untracked on purpose: it holds the Fable grant, which the repo must not ship.
 CONFIG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "safety_config.json"
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 PAUSE_FILE = _REPO_ROOT / ".aipass" / "autonomous_pause"
 MONITOR_SCRIPT = Path(__file__).parent / "dispatch_monitor.py"
 
-# Default prompt when no custom message provided
 DEFAULT_PROMPT = "Hi. Check inbox, process new emails, update memories when done."
 
-# Model aliases — passed directly to claude CLI which resolves latest-in-class.
 KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
-# If this default is flipped again, update the README to match (the owner, 2026-08-01).
+# The README names this default; change both together.
 DEFAULT_MODEL = "opus"
 
-# The passport value that means "never woken by an ordinary caller".
-# THIS DECIDES THE GATE, NOT THE MODEL. Who is woken at all versus mailed is a
-# different question from what they spawn on, and until 2026-09-08 this one
-# constant answered both — which is how a class-based rule ended up expressing
-# a policy about one named seat.
+# Decides the wake gate, not the model.
 MANAGER_CLASS = "manager"
 
-# The owner, 2026-09-08: "only devpulse runs on fable (I carry the admin
-# baggage)". SUPERSEDES his 2026-08-30 ruling that managers are Fable
-# (compass #323, superseded by #350). The seat is granted BY NAME because the
-# class could not express it: @vera is manager-class, a project owner, and woke
-# on Fable through the daemon's scheduled lane at 11:31 that morning — the run
-# that produced the ruling. Everyone else, every class, every project, runs
-# DEFAULT_MODEL by default and lighter models on request.
-#
-# The default is the FALLBACK, not the policy: the live grant is read from
-# CONFIG_FILE so the owner can move a seat without a code change.
+# Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
 FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
-#: The key in CONFIG_FILE holding the grant, when one has been written.
 FABLE_GRANT_KEY = "fable_allowed"
 
-# The one marking tmux cannot half-apply. A session either exists under this
-# name or new-session failed, so `tmux ls` never shows a daemon wake wearing a
-# hand-made name — which is how @vera's first external wake got killed as a
-# human's leftover on 2026-08-30. Loud on purpose: it is read by a person who
-# is deciding whether to kill a window, not by a parser.
+# The marking tmux cannot half-apply: a person deciding whether to kill a window reads it.
 DAEMON_SESSION_PREFIX = "AIPASS-DAEMON-WAKE-"
 
-# Branches that cannot be woken manually by cross-branch drone commands.
-# Dispatch-send path (dispatch.py._orchestrate_dispatch_send) bypasses this check.
+# dispatch.py._orchestrate_dispatch_send bypasses this check.
 WAKE_BLOCKLIST: frozenset[str] = frozenset({"@devpulse"})
 
 
@@ -131,13 +93,7 @@ def is_wake_blocked(target: str) -> bool:
 
 
 class ModelDecision(NamedTuple):
-    """What a wake spawns on, and what the caller has to be told about it.
-
-    Two fields because the caller needs both and the answer is one read of the
-    grant. Returning only the model would leave the refusal to be recomputed —
-    or, as the superseded version did, only logged, where the person who typed
-    the command never sees it.
-    """
+    """What a wake spawns on, and what the caller has to be told about it."""
 
     model: str
     #: "" when nothing was refused. Never None: callers test it for truth.
@@ -147,9 +103,7 @@ class ModelDecision(NamedTuple):
 def _is_fable(model: str) -> bool:
     """True for any spelling of Fable — bare alias, full id, any casing.
 
-    Substring rather than equality on purpose: the CLI takes both `fable` and
-    `claude-fable-5`, so a policy that only knew the alias would let the full
-    id walk straight past the non-manager half of the rule.
+    Substring on purpose: the CLI also takes full ids like `claude-fable-5`.
     """
     return "fable" in model.lower()
 
@@ -157,32 +111,20 @@ def _is_fable(model: str) -> bool:
 def _normalise_address(target: str) -> str:
     """One leading @, lowercase — the spelling the grant is keyed on.
 
-    Same normalisation `is_wake_blocked` already applies, for the same reason:
-    a policy keyed on an address must not be escapable by typing it differently.
+    A policy keyed on an address must not be escapable by typing it differently.
     """
     return f"@{target.lstrip('@').lower()}"
 
 
 def fable_allowed() -> frozenset:
-    """Which addresses may run Fable, per the owner's ruling of 2026-09-08.
+    """Which addresses may run Fable.
 
-    Read from CONFIG_FILE rather than hardcoded so the owner can move the grant
-    without a code change and without the repo shipping his answer.
-
-    A MISSING OR MALFORMED CONFIG FALLS BACK TO THE DEFAULT, NOT TO EMPTY. An
-    empty grant would demote @devpulse, which is a policy change; producing one
-    from a typo in an untracked file would mean the wake lane quietly enforcing
-    a ruling nobody made, and the only symptom would be devpulse spawning on
-    opus. Failing toward the written ruling is the recoverable direction.
-
-    An EXPLICIT empty list is honoured, because that is a decision rather than
-    an accident — it is the spelling for revoking the grant from everyone, and
-    it is distinguishable from the key being absent.
+    Missing, malformed or unreadable config falls back to the default, never to empty;
+    an EXPLICIT empty list is honoured (it revokes the grant from everyone).
     """
     try:
         config = _read_json(CONFIG_FILE)
     except JsonUnreadable as e:
-        # Unreadable falls to the written ruling, as above (ai_mail, leg 13).
         logger.warning("[wake] %s — the Fable grant falls back to the default", e)
         return FABLE_GRANT_DEFAULT
     if not isinstance(config, dict) or FABLE_GRANT_KEY not in config:
@@ -201,30 +143,10 @@ def fable_allowed() -> frozenset:
 
 
 def resolve_wake_model(target_email: str, requested: Optional[str]) -> ModelDecision:
-    """The model this wake spawns on, per the owner's ruling of 2026-09-08.
+    """The model this wake spawns on.
 
-    SUPERSEDES the 2026-08-30 rule that citizen_class manager means Fable. The
-    class decides nothing here any more: Fable is granted to named seats, and
-    today the grant holds @devpulse alone. A class-based rule could not express
-    "this one manager and no other" — @vera is manager-class and woke on Fable
-    through the scheduled lane on 2026-09-08, which is the run that produced
-    the ruling — so the input changed from the passport's class to the address.
-
-    A REFUSED REQUEST NEVER STALLS THE WAKE. The caller asked for a model, not
-    for a veto: the work proceeds on DEFAULT_MODEL. The refusal is RETURNED as
-    well as logged, because the superseded version only logged it and a log
-    line is not read by the person who typed the command.
-
-    Nothing requested still means DEFAULT_MODEL, for granted seats too. The
-    grant is permission to ask for Fable, not a standing assignment to it.
-
-    Args:
-        target_email: the branch being woken, in any spelling of the address
-        requested: the caller's model (schedule.json wake.model, --model, None)
-
-    Returns:
-        ModelDecision(model, refusal). `refusal` is "" unless Fable was asked
-        for on behalf of a seat that does not hold the grant.
+    A refused Fable request never stalls the wake: it runs on DEFAULT_MODEL and the refusal is
+    returned. Nothing requested means DEFAULT_MODEL, granted seats too.
     """
     if not requested:
         return ModelDecision(DEFAULT_MODEL, "")
@@ -243,9 +165,6 @@ def resolve_wake_model(target_email: str, requested: Optional[str]) -> ModelDeci
     )
     logger.warning("[wake] %s", refusal)
     return ModelDecision(DEFAULT_MODEL, refusal)
-
-
-# ─── Status Step Tracking ───────────────────────────────
 
 
 class DispatchStatus:
@@ -284,9 +203,7 @@ class DispatchStatus:
     def find_step(self, label: str) -> Optional[Tuple[str, str, str]]:
         """Return the last (status, label, detail) recorded under `label`, or None.
 
-        Lets callers read a specific gate's own verdict instead of pattern-matching
-        the prose in `summary`. Needed because the overall success bool cannot express
-        "delivered, but deliberately not woken" — see the manager gate in wake_branch.
+        The success bool cannot say "delivered, deliberately not woken"; read the gate's step.
         """
         for step in reversed(self.steps):
             if step[1] == label:
@@ -302,19 +219,14 @@ class DispatchStatus:
         return "no status"
 
 
-# ─── Helpers ────────────────────────────────────────────
-
-
 class JsonUnreadable(Exception):
-    """A JSON file that exists and cannot be read or parsed (ai_mail, leg 13)."""
+    """A JSON file that exists and cannot be read or parsed."""
 
 
 def _read_json(filepath: Path) -> Optional[dict]:
     """Read and parse a JSON file; None when it does not exist.
 
-    Raises:
-        JsonUnreadable: The file exists and cannot be read or parsed. Each
-            caller gives its own answer for that (ai_mail, leg 13).
+    Raises JsonUnreadable when it exists and cannot be read; each caller gives its own answer.
     """
     if not filepath.exists():
         return None
@@ -338,15 +250,9 @@ def _load_config() -> dict:
 
 
 def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
-    """Spawn monitor in its own systemd unit to survive cgroup cleanup (td-48).
+    """Spawn monitor in its own systemd unit to survive cgroup cleanup.
 
-    When wake_branch() runs inside a systemd oneshot service (e.g.
-    daemon-tick.timer), the default KillMode=control-group sends SIGTERM to
-    every process in the cgroup once the main process exits — killing the
-    detached monitor and its claude child.  systemd-run --user creates a
-    transient service unit with its own cgroup so the monitor survives.
-
-    Returns True on success, False to fall back to direct Popen.
+    KillMode=control-group would SIGTERM the detached monitor when a oneshot service exits.
     """
     unit_name = f"dispatch-{branch_email.lstrip('@')}"
     env_file = branch_path / "logs" / ".dispatch_env"
@@ -409,37 +315,18 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
     return True
 
 
-# ─── Branch Resolution ──────────────────────────────────
-
-
 def is_manager(branch_email: str) -> bool:
     """True when `branch_email` is citizen_class=manager, i.e. never woken.
 
-    Exists so a caller can PROMISE the right thing. Dispatch used to tell every
-    sender "you will be woken when X completes"; for a manager that was false, and
-    the manager then heard nothing at all (@devpulse P0, 2026-08-21). Managers are
-    mailed instead — the promise has to say so.
-
-    Agrees with wake_branch's manager gate on every passport: a missing passport
-    declares no class (False, the ordinary path); a passport that exists but
-    cannot be read fails closed (True), because the gate then skips the wake and
-    the caller mails, so "you will be MAILED" is the promise that holds
-    (ai_mail, leg 11; before it, an unreadable passport answered False).
-
-    Args:
-        branch_email: Address of the branch to classify (e.g. "@devpulse").
-
-    Returns:
-        bool: True when a readable passport says citizen_class == "manager", or
-        when the passport exists and cannot be read.
+    Lets dispatch promise "you will be MAILED". An unreadable passport fails closed (True),
+    matching wake_branch's manager gate; a missing one is False.
     """
     from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
     try:
         resolved = resolve_branch(branch_email)
     except RegistryUnreadable as exc:
-        # Which seat this is cannot be known, so its class cannot either: fail
-        # closed, as for an unreadable passport (ai_mail, leg 12).
+        # Fail closed, as for an unreadable passport.
         logger.warning("[wake] %s unresolvable — treated as a manager: %s", branch_email, exc)
         return True
     if not resolved:
@@ -460,19 +347,8 @@ def is_manager(branch_email: str) -> bool:
 def _external_citizens(repo_root: Path) -> List[dict]:
     """Every declared-root citizen, straight from @memory's public gateway.
 
-    A named seam rather than an inline import, for two reasons. It is the ONE
-    place the external tier enters my tree, so a change to @memory's contract
-    surfaces here as an AttributeError instead of as a wrong answer three steps
-    downstream; and a test can make the tier fail on demand without reaching
-    into another branch's module namespace.
-
-    Imported lazily and by MODULE, per @memory's own instruction: the branch
-    stays importable on an installation where @memory is absent, and refusals
-    logged inside the gateway stay attributable to @memory.
-
-    Never a second implementation. Reading AIPASS_ROOTS.json here would be the
-    exact failure the gateway was built to end — two readers of one anchor,
-    agreeing until the day they do not.
+    The one entry for the external tier; lazy, by module, so the branch imports without @memory.
+    Never read AIPASS_ROOTS.json here: two readers of one anchor drift.
     """
     from aipass.memory.apps.modules import fleet
 
@@ -482,42 +358,13 @@ def _external_citizens(repo_root: Path) -> List[dict]:
 def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
 
-    Four sources, in strict precedence: the AIPass registry, the caller's
-    project registry via AIPASS_CALLER_CWD, the verified-admin projects/* sweep,
-    and finally the declared-roots external tier.
-
-    LOCAL ALWAYS WINS is the fleet ruling, and it is why the external step is
-    LAST rather than merely late. Steps 1-3 all resolve inside AIPass home;
-    step 4 leaves it. Putting the admin sweep after the external tier would let
-    a sibling repo's @baud shadow the one living in our own projects/ — so the
-    sweep keeps its position, unchanged and still admin-only. The external step
-    carries no admin gate at all: @daemon fires unverified, and the anchor is a
-    machine-managed file the owner blessed, so declaration IS the credential.
-
-    Externals are discoverable through @memory's fleet gateway long before they
-    are wakeable through here — that gap is what failed @vera's first supervised
-    fire on 2026-08-30 with "Branch not found: @vera" while the same citizen sat
-    in @daemon's queue. Discovery and firing must read the same definition.
-
-    Args:
-        branch_email: Target address, with or without the leading @.
-        admin: Only a VERIFIED admin caller (5 legs, checked by the caller —
-            never claimed here) may see step 3, the projects/* sweep. Left
-            False, this function behaves exactly as it did before phase 5:
-            no widening for anyone unverified.
-
-    Raises:
-        RegistryUnreadable: the AIPass registry, the caller's project registry
-            or (admin) a hosted one exists and cannot be read. Its two callers,
-            wake_branch and is_manager, catch it at their own door (ai_mail,
-            leg 12).
+    Precedence: AIPass registry, caller's project registry, admin-only projects/* sweep, external tier.
+    Local always wins, so the external tier is LAST. Raises RegistryUnreadable rather than serve a namesake.
     """
     email = f"@{branch_email.lstrip('@').lower()}"
     from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
-    # Step 1: AIPass registry (local branches). One that exists and cannot be
-    # read refuses: read as absent, steps 2-4 could serve another project's
-    # namesake, and the daemon wakes with no caller cwd (ai_mail, leg 12).
+    # An unreadable registry refuses: read as absent, steps 2-4 could serve a namesake.
     try:
         registry = _read_json(BRANCH_REGISTRY)
     except JsonUnreadable as e:
@@ -532,7 +379,6 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                     return path, email
                 return None  # Found but path missing — definitive failure
 
-    # Step 2: Caller's project registry (cross-project dispatch)
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if caller_cwd:
         try:
@@ -545,15 +391,11 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 if branch_path.exists():
                     return branch_path, email
         except RegistryUnreadable:
-            # The caller's own project cannot say who it names: refuse rather
-            # than let steps 3-4 serve a namesake (ai_mail, leg 12).
             raise
         except Exception as e:
             logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
 
-    # Step 3: Hosted projects (verified-admin only — the cross-project bridge).
-    # Runs last so a local branch always wins, and runs at all only when the
-    # caller already proved the grant. Unverified callers never reach here.
+    # Verified-admin only; the caller already proved the grant.
     if admin:
         try:
             from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
@@ -566,17 +408,11 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                     logger.info("[wake] %s resolved via projects/ sweep — admin bridge", email)
                     return branch_path, email
         except RegistryUnreadable:
-            # A hosted registry that cannot be read may hold this citizen; the
-            # external tier would serve its namesake (ai_mail, leg 12).
             raise
         except Exception as e:
             logger.warning("[wake] resolve_branch projects sweep failed: %s", e)
 
-    # Step 4: The declared-roots external tier (FPLAN-0460 phase 5).
-    # Last, so every local source has already missed. Contained like the two
-    # steps above it: a tier that cannot answer returns a miss, never a
-    # traceback — every caller of this function reads None as "not found", and
-    # wake_branch turns that into an honest failed step.
+    # A tier that cannot answer returns a miss, never a traceback.
     try:
         candidates = [
             citizen
@@ -585,22 +421,8 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
         ]
         if candidates:
             if len(candidates) > 1:
-                # The ruling's own tie-break, and it now genuinely reaches this
-                # door. This used to say the opposite: declared_roots() returned
-                # sorted(found), so the winner was alphabetical-by-resolved-path
-                # and the tie-break the fleet ruling names was not available
-                # here. Rather than re-read the anchor to recover it — a second
-                # reader of the file the gateway exists to own — the collision
-                # was made loud and the disagreement raised with @memory, who
-                # dropped the sort (registry_scope 4.1.0, 2026-08-30). The
-                # gateway iterates roots in declaration order and dedups by
-                # path, so candidates[0] is the first-declared claimant.
-                #
-                # Still logged at error. A tie-break being correct does not make
-                # a collision expected: two roots claiming one address is a
-                # thing someone should know about, and a resolution nobody
-                # logged is indistinguishable from a citizen that only lives in
-                # one place.
+                # The gateway yields roots in declaration order, so [0] is the first-declared claimant.
+                # Still an error: two roots claiming one address is something someone should know.
                 logger.error(
                     "[wake] %s is claimed by %d declared roots — resolving to %s by DECLARATION ORDER "
                     "(first-declared root wins, per the fleet ruling). Other claimants: %s",
@@ -610,10 +432,7 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                     ", ".join(str(citizen["path"]) for citizen in candidates[1:]),
                 )
             branch_path = Path(candidates[0]["path"])
-            # No exists() check: the gateway admits an external citizen only
-            # when .trinity/passport.json is a file there, so the directory is
-            # already proven. A second check here could never be false, and an
-            # assertion that cannot fail hides which layer is load-bearing.
+            # No exists() check: the gateway only admits a directory with a passport file.
             logger.info("[wake] %s resolved via the declared-roots external tier", email)
             return branch_path, email
     except Exception as e:
@@ -622,37 +441,11 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
     return None
 
 
-# ─── Interactive Manager Spawn ──────────────────────────
-
-
 def _mark_daemon_session(session: str, email: str, status: "DispatchStatus") -> None:
     """Tag a live tmux session as daemon work, machine-readably.
 
-    The owner killed @vera's first external wake on 2026-08-30 because nothing in
-    the session said a machine had started it — he read `daemon-vera-192848` as
-    his own leftover tmux and took it out mid-playbook. The session NAME is the
-    guaranteed half of the answer (see DAEMON_SESSION_PREFIX): tmux either
-    creates the session under that name or the spawn already failed, so a human
-    reading `tmux ls` cannot get a half-marked session.
-
-    This is the queryable half — a user option any tool can read back with
-    `tmux show-options -v -t <session> @aipass_daemon_wake` instead of
-    string-matching a prefix. It is BEST EFFORT and never fatal: the session is
-    already alive by the time it runs, and refusing to start the agent because
-    a cosmetic option did not apply would trade real work for a label.
-
-    Owns the "mark" step outright, both outcomes. The first cut recorded the
-    warn here and an unconditional ok at the end of the spawn — and find_step
-    returns the LAST record under a label, so every failed marking still read
-    as marked. A step reported in two places is a step reported by neither.
-
-    Deliberately NOT the dispatch register. open_dispatch() demands an
-    expected_seconds taken from the lane's own timeout, and this lane has no
-    monitor and no timeout — every entry it wrote would stay outstanding
-    forever and go overdue against a number invented here, turning the crash
-    detector into a wall of false alarms. The register answers "was this
-    dispatch delivered"; this answers "may a human kill this window". Two
-    questions, and only one of them has a monitor to close it.
+    Best effort, never fatal; this owns the "mark" step for both outcomes (find_step reads the last).
+    Not the dispatch register: this lane has no monitor or timeout to close an entry.
     """
     marker = json.dumps({"branch": email, "sender": "@daemon", "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     try:
@@ -682,35 +475,15 @@ def _spawn_manager_interactive(
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
-    `claude_bin` is the binary wake_branch resolved for this wake.
-
-    The attachable path: a session the user CAN attach to (same pattern as the
-    manual tmux interactive wake). Used only for @daemon self-wakes that passed
-    the manager gate WITHOUT scheduled=True — the scheduled lane goes headless
-    instead (DPLAN-0287). No dispatch lock or monitor here: the occupancy check
-    is the one-instance guard for interactive sessions, which also means no
-    context pin, no bounce email and no lock cleanup.
-
-    Attachable is not attended. Every route into this function comes from
-    @daemon, i.e. from a clock rather than a person, so the session launches
-    with bypassPermissions unconditionally — the owner's ruling of 2026-08-30
-    after @vera sat on a denied Bash prompt here with nobody present to answer
-    it ("always bypass permissions always, claude alone will nvr work"). The
-    headless lane has carried the flag for months; this one is the lane that
-    was still spawning a bare `claude`.
-
-    `model` arrives already resolved by resolve_wake_model() — the policy lives
-    at one site in wake_branch, and this lane naming its own would be a second
-    place for the Fable grant to drift. Unchanged by the 2026-09-08 ruling for
-    exactly that reason: the rule this lane obeys moved, and this lane did not
-    have to, because it never held a copy of it.
+    Only @daemon self-wakes, so it always runs with bypassPermissions: nobody is there to answer.
+    No lock or monitor: the occupancy check is the one-instance guard. `model` is already resolved.
     """
     if shutil.which("tmux") is None:
         status.fail("tmux", "tmux not found — cannot spawn interactive manager session")
         logger.warning("[wake] %s manager wake failed — tmux missing", email)
         return status, False
 
-    # Prompt goes through a file — survives quoting, debuggable after the fact.
+    # Through a file: survives quoting, debuggable after the fact.
     daemon_dir = branch_path / ".daemon"
     daemon_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = daemon_dir / "last_wake_prompt.txt"
@@ -730,9 +503,7 @@ def _spawn_manager_interactive(
             text=True,
             timeout=15,
         )
-        # Marked BEFORE the agent starts: a window is killable from the moment
-        # it exists, so a marking that lands after send-keys leaves exactly the
-        # gap this exists to close.
+        # Before the agent starts: a window is killable from the moment it exists.
         _mark_daemon_session(session, email, status)
         subprocess.run(
             ["tmux", "send-keys", "-t", session, claude_line, "Enter"],
@@ -753,9 +524,6 @@ def _spawn_manager_interactive(
     return status, True
 
 
-# ─── Main Wake Function ─────────────────────────────────
-
-
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -772,50 +540,8 @@ def wake_branch(
     """
     Spawn a Claude agent at the target branch with step-by-step status.
 
-    Args:
-        branch_email: Target branch email (e.g. "@flow")
-        custom_message: Optional custom prompt (replaces default inbox check)
-        fresh: If True, start fresh session instead of resuming
-        auto: If True, respect autonomous_pause (used by daemon)
-        sender: Return-to-sender for bounce emails
-        model: Model shorthand ("sonnet", "opus", "haiku") or full model ID.
-               Defaults to opus (the owner ruling 2026-08-01: agents run opus).
-        scheduled: Keyword-only opt-in for the scheduled lane (DPLAN-0287) —
-               an unattended run fired by a clock, not by a person. A manager
-               target then wakes HEADLESS through dispatch_monitor (which pins
-               CLAUDE_CODE_AUTO_COMPACT_WINDOW) instead of an unattended tmux
-               session nobody is watching, and a WAKE_BLOCKLIST target is
-               refused outright. Non-manager targets are unaffected apart from
-               that refusal. Default False leaves every existing caller's
-               behaviour exactly as it was.
-        admin: Keyword-only, and an ALREADY-DECIDED verdict — never a request.
-               True means a caller holding the caller env ran the full 5-leg
-               admin-grant check and it passed (FPLAN-0401 THE CONTRACT;
-               dispatch.py owns that call). A manager target then wakes
-               headless through dispatch_monitor like any citizen dispatch.
-               This function cannot verify the grant itself: leg 1 needs
-               AIPASS_CALLER_*, which its in-process callers do not carry.
-               WAKE_BLOCKLIST still refuses — admin raises the stakes, not the
-               fence. Default False = today's manager gate, untouched.
-        wake_back: Keyword-only. True (default) = the dispatcher is woken, or
-               mailed if a manager, when the target finishes — the team-mission
-               contract. False = a library caller (e.g. @daemon's scheduled
-               nudges, which owe no reply) declines it; dispatch_monitor gets
-               --no-wake-back on argv. `sender` still passes through unchanged:
-               bounce mail and the manager gate's @daemon self-wake exception
-               read it. The interactive tmux lane has no wake-back to decline.
-
-    Returns:
-        Tuple of (DispatchStatus with all steps, overall success bool)
-
-        The bool means "the dispatch did what it should", NOT "an agent was woken".
-        A manager target returns True having deliberately woken nothing — mail is
-        delivered and the wake is skipped by design (see Step 3). Callers that need
-        to know whether a process actually started must check
-        status.find_step("manager"): "info" = gate skipped the wake, "ok" = a
-        manager spawn went ahead. Which spawn it was is named separately:
-        status.find_step("scheduled") is present only for the headless lane, and
-        the interactive tmux spawn reports its session in the "spawn" step.
+    admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
+    True means "did what it should", not "woke an agent": check status.find_step("manager").
     """
     json_handler.log_operation(
         "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}
@@ -823,14 +549,11 @@ def wake_branch(
 
     status = DispatchStatus()
 
-    # Step 1: Pause check (auto-dispatch only)
     if auto and PAUSE_FILE.exists():
         status.fail("pause", "System paused (autonomous_pause active)")
         logger.warning("[wake] BLOCKED %s — system paused", branch_email)
         return status, False
 
-    # Step 2: Resolve branch. An unreadable registry fails this step by name
-    # rather than waking whoever a later source names (ai_mail, leg 12).
     from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
     try:
@@ -846,48 +569,24 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
-    # Step 2b: Blocklist — no privileged lane ever spawns a blocked target.
-    # Checked BEFORE the passport read on purpose: an unreadable or missing
-    # passport must never be the reason @devpulse gets spawned at 5am, and a
-    # verified admin grant is permission to wake OTHERS, never to wake the
-    # blocked seat. The manual/dispatch paths keep enforcing this in
-    # dispatch.py._orchestrate_wake; this is the same rule at the one entry
-    # point a scheduler or an admin lane calls directly.
+    # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
     if (scheduled or admin) and is_wake_blocked(email):
         lane = "scheduled" if scheduled else "admin"
         status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the {lane} lane")
         logger.warning("[wake] BLOCKED %s — %s wake refused by WAKE_BLOCKLIST", email, lane)
         return status, False
 
-    # Step 3: Manager check — managers are never woken, mail only.
-    # Exceptions, in order:
-    #   scheduled=True  → headless through dispatch_monitor. An unattended 5am
-    #     run must carry the monitor's guarantees (context pin, bounce, lock
-    #     cleanup); a tmux session with no one attached has none of them.
-    #   sender=@daemon  → interactive tmux. A branch's .daemon/schedule.json is
-    #     self-authored (the daemon cannot write another branch's files), so a
-    #     daemon-scheduled wake is the manager waking ITSELF — consent is the
-    #     schedule's existence.
-    # Dispatch/manual wakes remain blocked.
+    # Managers are mailed, never woken, except: scheduled=True goes headless through the monitor,
+    # and sender=@daemon (a self-authored schedule, so the manager's consent) goes to tmux.
     passport_file = branch_path / ".trinity" / "passport.json"
     manager_scheduled = False  # daemon-scheduled manager wake → interactive tmux spawn
-    # Bound before the try so the model policy below reads a defined value on
-    # every path. An unreadable passport means "" — not a manager, the same
-    # direction the gate itself already fails in.
     citizen_class = ""
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
-        # The refusal first, then the three lanes: one level shallower than an
-        # elif chain ending in the refusal, same order (ai_mail, leg 16).
         if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
-            # Returns True having woken nothing and sent nothing. The caller
-            # owns the notification: the dispatch pipeline already mailed this
-            # manager before calling, and dispatch_monitor's wake-back mails it
-            # via _mail_wake_back(). Saying "mail delivered" here asserted a
-            # delivery this function never makes, which is how the wake-back's
-            # silent drop read as success for months (@devpulse P0, 2026-08-21).
+            # Woken nothing, sent nothing: the caller owns the mail.
             status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
             logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
             return status, True
@@ -901,19 +600,13 @@ def wake_branch(
                 status.ok("admin", "Headless lane — dispatch_monitor pipeline (admin grant verified by caller)")
                 logger.info("[wake] %s manager woken headless — admin lane", email)
             else:
-                # sender == "@daemon", the one lane the refusal above left.
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
     except FileNotFoundError as exc:
-        # No passport: no class was ever declared, so nothing marks this target
-        # a manager. The ordinary path stands (pinned: missing passport continues).
         logger.info("[wake] No passport for %s: %s", email, exc)
     except (json.JSONDecodeError, OSError) as exc:
-        # A passport that exists but cannot be read leaves the class unknown, and
-        # the target may be a manager. Fail closed in the lane that never wakes
-        # managers: skip the wake, the caller mails. The scheduled, admin and
-        # @daemon lanes wake managers too, so they go on (ai_mail, leg 11).
+        # Unknown class may be a manager: fail closed in the lane that never wakes managers.
         if not (scheduled or admin or sender == "@daemon"):
             status.info(
                 "manager",
@@ -923,32 +616,21 @@ def wake_branch(
             return status, True
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
-    # Step 3b: Model policy, decided ONCE for both spawn lanes. Resolved here
-    # rather than at each spawn site because a second site would be a second
-    # place for the rule to drift, and @vera reached Fable by CLI accident
-    # precisely because no site owned the answer.
-    #
-    # citizen_class is NO LONGER AN INPUT (The owner, 2026-09-08) and is no longer
-    # named in the step either: printing it beside the model implied it decided
-    # the model, which is exactly the superseded rule. The gate above prints the
-    # class where the class actually matters.
+    # Decided ONCE for both spawn lanes; a second site would let the rule drift.
     decision = resolve_wake_model(email, model)
     resolved_model = decision.model
     if decision.refusal:
-        # WARN, not fail: the wake proceeds. This step is the only place the
-        # person who typed the command learns their model was not honoured.
+        # WARN, not fail: the only place the caller learns the model was not honoured.
         status.warn("model", decision.refusal)
     else:
         status.ok("model", resolved_model)
 
-    # Step 4: Zombie check (pre-flight)
     zombie_count = clean_zombies()
     if zombie_count > 0:
         status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
     else:
         status.ok("pre-flight", "No zombie processes")
 
-    # Step 5: Lock check
     existing = check_lock(branch_path)
     if existing is not None:
         pid = existing.get("pid", "?")
@@ -964,7 +646,6 @@ def wake_branch(
 
     status.ok("lock", "No active lock — agent is sleeping")
 
-    # Step 6: Occupancy check
     if is_branch_occupied(branch_path):
         status.warn("occupancy", f"Interactive Claude session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
@@ -973,14 +654,7 @@ def wake_branch(
 
     status.ok("occupancy", "No interactive session")
 
-    # Step 6b: the recipient's dashboard, refreshed before anything spawns.
-    # THIS LINE IS WHY IT SITS HERE: every gate above can still refuse the wake,
-    # and all three spawn lanes below (tmux manager, systemd scope, detached
-    # Popen) are downstream — so the dashboard is written exactly when a session
-    # is certain to start, and exactly once. Fail-open; see the helper.
-    # Step 6a: the claude binary, resolved at this wake for both spawn lanes.
-    # Before the dashboard refresh, so a wake that cannot spawn writes nothing,
-    # and before any lock (ai_mail, leg 16).
+    # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
         claude_bin = _find_claude_bin()
     except FileNotFoundError as e:
@@ -990,17 +664,12 @@ def wake_branch(
 
     _refresh_recipient_dashboard(branch_path, email, status)
 
-    # A @daemon-sender manager wake spawns an interactive tmux session instead
-    # of the -p/monitor pipeline below. The scheduled lane deliberately does not
-    # set this flag — an unattended run belongs in the monitored pipeline.
     if manager_scheduled:
         return _spawn_manager_interactive(
             branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin
         )
 
-    # Step 7: Build spawn command
-    # An unreadable safety config refuses the wake: its max_turns may be lower
-    # than the default 100 (ai_mail, leg 13). No lock is held yet.
+    # An unreadable safety config refuses the wake: its max_turns may be lower than the default.
     try:
         config = _load_config()
     except JsonUnreadable as e:
@@ -1012,14 +681,8 @@ def wake_branch(
         prompt = f"Hi. {custom_message} "
     else:
         prompt = f"{DEFAULT_PROMPT} "
-    # Monitor owns lock cleanup end-to-end, so the prompt no longer tells the
-    # agent to delete the lock: an agent deleting it while its own monitor is
-    # still alive lets a second monitor spawn onto a "clear" lock, and the two
-    # then race over one lock file. Rationale from reading the cleanup paths —
-    # not a logged incident; the monitor's PID-verified cleanup is the guard.
-    # Spec first, build to it, audit last (DPLAN-0354): of 66 worker
-    # transcripts, 61 ran the checklist after writing and 0 read the
-    # standards before. Kept ahead of every other instruction so it is read first.
+    # Never tell the agent to delete its lock: the monitor owns cleanup, and two monitors would race.
+    # The spec-first line leads so it is read first.
     prompt += (
         "Before you build: read the seedgo standards rows for what you touch "
         "(src/aipass/seedgo/docs/aipass_standards.md; drone @seedgo checklist names the "
@@ -1044,28 +707,18 @@ def wake_branch(
         "json",
     ]
 
-    # Which session this dispatch lands in is decided by a written record, not
-    # by a file mtime. `-c` means "continue the most recently MODIFIED transcript
-    # in this directory", so a --fresh run, a late-flushing dispatch or a human
-    # opening a terminal here silently re-points the NEXT wake into somebody
-    # else's thread. session_pointer names the session instead; the -c branch
-    # below stays as the fallback for branches that have no usable pointer yet.
+    # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
     if fresh:
         session_id = session_pointer.mint_session_id()
-        # Written BEFORE the spawn on purpose: the CLI accepts the id we hand it
-        # and returns that same id, so there is no window in which a crash
-        # leaves a live session nobody recorded.
+        # Before the spawn, so no crash leaves a live session nobody recorded.
         if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):
-            # Never fatal. A branch whose pointer cannot be written must still
-            # wake — the next non-fresh dispatch simply falls back to -c.
             logger.warning("[wake] %s pointer write failed for session %s — spawning anyway", email, session_id)
         logger.info("[wake] %s fresh session %s", email, session_id)
         status.ok("session", f"fresh session {session_id[:8]}")
         claude_cmd = [claude_bin, *base_args, "--session-id", session_id]
     else:
         resume_id, reason = session_pointer.resolve_resume_target(branch_path)
-        # Verbatim: this reason string is the only trace left when an agent
-        # wakes somewhere unexpected.
+        # Verbatim: the only trace left when an agent wakes somewhere unexpected.
         logger.info("[wake] %s session decision: %s", email, reason)
         if resume_id:
             status.ok("session", f"resuming {resume_id[:8]} (pointer)")
@@ -1074,17 +727,12 @@ def wake_branch(
             status.info("session", "no pointer — continuing newest transcript (-c)")
             claude_cmd = [claude_bin, "-c", *base_args]
 
-    # Step 7: Spawn via dispatch_monitor
     log_dir = branch_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stderr_log = str(log_dir / "dispatch_stderr.log")
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
-    # Build monitor command. Monitor flags sit between the four positionals and
-    # "--"; a default wake passes none, so its argv is exactly what it was.
-    # wake_back rides argv, never spawn_env: spawn_env becomes the agent's own
-    # environment and would leak the choice into any dispatch the agent makes
-    # (the AIPASS_DISPATCH_ID leak class, popped below).
+    # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
     monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
@@ -1100,16 +748,13 @@ def wake_branch(
         *claude_cmd,
     ]
 
-    # Prepare environment
     spawn_env = os.environ.copy()
     spawn_env["AIPASS_SPAWNED"] = "1"
     spawn_env["AIPASS_SESSION_TYPE"] = "dispatched"
-    # Guarantee venv bin is on PATH so dispatched agents can find drone/claude
     venv_bin = str(_REPO_ROOT / ".venv" / "bin")
     if venv_bin not in spawn_env.get("PATH", ""):
         spawn_env["PATH"] = venv_bin + ":" + spawn_env.get("PATH", "")
-    # Guarantee ~/.local/bin is on PATH for pip-installed tools (e.g. claude)
-    # Background processes (trigger, prax watchdog) may have restricted PATH.
+    # Background launchers (trigger, prax watchdog) may run with a restricted PATH.
     local_bin = str(Path.home() / ".local" / "bin")
     if local_bin not in spawn_env.get("PATH", ""):
         spawn_env["PATH"] = local_bin + ":" + spawn_env.get("PATH", "")
@@ -1117,31 +762,18 @@ def wake_branch(
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
 
-    # Acquire lock BEFORE spawn to prevent TOCTOU race (DPLAN-0155 Phase 5).
+    # Lock BEFORE spawn (TOCTOU).
     acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
         return status, False
     status.ok("lock-acquire", "Dispatch lock acquired")
 
-    # ─── Register the dispatch BEFORE anything spawns (FPLAN-0452 P0) ───
-    # The owner's rule 1: the watchdog knows what is outstanding because it was
-    # TOLD. Written here, above the spawn, so a spawn that never starts still
-    # leaves evidence the dispatch was promised — evidence written after a
-    # successful spawn only ever records the dispatches that were already fine.
-    #
-    # expected_by uses the monitor's own HARD_TIMEOUT, never a number invented
-    # here. That is what makes "past expected_by with no completion record"
-    # mean the monitor DIED: a live one kills the run at HARD_TIMEOUT and
-    # reports, so it cannot legitimately overrun.
+    # Registered BEFORE the spawn, so a spawn that never starts still leaves the promise.
     from aipass.ai_mail.apps.handlers.dispatch import register
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import HARD_TIMEOUT
 
-    # Clear any INHERITED id first. spawn_env is a copy of this process's
-    # environment, and a dispatched agent dispatching another agent would
-    # otherwise hand the child its OWN dispatch id — every mail the child sent
-    # would be attributed to the parent's run. Same class of leak as the
-    # AIPASS_CALLER_* strip above, and it fails closed: no id beats a wrong one.
+    # Clear an INHERITED id, or a child's mail would be attributed to the parent's run.
     spawn_env.pop("AIPASS_DISPATCH_ID", None)
 
     dispatch_id = register.open_dispatch(
@@ -1155,14 +787,8 @@ def wake_branch(
         spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id
         status.ok("register", f"Registered as {dispatch_id[:8]}")
     else:
-        # open_dispatch already logged why. The dispatch still goes: a register
-        # that cannot record must not also be able to CANCEL work.
         status.info("register", "Not registered — completion will be unattributable")
 
-    # When inside a systemd oneshot service (e.g. daemon-tick.timer), the
-    # default KillMode=control-group sends SIGTERM to all cgroup members
-    # when the service exits — killing the detached monitor.  Escape by
-    # launching the monitor in its own transient systemd unit (td-48).
     spawned_via_scope = False
     monitor_pid = 0
     if os.environ.get("INVOCATION_ID") and shutil.which("systemd-run"):
@@ -1195,15 +821,10 @@ def wake_branch(
 
             monitor_pid = process.pid
 
-            # Annotate the register row with the pid we just learned (FPLAN-0499
-            # phase 2). open_dispatch ran above the spawn on purpose and could
-            # not know this; without it a dead monitor is invisible until
-            # expected_by, two hours out. Best-effort by design — the dispatch
-            # is already running and a lost annotation must not cancel it.
+            # Best effort: lets a dead monitor show before expected_by.
             if dispatch_id:
                 register.record_monitor_pid(dispatch_id, monitor_pid)
 
-            # Update lock with real monitor PID
             lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
             lock_data = {
                 "pid": monitor_pid,
@@ -1229,7 +850,6 @@ def wake_branch(
             status.fail("spawn", f"{type(e).__name__}: {e}")
             return status, False
 
-    # Step 9: Liveness check (brief wait then verify)
     time.sleep(2)
     if spawned_via_scope:
         _unit = f"dispatch-{email.lstrip('@')}"
@@ -1259,7 +879,6 @@ def wake_branch(
             lock_file.unlink(missing_ok=True)
             return status, False
 
-    # Notification feed event
     notif_body = custom_message[:80] if custom_message else "Manual wake: check inbox"
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
@@ -1270,8 +889,6 @@ def wake_branch(
 
     return status, True
 
-
-# ─── CLI Entry Point ─────────────────────────────────────
 
 if __name__ == "__main__":
     args = sys.argv[1:]
@@ -1302,7 +919,6 @@ if __name__ == "__main__":
         print("  wake.py --fresh --sender @vera @seedgo  # Fresh, bounce to @vera")
         sys.exit(0)
 
-    # Parse flags
     use_fresh = "--fresh" in args
     use_auto = "--auto" in args
     use_sender = "@devpulse"
@@ -1329,11 +945,7 @@ if __name__ == "__main__":
     branch = args[0]
     message = args[1] if len(args) > 1 else None
 
-    # --sender is a CLI string and lands on the privilege-bearing `sender`
-    # param, so it goes through the same verified-caller rail the routed
-    # commands use (FPLAN-0401). Closed here at @devpulse's request once the
-    # admin lane raised the stakes: the script surface no longer differs from
-    # the drone surface.
+    # --sender is privilege-bearing, so it goes through the verified-caller rail.
     from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
 
     claim_refusal = sender_claim_refusal(use_sender)

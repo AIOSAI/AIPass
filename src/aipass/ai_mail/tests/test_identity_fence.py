@@ -3,25 +3,13 @@
 # Description: Tests for the caller identity fence (no branch under caller = refuse)
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the fence it enforces fleetwide."""
 
-# The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
-# ur cwd, and if aimail was run in root it should fail outright."
-#
-# The defect these pin (@devpulse, 0bb77ec2 / 096c9a42): running any ai_mail verb
-# from the repo root resolved to the @aipass CITIZEN and read its mailbox. The
-# mechanism is a name collision, not a missing policy — drone's
-# ``resolve_caller_identity(<repo root>)`` returns ``'aipass'`` derived from the
-# PROJECT directory name, ai_mail's contact lookup finds the same-named citizen,
-# and the identity is stamped "verified". A dispatch sent that way cost $1.41 and
-# woke the wrong citizen.
-#
-# The rule: ``AIPASS_CALLER_CWD`` is the evidence of where the caller actually
-# stood. When it is set and does not sit inside a branch, no identity is provable
-# and every verb refuses — a claim in ``AIPASS_CALLER_BRANCH`` cannot outvote it.
+# AIPASS_CALLER_CWD is the evidence of where the caller stood: set and outside any branch,
+# every verb refuses, and a claim in AIPASS_CALLER_BRANCH cannot outvote it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
@@ -58,9 +46,7 @@ class TestCallerCwdOutranksClaim:
     """A branch CLAIM cannot survive cwd evidence that the caller stood outside."""
 
     def test_detect_refuses_when_caller_cwd_is_not_a_branch(self, tmp_path, monkeypatch):
-        """THE REPRODUCTION: drone stamps CALLER_BRANCH from the project dir name
-        at the repo root, which collides with the @aipass citizen. The cwd proves
-        the caller was not in a branch, so nothing may resolve."""
+        """At the repo root the project dir name collides with the @aipass citizen; nothing may resolve."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         assert detect_branch_from_pwd() is None
@@ -73,9 +59,7 @@ class TestCallerCwdOutranksClaim:
             get_current_user()
 
     def test_failure_reason_names_the_cwd_not_the_claim(self, tmp_path, monkeypatch):
-        """The existing message already names this exact mistake and tells the
-        caller to re-run from within the sending branch. It must be the one that
-        fires — the CALLER_BRANCH text would misreport CALLER_CWD as unset."""
+        """The cwd message fires, not the CALLER_BRANCH one that would misreport CALLER_CWD as unset."""
         outside = _non_branch_dir(tmp_path)
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(outside))
@@ -108,24 +92,9 @@ class TestLegitimateCallersUnaffected:
         assert info.get("email") == "@devpulse"
 
     def test_caller_cwd_unset_is_left_alone(self, tmp_path, monkeypatch):
-        """In-process library callers (@trigger delivery, @daemon wake) and the
-        dispatch env carry no AIPASS_CALLER_CWD. The fence keys on evidence that
-        contradicts, not on evidence that is absent — no cwd means no verdict
-        here, and the existing passport walk still decides.
+        """In-process callers carry no AIPASS_CALLER_CWD: no cwd means no verdict, the passport walk decides.
 
-        THE SEAT IS SYNTHETIC. This used to resolve against the live registry on
-        the author's machine and returned None on a fresh checkout, where the
-        registry does not exist — reported red in CI on PR 739 (@devpulse,
-        2026-08-23). It was testing the machine. The walk now runs entirely
-        inside tmp_path, so "the passport walk still decides" is demonstrated
-        rather than borrowed.
-
-        AIPASS_CALLER_BRANCH IS NOW UNSET TOO, and that is a correction rather
-        than a convenience. With it set, detect_branch_from_pwd takes the
-        caller_branch lane and returns before the passport walk is reached — so
-        the old version named a mechanism its own input could never exercise.
-        The real callers this test speaks for (in-process @trigger delivery,
-        @daemon wake) carry no caller env at all, which is what it now sets up.
+        CALLER_BRANCH is unset too: with it set, the caller_branch lane returns before the walk.
         """
         branch = tmp_path / "src" / "aipass" / "ai_mail"
         (branch / ".trinity").mkdir(parents=True)
@@ -154,10 +123,7 @@ class TestLegitimateCallersUnaffected:
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
         monkeypatch.chdir(branch)
-        # BRANCH_REGISTRY_PATH is frozen at import from find_repo_root(), so it
-        # points at whatever machine this runs on — the live registry here, a
-        # cwd-derived guess on a fresh checkout. Pointed at the fixture for the
-        # same reason conftest points FEED_PATH and CONTACTS_FILE at tmp_path.
+        # BRANCH_REGISTRY_PATH is frozen at import from find_repo_root(): the live machine's registry.
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
 
         info = detect_branch_from_pwd()
@@ -171,9 +137,7 @@ class TestEveryVerbIsFenced:
 
     @pytest.mark.parametrize("verb", ["inbox", "view", "reply", "close", "sent", "send", "dispatch"])
     def test_verb_exits_nonzero_from_non_branch_cwd(self, tmp_path, monkeypatch, verb):
-        """inbox, view, reply, send, dispatch — all of them. view/close/reply
-        matter most: they resolve through _resolve_branch_path(), whose own
-        fallback pointed at ai_mail's mailbox when detection failed."""
+        """Every verb refuses; view/close/reply's _resolve_branch_path() once fell back to ai_mail's mailbox."""
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
@@ -181,8 +145,7 @@ class TestEveryVerbIsFenced:
         assert entry.main() != 0
 
     def test_help_still_works_from_anywhere(self, tmp_path, monkeypatch):
-        """Help needs no identity and must not be fenced — @aipass's cross-OS
-        preflight runs `drone @ai_mail --help` as a routing probe."""
+        """Help is never fenced: a cross-OS preflight runs `drone @ai_mail --help` as a routing probe."""
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
@@ -191,25 +154,10 @@ class TestEveryVerbIsFenced:
 
 
 class TestProvenanceLiftsTheOverRefusal:
-    """@drone's AIPASS_CALLER_IDENTITY_SOURCE (shipped 2026-08-21 21:42) tells the
-    two cases apart that were byte-identical when the fence landed at 19:21.
-
-    The fence had to refuse both. That over-refusal broke S102 in practice — "an
-    agent that cds into another branch to read its code is still itself" — and it
-    is the live regression from my own fix. The flag lifts it:
-
-      assigned  — AIPASS_BRANCH_NAME, set when the process was created. A
-                  credential, true from ANY directory. Accept.
-      passport  — a passport under the caller's feet. Accept.
-      project   — a registry-derived PROJECT name that happens to spell a citizen.
-                  Never identity. Refuse, forever — that is the whole incident.
-    """
+    """@drone's AIPASS_CALLER_IDENTITY_SOURCE: assigned and passport are credentials, project never is."""
 
     def test_assigned_identity_resolves_from_outside_any_branch(self, tmp_path, monkeypatch):
-        """S102 RESTORED: a dispatched agent that cds out of its branch is still
-        itself. This is the case test_detect_resolves_identity_when_cwd_is_wrong
-        pinned before the fence superseded it — brought back, now keyed to the
-        credential rather than to a bare name."""
+        """A dispatched agent that cds out of its branch is still itself, keyed to the credential."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
@@ -218,16 +166,14 @@ class TestProvenanceLiftsTheOverRefusal:
         assert info.get("email") == "@ai_mail"
 
     def test_project_source_is_still_refused(self, tmp_path, monkeypatch):
-        """THE $1.41 CASE. A directory name is not a credential, no matter that it
-        spells a real citizen. This must never loosen."""
+        """A directory name is not a credential, even when it spells a real citizen."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "project")
         assert detect_branch_from_pwd() is None
 
     def test_passport_source_is_a_credential(self, tmp_path, monkeypatch):
-        """Defensive: if drone proved a passport but this walk disagrees, drone saw
-        the caller's real cwd and this process did not. Trust the prover."""
+        """If drone proved a passport and this walk disagrees, trust drone: it saw the real cwd."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "passport")
@@ -235,8 +181,7 @@ class TestProvenanceLiftsTheOverRefusal:
         assert info is not None and info.get("email") == "@ai_mail"
 
     def test_absent_flag_keeps_the_cwd_rule(self, tmp_path, monkeypatch):
-        """An older drone, or a caller that is not drone, stamps no flag. The cwd
-        evidence still decides — the lift is opt-in, never assumed."""
+        """No flag (older drone, non-drone caller): the cwd evidence still decides."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
@@ -250,9 +195,7 @@ class TestProvenanceLiftsTheOverRefusal:
         assert detect_branch_from_pwd() is None
 
     def test_verified_caller_accepts_assigned_outside_a_branch(self, tmp_path, monkeypatch):
-        """The privilege rail lifts with the same key — refusing 'assigned' here
-        would keep the wake lane closed for exactly the dispatched agents it exists
-        to serve."""
+        """The privilege rail lifts with the same key, or the wake lane stays closed to dispatched agents."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "daemon")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
@@ -276,27 +219,7 @@ class TestProvenanceLiftsTheOverRefusal:
 
 
 class TestThePoisonedContactRowCannotOutvoteTheRegistry:
-    """Found live, 2026-08-23: `drone @ai_mail inbox` served @flow's mailbox.
-
-    The system's own identity log is what named it — right name, right email,
-    WRONG PATH, and stamped "verified":
-
-        strategy       caller_branch:contact
-        confidence     verified
-        resolved_name  AI_MAIL
-        resolved_email @ai_mail
-        resolved_path  .../src/aipass/flow
-
-    contacts.json is a LEARNED, WRITABLE cache; AIPASS_REGISTRY.json is the
-    authoritative catalog. Consulting the cache FIRST let one poisoned row
-    outrank the catalog for a citizen the catalog knows perfectly well. The
-    existing staleness guard could not catch it: it only asks whether the
-    branch root is a directory, and the wrong directory was a real live branch.
-
-    Contacts exist for EXTERNAL projects that are not in the registry — that is
-    what _get_contact_info's own docstring says. So the ordering was backwards
-    for every AIPass citizen, which is every caller that matters here.
-    """
+    """contacts.json is a writable cache; the registry outranks it for every citizen it knows."""
 
     def _poison(self, monkeypatch, tmp_path, victim_dir):
         """Stage a contact row for 'ai_mail' whose inbox is another branch's."""
@@ -342,11 +265,7 @@ class TestThePoisonedContactRowCannotOutvoteTheRegistry:
         )
 
     def test_contacts_still_serve_a_name_the_registry_does_not_know(self, monkeypatch, tmp_path):
-        """The cache keeps its actual job: external projects absent from the registry.
-
-        Without this, "registry first" would quietly become "registry only" and
-        break every external-tier caller — the case contacts were built for.
-        """
+        """The cache keeps its actual job: external projects absent from the registry."""
 
         stranger = tmp_path / "outside" / "vera"
         (stranger / ".ai_mail.local").mkdir(parents=True)
@@ -373,35 +292,9 @@ class TestThePoisonedContactRowCannotOutvoteTheRegistry:
 
 
 class TestAProjectCitizenResolvesAgainstItsOwnRegistry:
-    """Found live 2026-08-24 (@devpulse 10400b9b, measured first by @baud).
+    """A registry row's path is relative to the registry it came from; the reader absolutises it.
 
-    A projects/* citizen could not read or reply to his own mail: `inbox` printed
-    "Inbox is empty" while four unread messages sat in the file under his feet,
-    and `reply <id>` answered "Message not found" for an id read straight out of
-    that file. Both symptoms are one cause, and the identity log named it in a
-    single row - the contrast with the row logged seconds later is the defect:
-
-        BAUD      strategy caller_branch:registry  resolved_path src/baud/baud
-        DEVPULSE  strategy caller_branch:registry  resolved_path /home/.../devpulse
-
-    One relative, one absolute. A registry row's ``path`` is relative to THE
-    REGISTRY IT CAME FROM. ``_lookup_branch_by_name`` falls back to the caller's
-    own project registry for citizens absent from the AIPass one - correctly -
-    but returns the raw row, which carries no memory of which registry answered.
-    Every consumer then joins it to the AIPass repo root, so
-    ``projects/baud`` + ``src/baud/baud`` was read as ``<aipass>/src/baud/baud``.
-
-    IT DID NOT FAIL LOUDLY, IT FABRICATED. The wrong path is inside the AIPass
-    tree, so the mail lane CREATED it: src/baud/baud/.ai_mail.local/sent/ exists,
-    timestamped inside his session, holding the reply he believed he had sent.
-    Reading found nothing there (hence "empty"), and writing made a phantom
-    mailbox belonging to no citizen. Same species as the contacts-cache leak of
-    08-23 and the register-in-the-wrong-place risk of 08-22: not a refusal, a
-    confident wrong address.
-
-    Fixed at the SOURCE rather than at the nine call sites that join a registry
-    path - the row is absolutised by the function that reads the registry, so no
-    consumer can ever be handed a relative path without the root that explains it.
+    Joined to the AIPass root instead, a project citizen's path silently became a phantom mailbox.
     """
 
     @staticmethod
@@ -442,11 +335,7 @@ class TestAProjectCitizenResolvesAgainstItsOwnRegistry:
         )
 
     def test_an_aipass_citizen_with_a_relative_row_is_unaffected(self, monkeypatch, tmp_path):
-        """Six of the eighteen AIPass rows are relative — this must not move them.
-
-        Fixing the project lane by breaking the main one would trade a rare
-        failure for the common one.
-        """
+        """Six of the eighteen AIPass rows are relative — this must not move them."""
         repo = tmp_path / "aipass"
         citizen = repo / "src" / "aipass" / "ai_mail"
         (citizen / ".trinity").mkdir(parents=True)

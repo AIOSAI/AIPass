@@ -3,25 +3,12 @@
 # Description: Completion report tests — build_report, write_report, fire_completed, and the sent-mail attribution scan
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/report.py."""
 
-# The completion report — what the finishing agent can honestly say about its run.
-#
-# FPLAN-0452 P1.
-#
-# Two of these tests exist because of a specific argument, and they are the ones
-# to keep if the file ever shrinks:
-#
-# * ``test_a_mail_written_by_someone_else_during_the_run_is_not_claimed`` is the
-#   difference between a RECORD and an INFERENCE. An mtime scan of ``sent/``
-#   attributes by TIME; the stamp attributes by AUTHORSHIP.
-# * ``test_bg_orphaned_ships_beside_an_empty_email_list`` pins the honesty
-#   requirement. A run whose background tasks were killed reports zero emails for
-#   an agent that believed it had replied — without the flag beside it, a reader
-#   concludes the agent ignored its mail.
+# The completion report: what the finishing agent can honestly say about its run.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — REPORTS_DIRNAME, REPORTS_MAX_FILES, REPORTS_KEEP_FILES, RESULT_EXCERPT_CHARS values
@@ -62,8 +49,7 @@ class TestEmailsSentIsARecordNotAnInference:
     def test_a_mail_written_by_someone_else_during_the_run_is_not_claimed(self, branch):
         """The whole argument for the stamp, in one test.
 
-        Both files are written inside the run's window, so an mtime scan would
-        report BOTH as this agent's work. Only one carries the dispatch id.
+        An mtime scan would claim BOTH files; only one carries the dispatch id.
         """
         _write_sent(branch, "mine", dispatch_id="abc-123", to="@flow")
         _write_sent(branch, "not_mine", to="@prax")
@@ -134,9 +120,7 @@ class TestTheHonestyRequirements:
     def test_bg_orphaned_ships_beside_an_empty_email_list(self, branch):
         """The report says "0 emails" for an agent that believed it had replied.
 
-        Its background tasks — possibly including that reply — were killed at
-        the headless ceiling. The flag is what stops a reader concluding the
-        agent ignored its mail.
+        Its background tasks were killed; the flag stops a reader concluding it ignored its mail.
         """
         built = report.build_report(
             "abc", "@devpulse", "@ai_mail", branch, time.time(), 30, 0, "INCOMPLETE", [], True, False, "woken"
@@ -149,11 +133,7 @@ class TestTheHonestyRequirements:
     def test_memories_that_cannot_be_listed_report_unknown_not_untouched(self, branch, monkeypatch):
         """A listing that failed is not "no memory written": the report says None.
 
-        Before leg 10 memories_edited answered False on a listing error, the
-        same answer as an agent that never touched its memories. A raise out of
-        build_report would lose the report at dispatch_monitor's terminal catch,
-        so the unknown is recorded in the report instead. Its proof is the
-        mutant that puts False back (ai_mail, leg 10).
+        Raising out of build_report would lose the report at dispatch_monitor's terminal catch.
         """
 
         def _unlistable(branch_path, since):
@@ -168,12 +148,7 @@ class TestTheHonestyRequirements:
         assert built["memories_edited"] is None
 
     def test_sent_mail_that_cannot_be_listed_reports_unknown_not_none_sent(self, branch, monkeypatch):
-        """A sent folder that failed to list is not "sent nothing": both mail fields say None.
-
-        An empty list here reads as an agent that ignored its mail, which is the
-        misreading this report exists to prevent. Its proof is the mutant that
-        puts the empty list back (ai_mail, leg 10).
-        """
+        """A sent folder that failed to list is not "sent nothing": both mail fields say None."""
 
         def _unlistable(branch_path, dispatch_id):
             raise OSError("listing failed")

@@ -3,7 +3,7 @@
 # Description: Tests for email reply handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/reply.py."""
@@ -22,18 +22,12 @@ from aipass.ai_mail.apps.handlers.email.reply import (
 )
 
 
-# ---- Fixtures ------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
     with patch("aipass.ai_mail.apps.handlers.email.reply.json_handler") as mock_jh:
         mock_jh.log_operation.return_value = True
         yield mock_jh
-
-
-# ---- get_email_by_id tests -----------------------------------
 
 
 def test_get_email_by_id_found(tmp_path):
@@ -82,9 +76,7 @@ def test_get_email_by_id_missing_file(tmp_path):
 def test_get_email_by_id_corrupt_json(tmp_path):
     """An inbox that cannot be parsed raises; it is not "message not found".
 
-    Before leg 10 this answered None, the same answer as an id that is not in a
-    readable inbox, so reply told the user "Message not found" about a broken
-    inbox. handle_reply turns the raise into its error line (ai_mail, leg 10).
+    handle_reply turns the raise into its error line instead of "Message not found".
     """
     inbox_file = tmp_path / "inbox.json"
     inbox_file.write_text("{broken json!!!", encoding="utf-8")
@@ -113,9 +105,6 @@ def test_get_email_by_id_no_messages_key(tmp_path):
     result = get_email_by_id(inbox_file, "abc123")
 
     assert result is None
-
-
-# ---- send_reply tests ----------------------------------------
 
 
 def _make_original_email(
@@ -168,7 +157,6 @@ def test_send_reply_happy_path(tmp_path):
     assert reply_id is not None
     assert "Reply sent" in message
 
-    # Verify sent file was created
     sent_folder = from_branch_path / ".ai_mail.local" / "sent"
     assert sent_folder.exists()
     sent_files = list(sent_folder.glob("*.json"))
@@ -322,19 +310,8 @@ def test_send_reply_multiline_body_preserved(tmp_path):
     assert sent_data["message"] == multiline_body
 
 
-# ---- Cross-project reply continuation -------------------------
-#
-# Two gaps found live after the wall-3 fix (devpulse, 2026-08-07):
-#   GAP 1 outgoing replies carried no reply_path, so a cross-project conversation
-#          died after exactly one round — the external citizen could reach us, we
-#          could not reach back.
-#   GAP 2 _validate_reply_path required a literal AIPASS_REGISTRY.json in the
-#          target's ancestors, which no external project has. The validator
-#          rejected precisely the deliveries it exists to permit.
-#
-# These fixtures deliberately name their registry MYPROJ_REGISTRY.json. Every
-# earlier suite in this bug class stayed green because its fixtures used the
-# hardcoded name and so shared the code's assumption.
+# Cross-project replies: outgoing replies must carry reply_path (GAP 1), and the validator must
+# accept any *_REGISTRY.json (GAP 2). Fixtures use MYPROJ_REGISTRY.json so they cannot share a hardcoded name.
 
 _PATCH_NOTIFY = "aipass.ai_mail.apps.handlers.email.delivery._emit_notification_event"
 
@@ -351,14 +328,8 @@ def _make_external_project(root, project="myproj", branch="vera"):
     return ext_root / branch, inbox_file
 
 
-# GAP 2 -- validator accepts external registries
-
-
 def _reply_to_external(tmp_path, reply_path):
-    """send_reply from a tmp branch to an external @vera whose message carried `reply_path`.
-
-    The reply_path validator is reached through send_reply, not called (ai_mail, leg 14).
-    """
+    """send_reply from a tmp branch to an external @vera whose message carried `reply_path`."""
     branch_a = tmp_path / "branch_a"
     branch_a.mkdir(exist_ok=True)
     original = _make_original_email(sender="@vera")
@@ -410,9 +381,6 @@ def test_validate_reply_path_rejects_tree_with_no_registry(tmp_path):
     assert (stray / "inbox.json").read_text(encoding="utf-8") == "{}"
 
 
-# GAP 1 -- outgoing replies carry a return address
-
-
 def test_reply_carries_reply_path_to_own_inbox(tmp_path):
     """A reply built by send_reply points reply_path at the replying branch's inbox."""
     from_branch_path = tmp_path / "branch_a"
@@ -438,16 +406,10 @@ def test_reply_carries_reply_path_to_own_inbox(tmp_path):
     assert captured["reply_path"] == str(from_branch_path / ".ai_mail.local" / "inbox.json")
 
 
-# Full continuation: reply out -> lands externally -> carries a way back -> reply back in
-
-
 def test_cross_project_reply_round_trip(tmp_path):
     """A replies to an external citizen; the delivered reply carries a working return address.
 
-    Proves the whole verb rather than the layer: the reply must actually arrive in the
-    external inbox (GAP 2 -- the validator has to accept MYPROJ_REGISTRY.json), it must
-    carry reply_path back to A (GAP 1), and a further reply must deliver into A's own
-    inbox using only that stored path.
+    Proves the whole verb: delivery out (GAP 2), reply_path stamped (GAP 1), and a reply back via that path.
     """
     ext_branch, ext_inbox = _make_external_project(tmp_path)
 
@@ -475,7 +437,6 @@ def test_cross_project_reply_round_trip(tmp_path):
     delivered = json.loads(ext_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert delivered["from"] == "@branch_a"
     assert delivered["message"] == "Reply outbound"
-    # The return address A stamped on the way out.
     assert delivered["reply_path"] == str(a_inbox)
 
     # Leg 2: the external citizen replies to THAT message, resolving only via reply_path.
@@ -492,5 +453,4 @@ def test_cross_project_reply_round_trip(tmp_path):
     landed = json.loads(a_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert landed["from"] == "@vera"
     assert landed["message"] == "Reply back inbound"
-    # And the conversation can continue past this round too.
     assert landed["reply_path"] == str(ext_inbox)

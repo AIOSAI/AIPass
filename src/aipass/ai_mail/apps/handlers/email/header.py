@@ -3,27 +3,17 @@
 # Description: Email Header Handler
 # Version: 1.2.1
 # Created: 2026-02-04
-# Modified: 2026-08-31
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Header Handler
 
-Generates and prepends headers to outgoing emails.
-Critical dispatch header ensures agents see memory update reminder FIRST.
-Independent handler - no module dependencies.
-
-This string OPENS the module body, before the import. It sat after the import
-until 2026-08-31, where Python evaluates it, discards it, and leaves __doc__
-None — the file read as documented to every human and to nothing that reads
-__doc__ (help(), pydoc, @seedgo's old line-scan checker). Found by @seedgo's
-rewrite onto ast.get_docstring; the position is the whole point, so keep any
-new import BELOW this string.
+Keep every import BELOW this string: after an import it is not __doc__.
 """
 
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-# Header for dispatch emails - agents see this FIRST before the task
 DISPATCH_HEADER = """⚡ DISPATCH TASK - READ THIS FIRST ⚡
 
 BEFORE YOU REPLY, YOU MUST:
@@ -43,7 +33,6 @@ Your memories are your presence. Skip the update = you never existed.
 ---
 """
 
-# Header override when --no-memory-save is set (private branch outbound)
 NO_MEMORY_SAVE_HEADER = """⚡ DISPATCH TASK - READ THIS FIRST ⚡
 
 MEMORY UPDATE: OPTIONAL — This dispatch was sent with --no-memory-save. Do NOT log this task in
@@ -65,31 +54,14 @@ Unexplained changes are evidence: state what you found, attribute it to no one.
 
 
 def get_dispatch_header(no_memory_save: bool = False) -> str:
-    """
-    Get the dispatch email header.
-
-    Args:
-        no_memory_save: If True, return header with no-memory-save directive
-
-    Returns:
-        Dispatch header string for dispatch emails
-    """
+    """Get the dispatch email header."""
     if no_memory_save:
         return NO_MEMORY_SAVE_HEADER
     return DISPATCH_HEADER
 
 
 def prepend_dispatch_header(message: str, no_memory_save: bool = False) -> str:
-    """
-    Prepend dispatch header to email message.
-
-    Args:
-        message: Original email message body
-        no_memory_save: If True, use no-memory-save variant of dispatch header
-
-    Returns:
-        Message with dispatch header prepended
-    """
+    """Prepend dispatch header to email message."""
     json_handler.log_operation("prepend_dispatch_header", {"no_memory_save": no_memory_save})
     return get_dispatch_header(no_memory_save=no_memory_save) + message
 

@@ -3,37 +3,14 @@
 # Description: Tests for whole-sequence help-flag detection across the three CLI modules
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py's wants_help() and the three CLI modules it gates."""
 
-# seedgo ``help_flag_safety``, DPLAN-0291 rule E.
-#
-# All three modules gated help at ``args[0]`` only, so a flag one position later
-# was discarded and the command ran instead. For a messaging branch that is not
-# cosmetic: ``dispatch @target "Subject" "Body" --help`` reached
-# ``_orchestrate_dispatch_send`` and would have *sent the mail and woken the
-# branch* it was asked to describe. Same class as @drone's ``rm`` shape, where a
-# trailing ``--help`` deleted the real target first.
-#
-# A question must never be executed as an instruction. Every test here mocks the
-# send and wake targets and asserts two things together — help was printed **and**
-# the side-effecting target was never called. Asserting only the first would pass
-# on code that explains itself after sending the mail.
-#
-# Two token classes, deliberately different:
-#
-# ``--help`` / ``-h``
-#     Unambiguous anywhere in the sequence, matched exactly. Exact match is what
-#     keeps real mail safe: a body reading "run --help for usage" arrives as one
-#     quoted argument and is not that token.
-#
-# ``help``
-#     A legitimate operand — a subject line can be the word "help", and for this
-#     branch that is a plausible message, not a typo. It therefore only reads as
-#     a request in the subcommand slot, position 0. None of the three modules
-#     owns a genuine ``help`` verb, so position 0 is free.
+# seedgo ``help_flag_safety``: a question must never run as an instruction. Each test asserts help
+# printed AND the side-effecting target never ran. ``--help``/``-h`` count anywhere (exact match);
+# bare ``help`` only at position 0, since a subject can legitimately be the word "help".
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — print_help()'s rendered wording; patched here, rendered in tests/test_cli_routing.py
@@ -44,11 +21,6 @@ from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.modules import dispatch as dispatch_module
 from aipass.ai_mail.apps.modules import email as email_module
 from aipass.ai_mail.apps.modules import email_send as email_send_module
-
-
-# =============================================================================
-# THE DETECTOR
-# =============================================================================
 
 
 class TestWantsHelp:
@@ -84,11 +56,6 @@ class TestWantsHelp:
     def test_a_body_that_is_exactly_the_flag_explains_rather_than_sends(self):
         """Nonsense input, and explain-over-execute is the ruling."""
         assert wants_help(["@devpulse", "Subject", "--help"]) is True
-
-
-# =============================================================================
-# DISPATCH — THE DANGEROUS ONE (sends mail AND wakes a branch)
-# =============================================================================
 
 
 class TestDispatchHelpSafety:
@@ -151,11 +118,6 @@ class TestDispatchHelpSafety:
         help_out.assert_not_called()
 
 
-# =============================================================================
-# EMAIL MODULE
-# =============================================================================
-
-
 class TestEmailHelpSafety:
     """`email`/`send` reach a real delivery; the other verbs mutate the inbox."""
 
@@ -206,11 +168,6 @@ class TestEmailHelpSafety:
     def test_unknown_command_still_declines(self):
         """The guard must not turn a foreign command into a help print."""
         assert email_module.handle_command("nonsense", ["--help"]) is False
-
-
-# =============================================================================
-# EMAIL_SEND MODULE
-# =============================================================================
 
 
 class TestEmailSendHelpSafety:

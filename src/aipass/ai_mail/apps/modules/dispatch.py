@@ -3,14 +3,13 @@
 # Description: Dispatch Module
 # Version: 3.3.1
 # Created: 2026-02-02
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dispatch Module
 
-Orchestrates dispatch commands: status tracking and daemon management.
-Delegates all business logic to handlers.
+Orchestrates dispatch commands; all business logic lives in handlers.
 """
 
 import os
@@ -74,28 +73,14 @@ DAEMON:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle dispatch commands.
+    """Handle dispatch commands.
 
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise.
-
-        "Handled" means recognised and run — not "it worked". A failed send or
-        wake reports itself through error(), which sets the process failure flag
-        main() maps to exit 2. Returning False for a failure sent the router on
-        to the next module, which re-ran the send and then printed
-        "Unknown command: dispatch" over a dispatch it had just attempted.
+    True means recognised and run, not "it worked": failures go through error(). False on failure re-runs the send.
     """
     if command != "dispatch":
         return False
 
-    # Whole-sequence, before anything routes: a trailing --help on a dispatch
-    # would otherwise land in the subcommand slot and SEND the mail and WAKE
-    # the branch it was asked to describe.
+    # Whole-sequence, before routing: a trailing --help must never send and wake.
     if wants_help(args):
         print_help()
         return True
@@ -108,10 +93,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     json_handler.log_operation("dispatch_command", {"subcommand": subcommand})
 
-    # A verb table rather than an if/elif chain. Adding `register` made the chain
-    # deep enough to trip the nesting limit; a table stays flat however many
-    # verbs land, and the address forms below stay separate because they match on
-    # a PREFIX rather than on the whole word.
+    # Address forms below stay out of the table: they match on a prefix, not the whole word.
     verbs = {
         "status": lambda: _orchestrate_status(),
         "register": lambda: _orchestrate_register(),
@@ -132,13 +114,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 
 def _orchestrate_register() -> bool:
-    """Show what the register says is still outstanding, and what is overdue.
-
-    The reader door for the owner's rule 1. Crash detection is supposed to be
-    "visible to any reader" with nothing running to discover it — this is a
-    reader, and it proves the claim rather than leaving it as an assertion in
-    a docstring. Reading the register costs one file read and no process.
-    """
+    """Show what the register says is still outstanding, and what is overdue."""
     from aipass.ai_mail.apps.handlers.dispatch import register
 
     entries = register.outstanding()
@@ -166,10 +142,7 @@ def _orchestrate_register() -> bool:
             f"the monitor for it is not running.[/yellow]"
         )
 
-    # warning(), not error(): this is a READER. error() would set the process
-    # failure flag and make `dispatch register` exit non-zero merely for
-    # reporting what it found, which breaks every caller that reads it to decide
-    # something. warning() carries the same severity to stderr without the flag.
+    # warning(), not error(): a reader must not exit non-zero for reporting what it found.
     dead = sum(1 for e in entries if e.get("monitor_alive") is False)
     if dead:
         warning(f"{dead} whose monitor process is GONE — visible now rather than at expected-by.")
@@ -179,10 +152,7 @@ def _orchestrate_register() -> bool:
 def _monitor_phrase(entry: dict) -> str:
     """How this row's monitor reads to a human, including when it cannot be told.
 
-    Three answers, printed as three phrases. "unknown" is not a hedge here: it
-    is every row written before the pid was recorded, and the systemd-scope
-    spawn path which never learns one. Printing those as "dead" would show a
-    screen full of deaths for dispatches that merely predate the field.
+    "unknown" covers rows that predate the pid field and systemd-scope spawns; printing them as dead would be false.
     """
     alive = entry.get("monitor_alive")
     if alive is True:
@@ -256,7 +226,6 @@ def _orchestrate_wake(args: List[str]) -> bool:
         console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
 
-    # Parse --fresh, --sender, --model flags
     use_fresh = "--fresh" in args
     use_sender = "@devpulse"
     use_model = None
@@ -293,8 +262,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
         )
         return True
 
-    # --sender is a CLI string and reaches wake_branch's privilege-bearing
-    # `sender` param, exactly like --from does on the dispatch-send path.
+    # --sender is a CLI claim that reaches wake_branch's privilege-bearing `sender`, like --from.
     from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
 
     refusal = sender_claim_refusal(use_sender)
@@ -302,20 +270,8 @@ def _orchestrate_wake(args: List[str]) -> bool:
         error(f"Wake refused: {refusal}")
         return True
 
-    # Admin lane, same 5-leg grant the send+wake verb runs. It was missing here,
-    # so the two verbs disagreed from ONE seat: `dispatch @vera "..." "..."` from
-    # the verified admin resolved, took the lock and spawned, while
-    # `dispatch wake @vera` answered "manager — wake skipped, caller must mail"
-    # (@devpulse, 2026-09-02). The manager gate was never the difference — this
-    # lane simply never asked whether the caller held the grant, so wake_branch
-    # received admin=False by default and took the ordinary refusal. The owner's
-    # ruling 2026-09-02 00:23 is that the admin seat dispatches any agent in any
-    # directory; a verb that drops the grant on the floor cannot honour it.
-    #
-    # Verified HERE rather than inside wake_branch for the same reason the send
-    # path states: this is where the caller env still lives, and wake_branch only
-    # ever receives the verdict. A verifier that raises must not take the wake
-    # down with it — no grant, the wake proceeds exactly as it did before.
+    # Admin lane: the same 5-leg grant as send+wake, verified here where the caller env lives.
+    # A raising verifier means no grant; the wake still proceeds.
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     is_admin = False
@@ -342,12 +298,10 @@ def _orchestrate_wake(args: List[str]) -> bool:
         admin=is_admin,
     )
 
-    # Print step-by-step status
     console.print(dispatch_status.format())
 
     if not success:
-        # The status block shows which step failed but never marks the command
-        # failed, so a dead wake exited 0. Say it once, out loud.
+        # The status block never marks the command failed; without this a dead wake exits 0.
         error(f"Wake failed for {branch_email} — see the step status above")
 
     return True
@@ -355,7 +309,6 @@ def _orchestrate_wake(args: List[str]) -> bool:
 
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
-    # Parse flags
     use_fresh = False
     no_memory_save = False
     from_branch = None
@@ -393,9 +346,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     subject = filtered[1]
     body = filtered[2]
 
-    # --from is an unauthenticated string. It may author the mail, but it must
-    # not buy a wake lane: refused BEFORE the send, so a spoof attempt leaves
-    # no delivered dispatch email behind claiming to be from someone it isn't.
+    # --from may author the mail but not buy a wake lane; refused BEFORE the send so a spoof delivers nothing.
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     refusal = verified_caller.sender_claim_refusal(from_branch)
@@ -403,12 +354,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         error(f"Dispatch to {target} refused: {refusal}")
         return True
 
-    # Admin lane (FPLAN-0401): the 5-leg grant check runs HERE because this is
-    # where the caller env still lives — wake_branch only ever receives the
-    # verdict. The rail pre-check is noise control, not security: only the
-    # grant holder can pass leg 1 anyway, so anyone else skips the file reads
-    # and the lane-dark report they could do nothing about. A verifier that
-    # raises must not take the mail down with it — no grant, dispatch proceeds.
+    # Admin lane: verified here where the caller env lives. The rail pre-check is noise control, not security.
     is_admin = False
     if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
         try:
@@ -422,12 +368,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
 
-    # --- Step 1: Send dispatch email ---
-    # No "Sending..." announcement before the fact. Progress goes to stdout and
-    # failures to stderr, and drone captures each stream whole and replays
-    # stdout first — so a pre-send progress line always surfaced BELOW the
-    # refusal it preceded, reading as "it failed, and then it sent". The send is
-    # sub-second: announce the outcome, not the intent.
+    # No pre-send progress line: drone replays stdout before stderr, so it would print after the refusal.
 
     from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info, send_to_single
     from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
@@ -490,13 +431,11 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         error(f"Dispatch to {target} not sent: {e}")
         return True
 
-    # --- Step 2: Wake the branch ---
     console.print(f"\nWaking {target}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
-    # The wake is attributed to the VERIFIED caller, not to the mail's author:
-    # --from moves who the email is from, never who the wake came from.
+    # The wake is attributed to the VERIFIED caller; --from never moves who the wake came from.
     dispatch_status, wake_ok = wake_branch(
         target,
         fresh=use_fresh,
@@ -519,16 +458,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 def _announce_wake_back(target: str, sender: str) -> None:
     """Print what will ACTUALLY happen when `target` finishes.
 
-    Managers are never woken — the blocklist is deliberate and stays. Telling a
-    manager "you will be woken" was a promise the lane could not keep, and the
-    manager then heard nothing at all: three live cases on 2026-08-21 alone
-    (@devpulse dispatching @ai_mail, @drone, then @ai_mail again, 19:26-22:05,
-    each logged skipped_manager). The wake-back now mails them,
-    so the promise says mail.
-
-    Args:
-        target: The dispatched branch.
-        sender: The address that will receive the wake-back.
+    Managers are never woken (deliberate blocklist); the wake-back mails them, so the promise must say mail.
     """
     from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager
 

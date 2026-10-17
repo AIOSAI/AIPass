@@ -3,12 +3,10 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model and marking."""
-
-# Split on 2026-10-08: the helpers and the manager lanes are their own files.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
@@ -45,7 +43,6 @@ class TestWakeBranchSpawnEnv:
 
     def test_spawn_env_includes_local_bin(self, tmp_path, monkeypatch):
         """spawn_env PATH includes ~/.local/bin even when not in os.environ PATH."""
-        # Set up a minimal registry with one branch
         branch_path = tmp_path / "src" / "aipass" / "testbranch"
         branch_path.mkdir(parents=True)
         (branch_path / ".ai_mail.local").mkdir()
@@ -64,7 +61,6 @@ class TestWakeBranchSpawnEnv:
         monkeypatch.setattr(wake_mod, "MONITOR_SCRIPT", tmp_path / "dispatch_monitor.py")
         (tmp_path / "dispatch_monitor.py").touch()
 
-        # Strip ~/.local/bin from os.environ to simulate restricted PATH
         from pathlib import Path as _Path
 
         local_bin = str(_Path.home() / ".local" / "bin")
@@ -83,8 +79,7 @@ class TestWakeBranchSpawnEnv:
             return FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        # The liveness probe and the occupancy scan stay walls in front of host pids and
-        # live sessions; each is asserted on what it was asked (ai_mail, leg 7)
+        # The liveness probe and occupancy scan stay walls in front of host pids and live sessions.
         pid_alive = MagicMock(return_value=True)
         monkeypatch.setattr(wake_mod, "check_pid_alive", pid_alive)
         monkeypatch.setattr(wake_mod, "clean_zombies", lambda: 0)
@@ -93,12 +88,11 @@ class TestWakeBranchSpawnEnv:
         monkeypatch.setattr(wake_mod, "acquire_lock", lambda p, pid: (True, "ok"))
         sleep = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
-        # send_notification appends to the live feed, so it stays patched and is asserted (ai_mail, leg 6)
+        # send_notification appends to the live feed, so it stays patched.
         notify = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
 
-        # The test owns the binary it needs: a CI runner has no claude anywhere, and a
-        # host lookup made this pass only where ~/.local/bin/claude exists (PR #774).
+        # The test owns the binary: a CI runner has no claude anywhere.
         claude_bin = tmp_path / "bin" / "claude"
         claude_bin.parent.mkdir()
         claude_bin.touch()
@@ -120,13 +114,8 @@ class TestWakeBranchSpawnEnv:
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
 
 
-# --- wake_branch integration tests -------------------------------------
-
-
 class TestWakeBranch:
     """Tests for wake_branch() — all remaining code paths."""
-
-    # --- early exits ---
 
     def test_auto_pause_file_blocks(self, tmp_path, monkeypatch):
         """auto=True with PAUSE_FILE existing returns failure."""
@@ -146,13 +135,7 @@ class TestWakeBranch:
         assert any(s[0] == "fail" and "resolve" in s[1] for s in status.steps)
 
     def test_an_unreadable_registry_refuses_rather_than_waking_an_external_namesake(self, tmp_path, monkeypatch):
-        """A scheduled wake never lands on another root's citizen because the AIPass registry cannot be read.
-
-        Before leg 12 an unreadable AIPASS_REGISTRY.json read as no registry, and
-        resolution fell through to the external tier, which served a declared
-        root's @testbranch, so the wake spawned the namesake. Now the resolve step
-        fails and names the registry (ai_mail, leg 12).
-        """
+        """A scheduled wake never lands on another root's citizen because the AIPass registry cannot be read."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
         namesake = tmp_path / "Elsewhere" / "testbranch"
@@ -174,14 +157,7 @@ class TestWakeBranch:
 
     @pytest.mark.parametrize("where", ["caller_project", "hosted_project"])
     def test_an_unreadable_project_registry_refuses_rather_than_waking_a_namesake(self, tmp_path, monkeypatch, where):
-        """A project registry that cannot be read stops resolution before the external tier.
-
-        @vera lives in Lab, and Lab's registry is not JSON. Before leg 12 step 2
-        (the caller's project) and step 3 (the admin sweep of projects/) logged
-        the failure and went on, and the external tier served another root's
-        @vera. Now the resolve step fails and names Lab's registry (ai_mail,
-        leg 12).
-        """
+        """A project registry that cannot be read stops resolution before the external tier."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         lab = tmp_path / "projects" / "lab"
         (lab / "vera").mkdir(parents=True)
@@ -206,8 +182,6 @@ class TestWakeBranch:
         assert resolve[2].startswith("@vera not resolved: LAB_REGISTRY.json could not be read")
         assert calls["popen"] == [] and calls["tmux"] == []
 
-    # --- manager check ---
-
     def test_manager_target_skips_wake(self, tmp_path, monkeypatch):
         """Target with citizen_class=manager returns True (mail only, no wake)."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
@@ -222,13 +196,7 @@ class TestWakeBranch:
         assert any(s[1] == "manager" for s in status.steps)
 
     def test_unreadable_passport_fails_closed_as_a_manager(self, tmp_path, monkeypatch):
-        """A passport that exists but cannot be read never lets the target be woken.
-
-        Its class is unknown, and the target may be a manager; before leg 11 the
-        gate fell through and spawned it. Now the default lane treats it as a
-        manager: wake skipped, the caller mails. Its proof is the mutant that
-        falls through again (ai_mail, leg 11).
-        """
+        """A passport that exists but cannot be read never lets the target be woken (treated as a manager)."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         trinity = branch_path / ".trinity"
         trinity.mkdir(parents=True, exist_ok=True)
@@ -245,9 +213,7 @@ class TestWakeBranch:
         assert calls["popen"] == [] and calls["tmux"] == []
 
     def test_manager_daemon_scheduled_wake_spawns_interactive(self, tmp_path, monkeypatch):
-        """Manager + sender=@daemon bypasses the gate and spawns an interactive
-        tmux session — managers are never headless. Self-authored
-        .daemon/schedule.json = consent; the daemon cannot write other branches' files."""
+        """Manager + sender=@daemon bypasses the gate and spawns an interactive tmux session, never headless."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         trinity = branch_path / ".trinity"
         trinity.mkdir(parents=True, exist_ok=True)
@@ -271,16 +237,13 @@ class TestWakeBranch:
         monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
         status, ok = wake_branch("@testbranch", custom_message="continue the work", sender="@daemon")
         assert ok is True
-        # Gate records the bypass as an ok step (not the info skip)...
         assert any(s[0] == "ok" and s[1] == "manager" for s in status.steps)
-        # ...and the spawn is an interactive tmux session, not the headless monitor.
         assert any(s[0] == "ok" and s[1] == "spawn" and "tmux" in s[2] for s in status.steps)
         assert [c[:2] for c in tmux_calls] == [
             ["tmux", "new-session"],
             ["tmux", "set-option"],
             ["tmux", "send-keys"],
         ]
-        # Prompt travels via file (quoting-proof, debuggable).
         prompt_file = branch_path / ".daemon" / "last_wake_prompt.txt"
         assert prompt_file.read_text(encoding="utf-8") == "continue the work"
 
@@ -335,8 +298,6 @@ class TestWakeBranch:
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )
 
-    # --- zombie check ---
-
     def test_zombie_check_warns_but_continues(self, tmp_path, monkeypatch):
         """Zombie detected adds warning but dispatch continues."""
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -350,8 +311,6 @@ class TestWakeBranch:
         notify.assert_called_once_with(
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )
-
-    # --- lock exists ---
 
     def test_lock_exists_auto_true_fails(self, tmp_path, monkeypatch):
         """Lock active + auto=True returns failure."""
@@ -377,8 +336,6 @@ class TestWakeBranch:
         assert ok is True
         assert any(s[0] == "info" and "delivery" in s[1] for s in status.steps)
 
-    # --- branch occupied ---
-
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
@@ -388,8 +345,6 @@ class TestWakeBranch:
         occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert any(s[0] == "fail" and "blocked" in s[1] for s in status.steps)
-
-    # --- fresh vs resume ---
 
     def test_fresh_true_no_continue_flag(self, tmp_path, monkeypatch):
         """fresh=True -> claude_cmd does NOT include '-c' flag."""
@@ -407,10 +362,8 @@ class TestWakeBranch:
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", fresh=True)
         assert ok is True
-        # The claude subcommand is embedded after "--" in monitor_cmd
         assert captured_cmds
         cmd = captured_cmds[0]
-        # Everything after "--" is the claude command
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
         assert "-c" not in claude_part
@@ -443,8 +396,6 @@ class TestWakeBranch:
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )
 
-    # --- custom message ---
-
     def test_custom_message_sets_prompt(self, tmp_path, monkeypatch):
         """custom_message uses 'Hi. <message>' instead of DEFAULT_PROMPT."""
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -465,18 +416,15 @@ class TestWakeBranch:
         cmd = captured_cmds[0]
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
-        # Find the prompt argument (follows -p)
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert prompt.startswith("Hi. Run the audit")
-        # The custom message, not the default, is the feed body
         notify.assert_called_once_with("@testbranch waking", "Run the audit", source="testbranch", kind="wake")
 
     def test_prompt_does_not_ask_agent_to_delete_lock(self, tmp_path, monkeypatch):
         """Monitor owns lock cleanup — the prompt must not also tell the agent to delete it.
 
-        A dual-delete race let a second monitor spawn onto a lock the first
-        agent had already removed mid-run (lock-theft, observed 2026-07-31).
+        A dual-delete race let a second monitor spawn onto a lock removed mid-run.
         """
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -504,11 +452,7 @@ class TestWakeBranch:
         )
 
     def test_prompt_instructs_synchronous_subagents(self, tmp_path, monkeypatch):
-        """Prompt tells the agent to run sub-agents in the foreground, not background.
-
-        Headless print-mode kills orphaned background tasks after 600s with
-        no reply sent — the agent needs to know not to background work.
-        """
+        """Prompt tells the agent to run sub-agents in the foreground (headless mode kills orphaned background tasks)."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
 
@@ -534,12 +478,7 @@ class TestWakeBranch:
         )
 
     def test_prompt_puts_the_spec_before_the_build(self, tmp_path, monkeypatch):
-        """Prompt sends the builder to the standards and the test template first, the checklist last.
-
-        Measured on 66 worker transcripts: 61 ran the checklist after writing,
-        0 read the standards page before (DPLAN-0354). The spec line comes
-        ahead of every other instruction so it is read first.
-        """
+        """Prompt sends the builder to the standards and the test template first, the checklist last."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
 
@@ -571,8 +510,6 @@ class TestWakeBranch:
         assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
         assert prompt.find("checklist last") > spec_at
 
-    # --- spawn errors ---
-
     def test_spawn_file_not_found(self, tmp_path, monkeypatch):
         """FileNotFoundError during Popen -> fail step."""
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -599,17 +536,13 @@ class TestWakeBranch:
         assert ok is False
         assert any(s[0] == "fail" and "RuntimeError" in s[2] for s in status.steps)
 
-    # --- pre-spawn: lock acquisition failure (DPLAN-0155) ---
-
     def test_lock_acquisition_fails_before_spawn(self, tmp_path, monkeypatch):
-        """Lock fails before spawn -> fail step, returns False (DPLAN-0155 lock-before-spawn)."""
+        """Lock fails before spawn -> fail step, returns False (lock-before-spawn)."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch, acquire_lock=lambda p, pid: (False, "Lock file already exists"))
         status, ok = wake_branch("@testbranch")
         assert ok is False
         assert any(s[0] == "fail" and "lock-acquire" in s[1] for s in status.steps)
-
-    # --- alive check fails ---
 
     def test_alive_check_fails_cleans_up_lock(self, tmp_path, monkeypatch):
         """Agent dies immediately -> cleans up lock, returns False."""
@@ -617,7 +550,6 @@ class TestWakeBranch:
         pid_alive = MagicMock(return_value=False)
         _patch_wake_deps(monkeypatch, check_pid_alive=pid_alive)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        # Create the lock file so we can verify it gets cleaned up
         lock_dir = branch_path / ".ai_mail.local"
         lock_dir.mkdir(parents=True, exist_ok=True)
         lock_file = lock_dir / ".dispatch.lock"
@@ -626,10 +558,7 @@ class TestWakeBranch:
         pid_alive.assert_called_once_with(_FakeProc().pid)
         assert ok is False
         assert any(s[0] == "fail" and "alive" in s[1] for s in status.steps)
-        # Lock file should be cleaned up
         assert not lock_file.exists()
-
-    # --- successful full path ---
 
     def test_successful_full_path(self, tmp_path, monkeypatch):
         """All steps OK -> returns (status, True) with all expected steps."""
@@ -653,8 +582,6 @@ class TestWakeBranch:
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )
 
-    # --- notification failure doesn't break success ---
-
     def test_notification_failure_does_not_break_success(self, tmp_path, monkeypatch):
         """Exception in send_notification is caught — overall success unchanged."""
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -673,17 +600,10 @@ class TestWakeBranch:
         assert ok is True
 
 
-# --- session pointer wiring --------------------------------------------
-
-
 class TestWakeSessionPointer:
     """Which session a dispatch lands in comes from a written pointer, not a mtime.
 
-    `-c` continues the most recently MODIFIED transcript in the branch dir, so
-    a --fresh run or a human opening a terminal there re-points the next wake
-    into somebody else's thread. These tests pin the three routes wake.py can
-    take — mint, resume, and the unchanged -c fallback — and that none of them
-    can refuse to spawn.
+    `-c` follows the newest transcript, so any other session there re-points the next wake.
     """
 
     @pytest.fixture
@@ -695,12 +615,7 @@ class TestWakeSessionPointer:
         return home
 
     def _plant_pointer(self, branch_path, fake_home, session_id):
-        """Write a valid pointer AND the transcript it names.
-
-        Both are required: resolve_resume_target refuses an id with no
-        transcript behind it, because --resume on a missing transcript fails
-        the dispatch outright.
-        """
+        """Write a valid pointer AND the transcript it names (resume refuses an id with no transcript)."""
         wake_mod.session_pointer.write_pointer(branch_path, session_id, "test")
         transcript = wake_mod.session_pointer.transcript_file(branch_path, session_id)
         assert transcript is not None, "fake_home did not take — no home, no transcript path"
@@ -726,7 +641,6 @@ class TestWakeSessionPointer:
         assert pointer["set_by"] == "wake-fresh"
         session_step = status.find_step("session")
         assert session_step is not None and session_step[0] == "ok"
-        # Humans read a prefix; the full id goes to the log.
         assert spawned_id[:8] in session_step[2]
 
     def test_non_fresh_with_a_valid_pointer_resumes_and_drops_c(self, tmp_path, monkeypatch, fake_home):
@@ -790,7 +704,6 @@ class TestWakeSessionPointer:
         assert ok is True
         assert len(calls["popen"]) == 1
         args = _claude_args(calls["popen"][0]["cmd"])
-        # The id still goes to the CLI — only the record of it was lost.
         assert "--session-id" in args
         session_id = args[args.index("--session-id") + 1]
         write_pointer.assert_called_once_with(branch_path, session_id, "wake-fresh")
@@ -817,26 +730,12 @@ class TestWakeSessionPointer:
             assert "--max-turns" in args
 
 
-# --- wake-lane rulings, the owner 2026-09-08 ------------------------------
-#
-# THESE PINS WERE WRITTEN TO THE 2026-08-30 RULING AND ARE REWRITTEN IN PLACE.
-# That rule was "managers are fable thats it, only manager run fable", and this
-# class pinned it from both sides. It is superseded (compass #323 → #350): only
-# @devpulse runs Fable, granted by NAME, and citizen_class decides nothing about
-# the model any more. Every assertion below changed direction — a class-based
-# pin cannot express "this one manager and no other", which is the whole reason
-# the ruling moved after @vera, a manager-class project owner, woke on Fable
-# through the scheduled lane on 2026-09-08.
+# Fable is granted by NAME (fable_allowed), never by citizen_class.
 
 
 @pytest.fixture
 def granted(monkeypatch, tmp_path):
-    """Point the grant at a written config, and hand back a writer for it.
-
-    The real CONFIG_FILE is untracked and may hold anything on the machine
-    running this suite, so a test that read it would be measuring the owner's
-    laptop. Every test here writes the grant it means to test.
-    """
+    """Point the grant at a written config, and hand back a writer for it (the real CONFIG_FILE is host state)."""
 
     def _write(entries):
         config = tmp_path / "safety_config.json"
@@ -850,11 +749,7 @@ def granted(monkeypatch, tmp_path):
 class TestWakeModelPolicy:
     """resolve_wake_model() — Fable is granted by name, to @devpulse alone.
 
-    Two halves tested separately because they fail in opposite directions: the
-    grant half strands @devpulse on opus if it is wrong, the refusal half lets
-    Fable leak to everyone. A suite that only pinned the first would pass a
-    policy that gave Fable to everybody, which is the policy that was just
-    superseded.
+    Grant and refusal are pinned separately: they fail in opposite directions.
     """
 
     def test_a_granted_seat_may_ask_for_fable(self, granted):
@@ -863,8 +758,7 @@ class TestWakeModelPolicy:
         assert wake_mod.resolve_wake_model("@devpulse", "fable").model == "fable"
 
     def test_a_seat_without_the_grant_is_refused_and_told_why(self, granted):
-        """The refusal is RETURNED, not only logged. The superseded version only
-        logged it, and a log line is not read by whoever typed the command."""
+        """The refusal is RETURNED, not only logged: a log line is not read by whoever typed the command."""
         granted(["@devpulse"])
 
         decision = wake_mod.resolve_wake_model("@vera", "fable")
@@ -875,37 +769,29 @@ class TestWakeModelPolicy:
         assert "2026-09-08" in decision.refusal, decision.refusal
 
     def test_manager_class_no_longer_buys_fable(self, granted):
-        """The superseded rule, pinned as superseded. This is the exact call the
-        08-30 version answered with "fable" for any manager; @vera is
-        manager-class and holds no grant, so it is opus now.
+        """A manager-class seat without the grant gets the default model.
 
-        The refused "fable" request still resolves to a model: refusing the WAKE
-        would punish the target for its schedule's model field. The wake
-        happens; the model does not."""
+        A refused "fable" request still wakes: the model is refused, not the wake."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@vera", None).model == DEFAULT_MODEL
         assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
 
     def test_nothing_requested_is_the_default_even_for_a_granted_seat(self, granted):
-        """The grant is permission to ASK for Fable, not a standing assignment
-        to it. The owner: everyone runs opus by default when dispatched."""
+        """The grant is permission to ASK for Fable, not a standing assignment to it."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@devpulse", None).model == DEFAULT_MODEL
 
     def test_a_lighter_request_is_honoured_unchanged(self, granted):
-        """The ruling names who may run Fable. It does not touch anything else,
-        and the 08-30 version overrode a manager's sonnet request outright."""
+        """The grant names who may run Fable; it never overrides a lighter request."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@devpulse", "sonnet").model == "sonnet"
         assert wake_mod.resolve_wake_model("@ai_mail", "haiku").model == "haiku"
 
     def test_the_full_fable_id_is_caught_too(self, granted):
-        """The spelling that walks past an equality check. `--model` takes both
-        `fable` and `claude-fable-5`, so a policy comparing to the bare alias
-        would hand an ungranted seat the exact model the ruling forbids."""
+        """`--model` takes both `fable` and `claude-fable-5`; the bare-alias compare would miss the full id."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@vera", "claude-fable-5").model == DEFAULT_MODEL
@@ -916,9 +802,7 @@ class TestWakeModelPolicy:
         assert wake_mod.resolve_wake_model("@vera", "FABLE").model == DEFAULT_MODEL
 
     def test_the_address_spelling_cannot_escape_the_grant(self, granted):
-        """Both directions of the same normalisation. A grant keyed on an
-        address is worthless if typing it differently changes the answer —
-        dropping the @ or shouting it must not promote OR demote a seat."""
+        """Dropping the @ or changing case must not promote OR demote a seat."""
         granted(["devpulse"])
 
         assert wake_mod.resolve_wake_model("@DevPulse", "fable").model == "fable"
@@ -938,14 +822,7 @@ def _tmux_line(calls, verb):
 
 
 class TestUnattendedWakesBypassPermissions:
-    """Ruling 1, the owner 2026-08-30: "always bypass permissions always, claude
-    alone will nvr work."
-
-    @vera's first external wake launched as a bare `claude`, sat in default
-    permission mode, and had Bash DENIED mid-playbook with nobody present to
-    approve it. The headless lane has carried the flag for months; the
-    interactive manager lane was the one still spawning plain claude.
-    """
+    """Every unattended lane carries bypassPermissions: nobody is present to approve a prompt."""
 
     def test_interactive_manager_lane_carries_the_bypass_flag(self, tmp_path, monkeypatch):
         _make_scheduled_fixtures(tmp_path, monkeypatch)
@@ -958,15 +835,7 @@ class TestUnattendedWakesBypassPermissions:
         assert "--permission-mode bypassPermissions" in _tmux_line(calls, "send-keys")
 
     def test_interactive_manager_lane_names_its_model_never_a_bare_claude(self, tmp_path, monkeypatch):
-        """Naming nothing is how @vera reached Fable by accident — right answer,
-        no decision behind it. The lane states the model it means.
-
-        The claim is that a model is NAMED, not which one: this pinned the
-        literal "--model fable" until 2026-09-08, so it was really re-asserting
-        the manager rule and it went red the moment that rule was superseded.
-        A manager with no request now resolves to the default, and the point of
-        this unit — no bare `claude` on this lane, ever — is unchanged.
-        """
+        """The lane states the model it means: no bare `claude` on this lane, ever."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -991,12 +860,9 @@ class TestUnattendedWakesBypassPermissions:
 
 
 class TestDaemonSessionMarking:
-    """Ruling 3, the owner 2026-08-30: a daemon-started session must be
-    recognizably daemon work, or a human kills it as a leftover.
+    """A daemon-started session must be recognizably daemon work, or a human kills it as a leftover.
 
-    He killed @vera's live session mid-run — `daemon-vera-192848` read as his
-    own stale tmux. Two markings, and only the first is guaranteed: tmux either
-    creates the session under the loud name or new-session already failed.
+    Only the session name is guaranteed; the set-option marker may fail.
     """
 
     def test_session_name_is_unmistakably_a_daemon_wake(self, tmp_path, monkeypatch):
@@ -1012,13 +878,9 @@ class TestDaemonSessionMarking:
         assert session.startswith(wake_mod.DAEMON_SESSION_PREFIX)
 
     def test_the_session_name_that_got_killed_cannot_come_back(self, tmp_path, monkeypatch):
-        """`daemon-vera-192848` is not a hypothesis — The owner read that exact
-        shape as his own leftover tmux and killed it mid-playbook.
+        """The `daemon-<branch>-...` shape read as a human's leftover tmux; the name must say a machine started it.
 
-        The pin above reads DAEMON_SESSION_PREFIX, so it passes for ANY value
-        the constant holds, including the one that already failed. This one
-        names the failed string instead, and asks the name to say out loud that
-        a machine started the session.
+        The pin above reads DAEMON_SESSION_PREFIX, so it passes for any value; this one names the failed string.
         """
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -1033,8 +895,7 @@ class TestDaemonSessionMarking:
         assert "AIPASS" in session, "the name must say a machine started this, not a person"
 
     def test_marking_lands_before_the_agent_starts(self, tmp_path, monkeypatch):
-        """A window is killable from the moment it exists. Marking after
-        send-keys leaves exactly the gap this closes."""
+        """A window is killable from the moment it exists, so marking precedes send-keys."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -1046,8 +907,7 @@ class TestDaemonSessionMarking:
         assert verbs == ["new-session", "set-option", "send-keys"]
 
     def test_the_marker_is_queryable_and_names_the_branch(self, tmp_path, monkeypatch):
-        """A user option any tool can read back, rather than string-matching a
-        session-name prefix."""
+        """A user option any tool can read back, rather than string-matching a session-name prefix."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -1062,9 +922,7 @@ class TestDaemonSessionMarking:
         assert payload["sender"] == "@daemon"
 
     def test_a_marking_failure_warns_and_still_wakes(self, tmp_path, monkeypatch):
-        """The session is already alive when the option is set. Refusing to
-        start the agent over a cosmetic label trades real work for a tag —
-        but the thin marking is said out loud, never swallowed."""
+        """A failed label warns but never cancels the wake: the session is already alive."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -1086,12 +944,9 @@ class TestDaemonSessionMarking:
         assert mark is not None and mark[0] == "warn"
 
     def test_the_interactive_lane_is_not_written_to_the_dispatch_register(self, tmp_path, monkeypatch):
-        """Deliberate, and the reason is the register's own contract:
-        open_dispatch() takes expected_seconds from the lane's timeout, and this
-        lane has no monitor and no timeout. Every entry would stay outstanding
-        forever and go overdue against an invented number — a crash detector
-        full of false alarms. Marking a window and tracking a promised dispatch
-        are two questions; only one of them has a monitor to close it."""
+        """Deliberate: this lane has no monitor and no timeout, so a register row could never close.
+
+        open_dispatch() needs expected_seconds; an invented one would only produce false overdue alarms."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
@@ -1106,14 +961,7 @@ class TestDaemonSessionMarking:
 
 
 class TestModelPolicyReachesBothSpawnLanes:
-    """The policy is decided once, above the fork. These pin that BOTH lanes
-    read that one decision — a rule enforced in only one lane is the shape the
-    fleet keeps paying for.
-
-    REWRITTEN 2026-09-08 for the grant. These pinned manager-class reaching
-    Fable down both lanes; the lanes are unchanged and the rule they carry is
-    not, so what each one asserts flipped while the structure stayed.
-    """
+    """The policy is decided once, above the fork; BOTH lanes must read that one decision."""
 
     def test_a_granted_seat_reaches_fable_down_the_tmux_lane(self, tmp_path, monkeypatch, granted):
         granted(["@testbranch"])
@@ -1127,8 +975,7 @@ class TestModelPolicyReachesBothSpawnLanes:
         assert "--model fable" in _tmux_line(calls, "send-keys")
 
     def test_a_granted_seat_reaches_fable_down_the_headless_lane_too(self, tmp_path, monkeypatch, granted):
-        """The scheduled lane never touches tmux, and the grant does not stop at
-        the tmux door — this is the lane @vera actually woke on."""
+        """The scheduled lane never touches tmux, and the grant does not stop at the tmux door."""
         granted(["@testbranch"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -1141,9 +988,7 @@ class TestModelPolicyReachesBothSpawnLanes:
         assert cmd[cmd.index("--model") + 1] == "fable"
 
     def test_an_ungranted_manager_spawns_on_the_default_down_the_tmux_lane(self, tmp_path, monkeypatch, granted):
-        """@vera's exact shape: manager-class, project owner, scheduled through
-        @daemon, asking for Fable. Under the 08-30 rule this line spawned Fable
-        without anyone requesting it."""
+        """Manager-class, scheduled through @daemon, asking for Fable, without the grant: default model."""
         granted(["@devpulse"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -1168,11 +1013,7 @@ class TestModelPolicyReachesBothSpawnLanes:
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
 
     def test_the_model_decision_is_a_named_step(self, tmp_path, monkeypatch, granted):
-        """Which model ran, readable from the status without grepping a log.
-
-        The class is deliberately NOT in this step any more: printing it beside
-        the model implied it decided the model, which is the superseded rule.
-        """
+        """Which model ran, readable from the status; the class is deliberately not printed (it decides nothing)."""
         granted(["@testbranch"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -1186,8 +1027,7 @@ class TestModelPolicyReachesBothSpawnLanes:
         assert step[2] == "fable"
 
     def test_a_refusal_is_a_warn_step_naming_target_model_and_ruling(self, tmp_path, monkeypatch, granted):
-        """Item 2 of the ruling: never silent. The caller sees this in the
-        dispatch output, not only in a log nobody has open."""
+        """Never silent: the caller sees the refusal in the dispatch output, not only in a log."""
         granted(["@devpulse"])
         _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="specialist")
         _patch_wake_deps(monkeypatch)
@@ -1215,9 +1055,7 @@ class TestModelPolicyReachesBothSpawnLanes:
         assert "may not run Fable" in status.format()
 
     def test_a_branch_with_no_passport_never_lands_on_fable(self, tmp_path, monkeypatch, granted):
-        """End to end with nothing to read. A missing passport used to be the
-        thing that kept a branch off Fable; now the grant is, and this pins that
-        an unreadable identity still cannot promote anyone."""
+        """End to end with nothing to read: a missing identity still cannot promote anyone."""
         granted(["@devpulse"])
         _make_wake_fixtures(tmp_path, monkeypatch)  # no .trinity/passport.json
         _patch_wake_deps(monkeypatch)

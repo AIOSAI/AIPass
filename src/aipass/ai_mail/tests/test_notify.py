@@ -3,14 +3,12 @@
 # Description: Tests for the notification feed writer
 # Version: 2.0.3
 # Created: 2026-04-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
 
-# Every assertion here reads the real file the writer produced on a tmp_path
-# feed. The only mocks are json_handler (audit log) and logger (output noise) --
-# never the write path itself.
+# Assertions read the real tmp_path feed; only json_handler and logger are mocked, never the write path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — the feed's JSON key names and path template in the module docstring
@@ -24,9 +22,6 @@ import pytest
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.notify as mod
-
-
-# --- Fixtures --------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -56,9 +51,6 @@ def _lines(path: Path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-# --- Contract: what a feed line contains ------------------------------
-
-
 def test_send_notification_writes_one_line_to_the_feed(feed):
     """A single call appends exactly one line to the feed file."""
     assert mod.send_notification("Title", "Body", "devpulse", "mail") is True
@@ -85,7 +77,6 @@ def test_ts_is_iso8601_with_timezone_offset(feed):
 
     parsed = datetime.fromisoformat(_lines(feed)[0]["ts"])
     assert parsed.tzinfo is not None
-    # The offset is this machine's local one, stamped at write time.
     assert parsed.utcoffset() == parsed.astimezone().utcoffset()
 
 
@@ -131,9 +122,6 @@ def test_multiline_body_stays_a_single_feed_line(feed):
     assert _lines(feed)[0]["body"] == "line one\nline two\nline three"
 
 
-# --- Append-only behaviour -------------------------------------------
-
-
 def test_appends_preserve_earlier_events_in_order(feed):
     """The feed is append-only: three calls leave three lines, oldest first."""
     for i in range(3):
@@ -176,9 +164,6 @@ def test_concurrent_appends_do_not_lose_or_corrupt_lines(feed):
     events = _lines(feed)
     assert len(events) == 160
     assert len({event["title"] for event in events}) == 160
-
-
-# --- Trim policy ------------------------------------------------------
 
 
 def test_feed_under_cap_is_never_trimmed(feed, monkeypatch):
@@ -229,11 +214,7 @@ def test_trim_leaves_no_temp_file_behind(feed, monkeypatch):
 
 
 def test_a_feed_exactly_at_cap_is_not_trimmed(feed, monkeypatch):
-    """A feed holding FEED_MAX_LINES lines is within cap: every line stays.
-
-    Through send_notification (ai_mail, leg 7): the trim's False went to no
-    caller, so the claim is what the feed holds at the boundary.
-    """
+    """A feed holding FEED_MAX_LINES lines is within cap: every line stays."""
     monkeypatch.setattr(mod, "FEED_MAX_LINES", 3)
     monkeypatch.setattr(mod, "FEED_KEEP_LINES", 1)
 
@@ -246,9 +227,7 @@ def test_a_feed_exactly_at_cap_is_not_trimmed(feed, monkeypatch):
 def test_an_undecodable_line_neither_fails_the_send_nor_stops_the_trim(feed, monkeypatch):
     """A byte that is not UTF-8 in the feed is a malformed line, not a crash.
 
-    The trim decoded the feed to count its lines, so one such byte made every
-    later send raise UnicodeDecodeError after its line was written (ai_mail,
-    leg 16). The trim counts bytes now; the bad line ages out like any other.
+    The trim counts bytes, not decoded lines, so the bad line ages out like any other.
     """
     monkeypatch.setattr(mod, "FEED_MAX_LINES", 3)
     monkeypatch.setattr(mod, "FEED_KEEP_LINES", 2)
@@ -262,7 +241,7 @@ def test_an_undecodable_line_neither_fails_the_send_nor_stops_the_trim(feed, mon
 
 
 def test_records_skip_an_undecodable_line_and_name_it(tmp_path, _capture_logger):
-    """jsonl_records skips a line that is not UTF-8 as it skips bad JSON (ai_mail, leg 16).
+    """jsonl_records skips a line that is not UTF-8 as it skips bad JSON.
 
     strict is about reading the file; one bad line never costs the records after it.
     """
@@ -279,9 +258,6 @@ def test_trim_reports_false_and_logs_when_feed_is_unreadable(tmp_path, _capture_
 
     assert mod._trim_jsonl(missing, mod.FEED_MAX_LINES, mod.FEED_KEEP_LINES) is False
     assert _capture_logger.error.called
-
-
-# --- Fail honest ------------------------------------------------------
 
 
 def test_write_failure_returns_false_and_logs_error(tmp_path, monkeypatch, _capture_logger):

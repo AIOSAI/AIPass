@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch daemon's dispatch lock, its own pid file and the occupied-branch check
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the dispatch lock, the daemon pid file and is_branch_occupied."""
@@ -115,7 +115,7 @@ def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
 
 
 def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
-    """A corrupt lock younger than the grace is a writer mid-write: held, not removed (ai_mail, leg 13)."""
+    """A corrupt lock younger than the grace is a writer mid-write: held, not removed."""
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
@@ -143,7 +143,7 @@ def test_check_lock_old_corrupt_json_removed(tmp_path):
 
 
 def test_check_lock_zombie_holder_is_dead(tmp_path, monkeypatch):
-    """A lock held by a linux zombie is reclaimed: the wake's liveness rule (ai_mail, leg 13)."""
+    """A lock held by a linux zombie is reclaimed: the wake's liveness rule."""
     monkeypatch.setattr(sys, "platform", "linux")
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
@@ -222,7 +222,7 @@ def _start_daemon(tmp_path, monkeypatch, pid_file, while_running=None):
 
     Returns what the pid file held when config loaded; [] means the daemon
     never started. while_running stands in for whatever touches the pid file
-    during the run (ai_mail, leg 14).
+    during the run.
     """
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     monkeypatch.setattr(daemon_mod, "SHUTDOWN", True)
@@ -401,7 +401,7 @@ def test_stale_unlink_failing_otherwise_than_denied_escapes(tmp_path, monkeypatc
     meet the stale file still standing and report "another daemon raced us",
     a race that never happened. The error is this stand-in's own. Green on the
     tree from its first run; its proof is the mutant that widens the catch to
-    OSError (ai_mail, leg 15).
+    OSError.
     """
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
@@ -510,9 +510,8 @@ def test_remove_pid_file_corrupt(tmp_path, monkeypatch):
 
 
 # ---- is_branch_occupied tests ------------------------------------
-# The daemon has used pid_lock's is_branch_occupied and its process readers since
-# leg 12; their own tests, the darwin lanes among them, live in test_wake.py
-# (ai_mail, leg 12; todo 39).
+# The daemon uses pid_lock's is_branch_occupied and process readers; their own tests,
+# the darwin lanes among them, live in test_wake.py.
 
 
 def test_is_branch_occupied_no_claude_processes(tmp_path):

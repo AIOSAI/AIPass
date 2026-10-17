@@ -3,25 +3,13 @@
 # Description: resolve_branch reaches the declared-roots external tier (FPLAN-0460)
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- the external tier, through my door."""
 
-# @vera's first supervised fire failed at ``resolve: Branch not found: @vera``.
-# Job DISCOVERY already knew the tier — @daemon reads @memory's fleet gateway —
-# but the FIRE path came through ``wake.resolve_branch``, which knew three
-# sources and none of them looked outside this repo. Discoverable but not
-# wakeable: the tier was half-plumbed.
-#
-# THE SEAM IS ``_REPO_ROOT``, not a patched gateway. @memory's
-# ``external_branches(repo_root=...)`` reads ``AIPASS_ROOTS.json`` at whatever
-# root it is handed, so pointing wake's ``_REPO_ROOT`` at a tmp home gives both
-# world states — anchor present and anchor absent — through the REAL gateway
-# code. Patching the gateway instead would have proven only that my mock returns
-# what I told it to, and the live defect was in whether the call happens at all.
-# Nothing here reads the real machine; every root, registry and passport below is
-# built in tmp_path.
+# The seam is ``_REPO_ROOT``, not a patched gateway: @memory's gateway reads AIPASS_ROOTS.json
+# at the root it is handed, so both world states run through the REAL gateway code in tmp_path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — resolve_wake_model()'s ModelDecision, unrelated here: tests/test_wake.py
@@ -103,21 +91,13 @@ class TestExternalTierIsReachable:
     """The defect and its fix, in the two world states."""
 
     def test_external_citizen_unreachable_without_the_anchor(self, home, vera_studio):
-        """WORLD STATE B — no AIPASS_ROOTS.json. @vera stays unresolvable.
-
-        The pre-tier behaviour, pinned. An installation that declares nothing
-        participates in nothing, and that is the ordinary state of a fresh
-        clone rather than a fault.
-        """
+        """WORLD STATE B — no AIPASS_ROOTS.json. @vera stays unresolvable."""
         assert not (home / "AIPASS_ROOTS.json").exists()
 
         assert wake_mod.resolve_branch("@vera") is None
 
     def test_external_citizen_resolves_through_the_anchor(self, home, vera_studio):
-        """WORLD STATE A — the root is declared. @vera resolves to its real path.
-
-        This is the live failure: same call, same tree, one blessed file apart.
-        """
+        """WORLD STATE A — the root is declared. @vera resolves to its real path."""
         _declare(home, vera_studio)
 
         result = wake_mod.resolve_branch("@vera")
@@ -139,12 +119,7 @@ class TestExternalTierIsReachable:
     def test_the_registry_side_is_case_folded_too(self, home, tmp_path):
         """BOTH sides fold, and only this pins the far one.
 
-        The caller's input is lowercased at the top of resolve_branch, so a
-        fixture that varies only the INPUT proves nothing about the address
-        stored in someone else's registry. A dropped ``.lower()`` on the
-        citizen's email survived that test and dies against this one. Casing
-        genuinely disagrees across the fleet — the core registry already spells
-        BACKUP and backup — and an external repo owes us no convention at all.
+        The input is lowercased up front, so only a mixed-case REGISTRY email pins the far side.
         """
         root = tmp_path / "Shouty"
         root.mkdir()
@@ -189,11 +164,7 @@ class TestExternalTierIsReachable:
     def test_an_addressless_citizen_does_not_break_the_search(self, home, tmp_path):
         """A registry row may carry no email at all, and it must not crash the walk.
 
-        @memory passes the address through rather than deriving one from the
-        directory name, so ``email`` is legitimately None for a path-only
-        citizen. Comparing ``None.lower()`` would raise, be swallowed by the
-        containment guard, and turn every OTHER external in that root into an
-        unresolvable — one addressless row taking out a whole tier.
+        A raising ``None.lower()`` would be swallowed and make every other external in the root unresolvable.
         """
         root = tmp_path / "Quiet"
         root.mkdir()
@@ -274,12 +245,7 @@ class TestTheStepIsContained:
         assert wake_mod.resolve_branch("@vera") is None
 
     def test_the_external_step_needs_no_admin_grant(self, home, vera_studio):
-        """The daemon fires unverified. Declaration is the credential, not a grant.
-
-        Deliberate and stated: the anchor is a machine-managed file the owner
-        blessed, so an external root is already an authorised destination. The
-        admin sweep of ``projects/*`` is a different question and stays gated.
-        """
+        """The daemon fires unverified. Declaration is the credential, not a grant."""
         _declare(home, vera_studio)
 
         assert wake_mod.resolve_branch("@vera", admin=False) == (vera_studio / "src" / "vera_studio" / "vera", "@vera")
@@ -303,14 +269,7 @@ class TestCollisionsAreNamedNotGuessed:
     def test_the_first_declared_root_wins_not_the_first_alphabetically(self, home, tmp_path, caplog):
         """The fleet's tie-break, proven end to end through @memory's gateway.
 
-        This pin used to assert the opposite. ``declared_roots()`` returned
-        ``sorted(found)`` — resolved-path order — so the winner was whatever
-        someone happened to name a directory, and the tie-break the ruling names
-        was not available at this door. Rather than re-read the anchor to
-        recover it (a second reader of the file the gateway exists to own), the
-        collision was made loud and the disagreement raised with @memory, who
-        dropped the sort in registry_scope 4.1.0. Zulu is declared first and
-        sorts last, so only declaration order can produce this answer.
+        Zulu is declared first and sorts last, so only declaration order can produce this answer.
         """
         alpha = self._twin_in(tmp_path, "Alpha")
         zulu = self._twin_in(tmp_path, "Zulu")
@@ -323,8 +282,7 @@ class TestCollisionsAreNamedNotGuessed:
 
     def test_the_control_case_where_both_orders_agree(self, home, tmp_path, caplog):
         """Declared Alpha-first, which is ALSO alphabetical — so this passes even
-        under a re-sorted gateway. It is here as the twin of the test above:
-        alone it proves nothing, and together they separate the two orders."""
+        under a re-sorted gateway; with the test above it separates the two orders."""
         alpha = self._twin_in(tmp_path, "Alpha")
         zulu = self._twin_in(tmp_path, "Zulu")
         _declare(home, alpha, zulu)
@@ -336,8 +294,7 @@ class TestCollisionsAreNamedNotGuessed:
 
     def test_every_losing_claimant_is_named_in_the_log(self, home, tmp_path, caplog):
         """A tie-break being correct does not make a collision expected. Two
-        roots claiming one address is worth an error line naming both, or a
-        resolution nobody logged reads exactly like a citizen with one home."""
+        roots claiming one address get an error line naming both."""
         alpha = self._twin_in(tmp_path, "Alpha")
         zulu = self._twin_in(tmp_path, "Zulu")
         _declare(home, zulu, alpha)

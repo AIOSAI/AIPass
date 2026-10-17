@@ -3,15 +3,13 @@
 # Description: Contacts address book — maps branch names to inbox paths
 # Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """
 Contacts Address Book Handler
 
-Maps branch names to their inbox paths for fast sender/recipient resolution.
-Solves the BRANCH DETECTION FAILED problem when external projects call drone
-— contacts lookup works even when CWD-walking cannot identify the caller.
+Resolves callers from external projects where CWD-walking cannot identify them.
 """
 
 import os
@@ -33,22 +31,11 @@ if sys.platform == "win32":
 CONTACTS_FILE = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.json"
 
 
-# =============================================
-# INTERNAL HELPERS
-# =============================================
-
-
 def _load_contacts() -> Dict:
     """Load contacts.json from disk.
 
-    Returns:
-        Dict with 'contacts' key mapping branch names to contact info. A missing
-        file (FileNotFoundError) is the one answer: no book means no contacts.
-
-    Raises:
-        RuntimeError: the book exists and cannot be read or parsed. Read as empty,
-            a corrupt book let the identity chain synthesize a citizen where a
-            fault stood (ai_mail, leg 17).
+    Only a missing file reads as empty; an unreadable book raises RuntimeError, since
+    read as empty it lets the identity chain synthesize a citizen where a fault stands.
     """
     import json
 
@@ -67,14 +54,7 @@ def _load_contacts() -> Dict:
 
 
 def _save_contacts(data: Dict) -> bool:
-    """Save contacts dict to contacts.json.
-
-    Args:
-        data: Full contacts data dict to save.
-
-    Returns:
-        True on success, False on error.
-    """
+    """Save contacts dict to contacts.json."""
     try:
         import json
 
@@ -87,23 +67,8 @@ def _save_contacts(data: Dict) -> bool:
         return False
 
 
-# =============================================
-# PUBLIC API
-# =============================================
-
-
 def get_contact(branch_name: str) -> Optional[Dict]:
-    """Look up a contact by branch name.
-
-    Args:
-        branch_name: Branch name or email (e.g., 'devpulse' or '@devpulse').
-
-    Returns:
-        Contact dict with 'project', 'inbox', 'last_seen' keys, or None if not found.
-
-    Raises:
-        RuntimeError: the book exists and cannot be read (see _load_contacts).
-    """
+    """Look up a contact by branch name."""
     json_handler.log_operation("contacts_get", {"branch": branch_name})
     name_key = branch_name.lstrip("@").lower()
     data = _load_contacts()
@@ -113,15 +78,7 @@ def get_contact(branch_name: str) -> Optional[Dict]:
 def register_contact(branch_name: str, project: str, inbox_path: str) -> bool:
     """Add or update a contact in the contacts address book.
 
-    Args:
-        branch_name: Branch name or email (leading @ stripped, lowercased).
-        project: Project name (e.g., 'AIPass', 'VeraStudio').
-        inbox_path: Absolute path to the branch's inbox.json file.
-
-    Returns:
-        True on success, False on error. A book that exists and cannot be read
-        is False and is left as found: a write over it would replace every row
-        with this one (ai_mail, leg 17).
+    An unreadable book returns False untouched: a write over it would replace every row.
     """
     json_handler.log_operation("contacts_register", {"branch": branch_name, "inbox": inbox_path})
     name_key = branch_name.lstrip("@").lower()
@@ -139,14 +96,7 @@ def register_contact(branch_name: str, project: str, inbox_path: str) -> bool:
 
 
 def all_contacts() -> Dict:
-    """Return all contacts as a dict keyed by branch name.
-
-    Returns:
-        Dict mapping branch names to contact info dicts.
-
-    Raises:
-        RuntimeError: the book exists and cannot be read (see _load_contacts).
-    """
+    """Return all contacts as a dict keyed by branch name."""
     json_handler.log_operation("contacts_list")
     data = _load_contacts()
     return data["contacts"]

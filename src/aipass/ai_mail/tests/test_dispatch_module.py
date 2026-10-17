@@ -3,7 +3,7 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -35,7 +35,7 @@ import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 
 
 # Each verb is reached the way `drone @ai_mail dispatch ...` reaches it: through
-# handle_command (ai_mail, leg 13).
+# handle_command.
 def _send(args):
     """`dispatch <@target|/path> Subject Body ...`."""
     return handle_command("dispatch", args)
@@ -183,7 +183,7 @@ class TestHandleCommand:
 
         load_dispatch_log raises on a log it cannot parse since leg 10; status
         reports that through error() and prints no empty-log line. Its proof is
-        the mutant that answers [] again (ai_mail, leg 10).
+        the mutant that answers [] again.
         """
 
         def _unreadable():
@@ -441,7 +441,7 @@ class TestOrchestrateWake:
         assert "Wake" in combined
 
     def test_wake_help_prints_the_wake_usage(self, monkeypatch):
-        """`dispatch wake help` prints the wake usage and returns True (ai_mail, leg 14)."""
+        """`dispatch wake help` prints the wake usage and returns True."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
@@ -451,7 +451,7 @@ class TestOrchestrateWake:
         assert 'Usage: dispatch wake @branch ["custom message"]' in combined
 
     def test_h_flag_after_wake_is_answered_and_wakes_nothing(self, monkeypatch):
-        """`dispatch wake -h` is help, never a wake: wants_help answers it before the verb (ai_mail, leg 14)."""
+        """`dispatch wake -h` is help, never a wake: wants_help answers it before the verb."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
         woken = []
@@ -1208,7 +1208,7 @@ class TestWakeBackPromiseMatchesDelivery:
         """`dispatch @canary` under the shared send patch set, the wake-back going to `sender`.
 
         The wake and the manager verdict are stubbed; the real console prints to
-        stdout. Reached through the command, not the helper (ai_mail, leg 14).
+        stdout. Reached through the command, not the helper.
         """
         status = DispatchStatus()
         status.ok("spawn", "agent started")

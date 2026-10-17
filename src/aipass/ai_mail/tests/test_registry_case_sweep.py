@@ -3,41 +3,14 @@
 # Description: Registry globs must not widen on a case-insensitive filesystem
 # Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
 
-# Case-insensitive-filesystem defence for every ``*_REGISTRY.json`` walk.
-#
-# THE DEFECT. On Windows the ``pathlib`` glob matcher folds case, so
-# ``*_REGISTRY.json`` also matches ``*_registry.json``. This repo is full of bait —
-# 237 lowercase files on this machine at the time of writing:
-# ``drone_command_registry.json`` sits directly beside drone's tree, every branch
-# carries ``.spawn/.template_registry.json`` (pathlib ``*`` matches dotfiles, unlike
-# the ``glob`` module), and @flow keeps ten ``flow_json/*_registry.json`` plan
-# counters. Found on ef029782's windows-setup leg, root-caused by @drone.
-#
-# MACOS IS THE SUBTLER HOST, and this file had it wrong until FPLAN-0554 (macOS
-# runs 34707762639 and 34707861282, darwin Python 3.13.15). Its VOLUME folds case,
-# so a lookup by name finds a lowercase twin, but CPython matches a wildcard with
-# the posix flavour's rule, which is case-sensitive on darwin too. The volume and
-# the matcher are two facts, and a probe of one predicts nothing about the other.
-#
-# WHY IT MATTERS HERE. My sites are identity-bearing: they answer "which project is
-# this" and "which registry names the caller". A command table read as a trust
-# anchor is the directory-name-as-identity species, back through a different door.
-#
-# THE INSTRUMENT. These pins run on Linux. ``case_insensitive_fs`` wraps
-# ``Path.glob`` to also yield the case-folded pattern's matches — @devpulse's shape,
-# and a faithful emulation of the Windows matcher, because the bait that exists on
-# disk is lowercase. ``folding_volume`` is the other half: lookups by name fold and
-# wildcards are left to whatever matcher is installed, so alone it is the macOS
-# world and stacked on the first it is the Windows one. The instrument's own
-# honesty is pinned two ways: a POSITIVE control that widens a listing *through
-# the instrument itself* (never through a re-implementation of its logic — that
-# mistake cost @aipass a pin that proved nothing while visiting zero files), and a
-# NEGATIVE control proving the instrument can still say no.
+# On Windows the pathlib glob matcher folds case, so ``*_REGISTRY.json`` also matches lowercase
+# ``*_registry.json`` counter files; these sites are identity-bearing. The fixtures below emulate
+# the Windows matcher and the macOS volume on Linux, with positive and negative controls.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — the real Windows/macOS case-folding behavior; emulated here, not run there
@@ -64,12 +37,7 @@ from aipass.ai_mail.apps.handlers.registry.read import (
 
 
 def _reply_along(tmp_path: Path, reply_path: Path):
-    """send_reply to an external @vera whose message carried `reply_path` (ai_mail, leg 14).
-
-    The reply_path validator is reached through send_reply, not called. Only the
-    registry lookups, the close and the notification are stubbed; the reply is
-    written into the tmp inbox it names, or refused.
-    """
+    """send_reply to an external @vera whose message carried `reply_path`."""
     branch_a = tmp_path / "branch_a"
     branch_a.mkdir(exist_ok=True)
     original = {"id": "orig0001", "from": "@vera", "subject": "Hello", "reply_path": str(reply_path)}
@@ -87,43 +55,8 @@ def _reply_along(tmp_path: Path, reply_path: Path):
 REAL_GLOB = Path.glob
 
 
-# ─── Per-platform expectations: two facts, not one ──────────────────────
-#
-# A MEASUREMENT IS OF AN INSTRUMENT AND A PLATFORM. Round 4 asserted
-# `_host_folds_case(...) is False` — a Linux fact stated as a universal — and it
-# went red on the real Windows runner (windows-setup, 28ee90d5, run 33431848734).
-# The production cure was never wrong; the PIN's premise was.
-#
-# TWO FACTS, NOT ONE (FPLAN-0554). One table used to answer "does the host fold"
-# and the pins predicted the wildcard glob from it. The macOS runner (Python
-# 3.13.15) showed those are different questions: its volume folds, so the probe
-# found its twin, and its matcher does not, so `*_REGISTRY.json` never saw
-# `wrong_registry.json`. Cause true, outcome false, and the link pin asserted a
-# connection that does not exist there. The probe had only LOOKED like a glob
-# question: 3.13 answers a glob component with no wildcard by os.path.lexists
-# (Lib/glob.py 3.13:408, literal_selector), not by matching, while 3.12 matches
-# every component (Lib/pathlib.py 3.12 _make_selector), so the same probe asked
-# the matcher under 3.12 and the volume under 3.13.
-#
-#   VOLUME  — does a lookup by name find a file spelled in another case?
-#   MATCHER — does a wildcard match a name spelled in another case? Every
-#             registry walk in this branch depends on THIS one.
-#
-# WHICH HALF IS MEASURED WHERE, stated rather than implied:
-#   linux  — both MEASURED LIVE every time this file runs here.
-#   win32  — DERIVED from the windows-setup reds, and true by NTFS default either
-#            way. The matcher row is also run here as an ORACLE: PureWindowsPath
-#            carries the win32 matching rule on every host.
-#   darwin — volume DELIBERATELY None (formattable either way, folds by default).
-#            Matcher False: a property of CPython's posix flavour, not of the
-#            volume, derived from the two macOS reds and run here as an ORACLE
-#            through PurePosixPath, the flavour darwin uses.
-#
-# KEYED ON sys.platform, NOT os.name, and this is a considered deviation from the
-# fleet shape. os.name collapses darwin into "posix", and default macOS folds
-# case — so an os.name VOLUME table would assert False on a folding host, which is
-# EXACTLY the species of error round 5 existed to fix. The matcher table would
-# survive os.name; it is keyed the same way so one key reads both.
+# Volume folding and matcher folding are separate facts (macOS: volume folds, matcher does not).
+# Keyed on sys.platform, not os.name: os.name collapses darwin into "posix".
 _VOLUME_FOLDS_BY_PLATFORM = {
     "linux": False,
     "win32": True,
@@ -150,13 +83,7 @@ def _expected(table: dict):
 
 @pytest.fixture
 def case_insensitive_fs(monkeypatch):
-    """Make ``Path.glob`` match the way the Windows matcher does.
-
-    Yields the real matches, then the matches of the case-folded pattern, without
-    duplicates. Only the ``_REGISTRY.json`` suffix carries uppercase in any
-    pattern this branch uses, so folding the whole pattern changes exactly the
-    thing under test.
-    """
+    """Make ``Path.glob`` match the way the Windows matcher does."""
 
     def _folded(self, pattern, *args, **kwargs):
         seen = []
@@ -178,17 +105,7 @@ _GLOB_MAGIC = re.compile(r"[*?[]")
 def folding_volume(monkeypatch):
     """Make the VOLUME fold case, leaving the glob MATCHER as it was.
 
-    Half a world, never a whole one. Requested after ``posix_matcher`` it is the
-    macOS world (``mac_world``); after ``case_insensitive_fs`` it is Windows.
-    Alone it inherits the HOST's matcher, which folds on Windows — the Mac-world
-    pins asked for alone went red there (Windows run 34710099534, head c69720c2).
-      - A lookup by name finds the file whatever its spelling: ``Path.exists``,
-        and a glob component with no wildcard, which 3.13 answers with
-        ``os.path.lexists`` (``Lib/glob.py`` 3.13:408, ``literal_selector``)
-        rather than by matching.
-      - A wildcard pattern goes to whatever ``Path.glob`` was installed when this
-        fixture ran: the real case-sensitive posix matcher, or the folding
-        emulator when that was requested first.
+    After ``posix_matcher`` it is macOS; after ``case_insensitive_fs`` it is Windows; alone it inherits the host matcher.
     """
     real_exists = Path.exists
     prior_glob = Path.glob
@@ -218,12 +135,7 @@ def folding_volume(monkeypatch):
 def posix_matcher(monkeypatch):
     """Install the posix flavour's case-sensitive wildcard matcher on ANY host.
 
-    The Mac world needs a matcher that does not fold, and on a Windows host the
-    installed one does: ``WindowsPath.glob`` takes the windows flavour's rule. A
-    Mac world that manufactured only the volume was a Mac world on posix hosts
-    alone. Each component is matched over the real directory listing with
-    ``fnmatch.fnmatchcase``, case-sensitive everywhere; ``**`` is refused by name
-    rather than half-emulated, because no pin here needs it.
+    ``WindowsPath.glob`` folds, so a Mac world needs this on a Windows host. ``**`` is refused, not emulated.
     """
 
     def _glob(self, pattern, *args, **kwargs):
@@ -245,23 +157,13 @@ def posix_matcher(monkeypatch):
 
 @pytest.fixture
 def mac_world(posix_matcher, folding_volume):
-    """CPython 3.13 on a default macOS volume, complete on any host: the posix
-    matcher is installed first and the folding volume over it, in the order the
-    two are requested here."""
+    """CPython 3.13 on a default macOS volume, complete on any host: posix matcher first, folding volume over it."""
 
 
 def _volume_folds_case(directory: Path) -> bool:
     """Does THIS VOLUME find a file by a name spelled in another case? Measured.
 
-    Writes ``aipass_case_probe`` and looks up the UPPERCASE spelling — the
-    defect's direction (an uppercase name reaching a lowercase file), not a
-    generic folding question. A lookup, never a glob: a glob with no wildcard is a
-    lookup under 3.13 and a match under 3.12, so the round-5 probe asked a
-    different question depending on the interpreter. A probe rather than
-    ``sys.platform``, because folding is a property of the VOLUME — macOS folds by
-    default and is case-sensitive when formatted that way, and a mounted volume can
-    disagree with its own host. Never skipif: a skip retires the assertion on
-    exactly the platform whose CI found the defect.
+    A lookup, never a glob (3.13 answers a wildcard-free glob by lookup, 3.12 by matching). Never skipif.
     """
     marker = directory / "aipass_case_probe"
     marker.write_text("", encoding="utf-8")
@@ -272,13 +174,7 @@ def _volume_folds_case(directory: Path) -> bool:
 
 
 def _matcher_folds_case(directory: Path) -> bool:
-    """Does the glob MATCHER fold case? The fact every registry walk depends on.
-
-    Same marker, globbed through a WILDCARD in the defect's direction, so it takes
-    the selector ``*_REGISTRY.json`` takes on every interpreter. On the macOS
-    runner the wildcard glob saw nothing while the lookup-shaped probe said
-    folding; predicting a wildcard from the volume is what FPLAN-0554 cured.
-    """
+    """Does the glob MATCHER fold case? The fact every registry walk depends on."""
     marker = directory / "aipass_case_probe"
     marker.write_text("", encoding="utf-8")
     try:
@@ -288,11 +184,7 @@ def _matcher_folds_case(directory: Path) -> bool:
 
 
 def test_the_volume_probe_agrees_with_a_direct_stat(tmp_path):
-    """The volume probe's own control. ``Path.exists`` and ``os.path.exists`` are
-    two doors to one lookup, so they must agree, or the probe is reporting a
-    property of pathlib rather than of the volume. Its first spelling compared a
-    no-wildcard glob with ``exists``, which under 3.12 compares the matcher with
-    the volume and holds only where those two happen to agree."""
+    """The volume probe's own control: ``Path.exists`` and ``os.path.exists`` must agree."""
     marker = tmp_path / "aipass_case_probe"
     marker.write_text("", encoding="utf-8")
     by_stat = os.path.exists(tmp_path / "AIPASS_CASE_PROBE")
@@ -301,11 +193,7 @@ def test_the_volume_probe_agrees_with_a_direct_stat(tmp_path):
 
 
 def test_the_two_probes_ask_different_questions(tmp_path, mac_world):
-    """The crux of FPLAN-0554, manufactured here: a folding volume under a
-    case-sensitive matcher. On the Mac they disagree, so neither probe may stand
-    in for the other. Both halves are manufactured, so this is a pin about the
-    probes on every host rather than a posix host fact (Windows run 34710099534
-    read True here while only the volume was manufactured)."""
+    """A folding volume under a case-sensitive matcher: neither probe may stand in for the other."""
     assert _volume_folds_case(tmp_path) is True
     assert _matcher_folds_case(tmp_path) is False
 
@@ -313,10 +201,7 @@ def test_the_two_probes_ask_different_questions(tmp_path, mac_world):
 def _decoy(directory: Path, name: str = "wrong_registry.json") -> Path:
     """A lowercase counter file that MAPS TO A WRONG IDENTITY.
 
-    Carries a full, well-formed ``branches`` list naming @impostor. That is
-    deliberate: it makes every assertion below about *who the mail would land as*
-    rather than about set membership, so a pin cannot pass merely because the
-    file was filtered out of some list nobody reads.
+    A well-formed ``branches`` list makes every pin about who the mail lands as, not set membership.
     """
     seat = directory / "impostor"
     seat.mkdir(parents=True, exist_ok=True)
@@ -367,16 +252,10 @@ def _claims_of_the_link(directory: Path) -> None:
 
 
 class TestTheInstrumentIsHonest:
-    """Controls. A widening emulator that never widens turns every pin below
-    green for the wrong reason, and a control that cannot fail is not a control."""
+    """Controls: a widening emulator that never widens turns every pin below green for the wrong reason."""
 
     def test_positive_control_the_instrument_really_widens_a_listing(self, tmp_path, case_insensitive_fs):
-        """Exercises THE INSTRUMENT, not a copy of its logic.
-
-        The assertion runs the same ``Path.glob`` production code runs. @aipass
-        lost a night to a control that re-implemented the matching inline and
-        reported success while the walk visited zero files.
-        """
+        """Exercises THE INSTRUMENT, not a copy of its logic."""
         _decoy(tmp_path)
         matched = list(tmp_path.glob("*_REGISTRY.json"))
         assert [p.name for p in matched] == ["wrong_registry.json"], (
@@ -386,32 +265,12 @@ class TestTheInstrumentIsHonest:
     def test_negative_control_the_instrument_can_say_no(self, tmp_path):
         """Same fixture tree, instrument NOT installed.
 
-        The claim is that the EMULATOR is what widens the listing above. Under a
-        case-sensitive matcher that reads as "the raw glob finds nothing". On
-        Windows the raw glob finds the decoy by itself — the matcher folds, which
-        is the entire defect these pins exist for — so the original spelling of
-        this control failed on the windows-setup leg of ebb8075d asserting `== []`
-        against a real WindowsPath.
-
-        So the host is PROBED, never assumed and never skipif'd (@memory's
-        ruling, applied fleet-wide 2026-08-31). The probe used to ask the VOLUME,
-        and the macOS runner answered yes while its matcher said no (FPLAN-0554,
-        runs 34707762639 and 34707861282), so it now asks the MATCHER, the
-        question this glob actually puts. Either way the reader refuses the decoy
-        and the control can still say no; @spawn's CONTROL_LIVE probe could not
-        until a mutant caught it lying.
+        The host's MATCHER is probed, never assumed and never skipif'd: on Windows the raw glob sees the decoy.
         """
         _claims_of_the_negative_control(tmp_path)
 
     def test_the_probe_reports_folding_when_the_host_folds(self, tmp_path, case_insensitive_fs):
-        """The Windows branch of the control above never executes on Linux, so
-        it would ship unverified. Driven here through the emulator: with a
-        folding matcher installed the probe must SAY so, and the production
-        reader must still refuse the decoy that the raw glob now hands it.
-
-        This is the assertion that actually ran red on the windows-setup leg —
-        reproduced on Linux rather than left to the next CI train to discover.
-        """
+        """The Windows branch of the control above, driven on Linux through the emulator."""
         assert _matcher_folds_case(tmp_path) is True
 
         decoy = _decoy(tmp_path)
@@ -419,31 +278,21 @@ class TestTheInstrumentIsHonest:
         assert registries_in(tmp_path) == []
 
     def test_cause_the_volume_folds_exactly_as_its_platform_row_says(self, tmp_path):
-        """CAUSE, volume half. What this filesystem does, against the table.
-
-        Round 4 wrote `is False` here and CI proved that is a Linux fact, not a
-        universal. A platform whose row is None (macOS, formattable either way)
-        asserts nothing here — the matcher pins still run there.
-        """
+        """CAUSE, volume half. What this filesystem does, against the table."""
         expected = _expected(_VOLUME_FOLDS_BY_PLATFORM)
         if expected is None:
             pytest.skip(f"{sys.platform}: volume case-folding is configurable — the matcher pins still run")
         assert _volume_folds_case(tmp_path) is expected
 
     def test_cause_the_matcher_folds_exactly_as_its_platform_row_says(self, tmp_path):
-        """CAUSE, matcher half, the one the registry walks depend on. Every known
-        platform has a fixed row, darwin included: the matcher follows CPython's
-        path flavour, not the volume, so the Mac runs this pin for real."""
+        """CAUSE, matcher half, the one the registry walks depend on; darwin's row follows CPython's flavour."""
         expected = _expected(_MATCHER_FOLDS_BY_PLATFORM)
         if expected is None:
             pytest.skip(f"{sys.platform}: no matcher row for this platform — see the LINK pin")
         assert _matcher_folds_case(tmp_path) is expected
 
     def test_outcome_the_raw_glob_sees_the_decoy_exactly_when_the_matcher_row_says_so(self, tmp_path):
-        """OUTCOME. What that means for the thing under test: whether an
-        uppercase pattern reaches the lowercase counter file. Predicted from the
-        MATCHER row; it was the volume row, the prediction the macOS runner
-        refuted."""
+        """OUTCOME. Whether an uppercase pattern reaches the lowercase counter, predicted from the MATCHER row."""
         expected = _expected(_MATCHER_FOLDS_BY_PLATFORM)
         if expected is None:
             pytest.skip(f"{sys.platform}: no matcher row for this platform — see the LINK pin")
@@ -452,35 +301,16 @@ class TestTheInstrumentIsHonest:
 
     @pytest.mark.parametrize("platform", sorted(_MATCHER_FOLDS_BY_PLATFORM))
     def test_the_matcher_row_is_what_that_platforms_path_flavour_does(self, platform):
-        """ORACLE. Both path flavours ship in the standard library on every host,
-        so the matcher row of a platform this box is not can still be run here.
-        ``PurePath.match`` and the glob matcher take their case rule from the same
-        flavour, and darwin's flavour is posix: its row is False whatever its
-        volume does, which is the half the old single table could not say."""
+        """ORACLE. Both path flavours ship on every host, so each platform's matcher row runs here."""
         flavour = _MATCHER_FLAVOUR_BY_PLATFORM[platform]
         assert flavour("wrong_registry.json").match("*_REGISTRY.json") is _MATCHER_FOLDS_BY_PLATFORM[platform]
 
     def test_link_the_outcome_follows_from_the_cause_on_every_platform(self, tmp_path):
-        """LINK. Holds with NO platform row at all: whatever this host does, the
-        glob's behaviour must follow from the MATCHER probe's verdict, and the
-        production reader must refuse the counter EITHER WAY. It followed the
-        volume probe until the macOS runner showed a host where the two disagree.
-
-        A future red then names its own mechanism — a cause pin red means a table
-        is wrong about the platform, the outcome pin red means glob disagrees with
-        the matcher row, link red means the two are no longer connected at all.
-        """
+        """LINK. Holds with NO platform row: the glob follows the MATCHER probe, and the reader refuses either way."""
         _claims_of_the_link(tmp_path)
 
     def test_the_windows_row_is_driven_here_so_it_cannot_rot(self, tmp_path, case_insensitive_fs, folding_volume):
-        """The win32 rows are derived, so on Linux they would sit unexecuted
-        between Windows CI runs. @prax's rule: emulate the PLATFORM, not just the
-        denial.
-
-        Both halves are emulated, stacked: a folding matcher, then a folding
-        volume over it. The probes must present Windows, and the negative control
-        and the link must hold there with the same claims they make on the host.
-        """
+        """The win32 rows are derived, so they are driven here through both stacked emulators."""
         assert _VOLUME_FOLDS_BY_PLATFORM["win32"] is True
         assert _MATCHER_FOLDS_BY_PLATFORM["win32"] is True
 
@@ -491,17 +321,7 @@ class TestTheInstrumentIsHonest:
         _claims_of_the_link(tmp_path)
 
     def test_the_mac_row_is_driven_here_so_it_cannot_rot(self, tmp_path, mac_world):
-        """The two macOS reds, reproduced on Linux before they were cured: a
-        folding volume under a case-sensitive matcher. With the old single probe
-        the negative control and the link failed in this world with the runner's
-        own text ("host was probed as case-folding, so the raw glob must see the
-        decoy", and ``in []) is True``). Now the volume folds, the matcher does
-        not, the raw glob sees nothing, and the reader refuses the counter anyway.
-
-        The matcher is manufactured as well as the volume. With the volume alone
-        this pin was a Mac world on posix hosts only, and the Windows runner read
-        its own folding matcher here (run 34710099534, head c69720c2).
-        """
+        """The two macOS reds, reproduced on Linux: a folding volume under a case-sensitive matcher."""
         assert _MATCHER_FOLDS_BY_PLATFORM["darwin"] is False
 
         assert _volume_folds_case(tmp_path) is True, "emulated macOS must present a folding volume"
@@ -513,34 +333,14 @@ class TestTheInstrumentIsHonest:
     def test_darwin_is_deliberately_unfixed_not_forgotten(self, tmp_path):
         """A None row looks like an omission, so it is pinned as a decision.
 
-        Giving darwin a fixed VOLUME row survives every other mutant in this file
-        on Linux — there is no Darwin runner here to contradict it — so without
-        this pin the table could acquire a false macOS expectation and nothing
-        would notice until a Mac ran it. macOS is formattable either way AND
-        folds by default, which is why no fixed answer is honest.
-
-        The MATCHER row is the opposite case, pinned beside it so the two are
-        never collapsed into one table again: fixed False, because that is
-        CPython's posix flavour speaking, whatever the volume was formatted as.
-
-        This is also why the tables key on sys.platform rather than os.name: the
-        fleet shape says os.name, but that collapses darwin into "posix" and
-        would assert a False volume on a folding host.
+        macOS volumes are formattable either way; the matcher row is fixed False (CPython's posix flavour).
         """
         assert _VOLUME_FOLDS_BY_PLATFORM["darwin"] is None
         assert "darwin" in _VOLUME_FOLDS_BY_PLATFORM, "an absent key and a None row read the same at runtime"
         assert _MATCHER_FOLDS_BY_PLATFORM["darwin"] is False
 
     def test_the_fixtures_never_write_case_twins(self, tmp_path):
-        """@memory's round-4 lesson, applied to my own fixtures: a case-twin
-        decoy cannot COEXIST on a folding filesystem — it OVERWRITES. A probe or
-        fixture that writes twins measures an overwrite while claiming to
-        measure case-globbing.
-
-        Mine do not (`wrong_registry.json` vs `PROJECT_REGISTRY.json`, and the
-        host probe unlinks its marker), and that is pinned rather than trusted,
-        because it is silent on Linux and destructive on Windows.
-        """
+        """A case-twin decoy OVERWRITES on a folding filesystem, so fixtures never write twins."""
         decoy = _decoy(tmp_path)
         real = _real_registry(tmp_path)
 
@@ -549,18 +349,14 @@ class TestTheInstrumentIsHonest:
         assert len({decoy.name.lower(), real.name.lower()}) == 2
 
     def test_the_decoy_would_genuinely_seat_the_wrong_citizen(self, tmp_path):
-        """The decoy is a real registry naming a real branch. Without this, a
-        green pin might only mean 'the file was skipped', not 'the wrong citizen
-        was never reachable'."""
+        """The decoy is a real registry naming a real branch, so a green pin means the wrong citizen was unreachable."""
         decoy = _decoy(tmp_path)
         loaded = json.loads(decoy.read_text(encoding="utf-8"))
         assert loaded["branches"][0]["email"] == "@impostor"
 
 
 class TestFindProjectRootIgnoresLowercaseCounters:
-    """``paths.find_project_root`` answers 'which project is this' for the
-    cross-project delivery fence (delivery.py:379/383). A wrong root there makes
-    the fence compare two different questions."""
+    """``paths.find_project_root`` answers 'which project is this' for the cross-project delivery fence."""
 
     def test_a_lowercase_counter_does_not_become_a_project_root(self, tmp_path, case_insensitive_fs):
         project = tmp_path / "project"
@@ -572,8 +368,7 @@ class TestFindProjectRootIgnoresLowercaseCounters:
         assert find_project_root(nested) == project
 
     def test_the_real_registry_is_still_found(self, tmp_path, case_insensitive_fs):
-        """The other half. A filter that refuses everything passes every
-        did-not-pick-the-decoy assertion in this file."""
+        """The other half: a filter that refuses everything passes every did-not-pick-the-decoy pin."""
         project = tmp_path / "project"
         _real_registry(project)
         nested = project / "branch" / "apps"
@@ -582,9 +377,7 @@ class TestFindProjectRootIgnoresLowercaseCounters:
         assert find_project_root(nested) == project
 
     def test_an_external_project_registry_named_after_itself_survives(self, tmp_path, case_insensitive_fs):
-        """SUFFIX only, never the stem. External projects name registries after
-        themselves — Vera-Studio_REGISTRY.json, vera_studio_REGISTRY.json — and a
-        filter keyed on the stem would delete real citizens to fix a bug."""
+        """SUFFIX only, never the stem: external projects name registries after themselves."""
         for stem in ("Vera-Studio", "vera_studio", "feel_good_app"):
             project = tmp_path / stem
             _real_registry(project, f"{stem}_REGISTRY.json")
@@ -594,14 +387,13 @@ class TestFindProjectRootIgnoresLowercaseCounters:
 
 
 class TestCallerRegistryNeverResolvesToACounter:
-    """``branch_detection._find_caller_registry`` picks the registry that NAMES
-    the caller. It returns the FIRST non-AIPass registry it meets walking up, so
-    a decoy does not merely add a candidate — it ends the walk."""
+    """``branch_detection._find_caller_registry`` picks the registry that NAMES the caller.
+
+    It returns the FIRST non-AIPass registry walking up, so a decoy ends the walk.
+    """
 
     def test_the_impostor_registry_is_never_returned(self, tmp_path, monkeypatch, case_insensitive_fs):
-        """Through get_branch_info_from_registry (ai_mail, leg 7): the genuine seat
-        resolves, which it can only do from the real registry — the decoy names no
-        such seat, so a walk that stopped at it would answer None."""
+        """Through get_branch_info_from_registry: the genuine seat resolves only from the real registry."""
         project = tmp_path / "project"
         _real_registry(project)
         caller = project / "src" / "seat"
@@ -615,8 +407,7 @@ class TestCallerRegistryNeverResolvesToACounter:
         assert found is not None and found["email"] == "@genuine"
 
     def test_a_caller_identity_lookup_does_not_seat_the_impostor(self, tmp_path, monkeypatch, case_insensitive_fs):
-        """The assertion that is about WHO, not about which file. Both registries
-        are well-formed and both name a branch; only one of them is real."""
+        """The assertion that is about WHO, not about which file."""
         project = tmp_path / "project"
         _real_registry(project)
         caller = project / "src" / "seat"
@@ -626,12 +417,10 @@ class TestCallerRegistryNeverResolvesToACounter:
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
-        # No contact row vouches for either name; only a registry can.
         asked: list[str] = []
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.email.contacts.get_contact", lambda name: asked.append(name))
 
-        # Through detect_branch_from_pwd, the caller-branch lane (ai_mail, leg 14):
-        # the impostor finds no registry seat and is only synthesized as external.
+        # The impostor finds no registry seat and is only synthesized as external.
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "impostor")
         impostor = bd.detect_branch_from_pwd()
         assert impostor is not None and impostor["type"] == "external"
@@ -639,14 +428,14 @@ class TestCallerRegistryNeverResolvesToACounter:
         genuine = bd.detect_branch_from_pwd()
         assert genuine is not None and genuine["email"] == "@genuine"
         assert genuine.get("type") != "external"
-        # Only the impostor fell through to the address book.
         assert asked == ["impostor"]
 
 
 class TestReplyPathValidationIsNotSatisfiedByACounter:
     """``reply._validate_reply_path`` guards delivery TOWARD an external project.
-    It is existence-only, so a decoy anywhere up the chain is a full pass — this
-    is the outbound direction of the same defect."""
+
+    It is existence-only, so a decoy anywhere up the chain is a full pass.
+    """
 
     def test_a_counter_ancestor_does_not_validate_a_reply_path(self, tmp_path, case_insensitive_fs):
         stray = tmp_path / "not-a-project"
@@ -672,9 +461,7 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
 
 
 class TestResidentAndProjectTreeDiscovery:
-    """The two sites @drone's sweep did not list. Both are one or two levels
-    down rather than a walk up, and both decide WHICH CITIZENS EXIST — the
-    resident roster and the verified-admin cross-project bridge."""
+    """The two sites @drone's sweep did not list: both decide WHICH CITIZENS EXIST."""
 
     def test_resident_discovery_skips_lowercase_counters(self, tmp_path, case_insensitive_fs):
         projects = tmp_path / "projects"
@@ -705,9 +492,7 @@ class TestResidentAndProjectTreeDiscovery:
 
 
 class TestNoInlineRegistryGlobSurvivesInTheTree:
-    """The drift guard. Six sites were fixed; the seventh is the one written next
-    month by someone who never read this file, so the ban is structural rather
-    than remembered."""
+    """The drift guard: the ban on inline registry globs is structural rather than remembered."""
 
     HANDLERS = Path(__file__).resolve().parents[1] / "apps"
     READER_FILE = "paths.py"
@@ -716,12 +501,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
     def _mentions_registry(arg, module_constants):
         """Whether this glob argument carries a registry pattern.
 
-        TWO spellings, because only catching the first would have let my own fix
-        through: ``resident_registry_paths`` globbed
-        ``projects.glob(RESIDENT_REGISTRY_GLOB)``, a NAME, and a literal-only ban
-        reported that site clean while it held the defect. A rule blind to the
-        shape the code actually uses is worse than no rule, because it reports a
-        swept tree.
+        Two spellings: a literal-only ban reports ``glob(RESIDENT_REGISTRY_GLOB)`` (a Name) clean.
         """
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
             return "registry" in arg.value.lower()
@@ -733,11 +513,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
     def _sources(root):
         """Every .py under root, never inside a dropbox, .archive or __pycache__.
 
-        Written here, not imported: seedgo's handlers guard refuses a caller from
-        another branch. dropbox and .archive are the owner's ruling of 09-27 (a
-        dropbox is a sandbox like .archive); apps/handlers/.archive holds retired
-        .py files today, which the bare rglob read. Names are judged relative to
-        root. Every other directory is walked, tools, docs and logs included.
+        Written here, not imported: seedgo's handlers guard refuses a caller from another branch.
         """
         skip = frozenset({"dropbox", ".archive", "__pycache__"})
         for source in root.rglob("*.py"):
@@ -745,8 +521,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
                 yield source
 
     def _registry_glob_calls(self, root=None):
-        """Every ``.glob(...)``/``.rglob(...)`` reaching for a registry pattern,
-        outside the one filtered reader."""
+        """Every ``.glob(...)``/``.rglob(...)`` reaching for a registry pattern, outside the one filtered reader."""
         offenders = []
         for source in self._sources(root or self.HANDLERS):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
@@ -768,18 +543,13 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         return offenders
 
     def test_the_ban_is_measured_not_asserted(self):
-        """Positive control for the AST walk itself. If the parser visits nothing
-        — wrong root, renamed package — the ban below passes vacuously and
-        reports a clean tree it never read."""
+        """Positive control for the AST walk itself: an empty walk would pass the ban vacuously."""
         seen = [s.name for s in self._sources(self.HANDLERS)]
         assert len(seen) > 20, f"the walk must actually reach the handler tree, saw {len(seen)}"
         assert self.READER_FILE in seen
 
     def test_the_ban_catches_a_named_constant_not_only_a_literal(self):
-        """Negative control for the RULE. Feeds the matcher the exact shape my
-        own resident-discovery site used — a bare Name — and requires a
-        conviction. Without this, tightening the ban to literals-only would pass
-        every test in this class while reopening the hole."""
+        """Negative control for the RULE: a bare Name constant (resident discovery's shape) must convict."""
         module_constants = {"RESIDENT_REGISTRY_GLOB": "*/*_REGISTRY.json"}
 
         def _first_arg(source):
@@ -796,14 +566,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         assert self._mentions_registry(innocent, {}) is False
 
     def test_the_ban_never_reads_a_dropbox_or_an_archive(self, tmp_path):
-        """A registry glob planted in a dropbox or .archive under the walked root is
-        not read; the same glob in live source is. The live file is the control:
-        without it an empty walk would pass.
-
-        The root stands inside a directory named dropbox, so a filter on the whole
-        path would drop live.py too. The runner cannot serve a test module: this pin
-        stands on red first alone (the filter removed, both plants came back).
-        """
+        """A registry glob planted in a dropbox or .archive under the walked root is not read; live source is."""
         root = tmp_path / "dropbox" / "root"
         root.mkdir(parents=True)
         glob_line = 'd.glob("*_REGISTRY.json")\n'

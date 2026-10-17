@@ -3,14 +3,11 @@
 # Description: Dispatch Status Handler
 # Version: 1.0.1
 # Created: 2026-02-02
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dispatch Status Handler
-
-Handles dispatch log storage and status checking.
-Independent handler - no module dependencies.
 """
 
 import json
@@ -22,7 +19,6 @@ from typing import Dict, Any, List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-# Dispatch log location (package-relative)
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
 DISPATCH_LOG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "dispatch_log.json"
 
@@ -30,10 +26,7 @@ DISPATCH_LOG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "dispatch_log.json"
 def load_dispatch_log() -> List[Dict[str, Any]]:
     """Load dispatch log from JSON file.
 
-    Raises:
-        OSError, ValueError: the log exists and cannot be read or parsed. An
-            empty list would read as "no dispatches", and log_dispatch would
-            then save one entry over the unreadable file (ai_mail, leg 10).
+    Raises OSError/ValueError on an unreadable log: returning [] would let log_dispatch overwrite it.
     """
     if not DISPATCH_LOG_FILE.exists():
         return []
@@ -46,10 +39,8 @@ def load_dispatch_log() -> List[Dict[str, Any]]:
 def save_dispatch_log(dispatches: List[Dict[str, Any]]) -> bool:
     """Save dispatch log to JSON file"""
     try:
-        # Ensure parent directory exists
         DISPATCH_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-        # Keep last 50 dispatches
         dispatches = dispatches[-50:]
 
         data = {"last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "dispatches": dispatches}
@@ -63,21 +54,10 @@ def save_dispatch_log(dispatches: List[Dict[str, Any]]) -> bool:
 
 
 def log_dispatch(branch: str, pid: Optional[int], status: str, error_msg: Optional[str] = None) -> bool:
-    """
-    Log a dispatch event.
+    """Log a dispatch event.
 
-    Args:
-        branch: Target branch email (e.g., @flow)
-        pid: Process ID if successful
-        status: 'spawned' or 'failed'
-        error_msg: Error message if failed
-
-    Returns:
-        True if logged successfully; False if the log could not be read (it is
-        left untouched, never overwritten) or could not be saved. Both callers,
-        daemon.py's spawn path, ignore the answer: a raise there would reach the
-        spawn's except, which releases the lock of an agent already running
-        (ai_mail, leg 10).
+    False if the log is unreadable (left untouched) or unsaved. Never raises: in daemon.py's
+    spawn path a raise would release the lock of an agent already running.
     """
     json_handler.log_operation("log_dispatch", {"branch": branch, "status": status})
 
@@ -102,12 +82,7 @@ def log_dispatch(branch: str, pid: Optional[int], status: str, error_msg: Option
 
 
 def check_pid_status(pid: int) -> str:
-    """
-    Check if a PID is still running.
-
-    Returns:
-        'RUNNING', 'COMPLETED', or 'UNKNOWN'
-    """
+    """Check if a PID is still running."""
     try:
         result = subprocess.run(["ps", "-p", str(pid)], capture_output=True, timeout=5)
         if result.returncode == 0:

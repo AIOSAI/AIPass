@@ -3,37 +3,13 @@
 # Description: Notification Feed Writer
 # Version: 2.0.1
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Notification Feed Writer
 
-Desktop toasts are retired (the owner's ruling, 2026-08-11) — no D-Bus, no
-notify-send, and no fallback that still toasts. Notification events are
-appended as JSON lines to a shared feed; BAUD's notification bell reads it.
-
-Feed contract (ai_mail writes, BAUD reads):
-
-    path : <repo root>/.aipass/notifications.jsonl
-    line : {"ts": ISO8601, "kind": mail|wake|dispatch|system,
-            "title": str, "body": str, "source": branch name (no @)}
-
-Append-only, one JSON object per line. Readers never write, and the feed
-carries no read flags — BAUD tracks read state locally.
-
-Locate the feed via ``aipass.ai_mail.feed_path()``, not by restating the path.
-Readers: the trim REPLACES the file, so the inode changes and line positions
-shift. Lines carry no id, so a cursor held as a line index or byte offset goes
-stale silently. Key on ``ts`` and flag gaps — full contract in the README.
-
-Concurrency: delivery, wake, dispatch_monitor and daemon append from separate
-processes. Each append is a single O_APPEND write; the trim is a
-read-modify-write. Both take the same advisory lock, so an append can never
-land inside a trim and be dropped.
-
-Fail honest: a feed write that fails is logged and returns False. Nothing
-falls back to a toast.
+Append-only JSONL feed BAUD's bell reads; desktop toasts are retired. Reference: docs/dispatch_register_and_feed.md
 """
 
 import json
@@ -48,7 +24,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-# fcntl is POSIX-only (Linux/macOS). On Windows, use msvcrt for locking.
 if sys.platform == "win32":
     import msvcrt
 
@@ -60,31 +35,18 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-# The four event kinds BAUD renders. Anything else is coerced to "system".
 NOTIFICATION_KINDS = ("mail", "wake", "dispatch", "system")
 DEFAULT_KIND = "system"
 
 
 def feed_path() -> Path:
-    """Where the notification feed lives — the one place the path is built.
-
-    @api serves this file over /v1/feed and had restated the expression as
-    their own constant, because reaching into another branch's handlers is an
-    encapsulation violation. A duplicated path goes stale silently the day the
-    feed moves: a phone bell showing nothing, with no error anywhere. The door
-    is re-exported as ``aipass.ai_mail.feed_path``.
-
-    Prefer this over FEED_PATH in new code — it resolves at call time, while
-    the constant freezes the repo root at import.
-    """
+    """Where the notification feed lives — the one place the path is built."""
     return find_repo_root() / ".aipass" / "notifications.jsonl"
 
 
 FEED_PATH = feed_path()
 FEED_LOCK_NAME = ".notifications.lock"
 
-# Trim policy: once the feed passes FEED_MAX_LINES, keep only the newest
-# FEED_KEEP_LINES. A bell shows recent events — old ones have no reader.
 FEED_MAX_LINES = 400
 FEED_KEEP_LINES = 200
 
@@ -98,21 +60,7 @@ def send_notification(
 ) -> bool:
     """Append one notification event to the shared feed.
 
-    Args:
-        title: Event title (e.g. "DEVPULSE -> AI_MAIL")
-        body: Event body text
-        source: Branch the event is about, with or without a leading @
-        kind: One of NOTIFICATION_KINDS; anything else is logged and
-              recorded as "system" rather than dropped
-        extra: Additive fields merged into the line — never overwriting a
-               contract key. Dispatch completions carry ``dispatch_id``,
-               ``sender`` and ``report_path`` this way (FPLAN-0452 P1), so a
-               reader can tell whose dispatch finished and where the full
-               report waits WITHOUT the 1-2 KB report bloating every line.
-               @api serves this feed to BAUD, so growth here is not free.
-
-    Returns:
-        True if the line was appended, False if the feed write failed
+    ``extra`` fields are additive, never overwrite a contract key; @api serves every line to BAUD, so keep them small.
     """
     json_handler.log_operation("send_notification", {"title": title, "source": source, "kind": kind})
 
@@ -124,8 +72,7 @@ def _build_event(
 ) -> Dict[str, str]:
     """Build the feed line payload — the whole schema lives here.
 
-    Contract keys are written LAST so an ``extra`` carrying ``ts`` or ``kind``
-    cannot quietly redefine the schema every reader depends on.
+    Contract keys are written LAST so an ``extra`` carrying ``ts`` or ``kind`` cannot redefine the schema.
     """
     event: Dict[str, str] = {}
     if extra:
@@ -155,9 +102,7 @@ def _normalize_kind(kind: str) -> str:
 def _append_event(path: Path, event: Dict[str, str]) -> bool:
     """Append *event* as one JSON line, then trim if the feed has outgrown its cap.
 
-    The parameter is *path*, not *feed_path*: that name belongs to the module
-    function above, and shadowing it here would make ``feed_path()`` inside
-    this body a TypeError on a Path.
+    The parameter is *path*, not *feed_path*: shadowing the module function would break ``feed_path()`` here.
     """
     return append_jsonl(
         path,
@@ -171,20 +116,7 @@ def _append_event(path: Path, event: Dict[str, str]) -> bool:
 def append_jsonl(path: Path, record: Dict, *, lock_name: str, max_lines: int, keep_lines: int) -> bool:
     """Append *record* as one locked JSON line to a capped append-only log.
 
-    The feed's write discipline, made reusable rather than copied. The dispatch
-    register (FPLAN-0452 P0) is the same shape — append-only, locked, capped —
-    and a second hand-rolled copy of the lock-then-trim ordering is how the two
-    drift apart: fix a race in one and the other keeps it.
-
-    Args:
-        path: The log file; its parent is created if missing
-        record: One JSON-serialisable record
-        lock_name: Sibling lock filename, so two logs never share a lock
-        max_lines: Trim once the file passes this many lines
-        keep_lines: How many newest lines a trim keeps
-
-    Returns:
-        True if the line was appended, False if the write failed
+    One shared write discipline for the feed and the dispatch register, so the lock-then-trim ordering cannot drift.
     """
     line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -206,31 +138,14 @@ def append_jsonl(path: Path, record: Dict, *, lock_name: str, max_lines: int, ke
 def jsonl_records(path: Path, strict: bool = False):
     """Yield each parseable record from a JSONL log, oldest first.
 
-    A malformed line is skipped and named rather than aborting the read: these
-    logs are appended by concurrent processes, and one truncated line must not
-    cost a reader every record after it. A missing file yields nothing — that
-    is a defined empty state ("nothing registered yet"), not a failure.
-
-    Args:
-        path: The JSONL log to read
-        strict: Raise OSError when an EXISTING file cannot be read, instead of
-            logging and yielding nothing. Callers whose emptiness is meaningful
-            need this: for the dispatch register, "nothing is outstanding" and
-            "I cannot tell what is outstanding" are opposite answers, and
-            returning an empty sequence for both renders them identically.
-            @devpulse pinned that distinction in their wire (2026-08-22) and it
-            is theirs to rely on. The feed keeps the tolerant default — a bell
-            that misses events is better than one that raises at a hook.
+    A malformed line is skipped and named; a missing file yields nothing. ``strict`` raises OSError when an existing
+    file cannot be read: for the dispatch register, "nothing outstanding" and "cannot tell" must differ.
     """
-    # Checked, not caught: "nothing has been registered yet" is a DEFINED EMPTY
-    # STATE, and an empty generator says so honestly. Swallowing FileNotFoundError
-    # would make it indistinguishable from a real read failure one line below.
+    # Checked, not caught: a missing file is a defined empty state, distinct from a read failure below.
     if not path.exists():
         return
 
-    # Read as bytes, decoded line by line: a byte that is not UTF-8 is one
-    # malformed line, and decoding the whole file raised for every line after
-    # it, past the OSError arm (ai_mail, leg 16).
+    # Read as bytes, decoded per line: one non-UTF-8 line must not fail every line after it.
     try:
         with open(path, "rb") as f:
             lines = f.readlines()
@@ -252,11 +167,7 @@ def jsonl_records(path: Path, strict: bool = False):
 
 @contextmanager
 def _jsonl_lock(path: Path, lock_name: str):
-    """Hold an exclusive advisory lock for an append-only log.
-
-    The lock lives on a sibling lock file, never on the log itself — the trim
-    replaces the log's inode, which would drop a lock held on it.
-    """
+    """Hold an exclusive advisory lock for an append-only log."""
     lock_file = path.parent / lock_name
     lock_fd = None
 
@@ -283,19 +194,7 @@ def _jsonl_lock(path: Path, lock_name: str):
 def _trim_jsonl(path: Path, max_lines: int, keep_lines: int) -> bool:
     """Drop an append-only log to its newest *keep_lines* once past *max_lines*.
 
-    Caller must hold the log's lock — this is a read-modify-write, and an
-    unlocked append landing between the read and the replace would be lost.
-
-    The os.replace below gives the log a NEW INODE. Readers therefore cannot
-    hold a byte offset or line index across a trim; the feed's reader contract
-    in the README says key on ``ts``, and the register is read whole.
-
-    The log is counted and kept as bytes: the trim never decodes it, so a line
-    that is not UTF-8 cannot make the append that just landed raise (ai_mail,
-    leg 16). Such a line ages out like any other.
-
-    Returns:
-        True if the log was trimmed, False if it was already within cap
+    Caller must hold the lock. os.replace gives a new inode, so readers cannot hold offsets across a trim.
     """
     try:
         with open(path, "rb") as f:

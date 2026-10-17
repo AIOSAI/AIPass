@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.0.3
 # Created: 2026-08-20
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -33,9 +33,6 @@ from aipass.ai_mail.apps.handlers.dispatch.session_pointer import (
 )
 
 
-# --- Fixtures --------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _suppress_logger(monkeypatch):
     """Suppress logger output during tests."""
@@ -58,12 +55,8 @@ def branch(tmp_path):
 
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
-    """Point the home directory at tmp_path so transcript paths land under the sandbox.
-
-    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so the
-    environment moves it for this test without replacing pathlib for every
-    reader in the process (ai_mail, leg 6).
-    """
+    """Point the home directory at tmp_path so transcript paths land under the sandbox."""
+    # Path.home() reads HOME on POSIX and USERPROFILE on Windows: set both, leave pathlib alone.
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -81,9 +74,6 @@ def _make_transcript(branch_path: Path, session_id: str, size_bytes: int = 64) -
     return target
 
 
-# --- mint_session_id -------------------------------------------------
-
-
 def test_mint_session_id_is_a_uuid_string():
     """Callers pass this straight to --session-id, so the shape is a contract."""
     import uuid
@@ -95,9 +85,6 @@ def test_mint_session_id_is_a_uuid_string():
 
 def test_mint_session_id_is_unique():
     assert mint_session_id() != mint_session_id()
-
-
-# --- transcript_dir / transcript_file --------------------------------
 
 
 def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
@@ -134,20 +121,8 @@ def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
     assert result.parent == transcript_dir(sample)
 
 
-# dispatch_monitor's _get_jsonl_projects_dir copy was retired on 2026-10-10: its one
-# caller, run_with_startup_check, asks transcript_dir directly, and
-# tests/test_dispatch_monitor_helpers.py's _startup_run asserts that call. The
-# encoding's pin lives here, in the tests above, where the one copy of it is.
-
-
-# --- pointer_path ----------------------------------------------------
-
-
 def test_pointer_path_sits_beside_the_dispatch_lock(branch):
     assert pointer_path(branch) == branch / ".ai_mail.local" / "session.json"
-
-
-# --- write_pointer / read_pointer round trip -------------------------
 
 
 def test_round_trip_write_then_read(branch):
@@ -193,9 +168,6 @@ def test_write_pointer_leaves_no_temp_files_behind(branch):
     write_pointer(branch, "sess-1", "wake")
     leftovers = [p.name for p in (branch / ".ai_mail.local").iterdir() if p.name != "session.json"]
     assert leftovers == []
-
-
-# --- read_pointer refusals -------------------------------------------
 
 
 def test_read_pointer_none_when_file_missing(branch):
@@ -250,9 +222,6 @@ def test_read_pointer_none_on_oserror(branch, monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", _boom)
     assert read_pointer(branch) is None
-
-
-# --- write_pointer failure paths -------------------------------------
 
 
 def test_write_pointer_returns_false_on_oserror(branch, monkeypatch):
@@ -312,9 +281,6 @@ def test_failed_write_cleans_up_its_temp_file(branch, monkeypatch):
 
     leftovers = [p.name for p in (branch / ".ai_mail.local").iterdir() if p.name != "session.json"]
     assert leftovers == []
-
-
-# --- resolve_resume_target -------------------------------------------
 
 
 def test_resolve_returns_none_with_no_pointer(branch, fake_home):
@@ -385,9 +351,6 @@ def test_resolve_reason_is_always_populated(branch, fake_home):
         assert isinstance(reason, str) and reason.strip()
 
 
-# --- resolve_resume_target: oversize transcript ----------------------
-
-
 def test_resolve_flags_an_oversize_transcript_but_still_resumes(branch, fake_home):
     """Detection only -- rotation is a human decision and is NOT armed here."""
     write_pointer(branch, "sess-big", "wake")
@@ -432,8 +395,7 @@ def test_resolve_still_resumes_when_the_size_check_itself_fails(branch, fake_hom
         return real_stat(self, *args, **kwargs)
 
     def _is_file(self, *args, **kwargs):
-        # The existence check must still pass -- only the SIZE read fails,
-        # which is the narrow case this test pins.
+        # Only the SIZE read fails; the existence check must still pass.
         if self.suffix == ".jsonl":
             return True
         return real_is_file(self, *args, **kwargs)
@@ -443,9 +405,6 @@ def test_resolve_still_resumes_when_the_size_check_itself_fails(branch, fake_hom
     session_id, reason = resolve_resume_target(branch, max_transcript_mb=1.0)
     assert session_id == "sess-live"
     assert "size unknown" in reason
-
-
-# --- never raises ----------------------------------------------------
 
 
 def test_resolve_never_raises_on_a_nonsense_argument():
@@ -484,43 +443,15 @@ def test_pointer_file_is_valid_json_on_disk(branch):
     raw = pointer_path(branch).read_text(encoding="utf-8")
     parsed = json.loads(raw)
     assert set(parsed) == {"session_id", "set_at", "set_by", "cwd"}
-    # MEASURED 2026-09-08: five newlines — one after the opening brace and one
-    # after each of the four keys. The ``or`` that stood here could not fail:
-    # read_text uses universal newlines, so "\n" is in the text on every
-    # platform whatever os.linesep says, and a single-blob dump would have
-    # passed it too. The claim in the old comment — indented, not a blob — is
-    # now the assertion.
+    # Indented, not a blob: one newline after the brace and one after each of the four keys.
     assert raw.count("\n") == 5, raw
 
 
-# --- Windows path rendering ------------------------------------------
-
-
 class TestTheMismatchMessageIsReadableOnBothPlatforms:
-    """CI red on PR 739's windows-setup job (@devpulse, 2026-08-23).
-
-    test_resolve_returns_none_on_cwd_mismatch asserted ``str(branch.resolve())
-    in reason`` while the production message rendered the same path through
-    ``{...!r}``. On POSIX that is invisible - repr of "/home/x" only adds
-    quotes, so the needle is still a substring. On Windows repr DOUBLES every
-    backslash, so the haystack holds ``'C:\\\\Users\\\\x'`` while the needle is
-    ``C:\\Users\\x``, and the comparison can never succeed.
-
-    The test's intent was right and stays: a mismatch message that does not NAME
-    both paths is useless to the human reading it. What was wrong was the
-    rendering underneath - and it was wrong for the reader too, not just for the
-    assertion. A Windows user was being shown a path with doubled separators
-    that matches nothing they can copy, paste, or eyeball against their own
-    directory. Fixing the assertion alone would have left that in place.
-    """
+    """A mismatch message names both paths as stored: no repr-doubled Windows backslashes."""
 
     def test_a_windows_pointer_cwd_survives_into_the_message(self, branch, fake_home):
-        """The reproduction, run on Linux: pointer cwd is read from JSON verbatim.
-
-        Nothing is mocked. ``cwd`` comes straight out of session.json, so a
-        Windows path reaches the real formatting on any platform - which is what
-        makes CI's failure provable from here.
-        """
+        """The reproduction, run on Linux: pointer cwd is read from JSON verbatim, nothing mocked."""
         windows_cwd = r"C:\Projects\AIPass\src\aipass\ai_mail"
         path = pointer_path(branch)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -539,13 +470,7 @@ class TestTheMismatchMessageIsReadableOnBothPlatforms:
         assert "\\\\" not in reason, "no doubled separators - the reader cannot copy those"
 
     def test_an_empty_cwd_is_still_visible(self, branch, fake_home):
-        """What ``!r`` was buying, kept: a blank value must not vanish.
-
-        This is the reason repr was reached for in the first place. Swapping to
-        bare ``str`` would render an empty pointer cwd as nothing at all -
-        "pointer says  but this branch resolves to ..." - so the quoting has to
-        survive the fix even though the escaping does not.
-        """
+        """What ``!r`` was buying, kept: a blank value must not vanish; the quoting survives, the escaping does not."""
         path = pointer_path(branch)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"session_id": "s", "cwd": "", "reason": "wake"}), encoding="utf-8")
@@ -569,28 +494,10 @@ class TestTheMismatchMessageIsReadableOnBothPlatforms:
         assert str(moved.resolve()) in reason
 
 
-# --- unresolvable home ------------------------------------------------
-
-
 class TestAnUnnameableHomeDoesNotRaise:
-    """Reported by @hooks (2026-08-23), found inside my file while fixing their own CI red.
+    """Path.home() can raise on Windows (no USERPROFILE); the resume path must not.
 
-    ``Path.home()`` was the one unguarded call on the resume path. It delegates
-    to ``os.path.expanduser``, which on POSIX falls back to the pwd database and
-    so is nearly unfailable — but ntpath reads USERPROFILE, then
-    HOMEDRIVE+HOMEPATH, and has NO pwd fallback. Absent those it returns "~"
-    unchanged and pathlib raises RuntimeError. Verified here rather than taken
-    on trust: ntpath.expanduser("~") -> "~" with those three cleared.
-
-    That breaks two written contracts. The module docstring: "Nothing here
-    raises." resolve_resume_target's: "This never raises." Everything else on
-    the path is careful — read_pointer swallows I/O and parse errors, the branch
-    resolve catches OSError, every candidate stat catches OSError.
-
-    THE REACH IS THE HAPPY PATH, which is what makes it worth fixing rather than
-    noting: it only fires once a pointer EXISTS and its cwd MATCHES. A branch
-    with no pointer returns early and never touches it. So it is reached by
-    exactly the branches that are correctly pointed.
+    Reached only once a pointer exists and its cwd matches, so it is the happy path.
     """
 
     @staticmethod
@@ -616,12 +523,7 @@ class TestAnUnnameableHomeDoesNotRaise:
         )
 
     def test_the_reason_says_home_and_not_transcript_not_found(self, branch, fake_home, monkeypatch):
-        """ "I cannot name home" and "there is no transcript" are different facts.
-
-        Collapsing them would be the same defect as an unreadable dispatch
-        register returning [] — a reader cannot act on a message that blames the
-        wrong thing, and the machine-level failure is the one worth fixing.
-        """
+        """ "I cannot name home" and "there is no transcript" are different facts."""
         write_pointer(branch, "sess-live", "wake")
         _make_transcript(branch, "sess-live")
         self._home_is_unnameable(monkeypatch)
@@ -631,12 +533,7 @@ class TestAnUnnameableHomeDoesNotRaise:
         assert "home" in reason.lower(), f"the reason must name the actual failure. Got: {reason}"
 
     def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch, tmp_path):
-        """No home means no answer — not a plausible path that cannot exist.
-
-        Returning a sentinel would make "this machine cannot name its home"
-        indistinguishable from "no transcript here", which is precisely the
-        collapse this branch spent the night removing from three other files.
-        """
+        """No home means no answer — not a plausible path that cannot exist."""
         self._home_is_unnameable(monkeypatch)
 
         somewhere = str(tmp_path / "anywhere")

@@ -3,7 +3,7 @@
 # Description: Tests for email footer handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/footer.py."""
@@ -17,24 +17,12 @@ from unittest.mock import MagicMock
 import aipass.ai_mail.apps.handlers.email.footer as mod
 
 
-# --- Fixtures --------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _suppress_log_operation(monkeypatch):
     """Prevent json_handler.log_operation from touching real files."""
     mock_jh = MagicMock()
     monkeypatch.setattr(mod, "json_handler", mock_jh)
     return mock_jh
-
-
-# --- get_footer tests ------------------------------------------------
-
-
-# ``test_get_footer_returns_string`` lived here until 2026-09-08 (FPLAN-0514).
-# Its whole oracle was ``isinstance(result, str)``, and the two units below
-# already fail on anything that is not the constant string, so it pinned nothing
-# a sibling did not. Retired to tests/.archive/, not deleted.
 
 
 def test_get_footer_matches_constant():
@@ -56,18 +44,11 @@ def test_get_footer_contains_checklist():
 def test_close_your_plan_excludes_living_docs():
     """The close line must not tell an APLAN owner to close a standing record.
 
-    This footer is appended to EVERY outgoing mail and has no plan context, so
-    it cannot read a plan-type prefix — the wording itself has to carry the
-    exception. Measured cost of leaving it implicit (DPLAN-0291 closeout):
-    4 branches stopped to ask which rule won, and @api closed its living audit
-    doc the day it was created, archiving the findings.
+    The footer has no plan context, so the wording itself must carry the exception.
     """
     result = mod.get_footer()
     close_line = next(line for line in result.splitlines() if "CLOSE YOUR PLAN" in line)
     assert "APLAN" in close_line, "the close line must name the living-doc exception"
-
-
-# --- append_footer tests ---------------------------------------------
 
 
 def test_append_footer_appends_to_message():

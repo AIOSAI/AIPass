@@ -3,20 +3,13 @@
 # Description: Email Orchestration Module
 # Version: 3.5.0
 # Created: 2025-12-02
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Orchestration Module
 
-Orchestrates email workflows for AI_Mail CLI system.
-Handles: send, inbox, view, close, reply, sent, contacts commands.
-
-Module Pattern:
-- handle_command(command, args) -> bool entry point
-- Imports handlers for business logic
-- Logs operations via json_handler
-- NO business logic in this file
+Handles send, inbox, view, close, reply, sent, contacts; business logic lives in handlers.
 """
 
 import os
@@ -69,11 +62,7 @@ except ImportError as e:
 def _print_row(row: str) -> None:
     """Print one listing row, never letting a render failure hide it.
 
-    Rows carry sender-controlled text. format.py escapes it, but a row that
-    still fails to render must degrade visibly, not vanish: an invisible
-    message is the worst failure shape mail has — the sender believes it was
-    delivered and the recipient never sees it. On failure the row is
-    reprinted with markup disabled behind a marker.
+    Rows carry sender text; a row that fails to render is reprinted raw, because an invisible message looks delivered.
     """
     try:
         console.print(row)
@@ -86,18 +75,7 @@ def _print_row(row: str) -> None:
 def _resolve_branch_path() -> Path:
     """Resolve the branch path for inbox operations.
 
-    Identity comes from get_current_user() and nowhere else. There is no longer a
-    fallback to this module's own branch: substituting @ai_mail's mailbox for an
-    unresolvable caller meant `view`/`close`/`reply` quietly operated on the wrong
-    citizen's mail — reading another citizen's inbox because of where a terminal
-    happened to be standing, which is the same defect as sending as them
-    (the owner's ruling, 2026-08-21; @devpulse 096c9a42).
-
-    Raises:
-        RuntimeError: propagated from get_current_user() when the caller cannot be
-            resolved. The CLI fence in ai_mail.py refuses before any verb reaches
-            here, so this is a backstop for in-process callers, not the user-facing
-            path.
+    Identity comes from get_current_user() only, never a fallback to @ai_mail's own mailbox; RuntimeError propagates.
     """
     return Path(get_current_user()["mailbox_path"]).parent
 
@@ -105,25 +83,8 @@ def _resolve_branch_path() -> Path:
 def caller_refusal() -> str:
     """Return a refusal message when the caller stands outside any branch, else "".
 
-    The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
-    ur cwd, and if aimail was run in root it should fail outright." Every verb —
-    inbox, view, reply, send, dispatch — refuses rather than resolving to whichever
-    citizen the route happens to land on. Reading another citizen's mail because of
-    where a terminal happened to be standing is the same defect as sending as them
-    (@devpulse 0bb77ec2 / 096c9a42: a dispatch from the repo root sent as @aipass,
-    woke the wrong citizen, cost $1.41).
-
-    Called from the CLI entry point rather than per handler: the per-id verbs
-    (view/close/reply) resolve through ``_resolve_branch_path()`` and never consult
-    identity again, so one gate above all of them is the only place "every verb" is
-    actually true. In-process importers (@trigger's delivery, @daemon's wake) do not
-    pass through here — that is the import boundary, a different trust model.
-
-    The text is get_current_user()'s own RuntimeError, never a second wording: it
-    already names the mistake and tells the caller to re-run from the sending branch.
-
-    Returns:
-        str: The refusal text, or "" when the caller's identity is resolvable.
+    Called once from the CLI entry point so every verb is gated; in-process importers do not pass through here.
+    The text is get_current_user()'s own RuntimeError, never a second wording.
     """
     try:
         get_current_user()
@@ -179,8 +140,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     valid = ["send", "email", "inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
     if command not in valid:
         return False
-    # Whole-sequence: a flag after the first argument would otherwise reach
-    # handle_send/handle_close/handle_reply and mutate a mailbox.
+    # Whole-sequence: a later --help must not reach send/close/reply and mutate a mailbox.
     if wants_help(args):
         print_help()
         return True
@@ -206,11 +166,7 @@ def handle_inbox(args: List[str]) -> bool:
     try:
         first_arg = args[0] if args else None
 
-        # get_current_user passed directly, with no substitute wrapper: an
-        # unresolvable caller must not be shown @ai_mail's own inbox. That was the
-        # third substitution in this lane (with _resolve_branch_path and the
-        # CALLER_BRANCH claim) and the quietest — it rendered someone else's mail
-        # under a heading that named no one. The CLI fence refuses before here.
+        # get_current_user passed directly, no substitute: an unresolvable caller must not see @ai_mail's inbox.
         ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, get_current_user)
         if not ok:
             error(info["error"])
@@ -230,10 +186,7 @@ def handle_inbox(args: List[str]) -> bool:
             console.print(f"Inbox{label} is empty")
             return True
 
-        # delivery.py inserts new mail at index 0, so messages[:LIST_LIMIT] is
-        # the NEWEST slice. Reversing first and then slicing kept the OLDEST 20
-        # and silently hid every new message in any inbox holding more than 20.
-        # Slice first, then reverse for oldest-first reading order.
+        # delivery.py inserts new mail at index 0: slice the newest first, then reverse for reading order.
         newest = messages[:LIST_LIMIT]
         display = list(reversed(newest))
         console.print(f"\nInbox{label}\n" + "=" * 70)
@@ -264,16 +217,13 @@ def handle_view(args: List[str]) -> bool:
         branch_path = _resolve_branch_path()
         message_id = args[0]
 
-        # Handle "latest" shortcut — get the most recent message ID
         if message_id.lower() == "latest":
             inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
             inbox_data = load_inbox(inbox_file)
             if not inbox_data or not inbox_data.get("messages"):
                 error("Inbox is empty")
                 return True
-            # delivery.py inserts at index 0 — the most recent message is the
-            # FIRST entry, not the last. Reading [-1] served up the OLDEST mail
-            # in the inbox under the name "latest".
+            # delivery.py inserts at index 0, so the most recent message is the FIRST entry.
             message_id = inbox_data["messages"][0].get("id")
             if not message_id:
                 error("Could not find latest message")
@@ -285,15 +235,10 @@ def handle_view(args: List[str]) -> bool:
             return True
         header = format_email_header(email_data)
         console.print(f"\n{header}")
-        # The body is raw sender text and never carries styling of its own, so
-        # it renders with markup off entirely. Escaping would work too, but
-        # markup=False cannot raise MarkupError at all — and this is the
-        # primary read surface: it must survive any content a sender can type.
+        # Raw sender text renders with markup off: markup=False cannot raise MarkupError on any content.
         console.print(f"\n{email_data.get('message', '')}", markup=False)
         console.print("=" * 70)
-        # Echo the message's OWN id, never args[0] — `view latest` printed
-        # "ID: latest", and a lookup by sent_id would otherwise print the
-        # sender's id back as though it were this mailbox's name for it.
+        # Echo the message's OWN id, never args[0] ("latest", or a sender's sent_id).
         resolved_id = email_data.get("id", message_id)
         sent_id = email_data.get("sent_id")
         origin = f" | sender's id: {sent_id}" if sent_id else ""
@@ -368,10 +313,7 @@ def handle_reply(args: List[str]) -> bool:
         reply_message = " ".join(args[1:])
         flag_like = [a for a in args[1:] if a.startswith("--")]
         if flag_like:
-            # reply has no flag parsing — args[1:] is joined verbatim as the message body.
-            # An unrecognized flag (e.g. --body-file) is not consumed, not rejected, and
-            # not substituted — it ships as literal text with no signal it happened
-            # (@cli, ef49d937: a --body-file typo silently became the sent message).
+            # reply has no flag parsing: args[1:] is the body verbatim, so an unknown flag ships as literal text.
             warning(
                 f"reply takes no flags — {', '.join(flag_like)} sent as literal message text.",
             )
@@ -397,12 +339,7 @@ def handle_sent(args: List[str]) -> bool:
         if not sent_folder.exists():
             console.print("No sent messages")
             return True
-        # Sort by mtime, not by filename. The folder holds two naming schemes —
-        # create.py writes "<YYYYMMDD_HHMMSS>_<subject>.json", reply.py writes
-        # "<id>.json" — and in a filename sort every hex id outranks every digit,
-        # so a mailbox with 20 replies in it hid all recent sends behind them.
-        # That is the newest-end truncation bug the inbox listing already fixed,
-        # and here it hid the refused records this listing exists to surface.
+        # Sort by mtime, not filename: create.py and reply.py use two naming schemes, and hex ids outsort dates.
         files = sorted(sent_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:LIST_LIMIT]
         if not files:
             console.print("No sent messages")
@@ -413,8 +350,7 @@ def handle_sent(args: List[str]) -> bool:
             if data:
                 _print_row(format_email_list_item(i, data, show_unread=False))
             else:
-                # An unreadable sent file still gets a row — dropping it would
-                # under-report what was sent with no error anywhere.
+                # An unreadable sent file still gets a row, so nothing sent is silently under-reported.
                 logger.warning("[email] sent file unreadable, listing as placeholder: %s", f.name)
                 console.print(f"\n{i}. [UNREADABLE FILE] {f.name}", markup=False)
         console.print("\n" + "=" * 70 + f"\nShowing {len(files)} sent messages")

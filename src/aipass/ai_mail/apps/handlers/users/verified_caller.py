@@ -3,42 +3,15 @@
 # Description: Verified-Caller Rail for privilege-bearing decisions
 # Version: 1.6.0
 # Created: 2026-08-12
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Verified-Caller Rail
 
-Identity that GATES something may only come from the environment drone stamps
-from real process ancestry (``AIPASS_CALLER_BRANCH``, falling back to a passport
-walk up ``AIPASS_CALLER_CWD``). A CLI flag is a claim, not a credential.
-
-Why this exists: ``--from`` (dispatch send) and ``--sender`` (manual wake) both
-land on ``wake_branch(sender=...)``, and ``sender == "@daemon"`` unlocks the
-manager wake lane. Until this rail, any citizen could run
-``dispatch @manager --from @daemon`` and wake a manager (found by a @devpulse
-read-only scout, DPLAN-0288, traced not executed).
-
-The split this module draws:
-
-- **claimed identity** — what the caller typed. Still authors the mail; it is
-  display/routing metadata and stays as permissive as it ever was.
-- **verified identity** — who the rail can prove is calling. The only thing a
-  privilege may read.
-
-Deliberately NOT a fallback to ``Path.cwd()``: drone runs a routed module with
-``cwd=<target branch>`` and a dispatched agent runs with ``cwd=<its own tree>``,
-so this process's own directory says nothing about who called. Unprovable
-returns "" and a privileged claim on "" is refused — fail closed.
-
-Scope: this is the CLI boundary. Direct in-process callers of ``wake_branch``
-(e.g. @daemon's ``run.py``) never pass through here; that trust model is the
-import boundary, not this one.
+A CLI flag is a claim, not a credential. Reference: docs/identity_and_boundaries.md
 """
 
-# =============================================
-# IMPORTS
-# =============================================
 import os
 import sys
 from pathlib import Path
@@ -56,16 +29,8 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# =============================================
-# CONSTANTS
-# =============================================
 
-# Sender values that unlock a wake lane rather than just addressing a bounce.
-# Kept here, at the boundary that enforces them, because wake_branch itself
-# cannot: its in-process callers have no caller env to check against and are
-# trusted by import. test_verified_caller.py scans wake.py for `sender == "@x"`
-# gates and fails if one is missing from this set — Phase 4's admin identity
-# lands in both places or not at all.
+# Senders that unlock a wake lane. test_verified_caller.py checks every `sender == "@x"` gate in wake.py is listed here.
 PRIVILEGED_SENDERS: frozenset[str] = frozenset({"@daemon"})
 
 
@@ -79,29 +44,13 @@ def _normalize(address: Optional[str]) -> str:
 def resolve_verified_caller() -> str:
     """Resolve the branch address of the process that actually invoked us.
 
-    Two legs, in order:
-      1. ``AIPASS_CALLER_BRANCH`` — drone's assigned identity, stamped from real
-         process ancestry (router_handler).
-      2. ``AIPASS_CALLER_CWD`` walked up to a ``.trinity/passport.json``.
-
-    Returns:
-        str: ``@branch``, or "" when the caller cannot be proven. "" is a
-        normal answer (direct invocation, no drone), never an exception —
-        callers decide what an unproven caller may do.
+    "" when the caller cannot be proven: a normal answer, never an exception. Bare cwd is never a fallback.
     """
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
 
-    # Evidence before claim. A CALLER_CWD that sits in no branch DISPROVES any
-    # CALLER_BRANCH stamped alongside it: drone derives that name from the nearest
-    # project directory, so at the repo root it reads 'aipass' and collides with the
-    # citizen of the same name. Returning that here would hand a privilege check an
-    # identity nobody proved (@devpulse, 0bb77ec2). Unset is different from
-    # contradicted — no cwd means no verdict, and the claim still stands.
+    # Evidence before claim: a CALLER_CWD in no branch disproves CALLER_BRANCH (at the repo root drone stamps 'aipass').
+    # Unset cwd is no verdict. Only a credential source (not a directory-name "project") survives the contradiction.
     if caller_cwd and not find_branch_root(Path(caller_cwd)):
-        # Same key as the identity fence: a credential travels, a location does
-        # not. Refusing "assigned" here would close the wake lane on exactly the
-        # dispatched agents it exists to serve, while "project" — a directory name
-        # — must never buy a privileged sender claim.
         if os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") not in _CREDENTIAL_SOURCES:
             return ""
 
@@ -118,19 +67,7 @@ def resolve_verified_caller() -> str:
 
 
 def sender_claim_refusal(claimed: Optional[str]) -> Optional[str]:
-    """Return a refusal reason if `claimed` is privilege-bearing and unproven.
-
-    A claim that gates nothing is never refused — ``--from @spawn`` from any
-    seat stays legal, because the value only rides on the mail. A claim that
-    DOES gate something must equal the verified caller.
-
-    Args:
-        claimed: The sender address the caller supplied, or None.
-
-    Returns:
-        Optional[str]: Human-readable reason naming both identities, or None
-        when the claim is allowed.
-    """
+    """Return a refusal reason if `claimed` is privilege-bearing and unproven."""
     claim = _normalize(claimed)
     if claim not in PRIVILEGED_SENDERS:
         return None
@@ -150,20 +87,7 @@ def sender_claim_refusal(claimed: Optional[str]) -> Optional[str]:
 
 
 def resolve_wake_sender(claimed: Optional[str]) -> str:
-    """Return the sender value a wake may be given.
-
-    The verified caller when there is one; otherwise the claim, which
-    :func:`sender_claim_refusal` has already guaranteed is not
-    privilege-bearing. So the value reaching ``wake_branch`` is either proven
-    or harmless — never an unproven privileged string.
-
-    Args:
-        claimed: The sender address the caller supplied, or None.
-
-    Returns:
-        str: Address for bounce mail and wake-back. "" stays "" — that is
-        wake-back's chain terminator, not an identity to invent.
-    """
+    """Return the sender value a wake may be given."""
     return resolve_verified_caller() or _normalize(claimed)
 
 
@@ -174,30 +98,8 @@ def verify_admin_caller(
     key_path: Optional[Path] = None,
     registry_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
-    """Run the full 5-leg admin-grant check (FPLAN-0401 THE CONTRACT).
-
-    Delegates to @devpulse's reference implementation rather than mirroring it:
-    the contract has one home, so a change to it cannot silently disagree with
-    this lane. The legs are caller identity, registry-resolved cert path, cert
-    content, HMAC-SHA256 signature, and the registry admin flag — all five, or
-    nothing.
-
-    Fail-closed at every edge: if the reference cannot be imported the lane is
-    dark, not open. Nothing here reads or logs key material.
-
-    Args:
-        key_path: Override the signing-key path (tests only — production uses
-            the reference's default, ``~/.aipass/admin_grant.key``).
-        registry_path: Override the registry path (tests only).
-
-    Returns:
-        Tuple[bool, str]: (verified, reason). The reason names the failed leg
-        so a refusal can be read without a debugger.
-    """
+    """Run the full 5-leg admin-grant check."""
     try:
-        # devpulse's door (DPLAN-0404): one implementation of the 5-leg contract,
-        # reached through its published re-export, never its handlers. Lazy, so
-        # a dark lane costs nothing at import.
         from aipass.devpulse.apps.modules.door_admin_grant import verify_admin_grant
     except ImportError as exc:
         logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
@@ -221,25 +123,7 @@ def verify_admin_caller(
 def is_verified_admin_caller() -> bool:
     """True only when the caller IS the admin holder and all five legs pass.
 
-    The single boolean the cross-project bridge consumes. Two gates, in order:
-
-    1. The verified-caller rail must say this process IS the holder. Every other
-       citizen short-circuits here and does zero file I/O — noise control, NOT
-       security (leg 1 inside the reference decides that, independently).
-    2. The 5-leg grant must verify. A verifier that raises is not a verdict:
-       the raise reaches the caller, which refuses loudly. Answered as False,
-       a broken verifier looked like a working one that said no (ai_mail,
-       leg 17). Refusal by exception is still refusal; the bridge never opens.
-
-    Deliberately NOT cached. A revoked grant has to take effect on the next
-    call; a per-process cache would keep a torn-up grant alive until restart,
-    which is failing open.
-
-    Returns:
-        True if this caller may cross project boundaries, False otherwise.
-
-    Raises:
-        Whatever verify_admin_caller raises, unchanged.
+    Not cached, so a revoked grant takes effect on the next call. A raising verifier propagates (refusal, not False).
     """
     if resolve_verified_caller() != ADMIN_HOLDER:
         return False

@@ -132,7 +132,7 @@
     {
       "file": "apps/handlers/dispatch/report.py",
       "standard": "logged_fallback",
-      "lines": [284],
+      "lines": [196],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10): _prune_reports returns how many reports it removed, and a listing that failed removed none, so 0 is the count, not a stand-in. Its one caller, write_report, ignores the count and has already written the report; the failure is logged at warning. A raise here would turn a missed prune into a lost dispatch record."
     },
     {
@@ -158,103 +158,103 @@
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
       "standard": "logged_fallback",
-      "lines": [124],
+      "lines": [96],
       "reason": "Under @devpulse's leg 11 ruling c (ai_mail, fleet green leg 11): _migrate_deleted_json_if_exists returns how many legacy deleted.json messages it moved, and both callers (mark_all_read_and_archive, mark_as_closed_and_archive) ignore the count. A raise would land in reply's auto-close after the reply has been sent. The failure is logged at warning and deleted.json stays in place for the next close."
     },
     {
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
-      "lines": [250, 254, 307, 311, 352, 389, 425, 445],
+      "lines": [203, 207, 252, 256, 297, 331, 361, 381],
       "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
     },
     {
       "file": "apps/modules/email_send.py",
       "standard": "logged_fallback",
-      "lines": [270, 275],
+      "lines": [244, 249],
       "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 270 is a BrokenPipeError (stdout closed early); 275 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
     },
     {
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
-      "lines": [203, 491],
+      "lines": [173, 432],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 491 (487 before leg 10's edit above it) is the send phase failure, which has already called error() (mark_command_failed); 203 is _orchestrate_status meeting an unreadable dispatch log, which it reports through error() since leg 10 instead of printing 'No dispatches recorded yet.'. True tells the router the command was recognised."
     },
     {
       "file": "apps/handlers/email/send.py",
       "standard": "logged_fallback",
-      "lines": [312, 320, 336, 344],
+      "lines": [242, 250, 266, 274],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:189, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
-      "lines": [198, 299, 657],
+      "lines": [140, 217, 483],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08 and 2026-10-16). 198: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and log_wake_result plus the report's wake_result carry it. 299: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 657: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
-      "lines": [453],
+      "lines": [340],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
     },
     {
       "file": "apps/handlers/email/create.py",
       "standard": "logged_fallback",
-      "lines": [206],
+      "lines": [152],
       "reason": "The caller names it (ai_mail, fleet green leg 12): load_email_file documents None for a file that cannot be read, and its one caller, the sent listing in modules/email.py 412, reaches it only for files its own glob just found, so None there means unreadable, and the listing prints that row as '[UNREADABLE FILE] <name>' and logs it rather than dropping it. Nothing is written behind it; a raise would end the whole listing at the first bad file."
     },
     {
       "file": "apps/handlers/registry/read.py",
       "standard": "logged_fallback",
-      "lines": [100],
+      "lines": [74],
       "reason": "Traced, the namesake is not reachable through this [] (ai_mail, fleet green leg 12, the commons-namesake re-read of the leg 11 HELD). get_all_branches answers [] for an unreadable AIPASS_REGISTRY.json. Its one resolver, deliver_email_to_branch, no longer trusts that: before the map widens to the caller's project, the admin sweep or the external tier, delivery asks check_registry_readable and refuses, naming the registry (pinned: test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake). The other callers list or match names, and every send they make goes through that delivery: email_send 181 (interactive list) and 306 (broadcast targets), email.handle_contacts 432 (display), reply.send_reply 151 (sender lookup), get_branch_by_email 146, delivery 632 (a path argument; a miss refuses). wake reads the registry itself and refuses since leg 12. A raise here would turn those CLI commands into 'not handled' through route_command."
     },
     {
       "file": "apps/handlers/registry/read.py",
       "standard": "logged_fallback",
-      "lines": [391],
+      "lines": [243],
       "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose callers are email_send 315 (the @all broadcast target list) and @seedgo's fresh_clone_check 13/40. An unreadable resident registry drops that project's residents from the broadcast; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @seedgo's check."
     },
     {
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
-      "lines": [368, 611],
+      "lines": [215, 366],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined DPLAN-0404 leg 15). 368: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 611: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
     },
     {
       "file": "apps/handlers/email/format.py",
       "standard": "logged_fallback",
-      "lines": [64],
+      "lines": [51],
       "reason": "The value is the true answer for display (ai_mail, fleet green leg 10): lookup_branch_alias returns None for 'no alias to show', and its one caller, format_sender_display, then shows the branch name, which is what a reader needs when the alias cannot be read. Nothing is written behind it; a raise would break the inbox view over a cosmetic suffix. The failure is logged at warning."
     },
     {
       "file": "apps/handlers/notify.py",
       "standard": "logged_fallback",
-      "lines": [305, 320],
+      "lines": [204, 219],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined in leg 16): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (320 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
     },
     {
       "file": "apps/handlers/dispatch/test_token.py",
       "standard": "logged_fallback",
-      "lines": [88, 107, 130],
+      "lines": [76, 95, 114],
       "reason": "False is the failure answer, not a fallback (ai_mail, fleet green leg 10): auto_ack_test_email returns True only when both the reply and the close went, and every failure, a non-zero exit, a missing id or these subprocess errors, answers False. Its caller, test_token.py:140, counts acks only, so the message stays in the inbox, unacked, and is seen again. 130 (leg 13): scan_and_ack_test_emails answers 0 acked for an unreadable inbox, which is what happened; its one caller, poll_cycle (daemon.py 569), ignores the count, and the dispatch scan that follows refuses the same inbox."
     },
     {
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
-      "lines": [133],
+      "lines": [94],
       "reason": "The value is the answer (ai_mail, fleet green leg 10): the caller-identity gate returns '' when the caller resolves and the refusal text when it does not, as its docstring says; the except arm IS the refusal, carrying get_current_user()'s own RuntimeError text, and the entry point refuses on any non-empty answer."
     },
     {
       "file": "apps/handlers/dispatch/status.py",
       "standard": "logged_fallback",
-      "lines": [147],
+      "lines": [122],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10): calculate_age renders a display string, and 'unknown' is what it shows for a stamp it cannot read, the same as for an empty stamp. Its one caller is the dispatch status table (modules/dispatch.py); nothing is written behind it, and the parse failure is logged at warning."
     },
     {
       "file": "apps/ai_mail.py",
       "standard": "logged_fallback",
-      "lines": [204],
+      "lines": [153],
       "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
     },
     {
@@ -266,19 +266,19 @@
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "logged_fallback",
-      "lines": [118, 126],
+      "lines": [102, 110],
       "reason": "_pid_alive (ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; re-lined 2026-10-11): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 126 is the answer, not a fallback. 118, the Windows probe raised, answers alive as a named guess in the fail-closed direction: a second daemon does not start over a process it cannot rule out. Since leg 13 the dispatch lock uses pid_lock's check_pid_alive (a linux zombie is dead) and this one serves only the daemon's own pid file in _write_pid_file, where a zombie daemon still reads alive: named, not merged, as it is not the lock pair."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "logged_fallback",
-      "lines": [280, 298, 321, 520],
+      "lines": [245, 260, 277, 441],
       "reason": "Each caller's own answer to an unreadable file, all on the side where nothing spawns (ai_mail, fleet green legs 12 and 13; re-lined 2026-10-11). 280: get_registered_branches answers [] for an unreadable registry, so poll_cycle 535 polls no branch. 298: _is_registered_sender answers False, the registry cannot vouch for anyone, so spawn_agent 378 refuses an auto_execute dispatch (leg 12's fail-open find). 321: check_inbox_for_dispatch answers None for an unreadable inbox, so poll_cycle 573 finds no dispatch there. Each logs the JsonUnreadable it caught. 520: spawn_agent answers False for every spawn that did not happen, refused or failed; the except arm also releases the lock it took and logs the failure to the dispatch log, and its one caller, poll_cycle 581, counts spawns only. The unreadable safety config and state file are not here: they raise and run_daemon refuses, as their defaults are the less safe side."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
-      "lines": [362, 386],
+      "lines": [268, 292],
       "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
     },
     {
@@ -295,25 +295,25 @@
     {
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
-      "lines": [207, 210],
+      "lines": [126, 129],
       "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
     },
     {
       "file": "tests/test_notify.py",
       "standard": "through_the_command",
-      "lines": [280],
+      "lines": [259],
       "reason": "No route reaches this arm (ai_mail, fleet green leg 16; a line bypass under @devpulse's ruling of 2026-10-04). _trim_jsonl's read-failure arm logs and answers False, and its one caller, append_jsonl, ignores the answer and reaches the trim only after writing the same file under the same lock one line before, so neither send_notification nor append_jsonl can bring the read to fail. A public door would exist for this test alone. The row pins the arm's log and its False directly."
     },
     {
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
-      "lines": [105],
+      "lines": [92],
       "reason": "(ai_mail, fleet green leg 9; re-lined leg 17; its twin in test_dispatch_monitor_helpers.py retired 2026-10-10) transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
     {
       "file": "apps/handlers/dispatch/session_pointer.py",
       "standard": "logged_fallback",
-      "lines": [208, 211, 217],
+      "lines": [104, 107, 113],
       "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
     }
   ],

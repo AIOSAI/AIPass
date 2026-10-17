@@ -3,23 +3,10 @@
 # Description: Tests for absolute mailbox_path resolution in user functions
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
-
-# Bug: get_user_by_email() and get_all_users() returned relative paths like
-# "src/aipass/ai_mail/.ai_mail.local" instead of absolute paths.
-# get_current_user() was already correct (resolved against _repo_root).
-#
-# Fix: Both functions now resolve relative registry paths against _repo_root
-# (the parent of BRANCH_REGISTRY_PATH), matching get_current_user()'s pattern.
-#
-# These tests verify:
-# 1. get_user_by_email() returns an absolute mailbox_path
-# 2. get_all_users() returns absolute mailbox_path for every entry
-# 3. Paths are never doubled (no src/aipass/.../src/aipass/...)
-# 4. Absolute paths in the registry are preserved as-is
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
@@ -34,21 +21,9 @@ from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 from aipass.ai_mail.apps.handlers.users.user import get_all_users, get_current_user, get_user_by_email
 
 
-# ─── Fixtures ────────────────────────────────────────────
-
-
 @pytest.fixture
 def relative_path_registry(tmp_path):
-    """Create a registry with relative paths (production format).
-
-    Production AIPASS_REGISTRY.json uses list format with relative paths:
-        "path": "src/aipass/ai_mail"
-
-    The registry sits at tmp_path/AIPASS_REGISTRY.json, so _repo_root
-    is tmp_path. Resolved paths should be tmp_path / "src/aipass/..." .
-
-    Returns (registry_path, expected_repo_root).
-    """
+    """Create a registry with relative paths (production format); returns (registry_path, repo_root)."""
     registry = {
         "branches": [
             {
@@ -81,11 +56,7 @@ def relative_path_registry(tmp_path):
 
 @pytest.fixture
 def absolute_path_registry(tmp_path):
-    """Create a registry where paths are already absolute.
-
-    Ensures absolute paths pass through without double-resolution.
-    Returns (registry_path, branch_dir).
-    """
+    """Create a registry where paths are already absolute; returns (registry_path, branch_dir)."""
     branch_dir = tmp_path / "src" / "aipass" / "solo_branch"
     registry = {
         "branches": [
@@ -105,11 +76,7 @@ def absolute_path_registry(tmp_path):
 
 @pytest.fixture
 def dict_format_registry(tmp_path):
-    """Create a registry using dict format (legacy).
-
-    Tests that the dict->list normalization via _get_branches_list still
-    produces absolute paths.
-    """
+    """Create a registry using dict format (legacy)."""
     registry = {
         "branches": {
             "devpulse": {
@@ -131,9 +98,6 @@ def dict_format_registry(tmp_path):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path, tmp_path
-
-
-# ─── get_user_by_email() tests ───────────────────────────
 
 
 class TestGetUserByEmailPaths:
@@ -163,9 +127,7 @@ class TestGetUserByEmailPaths:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_user_by_email("@trigger")
             assert result is not None and result["email_address"] == "@trigger"
-            # Normalize to forward slashes for consistent counting on all platforms
             path = result["mailbox_path"].replace("\\", "/")
-            # Count occurrences of the relative segment
             assert path.count("src/aipass/trigger") == 1, f"Path contains doubled segment: {path}"
 
     def test_absolute_path_preserved(self, absolute_path_registry):
@@ -211,9 +173,6 @@ class TestGetUserByEmailPaths:
         assert str(broken) in str(raised.value)
 
 
-# ─── get_all_users() tests ───────────────────────────────
-
-
 class TestGetAllUsersPaths:
     """Verify get_all_users() returns absolute mailbox_path for every entry."""
 
@@ -232,10 +191,7 @@ class TestGetAllUsersPaths:
         registry_path, _ = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             users = get_all_users()
-            # The floor. Every assertion in this unit sits inside the loop, so an
-            # empty result made it a silent pass — a get_all_users() that
-            # returned nothing at all reported green. Three is the fixture's own
-            # number, pinned by test_all_paths_are_absolute above.
+            # The floor: every other assertion sits in the loop, so an empty result would pass silently.
             assert len(users) == 3, f"the registry fixture plants 3 users, got {len(users)}"
             for email, info in users.items():
                 assert info["mailbox_path"].endswith(".ai_mail.local"), (
@@ -250,9 +206,7 @@ class TestGetAllUsersPaths:
             # The floor — see test_all_paths_end_with_ai_mail_local above.
             assert len(users) == 3, f"the registry fixture plants 3 users, got {len(users)}"
             for email, info in users.items():
-                # Normalize to forward slashes for consistent counting on all platforms
                 path = info["mailbox_path"].replace("\\", "/")
-                # The relative prefix "src/aipass" should appear exactly once
                 assert path.count("src/aipass") == 1, f"Path for {email} contains doubled 'src/aipass': {path}"
 
     def test_paths_resolve_against_repo_root(self, relative_path_registry):
@@ -296,11 +250,7 @@ class TestGetAllUsersPaths:
             assert users == {}
 
     def test_unreadable_registry_raises_not_empty(self, tmp_path):
-        """A registry that exists and cannot be parsed raises, naming itself.
-
-        Read as {}, it answered exactly as a registry naming nobody, so a caller
-        could not tell "no users" from "users unknown" (ai_mail, leg 15).
-        """
+        """A registry that exists and cannot be parsed raises, naming itself: "no users" is not "unknown"."""
         broken = tmp_path / "AIPASS_REGISTRY.json"
         broken.write_text("{not json", encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", broken):
@@ -309,13 +259,7 @@ class TestGetAllUsersPaths:
         assert str(broken) in str(raised.value)
 
 
-# ─── Detection-failure diagnostics (error 0bd8b4f5) ──────
-#
-# drone runs the target branch with cwd=<target branch>, so Path.cwd() inside
-# ai_mail is ALWAYS a valid branch dir and is never the cause of failure.
-# Sender identity comes from the AIPASS_CALLER_* env vars. The old message
-# blamed the (valid) working directory and sent two investigations chasing a
-# phantom passport problem.
+# drone runs the target with cwd=<target branch>, so Path.cwd() is always valid; identity comes from AIPASS_CALLER_*.
 
 
 class TestDetectionFailureDiagnostics:
@@ -343,7 +287,6 @@ class TestDetectionFailureDiagnostics:
             get_current_user()
 
         msg = str(exc_info.value)
-        # The old wording told the reader to go look for a passport in cwd
         assert "must be called from within a branch directory" not in msg
         assert "informational only" in msg
 
@@ -374,12 +317,7 @@ class TestRepoRootFallbackIsLoud:
     def test_the_fallback_names_itself_once(self, monkeypatch, tmp_path, caplog):
         """Silence here was doing real work — every caller got "wherever I stand".
 
-        Written when the fresh checkout was the ORDINARY way to reach this
-        branch. It no longer is: pyproject.toml resolves that case, and the
-        class below pins it. What remains is a tree with neither marker, which
-        really is broken — so the warning still has to be findable, and still
-        must not repeat per call. Flagged by @devpulse alongside the PR 739
-        failures (2026-08-23).
+        A tree with neither marker is broken: the warning must be findable and must not repeat per call.
         """
         import logging
 
@@ -408,26 +346,11 @@ class TestRepoRootFallbackIsLoud:
 class TestTheFreshCheckoutFindsTheRightRoot:
     """@devpulse's standing item (dc764d49): "find_repo_root's return Path.cwd(). Fix it."
 
-    Their framing is what made the fix findable, so it is recorded here: the
-    danger was never the register being MISSING — they refuse on that — it is
-    the register being FOUND IN THE WRONG PLACE, which no refusal can catch. A
-    wire that arms against an empty file in the wrong directory reports perfect
-    health and covers nothing.
-
-    AIPASS_REGISTRY.json is UNTRACKED runtime state, so on a fresh checkout it
-    exists nowhere and the walk fell through to "wherever this process happens
-    to be standing". pyproject.toml is tracked, sits only at the repo root, and
-    is on the ancestor chain from this package — so the answer is available, it
-    was simply never asked for.
+    AIPASS_REGISTRY.json is untracked, so a fresh checkout finds the root by the tracked pyproject.toml.
     """
 
     def test_a_checkout_with_no_registry_still_finds_its_own_root(self, monkeypatch, tmp_path):
-        """The regression test for the actual defect: right root, wrong cwd.
-
-        Reds before the pyproject marker exists — find_repo_root returns the
-        unrelated cwd, and every path built from it (feed, register, reports)
-        lands in a directory that has nothing to do with the checkout.
-        """
+        """The regression test for the actual defect: right root, wrong cwd."""
         checkout = tmp_path / "fresh-checkout"
         (checkout / "src" / "aipass" / "ai_mail" / "apps" / "handlers").mkdir(parents=True)
         (checkout / "pyproject.toml").write_text("[project]\nname = 'aipass'\n", encoding="utf-8")
@@ -445,11 +368,8 @@ class TestTheFreshCheckoutFindsTheRightRoot:
         assert paths.find_repo_root() == checkout
 
     def test_the_registry_still_wins_when_it_is_there(self, monkeypatch, tmp_path):
-        """Order matters: the live registry is authoritative, pyproject is the stand-in.
-
-        Both markers present, at DIFFERENT levels, so the assertion can only
-        pass for one of them.
-        """
+        """Order matters: the live registry is authoritative, pyproject is the stand-in."""
+        # Markers at different levels, so the assertion can only pass for one of them.
         outer = tmp_path / "outer"
         inner = outer / "inner"
         inner.mkdir(parents=True)

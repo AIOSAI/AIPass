@@ -3,27 +3,14 @@
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
 # Version: 1.0.3
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""
 
-# Refused sends (FPLAN-0400 items B + C). Two failures, one surface, both found
-# live by @baud sending from projects/baud into the AIPass repo:
-#
-# B — the cross-project fence refused the send and the sent record still read
-#     ``status: "sent"``. The sender took "it's in my sent folder" as proof of
-#     delivery and had no way to learn the message never went.
-#
-# C — the refusal printed twice, then "Unknown command: email". The send was
-#     genuinely running twice: email_send.handle_command ignored its ``command``
-#     argument, so every command an earlier module declined — including a send
-#     that module had already run and reported as failed — was executed again
-#     here. Returning False for "ran and failed" is what sent the router on.
-#
-# The contract these pin: a handler returns True for "I recognised and ran this
-# command", never for "it worked". Failure is reported through error(), which
-# sets the process failure flag main() maps to exit 2.
+# A refused send must not leave a sent-looking record, and must not run twice.
+# The contract: a handler returns True for "I recognised and ran this command",
+# never for "it worked"; failure goes through error(), which main() maps to exit 2.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — format.py's other formatters (lookup_branch_alias, format_sender_display) parse
@@ -45,9 +32,6 @@ from aipass.ai_mail.apps.ai_mail import route_command
 from aipass.cli.apps.modules import error, reset_command_state, resolve_exit
 import aipass.ai_mail.apps.modules.email as email_mod
 import aipass.ai_mail.apps.modules.email_send as send_mod
-
-
-# ---- Fixtures ------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -85,11 +69,6 @@ def _read(email_file) -> dict:
 REFUSAL = "Cross-project mail refused: @baud (project: baud) cannot send to this branch (project: AIPass)."
 
 
-# ===========================================================================
-# Item B — mark_sent_record_refused
-# ===========================================================================
-
-
 class TestMarkSentRecordRefused:
     """Tests for the sent-record restamp itself."""
 
@@ -106,11 +85,7 @@ class TestMarkSentRecordRefused:
         assert record["refused_at"]
 
     def test_preserves_the_rest_of_the_record(self, tmp_path):
-        """Restamping keeps id, addresses, subject and body intact.
-
-        The attempt is evidence — a sender who saw an error must still be able
-        to cite exactly what they tried to send, and to whom.
-        """
+        """Restamping keeps id, addresses, subject and body intact: the attempt is evidence."""
         email_file = create_email_file("@ai_mail", "Subj", "Body", _user_info(tmp_path))
         before = _read(email_file)
 
@@ -134,11 +109,6 @@ class TestMarkSentRecordRefused:
         broken.write_text("{not json", encoding="utf-8")
 
         assert mark_sent_record_refused(broken, REFUSAL) is False
-
-
-# ===========================================================================
-# Item B — send_to_single / send_to_broadcast bookkeeping
-# ===========================================================================
 
 
 class TestSendToSingleRefusedBookkeeping:
@@ -238,10 +208,7 @@ class TestSendToBroadcastRefusedBookkeeping:
         return ok, success_count, total, results, created["path"]
 
     def test_every_recipient_refused_marks_the_record_refused(self, tmp_path, recorded_bus):
-        """Zero delivered means the record must not claim a delivery, and no sent event fires.
-
-        Pinned red first (leg 3): the broadcast fired email_broadcast_sent with successful=0.
-        """
+        """Zero delivered means the record must not claim a delivery, and no sent event fires."""
         ok, success_count, _, _, path = self._broadcast(tmp_path, [(False, REFUSAL), (False, REFUSAL)])
 
         assert ok is False
@@ -260,11 +227,6 @@ class TestSendToBroadcastRefusedBookkeeping:
         assert success_count == 1
         assert recorded_bus.fires == [("email_broadcast_sent", {"recipients": 2, "successful": 1, "subject": "Subj"})]
         assert _read(path)["status"] == "sent"
-
-
-# ===========================================================================
-# Item B — the refused record has to be visible
-# ===========================================================================
 
 
 class TestRefusedRecordIsVisible:
@@ -322,10 +284,7 @@ class TestRefusedRecordIsVisible:
     def test_sent_listing_orders_by_mtime_not_filename(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """The newest send tops the listing whichever naming scheme wrote it.
 
-        create.py writes "<YYYYMMDD_HHMMSS>_<subject>.json" and reply.py writes
-        "<id>.json". In a filename sort every hex id outranks every digit, so a
-        mailbox holding 20 replies hid every recent send behind them — including
-        the refused records this listing exists to surface.
+        create.py names by timestamp, reply.py by hex id; a filename sort hides recent sends behind replies.
         """
         sent = tmp_path / ".ai_mail.local" / "sent"
         sent.mkdir(parents=True)
@@ -350,22 +309,12 @@ class TestRefusedRecordIsVisible:
         assert body.index("NEW REFUSAL") < body.index("OLD REPLY")
 
 
-# ===========================================================================
-# Item C — one command, one send
-# ===========================================================================
-
-
 class TestEmailSendClaimsOnlyItsOwnCommands:
     """The double send: handle_command used to ignore `command` entirely."""
 
     @pytest.mark.parametrize("command", ["dispatch", "inbox", "view", "close", "reply", "sent", "contacts"])
     def test_foreign_command_is_declined_without_sending(self, command, monkeypatch):
-        """A command this module does not own must not run a send.
-
-        This is the canary for the doubled refusal: `dispatch` reached here
-        after dispatch.py had already run and reported it, and a second send
-        went out under a command name this module never owned.
-        """
+        """A command this module does not own must not run a send (the doubled-refusal defect)."""
         sends: list[list] = []
         monkeypatch.setattr(send_mod, "handle_send", lambda args: sends.append(args))
 
@@ -382,12 +331,7 @@ class TestEmailSendClaimsOnlyItsOwnCommands:
         assert sends == [["@target", "Subject", "Body"]]
 
     def test_foreign_command_with_no_args_does_not_swallow_it(self, monkeypatch):
-        """A bare `inbox` must reach the inbox module, not print introspection.
-
-        The no-args branch ran before any command check, so whichever module
-        the filesystem happened to hand the router first could answer `inbox`
-        with this module's introspection and return True.
-        """
+        """A bare `inbox` must reach the inbox module, not print introspection."""
         intros: list[int] = []
         monkeypatch.setattr(send_mod, "print_introspection", lambda: intros.append(1))
 
@@ -401,9 +345,7 @@ class TestRecognisedButFailedStaysHandled:
     def test_router_stops_at_the_first_module_that_ran_a_failed_send(self):
         """A failed send is not retried by the next module in the chain.
 
-        route_command walks modules until one returns True. When a failing send
-        returned False the walk continued, the next module ran the same send
-        again, and the router then declared the command unknown.
+        route_command walks modules until one returns True, so a failed send must still return True.
         """
         first = MagicMock()
         first.handle_command = MagicMock(return_value=True)

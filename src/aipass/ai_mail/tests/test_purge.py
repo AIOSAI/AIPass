@@ -3,7 +3,7 @@
 # Description: Tests for sent/deleted auto-purge handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/purge.py."""
@@ -24,9 +24,6 @@ from aipass.ai_mail.apps.handlers.email.purge import (
 )
 
 
-# ---- Fixtures ------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
@@ -35,15 +32,8 @@ def _silence_json_handler():
         yield mock_jh
 
 
-# ---- Helper --------------------------------------------------
-
-
 def _populate_folder(folder_path, count):
-    """Create count JSON files in folder_path with staggered mtimes.
-
-    Files are named email_000.json through email_{count-1}.json.
-    Each file gets a slightly different mtime so sorting by mtime is deterministic.
-    """
+    """Create count JSON files (email_000.json ...) in folder_path with staggered mtimes."""
     folder_path.mkdir(parents=True, exist_ok=True)
     for i in range(count):
         email_file = folder_path / f"email_{i:03d}.json"
@@ -56,12 +46,8 @@ def _populate_folder(folder_path, count):
             "timestamp": f"2026-01-01 12:{i:02d}:00",
         }
         email_file.write_text(json.dumps(email_data), encoding="utf-8")
-        # Stagger mtimes so sorting is deterministic (newer files have later mtime)
         base_time = 1700000000.0 + i
         os.utime(str(email_file), (base_time, base_time))
-
-
-# ---- purge_sent_folder tests ---------------------------------
 
 
 def test_purge_sent_folder_no_folder(tmp_path):
@@ -97,7 +83,6 @@ def test_purge_sent_folder_above_threshold_vectorize_success(tmp_path, monkeypat
     assert result["purged_count"] == 3  # 13 - 10 = 3 files purged
     assert result["vectorized"] is True
 
-    # Verify 10 files remain
     remaining = list((tmp_path / "sent").glob("*.json"))
     assert len(remaining) == 10
 
@@ -116,12 +101,8 @@ def test_purge_sent_folder_above_threshold_vectorize_fails(tmp_path, monkeypatch
     assert result["purged_count"] == 0
     assert result["vectorized"] is False
 
-    # All 13 files should still exist
     remaining = list((tmp_path / "sent").glob("*.json"))
     assert len(remaining) == 13
-
-
-# ---- purge_deleted_folder tests ------------------------------
 
 
 def test_purge_deleted_folder_no_folder(tmp_path):
@@ -157,9 +138,6 @@ def test_purge_deleted_folder_above_threshold(tmp_path, monkeypatch):
 
     remaining = list((tmp_path / "deleted").glob("*.json"))
     assert len(remaining) == 10
-
-
-# ---- run_purge tests -----------------------------------------
 
 
 def test_run_purge_both_below_threshold(tmp_path):
@@ -213,37 +191,10 @@ def test_run_purge_failure_propagates(tmp_path, monkeypatch):
     assert result["sent"]["success"] is False
 
 
-# ---- The subprocess seam --------------------------------------
-
-
 class TestVectorizationFailureIsNotSuccess:
-    """Reported by @memory (9da1ba52, 2026-08-23) and verified here before fixing.
+    """A handler reply of exit 0 with success:false is a refusal, so nothing may be deleted.
 
-    purge sent ``"operation": "vectorize_and_store"``. @memory's chroma handler
-    accepts six operations and that is not one of them; there is no evidence it
-    ever was. Their handler answers an unknown operation on STDOUT with
-    ``{"success": false, ...}`` and EXITS 0 — a deliberate choice, since the
-    subprocess ran fine, it was the request that was wrong. purge tested only
-    ``returncode != 0``, so the refusal sailed past and it returned success.
-
-    THAT IS NOT A COSMETIC BUG. ``_purge_files`` gates deletion on this result
-    and then calls ``file_path.unlink()`` under the comment "data is safely in
-    @memory". It never was. Reproduced live against the real handler:
-
-        $ echo '{"operation":"vectorize_and_store",...}' | python3 chroma_subprocess.py
-        {"success": false, "error": "Unknown operation: vectorize_and_store"}
-        EXIT CODE: 0
-
-    And confirmed from the other side: of 37 live collections, ai_mail_observations
-    and ai_mail_local exist (the .trinity rollover, working), and no email
-    collection exists at all.
-
-    WHY EVERY EXISTING TEST IN THIS FILE MISSED IT: they all monkeypatch
-    ``_vectorize_emails`` wholesale, so the seam between purge and the actual
-    subprocess had no coverage at any point. The bug lived exactly where the
-    mock began — the same shape as the dispatch-register phantoms this branch
-    hit on 08-22, where a writer and its first consumer were built separately
-    and neither suite covered the join.
+    The other tests here mock ``_vectorize_emails`` wholesale; these cover the subprocess seam.
     """
 
     @staticmethod
@@ -259,12 +210,7 @@ class TestVectorizationFailureIsNotSuccess:
         return lambda *a, **k: _Result()
 
     def test_an_unknown_operation_is_a_failure_even_though_exit_is_zero(self, tmp_path, monkeypatch):
-        """The exact live response, byte for byte, and its reason reaches the caller.
-
-        Through purge_sent_folder on a tmp_path mailbox (ai_mail, leg 8): the
-        failure dict carries @memory's own reason under "error". Red first: before
-        leg 8 the dict dropped it and the reason lived only in the log warning.
-        """
+        """The exact live response, byte for byte, and its reason reaches the caller under "error"."""
         _populate_folder(tmp_path / "sent", 15)
         monkeypatch.setattr(
             purge_mod.subprocess,
@@ -298,12 +244,7 @@ class TestVectorizationFailureIsNotSuccess:
         assert len(list(folder.glob("*.json"))) == before, "purge deleted originals it never archived"
 
     def test_unparseable_stdout_is_not_treated_as_success(self, tmp_path, monkeypatch):
-        """A handler that returns garbage has not stored anything either.
-
-        Guessing "probably fine" from unreadable output is how the original
-        defect would come back wearing a different hat. Through purge_sent_folder
-        on a tmp_path mailbox (ai_mail, leg 7): the originals are the oracle.
-        """
+        """A handler that returns garbage has not stored anything either."""
         folder = tmp_path / "sent"
         _populate_folder(folder, 15)
         monkeypatch.setattr(purge_mod.subprocess, "run", self._handler_reply("not json at all"))

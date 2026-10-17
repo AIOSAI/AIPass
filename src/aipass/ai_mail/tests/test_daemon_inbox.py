@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch daemon's registry read and inbox scan for dispatch mail
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the registered branches and the inbox scan for a dispatch to run."""
@@ -57,7 +57,7 @@ def test_get_registered_branches_no_file():
 
 
 def test_get_registered_branches_unreadable_polls_none(tmp_path):
-    """An unreadable registry answers no branches: nothing is polled, nothing spawned (ai_mail, leg 13)."""
+    """An unreadable registry answers no branches: nothing is polled, nothing spawned."""
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
 
     assert get_registered_branches() == []
@@ -122,7 +122,7 @@ def test_check_inbox_dispatch_no_inbox_file(tmp_path):
 
 
 def test_an_unreadable_inbox_yields_no_dispatch_and_no_ack(tmp_path):
-    """An unreadable inbox spawns nothing and acks nothing; neither scan raises (ai_mail, leg 13)."""
+    """An unreadable inbox spawns nothing and acks nothing; neither scan raises."""
     inbox = tmp_path / ".ai_mail.local" / "inbox.json"
     inbox.parent.mkdir(parents=True)
     inbox.write_text("{not json", encoding="utf-8")

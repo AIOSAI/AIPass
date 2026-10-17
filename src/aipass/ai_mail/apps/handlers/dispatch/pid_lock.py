@@ -3,13 +3,13 @@
 # Description: Process liveness, branch occupancy and the dispatch lock
 # Version: 1.0.1
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Process liveness, branch occupancy and the dispatch lock.
 
-Split out of wake.py in leg 13 (ai_mail, fleet green leg 13), when wake.py
+Split out of wake.py in leg 13, when wake.py
 passed the 1500-line line: these helpers ask the operating system about
 processes and own the .dispatch.lock file, and both the wake and the daemon
 call them. Their public names are the interface wake.py and daemon.py import.
@@ -58,14 +58,14 @@ def _pid_alive_windows(pid: int) -> bool:
 # small json.dump an instant later, so a reader can meet it empty or half
 # written. That window is milliseconds; 30 seconds is far past any such write
 # and far below a wake's turn, so a corrupt lock older than this is a crashed
-# writer's leftover and is reclaimed, and a younger one is held (ai_mail, leg 13).
+# writer's leftover and is reclaimed, and a younger one is held.
 _CORRUPT_LOCK_GRACE_SECONDS = 30
 
 
 def check_lock(branch_path: Path) -> Optional[dict]:
     """Return the lock data while the dispatch lock is held, or None once it is free.
 
-    The one lock check of the wake and the daemon (ai_mail, leg 13). A holder
+    The one lock check of the wake and the daemon. A holder
     that is dead, a linux zombie included, frees the lock and it is removed.
     A corrupt lock is removed only past _CORRUPT_LOCK_GRACE_SECONDS; younger,
     and a lock that cannot be read at all, answer held with a "corrupt" or

@@ -3,13 +3,10 @@
 # Description: Tests for email.py's address book commands - contacts and register
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/email.py's address book: handle_contacts and handle_register."""
-
-# Split out of test_email_module.py on 2026-10-08 to keep that file under the
-# 1,200-line target: the address book is its own subject, not a mailbox read.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — register_contact()'s own write: tests/test_contacts.py
@@ -24,11 +21,6 @@ from aipass.ai_mail.apps.modules.email import (
 from aipass.ai_mail.tests.support_email_module import _StdoutLines
 
 pytestmark = pytest.mark.usefixtures("email_modules_pinned", "email_json_silenced")
-
-
-# ===========================================================================
-# handle_contacts
-# ===========================================================================
 
 
 class TestHandleContacts:
@@ -49,7 +41,6 @@ class TestHandleContacts:
         result = handle_contacts([])
         assert result is True
         assert any("2 branches" in p for p in printed)
-        # Branches should appear sorted by email
         alpha_lines = [p for p in printed if "@alpha" in p]
         assert len(alpha_lines) > 0
 
@@ -84,11 +75,6 @@ class TestHandleContacts:
         result = handle_contacts([])
         assert result is True
         assert any("Registry unavailable" in e for e in errors)
-
-
-# ===========================================================================
-# handle_register
-# ===========================================================================
 
 
 class TestHandleRegister:

@@ -3,17 +3,12 @@
 # Description: Tests for email_send.py's send lane and email.py's command routing
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
 
-# Covers: handle_send and its lanes (direct, group, broadcast, interactive,
-# dispatch) in email_send.py, and handle_command, the caller-path resolution
-# and print_introspection in email.py.
-#
-# All handler dependencies are mocked -- these tests verify orchestration
-# logic, not business logic.
+# All handler dependencies are mocked: these tests verify orchestration, not business logic.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
@@ -33,11 +28,6 @@ from aipass.ai_mail.apps.modules.email_send import (
 from aipass.ai_mail.tests.support_email_module import _StdoutLines
 
 pytestmark = pytest.mark.usefixtures("email_modules_pinned", "email_json_silenced")
-
-
-# ===========================================================================
-# handle_send (from email_send.py)
-# ===========================================================================
 
 
 class TestHandleSend:
@@ -125,7 +115,7 @@ class TestHandleSend:
             "aipass.ai_mail.apps.modules.email_send.send_to_single",
             lambda *a, **kw: (False, "Branch not found"),
         )
-        # dispatch_send_error delivers a real error mail, so it stays patched and is asserted (ai_mail, leg 6)
+        # dispatch_send_error delivers a real error mail, so it stays patched and is asserted
         send_error = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.dispatch_send_error", send_error)
         errors: list[str] = []
@@ -142,16 +132,13 @@ class TestHandleSend:
 
     def test_send_interactive_mode(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """A cancelled interactive send is still a handled command."""
-        # pytest's stdin is not a terminal, so without this the no-TTY guard
-        # answers first and this test would pass while never reaching the
-        # cancel path it is named for.
+        # pytest's stdin is not a terminal: without this the no-TTY guard answers before the cancel path.
         tty = MagicMock(return_value=True)
         monkeypatch.setattr("sys.stdin.isatty", tty)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.parse_send_args",
             lambda args: {"mode": "interactive"},
         )
-        # _send_interactive calls get_all_branches and collect_interactive_input
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.get_all_branches",
             lambda: [{"name": "A", "email": "@a"}],
@@ -259,16 +246,10 @@ class TestHandleSend:
 
         result = handle_send(["@alpha", "@beta", "Group msg", "Hi all"])
         assert result is True
-        # Both recipients should have been sent to
         assert "@alpha" in sent_to
         assert "@beta" in sent_to
         assert any("Group send complete" in p for p in printed)
         error_mock.assert_not_called()
-
-
-# ===========================================================================
-# handle_command dispatch table
-# ===========================================================================
 
 
 class TestHandleCommand:
@@ -296,27 +277,12 @@ class TestHandleCommand:
         assert any("Email Module" in p for p in printed)
 
 
-# ###########################################################################
-# NEW COVERAGE TESTS — appended for untested paths in email.py & email_send.py
-# ###########################################################################
-
-
-# ===========================================================================
-# _resolve_branch_path — identity propagates, never substitutes
-# ===========================================================================
-
-
 class TestResolveBranchPath:
     """Tests for _resolve_branch_path identity behaviour."""
 
     def test_runtime_error_propagates_no_substitution(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
-        """POLICY CHANGE 2026-08-21: an unresolvable caller no longer collapses to
-        _AI_MAIL_DIR. That substitution pointed view/close/reply at @ai_mail's own
-        mailbox, so a caller standing outside any branch read and archived another
-        citizen's mail with no signal (the owner's ruling via @devpulse, 096c9a42).
-
-        Reached through the `sent` command (ai_mail, leg 14): the identity error is
-        the answer, and no mailbox, @ai_mail's included, is listed in its place."""
+        """An unresolvable caller no longer collapses to
+        _AI_MAIL_DIR: the identity error is the answer, and no mailbox is listed in its place."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.get_current_user",
             lambda: (_ for _ in ()).throw(RuntimeError("no branch")),
@@ -328,11 +294,6 @@ class TestResolveBranchPath:
         assert handle_command("sent", []) is True
         assert errors == ["Error: no branch"]
         assert not any("sent messages" in p.lower() for p in printed)
-
-
-# ===========================================================================
-# print_introspection (email.py lines 361-402)
-# ===========================================================================
 
 
 class TestPrintIntrospection:
@@ -349,11 +310,6 @@ class TestPrintIntrospection:
         assert "send.py" in combined
         assert "inbox_ops.py" in combined
         assert "json_handler.py" in combined
-
-
-# ===========================================================================
-# email_send.py: _delivery_callback
-# ===========================================================================
 
 
 def _no_error_dispatch(monkeypatch):
@@ -379,7 +335,7 @@ def _stub_single_send(monkeypatch, tmp_path, on_send=None):
         lambda *a: {"email_address": "@ai_mail", "display_name": "AI_MAIL", "mailbox_path": str(tmp_path)},
     )
     monkeypatch.setattr(email_send_mod, "resolve_dispatch_target", lambda recipient, auto, info: recipient)
-    # A failed send must stop here, never reach the real error report to @drone (ai_mail, leg 14).
+    # A failed send must stop here, never reach the real error report to @drone.
     _no_error_dispatch(monkeypatch)
 
     def _send(*a, **kw):
@@ -404,21 +360,15 @@ class TestDeliveryCallback:
         monkeypatch.setattr(email_send_mod, "on_email_delivered", mock_on_delivered)
         _stub_single_send(monkeypatch, tmp_path, on_send=lambda a: a[11](str(tmp_path), 3, 2, 5))
 
-        # The callback is the one `send` hands the delivery (ai_mail, leg 14).
         assert handle_send(["@target", "Sub", "Msg"]) is True
         assert delivered_args == [{"update_central_fn": email_send_mod.update_central}]
-
-
-# ===========================================================================
-# email_send.py: _get_branch_info_fn
-# ===========================================================================
 
 
 class TestGetBranchInfoFn:
     """Tests for email_send._get_branch_info_fn."""
 
     def _lookup_handed_over(self, monkeypatch, tmp_path):
-        """The branch-info lookup `send` hands dispatch-target resolution (ai_mail, leg 14)."""
+        """The branch-info lookup `send` hands dispatch-target resolution."""
         _stub_single_send(monkeypatch, tmp_path)
         handed: list = []
         monkeypatch.setattr(email_send_mod, "resolve_dispatch_target", lambda r, auto, info: handed.append(info) or r)
@@ -429,9 +379,6 @@ class TestGetBranchInfoFn:
     def test_get_branch_info_fn_success(self, monkeypatch, tmp_path):
         """Returns function on success."""
         result = self._lookup_handed_over(monkeypatch, tmp_path)
-        # MEASURED 2026-09-08: the import succeeds here and a real function comes
-        # back, so ``result is None`` never held — the ``or`` let the failure
-        # this unit is named for pass as success.
         assert callable(result)
         assert result.__name__ == "get_branch_info_from_registry"
 
@@ -453,11 +400,6 @@ class TestGetBranchInfoFn:
         assert result is None
 
 
-# ===========================================================================
-# email_send.py: _send_direct BrokenPipeError & generic exception
-# ===========================================================================
-
-
 class TestSendDirectExtended:
     """Extended tests for email_send._send_direct edge cases."""
 
@@ -471,7 +413,7 @@ class TestSendDirectExtended:
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
         _no_error_dispatch(monkeypatch)
 
-        result = handle_send(["@target", "Sub", "Msg"])  # through the command (ai_mail, leg 14)
+        result = handle_send(["@target", "Sub", "Msg"])
         assert result is True
         # A closed stdout is not a failed send: nothing is reported as an error
         error_mock.assert_not_called()
@@ -493,7 +435,7 @@ class TestSendDirectExtended:
             lambda msg: errors.append(msg),
         )
 
-        result = handle_send(["@target", "Sub", "Msg"])  # through the command (ai_mail, leg 14)
+        result = handle_send(["@target", "Sub", "Msg"])
         assert result is True  # recognised; the failure is what was reported
         assert errors == ["Error: send boom"]
         assert len(dispatched_errors) == 1
@@ -521,25 +463,17 @@ class TestSendDirectExtended:
         error_mock = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
-        result = handle_send(["@all", "Hello", "World"])  # through the command (ai_mail, leg 14)
+        result = handle_send(["@all", "Hello", "World"])
         assert result is True
         assert any("Broadcast" in p or "OK" in p for p in printed)
         error_mock.assert_not_called()
-
-
-# ===========================================================================
-# email_send.py: _fire_dispatch_trigger exception (line 201-202)
-# ===========================================================================
 
 
 class TestFireDispatchTrigger:
     """Tests for email_send._fire_dispatch_trigger exception handling."""
 
     def test_fire_dispatch_trigger_exception_logged(self, monkeypatch, tmp_path):
-        """Exception in trigger.fire is logged but does not propagate: `send --dispatch` still answers.
-
-        Reached through handle_send, not the helper (ai_mail, leg 14).
-        """
+        """Exception in trigger.fire is logged but does not propagate: `send --dispatch` still answers."""
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
         monkeypatch.setattr(email_send_mod, "trigger", mock_trigger)
@@ -550,11 +484,6 @@ class TestFireDispatchTrigger:
         assert handle_send(["@target", "Test Subject", "Body", "--dispatch"]) is True
         mock_trigger.fire.assert_called_once_with("email_dispatched", to="@target", subject="Test Subject")
         assert log.warning.call_args.args[0] == "[email_send] trigger fire for email_dispatched failed: %s"
-
-
-# ===========================================================================
-# email_send.py: _send_broadcast happy path & failure path
-# ===========================================================================
 
 
 class TestSendBroadcast:
@@ -583,7 +512,7 @@ class TestSendBroadcast:
             "mailbox_path": str(tmp_path),
         }
         monkeypatch.setattr(email_send_mod, "resolve_sender_info", lambda *a: user_info)
-        result = handle_send(["@all", "Subj", "Msg"])  # the broadcast, through the command (ai_mail, leg 14)
+        result = handle_send(["@all", "Subj", "Msg"])
         assert result is True
         assert any("Broadcasting" in p for p in printed)
         assert any("2/2" in p for p in printed)
@@ -611,14 +540,9 @@ class TestSendBroadcast:
             "mailbox_path": str(tmp_path),
         }
         monkeypatch.setattr(email_send_mod, "resolve_sender_info", lambda *a: user_info)
-        result = handle_send(["@all", "Subj", "Msg"])  # the broadcast, through the command (ai_mail, leg 14)
+        result = handle_send(["@all", "Subj", "Msg"])
         assert result is True  # recognised; the failure is what was reported
         assert errors == ["Failed to load email file for broadcast"]
-
-
-# ===========================================================================
-# email_send.py: print_introspection
-# ===========================================================================
 
 
 class TestEmailSendIntrospection:
@@ -637,21 +561,12 @@ class TestEmailSendIntrospection:
         assert "_delivery_callback" in combined
 
 
-# ===========================================================================
-# email_send.py: _send_interactive complete path (user provides input)
-# ===========================================================================
-
-
 class TestSendInteractiveExtended:
     """Extended tests for email_send._send_interactive."""
 
     def test_send_interactive_without_a_terminal_refuses_before_listing_branches(self, monkeypatch):
         """No TTY: refuse with usage, and do not print a branch list first.
-
-        `drone @ai_mail email` with no args used to reach the prompts through a
-        routed subprocess and block until drone's 30s timeout (measured live,
-        APLAN-0006). The listing must not print either — output that precedes a
-        certain refusal reads as progress toward a send that cannot happen.
+        Output that precedes a certain refusal reads as progress toward a send that cannot happen.
         """
         tty = MagicMock(return_value=False)
         monkeypatch.setattr("sys.stdin.isatty", tty)
@@ -664,8 +579,6 @@ class TestSendInteractiveExtended:
         errors: list[str] = []
         monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(str(msg)))
 
-        # `email` with no arguments is the interactive send (ai_mail, leg 14); the
-        # command was recognised, and the refusal is what was said.
         result = handle_send([])
 
         assert result is True
@@ -675,8 +588,7 @@ class TestSendInteractiveExtended:
 
     def test_send_interactive_complete_path(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
         """User provides input successfully, send proceeds."""
-        # Same reason as test_send_interactive_mode: the no-TTY guard runs first
-        # under pytest, so the terminal has to be pinned to reach the send path.
+        # Same reason as test_send_interactive_mode: pin the terminal to get past the no-TTY guard.
         tty = MagicMock(return_value=True)
         monkeypatch.setattr("sys.stdin.isatty", tty)
         monkeypatch.setattr(
@@ -708,7 +620,7 @@ class TestSendInteractiveExtended:
         error_mock = MagicMock()
         monkeypatch.setattr(email_send_mod, "error", error_mock)
 
-        result = handle_send([])  # the interactive send, through the command (ai_mail, leg 14)
+        result = handle_send([])
         assert result is True
         assert sent_to == ["@alpha"]
         assert any("@alpha" in p for p in printed)

@@ -3,17 +3,10 @@
 # Description: Tests for miscellaneous small handlers
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/central_writer.py and four other small handlers it sits beside."""
-
-# update_central, check_pid_status, run_daemon, deliver_to_inbox_file, resolve_inbox_target.
-#
-# The increment_counter/update_data_metrics blocks left with their implementation:
-# they were the only readers of ai_mail's own json_utils handler, which retired
-# into apps/handlers/.archive/ when the canonical path became the fleet shim
-# (DPLAN-0325). No production call site ever used either name.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — CENTRAL_FILE, CONFIG_FILE and DAEMON_STATE_FILE path constants
@@ -33,9 +26,6 @@ from aipass.ai_mail.apps.handlers.central_writer import update_central
 from aipass.ai_mail.apps.handlers.dispatch.status import check_pid_status
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
-
-
-# ---- Fixtures ------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -78,11 +68,6 @@ def _silence_json_handler_inbox_resolve():
         yield mock_jh
 
 
-# ==============================================================
-# update_central tests
-# ==============================================================
-
-
 def test_update_central_calls_build_and_write():
     """update_central calls aggregate_branch_stats, build_central_data, and write_central_file."""
     mock_stats = {"FLOW": {"unread": 2, "total": 5}}
@@ -108,11 +93,6 @@ def test_update_central_propagates_error():
         update_central()
 
 
-# ==============================================================
-# check_pid_status tests
-# ==============================================================
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (ps command)")
 def test_check_pid_status_running():
     """Returns RUNNING for the current process PID."""
@@ -123,7 +103,6 @@ def test_check_pid_status_running():
 
 def test_check_pid_status_completed():
     """Returns COMPLETED for a dead/nonexistent PID."""
-    # Use a PID that almost certainly does not exist
     with patch("aipass.ai_mail.apps.handlers.dispatch.status.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1)
         result = check_pid_status(999999999)
@@ -140,25 +119,16 @@ def test_check_pid_status_unknown_on_error():
     assert result == "UNKNOWN"
 
 
-# ==============================================================
-# run_daemon tests (minimal -- max_cycles not available, test poll_cycle call)
-# ==============================================================
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.WNOHANG)")
 @pytest.mark.usefixtures("daemon_signals_restored")
 def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
-    """run_daemon calls poll_cycle and save_daemon_state in the loop.
-
-    We mock the key dependencies and set SHUTDOWN to True after one cycle
-    to verify the loop structure works.
-    """
+    """run_daemon calls poll_cycle and save_daemon_state in the loop."""
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
     monkeypatch.setattr(daemon_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
     monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
 
     poll_calls = []
-    # _remove_pid_file runs for real against the tmp_path pid file this process owns (ai_mail, leg 5)
+    # _remove_pid_file runs for real against the tmp_path pid file this process owns
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text(str(os.getpid()), encoding="utf-8")
 
@@ -174,17 +144,15 @@ def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
         patch.object(daemon_mod, "is_kill_switch_active", return_value=False),
         patch("os.waitpid", side_effect=ChildProcessError),
     ):
-        # Reset SHUTDOWN before running
         daemon_mod.SHUTDOWN = False
         daemon_mod.run_daemon()
 
     assert len(poll_calls) == 1
-    # save_daemon_state runs for real: its only write is the tmp_path state file (ai_mail, leg 5)
+    # save_daemon_state runs for real: its only write is the tmp_path state file
     saved = json.loads((tmp_path / "daemon_state.json").read_text(encoding="utf-8"))
     assert "last_updated" in saved
     assert not pid_file.exists()
 
-    # Clean up global state
     daemon_mod.SHUTDOWN = False
 
 
@@ -200,11 +168,6 @@ def test_daemon_exits_if_pid_file_blocked(tmp_path, monkeypatch):
         daemon_mod.run_daemon()
 
     mock_poll.assert_not_called()
-
-
-# ==============================================================
-# deliver_to_inbox_file tests
-# ==============================================================
 
 
 @pytest.fixture
@@ -307,11 +270,6 @@ def test_deliver_to_inbox_file_preserves_existing_messages(tmp_path, _noop_inbox
     assert result["total_messages"] == 2
     assert result["messages"][0]["subject"] == "New email"
     assert result["messages"][1]["subject"] == "Old email"
-
-
-# ==============================================================
-# resolve_inbox_target tests
-# ==============================================================
 
 
 def test_resolve_inbox_target_explicit_branch(tmp_path):

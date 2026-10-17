@@ -3,7 +3,7 @@
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
 # Version: 1.0.2
 # Created: 2026-04-20
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
@@ -64,11 +64,7 @@ class TestIsWakeBlocked:
     def test_blocklist_is_frozenset(self):
         """WAKE_BLOCKLIST is a frozenset, and these are the addresses in it.
 
-        ``isinstance`` alone said nothing about WHO is blocked — an empty
-        frozenset passed it, and so did one that had quietly grown to cover half
-        the fleet. The membership is the thing worth knowing: exactly one
-        address is blocked from being woken, measured 2026-09-08, and widening
-        that set is a decision that should have to edit this line.
+        Widening the blocked set is a decision that should have to edit this line.
         """
         assert isinstance(WAKE_BLOCKLIST, frozenset)
         assert WAKE_BLOCKLIST == frozenset({"@devpulse"}), sorted(WAKE_BLOCKLIST)
@@ -82,11 +78,8 @@ class TestOrchestrateWakeBlocklist:
     """Tests that _orchestrate_wake enforces the blocklist."""
 
     def _call_orchestrate_wake(self, args):
-        """Run `dispatch wake <args>` through handle_command with mocked wake_branch and console.
-
-        wake_branch is lazily imported inside _orchestrate_wake, so we patch it
-        at the source module rather than as a dispatch module attribute.
-        """
+        """Run `dispatch wake <args>` through handle_command with mocked wake_branch and console."""
+        # wake_branch is imported lazily inside _orchestrate_wake: patch it at the source module.
         status_mock = MagicMock()
         status_mock.format.return_value = ""
         wake_return = (status_mock, True)
@@ -107,12 +100,7 @@ class TestOrchestrateWakeBlocklist:
         assert result is True
 
     def test_blocked_calls_error(self):
-        """Blocked wake prints a directive error naming the target and the dispatch route.
-
-        The whole message is pinned, so the target and the command it hands back are
-        read in place. Killed by the mutant that drops the target from the dispatch
-        command (leg 5).
-        """
+        """Blocked wake prints a directive error naming the target and the dispatch route."""
         result, mock_error = self._call_orchestrate_wake(["@devpulse"])
         mock_error.assert_called_once_with(
             "target @devpulse is protected from manual wake. "
@@ -131,11 +119,7 @@ class TestOrchestrateWakeBlocklist:
         mock_error.assert_called_once()
 
     def test_dispatch_send_does_not_check_blocklist(self):
-        """`dispatch @devpulse` sends and wakes without asking the blocklist (internal path).
-
-        Run through the command under the shared send patch set, with the
-        blocklist recorded at its home (ai_mail, leg 14).
-        """
+        """`dispatch @devpulse` sends and wakes without asking the blocklist (internal path)."""
         blocked = MagicMock(return_value=True)
         status_mock = MagicMock()
         status_mock.format.return_value = ""

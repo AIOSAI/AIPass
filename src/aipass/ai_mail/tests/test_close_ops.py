@@ -3,7 +3,7 @@
 # Description: Tests for email close operations handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/close_ops.py."""
@@ -18,9 +18,6 @@ from unittest.mock import MagicMock, patch
 import aipass.ai_mail.apps.handlers.email.close_ops as mod
 
 
-# ---- Fixtures ------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _silence_json_handler(monkeypatch):
     """Prevent log_operation from writing real JSON files during tests."""
@@ -28,9 +25,6 @@ def _silence_json_handler(monkeypatch):
     mock_jh.log_operation.return_value = True
     monkeypatch.setattr(mod, "json_handler", mock_jh)
     return mock_jh
-
-
-# ---- batch_close tests ----------------------------------------
 
 
 def test_batch_close_single_message_success(tmp_path: Path):
@@ -46,7 +40,6 @@ def test_batch_close_single_message_success(tmp_path: Path):
     assert results[0] == ("msg-1", True, "Closed msg-1")
     assert closed == 1
     assert failed == 0
-    # Single message: skip_post_ops should be False
     mock_fn.assert_called_once_with(branch_path, "msg-1", skip_post_ops=False)
 
 
@@ -62,7 +55,6 @@ def test_batch_close_multiple_messages_skip_post_ops(tmp_path: Path):
     assert len(results) == 3
     assert closed == 3
     assert failed == 0
-    # All calls should have skip_post_ops=True for batch mode
     for call in mock_fn.call_args_list:
         assert call.kwargs["skip_post_ops"] is True
 
@@ -115,9 +107,6 @@ def test_batch_close_all_failures(tmp_path: Path):
     assert failed == 2
 
 
-# ---- batch_close_post_ops tests --------------------------------
-
-
 def test_batch_close_post_ops_all_fns_called(tmp_path: Path):
     """All provided functions are called with correct arguments."""
     branch_path = tmp_path / "branch"
@@ -135,10 +124,7 @@ def test_batch_close_post_ops_all_fns_called(tmp_path: Path):
 def test_batch_close_post_ops_none_fns(tmp_path: Path):
     """None callables are SKIPPED, and the skip is silent.
 
-    Had no oracle — the call was the whole test, so "did not raise" was doing
-    the work. But not raising is also what a version that swallowed a real
-    TypeError would do. The two limbs each log a warning when they run and fail,
-    so an untouched logger is the evidence that neither limb was entered.
+    Each limb logs a warning when it runs and fails, so an untouched logger proves neither was entered.
     """
     branch_path = tmp_path / "branch"
     branch_path.mkdir()

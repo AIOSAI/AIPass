@@ -3,13 +3,10 @@
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation."""
-
-# Split out of test_dispatch_monitor.py on 2026-10-08 to keep that file under the
-# 1,200-line target: which session each attempt aims at, and what gets written down.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
@@ -26,22 +23,13 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import cmd_for_attem
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
 
-# --- session-pointer aware retry loop ---------------------------------
-#
-# wake.py now emits --resume <id> and --session-id <id> where it only ever
-# emitted -c. Every place the monitor reasoned about "-c" had to learn the
-# new flags, and one of them (the attempt loop) had to learn that a session
-# id is single-use: the CLI refuses an id that already exists, so re-running
-# an identical command is fatal where it used to be free.
+# A session id is single-use: the CLI refuses an id that already exists, so an identical retry is fatal.
 
 
 @pytest.fixture
 def pointer_home(tmp_path, monkeypatch):
     """Point the home directory at tmp_path so transcript paths land under the sandbox.
-
-    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so the
-    environment moves it for this test without replacing pathlib for every
-    reader in the process (ai_mail, leg 6).
+    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so no pathlib patch is needed.
     """
     home = tmp_path / "home"
     home.mkdir()
@@ -52,14 +40,7 @@ def pointer_home(tmp_path, monkeypatch):
 
 
 def _plant_transcript(branch_path, session_id):
-    """Create the transcript file Claude would have written for a session.
-
-    ``transcript_file`` returns None when this machine cannot name its home
-    directory — an absent answer rather than a path. Asserted rather than
-    assumed: every caller here runs under the fake-home fixture, so a None means
-    that fixture did not take, and failing on the assert names that cause
-    instead of an AttributeError on the next line.
-    """
+    """Create the transcript file Claude would have written for a session."""
     transcript = mod.session_pointer.transcript_file(branch_path, session_id)
     assert transcript is not None, "fake home not in effect — transcript_file could not name a path"
     transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -77,14 +58,7 @@ def test_attempt_1_is_the_command_as_built(tmp_path, pointer_home):
 
 def test_attempt_2_converts_a_consumed_session_id_to_resume(tmp_path, pointer_home):
     """THE regression guard: attempt 1 created the session, so the id is spent.
-
-    Re-sending it gets "Session ID <id> is already in use" and no output at
-    all — three strikes would fail instantly instead of recovering.
-
-    The rebuilt command must match wake.py's shape exactly: `--resume <id>`
-    leads, because that is the form verified against the CLI. Swapping the
-    flag where --session-id sat would trail it after `-p <prompt>` — an
-    argument order nobody has ever run.
+    The rebuilt command must match wake.py's shape: `--resume <id>` leads, the form verified against the CLI.
     """
     branch = tmp_path / "branch"
     branch.mkdir()
@@ -148,14 +122,7 @@ def test_attempt_2_leaves_an_unconsumed_session_id_alone(tmp_path, pointer_home)
 
 
 def test_attempt_2_mints_a_new_id_when_the_transcript_cannot_be_checked(tmp_path, pointer_home, monkeypatch):
-    """Unknown is neither "spent" nor "free": attempt 2 takes a new id, as strike 3 does.
-
-    Before leg 10 a stat failure answered "no transcript", so attempt 2 re-sent
-    an id that attempt 1 may already have claimed, the "already in use" failure
-    the comment beside it said it prevented. Resuming the id would be as wrong
-    the other way. Its proof is the mutant that answers False again
-    (ai_mail, leg 10).
-    """
+    """Unknown is neither "spent" nor "free": attempt 2 takes a new id, as strike 3 does."""
     branch = tmp_path / "branch"
     branch.mkdir()
 
@@ -182,12 +149,7 @@ def test_attempt_2_mints_a_new_id_when_the_transcript_cannot_be_checked(tmp_path
 
 
 def test_attempt_2_mints_a_new_id_when_there_is_no_home(tmp_path, pointer_home, monkeypatch):
-    """No home means no transcript can be located, so the id's state is unknown: new id.
-
-    Before leg 11 this answered "no transcript" and re-sent the id, the same
-    defect leg 10 cured for a stat failure. Its proof is the mutant that answers
-    False again (ai_mail, leg 11).
-    """
+    """No home means no transcript can be located, so the id's state is unknown: new id."""
     branch = tmp_path / "branch"
     branch.mkdir()
     no_home = MagicMock(return_value=None)
@@ -309,12 +271,9 @@ _C_CMD = ["claude", "-c", "-p", "hi"]
 
 
 def test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c(tmp_path, pointer_home):
-    """THE RULING (the owner, 2026-08-20): a -c landing is never written down.
+    """A -c landing is never written down.
 
-    -c picks by file mtime. Recording that choice would promote a guess into a
-    durable record, and every later dispatch would resume it deliberately — so
-    a branch whose newest transcript happened to be a human's chat would be
-    married to that chat forever. One wrong landing becomes permanent.
+    -c picks by file mtime; recording it would make every later dispatch resume a guess on purpose.
     """
     branch = tmp_path / "branch"
     branch.mkdir()
@@ -328,9 +287,7 @@ def test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c(tmp_path, poin
 
 def test_reconcile_writes_the_pointer_when_we_aimed_and_landed_elsewhere(tmp_path, pointer_home):
     """We named a session and the CLI reports a different one — record the truth.
-
-    This is how a strike-3 remint reaches the pointer: we aimed, the id moved,
-    and the branch must end up pointing at where its agent actually is.
+    This is how a strike-3 remint reaches the pointer.
     """
     branch = tmp_path / "branch"
     branch.mkdir()
@@ -413,10 +370,7 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "actual-id"}), encoding="utf-8")
 
-    # Had no oracle: the trailing comment said "no raise" and nothing checked
-    # it. pytest.raises cannot spell "must not raise", so the oracle is what
-    # SURVIVED the refused write — no pointer was invented on disk to paper over
-    # it, which is the failure mode a swallowed exception would hide.
+    # pytest.raises cannot spell "must not raise": the oracle is that no pointer was invented on disk.
     reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
     write_pointer.assert_called_once_with(branch, "actual-id", "monitor-reconciled")
@@ -424,11 +378,7 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
 
 
 def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_argv, pointer_home, tmp_path):
-    """End-to-end: --resume reaches strike 3 as a fresh, newly-minted session.
-
-    The old `"-c" in claude_cmd` check would have left all three attempts
-    identical, so a broken session could never be escaped.
-    """
+    """End-to-end: --resume reaches strike 3 as a fresh, newly-minted session."""
     argv, lock_file, stderr_log = main_argv
     argv = argv[:6] + ["claude", "--resume", "old-id", "--model", "opus"]
     calls: list[list[str]] = []
@@ -485,11 +435,7 @@ def _run_main_capturing_pointer(monkeypatch, argv, landed_session, tmp_path):
 
 def test_main_does_not_adopt_a_pointer_after_a_successful_c_run(monkeypatch, main_argv, pointer_home, tmp_path):
     """End-to-end of the ruling: a whole successful -c dispatch records nothing.
-
-    The fixture's command is `claude -c`, so the session it landed in was chosen
-    by file mtime. Writing that down would make the next dispatch resume it on
-    purpose — see test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c.
-    The branch stays on -c until something dispatches it --fresh.
+    See test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c.
     """
     argv, lock_file, _ = main_argv
     branch_path = lock_file.parent.parent
@@ -542,9 +488,7 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
         main()
 
     pointer = mod.session_pointer.read_pointer(branch_path)
-    # MEASURED 2026-09-08: a pointer IS written — the retry mints a fresh
-    # session and stamps it monitor-retry-fresh — so ``pointer is None`` never
-    # held on this path and the assertion could not fail where it was aimed.
+    # A pointer IS written here: the retry mints a fresh session stamped monitor-retry-fresh.
     assert pointer is not None
     assert pointer["session_id"] != "bad-session", pointer
     assert pointer["set_by"] == "monitor-retry-fresh", pointer

@@ -3,7 +3,7 @@
 # Description: Tests for email.py's mailbox handlers - inbox, view, close, reply, sent
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/email.py's mailbox handlers: inbox, view, close, reply, sent."""
@@ -305,7 +305,7 @@ class TestHandleClose:
         result = handle_close(["msg1"])
         assert result is True
         assert any("Closed" in p for p in printed)
-        # error() raises cli's process-wide failure flag; a success path never calls it (ai_mail, leg 6)
+        # error() raises cli's process-wide failure flag; a success path never calls it
         error_mock.assert_not_called()
 
     def test_close_all(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
@@ -398,7 +398,7 @@ class TestHandleReply:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        # A stub that sets the world (no such message); asserted so it is also a check of the lookup (ai_mail, leg 6)
+        # A stub that sets the world (no such message); asserted so it is also a check of the lookup
         lookup = MagicMock(return_value=None)
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email.get_email_by_id", lookup)
         errors: list[str] = []
@@ -784,7 +784,7 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.batch_close",
             lambda bp, ids, fn: (results, 2, 1),
         )
-        # post_ops writes the live central file and runs purge, so it stays patched and is asserted (ai_mail, leg 6)
+        # post_ops writes the live central file and runs purge, so it stays patched and is asserted
         post_ops = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email.batch_close_post_ops", post_ops)
         printed = _StdoutLines(capsys)
@@ -1022,7 +1022,7 @@ class TestListingNeverHidesMail:
         The real console rejects the stray closing tag itself (leg 5 took out the
         fake console that raised on cue), so the failure is Rich's own. The logger
         is replaced so the degraded path writes no live log, and asserted. The row
-        is printed by `inbox` itself, not by the row helper (ai_mail, leg 14).
+        is printed by `inbox` itself, not by the row helper.
         """
         log = MagicMock()
         monkeypatch.setattr(email_mod, "logger", log)

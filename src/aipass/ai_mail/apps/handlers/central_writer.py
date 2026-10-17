@@ -3,27 +3,20 @@
 # Description: AI_MAIL Central File Writer
 # Version: 1.2.0
 # Created: 2025-11-27
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 Central Writer Handler
 
-Aggregates branch inbox stats and writes to AI_MAIL.central.json.
-This file serves as AI_MAIL's API output for AIPASS dashboard integration.
-
-Architecture:
-- Scans all .ai_mail.local/inbox.json files across the system
-- Calculates per-branch unread/total message counts
-- Writes aggregated stats to AI_CENTRAL/AI_MAIL.central.json (under repo root)
+Aggregates branch inbox stats into AI_MAIL.central.json for the dashboard.
 """
 
-# CRITICAL: Use importlib to bypass local json/ directory and get stdlib json
+# Load stdlib json via importlib: the local handlers/json/ package shadows it on sys.path.
 import os
 import sys
 import importlib.util
 
-# Remove current directory from sys.path temporarily to import stdlib json
 _saved_path = sys.path.copy()
 sys.path = [p for p in sys.path if "handlers" not in p]
 spec = importlib.util.find_spec("json")
@@ -49,77 +42,28 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
 _REPO_ROOT = find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
 CENTRAL_FILE = AI_CENTRAL_DIR / "AI_MAIL.central.json"
 
-# Directory NAMES whose subtrees hold archived copies of live mailboxes. They
-# are pruned from the walk, never merely filtered out of its results.
-#
-# Matched as exact path components, not substrings. The substring form hid a
-# real branch whose directory merely CONTAINED the word: `my.backup.tools/`
-# read as an archive and vanished from central stats with no error anywhere.
-# It was also the only reason `/backups/` behaved differently on Windows —
-# that check was a literal forward-slash match, so the same tree counted on
-# POSIX and did not on Windows. Names have no separators, so both agree now.
-#
-# dropbox and .archive: the owner's ruling of 09-27 (20:37, 20:42) - a dropbox is
-# a sandbox like .archive, nothing looks into it. docs.local, artifacts and
-# system_logs are output directories: no mailbox lives in one (read 09-29, ai_mail
-# leg 3). Never seedgo's skip list: it names .ai_mail.local, which this walk finds.
+# Archive/output subtrees pruned from the walk, matched as exact path components (a substring hid real branches).
+# Never reuse seedgo's skip list: it names .ai_mail.local, which this walk must find.
 EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups", "dropbox", "docs.local", "artifacts", "system_logs"})
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
-# =============================================================================
-# CORE FUNCTIONS
-# =============================================================================
-
-
 def _raise_walk_error(err: OSError) -> None:
-    """
-    os.walk's onerror hook: a directory it cannot list is raised, not skipped.
+    """os.walk's onerror hook: a directory it cannot list is raised, not skipped.
 
-    Raised rather than recorded because the callers consume a plain list and
-    every one of them already wraps update_central() and logs its failure: a
-    stale central file is honest, counts over a partly unread tree are not.
-
-    Args:
-        err: The OSError os.walk's scandir raised.
-
-    Raises:
-        OSError: Always, the error as given.
+    A stale central file is honest; counts over a partly unread tree are not.
     """
     raise err
 
 
 def find_all_inbox_files() -> List[Path]:
-    """
-    Find all inbox.json files in .ai_mail.local directories.
+    """Find all inbox.json files in .ai_mail.local directories.
 
-    Scans the repo root directory for .ai_mail.local/inbox.json files.
-    Excludes backup/archive subtrees to avoid counting archived data.
-
-    PRUNES rather than filters. The previous implementation walked the whole
-    tree with rglob() and then discarded results whose path contained an
-    excluded word — but discarding a RESULT does not save the WALK. On the live
-    repo that meant traversing 57GB of .backup and 68GB of projects/ to return
-    26 inboxes: 2.9s per call, against 0.13s for the same 26 once the excluded
-    subtrees are pruned at the branch instead of at the leaf.
-
-    That cost was not paid once. update_central() calls this on every delivery,
-    so an 18-recipient broadcast spent ~55 of its ~60 seconds here and was
-    killed by the router's timeout after all the mail had already landed.
-
-    Returns:
-        List of Path objects to inbox.json files
-
-    Raises:
-        OSError: If filesystem scan fails
+    Prunes excluded subtrees, not results: this runs on every delivery, and a full walk times out broadcasts.
     """
     inbox_files = []
 
@@ -138,22 +82,7 @@ def find_all_inbox_files() -> List[Path]:
 
 
 def extract_branch_name(inbox_path: Path) -> str:
-    """
-    Extract branch name from inbox.json path.
-
-    Given: .../seedgo/.ai_mail.local/inbox.json
-    Returns: SEEDGO
-
-    Given: .../prax/.ai_mail.local/inbox.json
-    Returns: PRAX
-
-    Args:
-        inbox_path: Path to inbox.json file
-
-    Returns:
-        Uppercase branch name
-    """
-    # Parent of .ai_mail.local is the branch directory
+    """Extract branch name from inbox.json path."""
     branch_dir = inbox_path.parent.parent
     branch_name = branch_dir.name.upper()
 
@@ -161,20 +90,7 @@ def extract_branch_name(inbox_path: Path) -> str:
 
 
 def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
-    """
-    Read unread and total message counts from inbox.json.
-
-    Args:
-        inbox_path: Path to inbox.json file
-
-    Returns:
-        Tuple of (unread_count, total_messages)
-
-    Raises:
-        FileNotFoundError: If inbox.json doesn't exist
-        json.JSONDecodeError: If inbox.json is malformed
-        KeyError: If required fields are missing
-    """
+    """Read unread and total message counts from inbox.json."""
     with open(inbox_path, "r", encoding="utf-8") as f:
         inbox_data = stdlib_json.load(f)
 
@@ -185,16 +101,7 @@ def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
 
 
 def get_valid_branch_names() -> set:
-    """
-    Load valid branch names from AIPASS_REGISTRY.json.
-
-    Returns:
-        Set of uppercase branch names that are registered in the system.
-
-    Raises:
-        FileNotFoundError: If AIPASS_REGISTRY.json doesn't exist
-        json.JSONDecodeError: If AIPASS_REGISTRY.json is malformed
-    """
+    """Load valid branch names from AIPASS_REGISTRY.json."""
     with open(BRANCH_REGISTRY, "r", encoding="utf-8") as f:
         registry_data = stdlib_json.load(f)
 
@@ -202,23 +109,7 @@ def get_valid_branch_names() -> set:
 
 
 def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:
-    """
-    Aggregate inbox stats for all branches.
-
-    Scans all branch inbox files and compiles per-branch statistics.
-    Only includes branches that are registered in AIPASS_REGISTRY.json.
-
-    Returns:
-        Dict mapping branch names to their stats:
-        {
-            "SEEDGO": {"unread": 5, "total": 8},
-            "DRONE": {"unread": 0, "total": 3}
-        }
-
-    Raises:
-        OSError: If filesystem operations fail
-        json.JSONDecodeError: If any inbox.json is malformed
-    """
+    """Aggregate inbox stats for all branches."""
     branch_stats = {}
 
     inbox_files = find_all_inbox_files()
@@ -228,7 +119,6 @@ def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:
         try:
             branch_name = extract_branch_name(inbox_path)
 
-            # Skip branches not in BRANCH_REGISTRY
             if branch_name not in valid_branches:
                 continue
 
@@ -236,28 +126,16 @@ def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:
 
             branch_stats[branch_name] = {"unread": unread, "total": total}
         except (FileNotFoundError, stdlib_json.JSONDecodeError, KeyError) as e:
-            # Skip branches with missing/malformed inbox files
-            # Continue processing other branches
             logger.warning("[central] Skipping branch inbox %s: %s", inbox_path, e)
             continue
         except Exception as e:
-            # Handler tier 3: raise unexpected errors for caller to handle
             raise RuntimeError(f"Failed to process {inbox_path}: {e}") from e
 
     return branch_stats
 
 
 def calculate_system_totals(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str, int]:
-    """
-    Calculate system-wide totals from branch stats.
-
-    Args:
-        branch_stats: Per-branch statistics
-
-    Returns:
-        Dict with total_unread and total_messages:
-        {"total_unread": 5, "total_messages": 11}
-    """
+    """Calculate system-wide totals from branch stats."""
     total_unread = sum(stats["unread"] for stats in branch_stats.values())
     total_messages = sum(stats["total"] for stats in branch_stats.values())
 
@@ -265,15 +143,7 @@ def calculate_system_totals(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str
 
 
 def build_central_data(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
-    """
-    Build complete central.json data structure.
-
-    Args:
-        branch_stats: Per-branch statistics
-
-    Returns:
-        Complete data structure ready for JSON serialization
-    """
+    """Build complete central.json data structure."""
     system_totals = calculate_system_totals(branch_stats)
 
     return {
@@ -285,76 +155,28 @@ def build_central_data(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str, Any
 
 
 def write_central_file(data: Dict[str, Any]) -> None:
-    """
-    Write data to AI_MAIL.central.json.
-
-    Args:
-        data: Complete central file data structure
-
-    Raises:
-        OSError: If file write fails
-        PermissionError: If insufficient permissions
-    """
-    # Ensure AI_CENTRAL directory exists
+    """Write data to AI_MAIL.central.json."""
     AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
 
     with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
         stdlib_json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def update_central() -> Dict[str, Any]:
-    """
-    Update AI_MAIL.central.json with current branch inbox stats.
-
-    This is the primary public function for updating central statistics.
-    Should be called whenever mail is sent/received to keep dashboard in sync.
-
-    Process:
-    1. Scans all branch .ai_mail.local/inbox.json files
-    2. Aggregates unread and total message counts per branch
-    3. Calculates system-wide totals
-    4. Writes results to AI_CENTRAL/AI_MAIL.central.json (under repo root)
-
-    Returns:
-        The data written to central file (for logging/verification)
-
-    Raises:
-        OSError: If filesystem operations fail
-        json.JSONDecodeError: If any inbox.json is malformed
-        PermissionError: If insufficient permissions to write central file
-
-    Example:
-        >>> from ai_mail.apps.handlers.central_writer import update_central
-        >>> stats = update_central()
-        >>> print(stats["system_totals"]["total_unread"])
-        5
-    """
+    """Update AI_MAIL.central.json with current branch inbox stats."""
     json_handler.log_operation("update_central", {"target": str(CENTRAL_FILE)})
 
-    # Aggregate statistics from all branches
     branch_stats = aggregate_branch_stats()
 
-    # Build complete data structure
     central_data = build_central_data(branch_stats)
 
-    # Write to central file
     write_central_file(central_data)
 
     return central_data
 
 
-# =============================================================================
-# CLI TEST HARNESS
-# =============================================================================
-
 if __name__ == "__main__":
-    # Handler tier 3: no CLI imports in main code
-    # Test harness can import CLI libraries for display
+    # Only the test harness may import CLI libraries.
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
@@ -372,7 +194,6 @@ if __name__ == "__main__":
         console.print(f"[green]Updated:[/green] {CENTRAL_FILE}")
         console.print()
 
-        # Display results in table
         table = Table(title="Branch Mail Statistics")
         table.add_column("Branch", style="cyan", no_wrap=True)
         table.add_column("Unread", justify="right", style="yellow")
@@ -381,7 +202,6 @@ if __name__ == "__main__":
         for branch, data in sorted(stats["branch_stats"].items()):
             table.add_row(branch, str(data["unread"]), str(data["total"]))
 
-        # Add totals row
         table.add_section()
         table.add_row(
             "[bold]SYSTEM TOTALS[/bold]",

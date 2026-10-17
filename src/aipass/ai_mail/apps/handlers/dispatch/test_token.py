@@ -3,15 +3,11 @@
 # Description: AIPASS-TEST ping token detection and auto-ack
 # Version: 1.0.1
 # Created: 2026-04-22
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 AIPASS-TEST Ping Token Handler
-
-Detects AIPASS-TEST tokens in branch inboxes and auto-acks them
-without triggering dispatch. Extracted from daemon.py to keep
-the daemon under the 700-line architecture threshold.
 """
 
 import os
@@ -34,12 +30,7 @@ TEST_TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ac
 
 
 def has_test_token(body: str) -> bool:
-    """Return True if body contains the AIPASS-TEST token outside a code fence.
-
-    Code-fence-aware: lines between ``` markers are skipped so the token
-    inside a quoted example does not trigger auto-ack. Detection is
-    case-sensitive and line-anchored (strips whitespace before comparing).
-    """
+    """Return True if body contains the AIPASS-TEST token outside a code fence."""
     in_fence = False
     for line in body.splitlines():
         stripped = line.strip()
@@ -54,10 +45,7 @@ def has_test_token(body: str) -> bool:
 def auto_ack_test_email(branch_path: Path, branch_email: str, message: Dict[str, Any]) -> bool:
     """Send an 'ack' reply to a test-token email and close it.
 
-    Runs drone commands with cwd=branch_path so sender identity resolves
-    to the target branch, not @ai_mail.
-
-    Returns True if both reply and close succeed.
+    cwd=branch_path makes the sender resolve to the target branch, not @ai_mail.
     """
     json_handler.log_operation("test_token_ack", {"branch": branch_email, "id": message.get("id", "")})
     msg_id = message.get("id", "")
@@ -113,10 +101,7 @@ def auto_ack_test_email(branch_path: Path, branch_email: str, message: Dict[str,
 def scan_and_ack_test_emails(branch_path: Path, branch_email: str) -> int:
     """Scan a branch inbox for AIPASS-TEST tokens and auto-ack each one.
 
-    Called at the start of poll_cycle per-branch, before check_inbox_for_dispatch,
-    so test emails are consumed and never reach the dispatch scanner.
-
-    Returns the count of test emails acked.
+    Runs before check_inbox_for_dispatch so test emails never reach the dispatch scanner.
     """
     from aipass.ai_mail.apps.handlers.dispatch.daemon import JsonUnreadable, _read_json
 
@@ -124,8 +109,7 @@ def scan_and_ack_test_emails(branch_path: Path, branch_email: str) -> int:
     try:
         inbox_data = _read_json(inbox_file)
     except JsonUnreadable as e:
-        # Nothing acked is the safe side; the dispatch scan reads the same
-        # inbox and refuses it too (ai_mail, leg 13).
+        # Nothing acked is the safe side; the dispatch scan refuses the same inbox too.
         logger.warning("[test_token] %s — no test email acked", e)
         return 0
     if inbox_data is None:

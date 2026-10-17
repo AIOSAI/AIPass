@@ -3,7 +3,7 @@
 # Description: Tests for email error dispatch handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/error_dispatch.py."""
@@ -21,18 +21,12 @@ from aipass.ai_mail.apps.handlers.email.error_dispatch import (
 )
 
 
-# ---- Fixtures ------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
     with patch("aipass.ai_mail.apps.handlers.email.error_dispatch.json_handler") as mock_jh:
         mock_jh.log_operation.return_value = True
         yield mock_jh
-
-
-# ---- build_error_report tests --------------------------------
 
 
 def test_build_error_report_basic_structure(monkeypatch):
@@ -55,11 +49,7 @@ def test_build_error_report_basic_structure(monkeypatch):
 def test_build_error_report_reply_lands_on_the_mailbox_in_the_from_line(monkeypatch):
     """A reply to an error report reaches the sender it names, not a third party.
 
-    reply.py routes a reply to `reply_to or from`, so these two fields together
-    decide where an answer lands. @drone replied to one of these reports and it
-    arrived at @devpulse -- the dispatcher -- while the message read From: ai_mail
-    (reported 2026-08-12, APLAN-0006). Named after the contract, not the value:
-    whatever the From line claims is who must receive the answer.
+    reply.py routes a reply to `reply_to or from`, so these two fields decide where an answer lands.
     """
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "trigger")
 
@@ -69,11 +59,7 @@ def test_build_error_report_reply_lands_on_the_mailbox_in_the_from_line(monkeypa
 
 
 def test_build_error_report_reply_route_ignores_the_failing_sender(monkeypatch):
-    """The caller that failed to send is named in the body, never in the reply route.
-
-    The report is about ai_mail's delivery, so the investigation reply belongs to
-    ai_mail. The original sender stays evidence in the body.
-    """
+    """The caller that failed to send is named in the body, never in the reply route."""
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
 
     result = build_error_report("@backup", "Deploy task", "Connection refused")
@@ -131,7 +117,6 @@ def test_build_error_report_env_var_with_at_prefix(monkeypatch):
 
     result = build_error_report("@backup", "task", "error")
 
-    # Should normalize to @trigger (not @@trigger)
     assert "@@" not in result["message"]
     assert "@trigger" in result["message"]
 
@@ -143,12 +128,8 @@ def test_build_error_report_long_error_truncated_in_subject(monkeypatch):
 
     result = build_error_report("@backup", "task", long_error)
 
-    # The subject uses error_msg[:50]
     assert len(result["subject"]) < 200  # reasonable length
     assert "A" * 50 in result["subject"]
-
-
-# ---- dispatch_send_error tests --------------------------------
 
 
 def test_dispatch_send_error_success(monkeypatch):
@@ -193,9 +174,6 @@ def test_dispatch_send_error_passes_correct_email_data(monkeypatch):
     assert "@memory" in captured["subject"]
 
 
-# ---- on_email_delivered tests --------------------------------
-
-
 def test_on_email_delivered_with_central_callback():
     """Central callback is invoked when provided."""
     update_fn = MagicMock()
@@ -208,9 +186,7 @@ def test_on_email_delivered_with_central_callback():
 def test_on_email_delivered_with_none_callbacks():
     """A None callback is SKIPPED, silently — not called and not warned about.
 
-    Had no oracle: the call was the entire test. The function's only failure
-    path logs a warning, so an untouched logger is what says the None limb was
-    taken rather than the try block entered and its exception swallowed.
+    The only failure path logs a warning, so an untouched logger proves the None limb was taken.
     """
     with patch("aipass.ai_mail.apps.handlers.email.error_dispatch.logger") as mock_logger:
         on_email_delivered(None)
@@ -219,13 +195,7 @@ def test_on_email_delivered_with_none_callbacks():
 
 
 def test_on_email_delivered_central_failure_does_not_raise():
-    """Central update failure is caught silently.
-
-    A second copy of this pinned the same call and the same single assertion
-    with only the exception text changed (DPLAN-0323, merged FPLAN-0492). The
-    text the callback raises is not part of the contract — that it is swallowed
-    and the callback still ran is.
-    """
+    """Central update failure is caught silently."""
     update_fn = MagicMock(side_effect=RuntimeError("central broken"))
 
     on_email_delivered(update_central_fn=update_fn)
