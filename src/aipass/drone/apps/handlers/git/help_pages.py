@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-04
 # Modified: 2026-10-15
 # =============================================
@@ -16,7 +16,13 @@ every call and keeps the gh passthroughs' pages, which read the gate's table.
 from __future__ import annotations
 
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.git import commit_handler, merge_main_handler, repo_door, untrack_handler
+from aipass.drone.apps.handlers.git import (
+    commit_handler,
+    merge_main_handler,
+    release_handler,
+    repo_door,
+    untrack_handler,
+)
 
 
 def page(command: str | None = None) -> str:
@@ -81,7 +87,26 @@ def page(command: str | None = None) -> str:
             f"    {untrack_handler.REFUSE_DIRECTORY.format(path='<path>')}\n"
             "  --recursive   A directory leaves the index whole (git rm --cached -r).\n"
             '  Then commit the removal with no paths: drone @git commit "<message>"\n'
-            "  (paths would stage the files again). --repo is not served.\n"
+            "  (paths would stage the files again). --repo <path>: the admin door, paths repo-relative.\n"
+        )
+    if command == "release":
+        return (
+            "git release list [--repo OWNER/NAME] [--since TAG] [--limit N] [--json] — Published releases [global]\n"
+            "  Newest first, one row per release: tag, published_at (ISO), name, with the\n"
+            f"  notes indented under it. --repo defaults to {release_handler.DEFAULT_REPO}, public only.\n"
+            "  --since TAG stops at that tag (exclusive). --limit N caps the rows (default\n"
+            f"  {release_handler.DEFAULT_LIMIT}). --json prints one document: ok, repo, count, releases.\n"
+            "  Drafts are skipped. Read through gh api; refused, exactly as printed:\n"
+            + "".join(
+                f"    {text}\n"
+                for text in (
+                    release_handler.REFUSE_NO_GH,
+                    release_handler.REFUSE_PRIVATE.format(repo="<repo>"),
+                    release_handler.REFUSE_UNKNOWN.format(repo="<repo>"),
+                    release_handler.REFUSE_SINCE.format(tag="<tag>", repo="<repo>"),
+                )
+            )
+            + "  Example: drone @git release list --since v2.8.16\n"
         )
     if command == "export":
         return (
@@ -208,6 +233,7 @@ def page(command: str | None = None) -> str:
         "  issue list|view|status gh issue reads (view <#> [--comments])\n"
         "  run list|view|watch    gh run reads (view <id> --log | --log-failed)\n"
         "  workflow list|view     gh workflow reads\n"
+        "  release list           Published releases and their notes (release --help)\n"
         "Owner (devpulse only):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
@@ -246,11 +272,12 @@ def page(command: str | None = None) -> str:
         "  gh issue list|view|status  drone @git issue list|view|status\n"
         "  gh run list|view|watch     drone @git run list|view|watch\n"
         "  gh workflow list|view      drone @git workflow list|view\n"
+        "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n"
         "  Paths are read against your directory first, then the repo root.\n"
         "  No twin yet: git diff <range> -- <path> (use show <sha>). Ask @drone.\n"
         "\n" + repo_door.help_block() + "\n"
         "--json — THE MACHINE SURFACE:\n"
-        "  status, log, show and remote take --json in ANY slot; it is stripped\n"
+        "  status, log, show, remote and release take --json in ANY slot; it is stripped\n"
         "  before positional parsing, so `log --json 20` parses like `log 20`.\n"
         "  One JSON document on stdout, every one carrying an `ok` verdict — a\n"
         "  refusal is a document too, so a caller can parse why it failed.\n"

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
-# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs and untrack
-# Version: 1.3.0
+# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack and release
+# Version: 1.4.0
 # Created: 2026-04-21
 # Modified: 2026-10-15
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, a recorded stub everywhere but untrack, whose git runs in a tmp_path repo
+# seedgo: no-test-needed(stdlib) — subprocess.run: a recorded stub (gh too), but untrack's git runs in a tmp_path repo
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers import module_registry_handler
-from aipass.drone.apps.handlers.git import untrack_handler
+from aipass.drone.apps.handlers.git import release_handler, untrack_handler
 from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.handlers.git.pr_handler import create_pr
@@ -1119,3 +1119,179 @@ class TestUntrack:
         assert page.startswith("git untrack [--recursive] <path ...> — ")
         assert untrack_handler.REFUSE_DIRECTORY.format(path="<path>") in page
         assert untrack_handler.REFUSE_NOT_TRACKED.format(path="<path>", state="<state>") in page
+
+
+# ===========================================================================
+# release list: published releases and their notes, read-only, every seat
+# ===========================================================================
+
+_PUBLIC = {"private": False}
+_PAGE = "repos/AIOSAI/AIPass/releases?per_page=100&page={n}"
+_RELEASES = [
+    {
+        "tag_name": "v3",
+        "name": "three",
+        "published_at": "2026-10-03T00:00:00Z",
+        "body": "## v3\r\n\r\n- fix",
+        "draft": False,
+    },
+    {"tag_name": "v3-draft", "name": "unpublished", "published_at": None, "body": "wip", "draft": True},
+    {"tag_name": "v2", "name": "two", "published_at": "2026-10-02T00:00:00Z", "body": "", "draft": False},
+    {"tag_name": "v1", "name": "one", "published_at": "2026-10-01T00:00:00Z", "body": "first", "draft": False},
+]
+
+
+def _github(answers: dict[str, object], calls: list[str], gh_missing: bool = False):
+    """A gh stand-in answering `gh api <path>` from *answers* as GitHub would, 404 for any other path."""
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+        if gh_missing:
+            raise FileNotFoundError("gh")
+        assert argv[:2] == ["gh", "api"], f"unexpected call: {argv}"
+        calls.append(argv[2])
+        if argv[2] not in answers:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="gh: Not Found (HTTP 404)")
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(answers[argv[2]]), stderr="")
+
+    return run
+
+
+def _release(args: list[str], answers: dict[str, object], calls: list[str], gh_missing: bool = False) -> dict:
+    with patch(f"{_RELEASE_MOD}.subprocess.run", side_effect=_github(answers, calls, gh_missing)):
+        return handle_command("release", args)
+
+
+_RELEASE_MOD = "aipass.drone.apps.handlers.git.release_handler"
+_AIPASS_RELEASES = {"repos/AIOSAI/AIPass": _PUBLIC, _PAGE.format(n=1): _RELEASES}
+
+
+class TestReleaseList:
+    """release list reads a public repo's published releases through gh api, for every seat."""
+
+    def test_a_citizen_with_no_ownership_reads_aipass_releases_newest_first_with_notes_indented(
+        self, seedgo_dir: Path
+    ) -> None:
+        """The real gate, a builder's passport: the global tier serves it. Drafts are not published."""
+        calls: list[str] = []
+
+        result = _release(["list"], _AIPASS_RELEASES, calls)
+
+        assert result == {
+            "stdout": (
+                "v3  2026-10-03T00:00:00Z  three\n    ## v3\n\n    - fix\n\n"
+                "v2  2026-10-02T00:00:00Z  two\n    (no notes)\n\n"
+                "v1  2026-10-01T00:00:00Z  one\n    first"
+            ),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert calls == ["repos/AIOSAI/AIPass", _PAGE.format(n=1)]
+
+    def test_since_stops_before_its_tag_and_a_mistyped_tag_is_refused_even_past_the_limit(
+        self, seedgo_dir: Path
+    ) -> None:
+        """Mutant: the limit returns before --since is checked, so a typo came back as a full page."""
+        since = _release(["list", "--since", "v1"], _AIPASS_RELEASES, [])
+        capped = _release(["list", "--since=v1", "--limit", "1"], _AIPASS_RELEASES, [])
+        typo = _release(["list", "--since", "v0", "--limit", "1"], _AIPASS_RELEASES, [])
+
+        assert [line.split("  ")[0] for line in since["stdout"].splitlines() if line.startswith("v")] == ["v3", "v2"]
+        assert capped["stdout"].startswith("v3  ") and "\nv2  " not in capped["stdout"]
+        assert typo == {
+            "stdout": "",
+            "stderr": release_handler.REFUSE_SINCE.format(tag="v0", repo="AIOSAI/AIPass"),
+            "exit_code": 1,
+        }
+
+    def test_a_since_tag_on_the_second_page_is_found(self, seedgo_dir: Path) -> None:
+        """Mutant: only page one is read — the tag is never seen and the read is refused."""
+        newer = [
+            {"tag_name": f"v1.{n}", "name": "", "published_at": "", "body": "", "draft": False}
+            for n in range(100, 0, -1)
+        ]
+        answers = {"repos/AIOSAI/AIPass": _PUBLIC, _PAGE.format(n=1): newer, _PAGE.format(n=2): _RELEASES}
+
+        result = _release(["list", "--since", "v2", "--limit", "2"], answers, [])
+
+        assert result["exit_code"] == 0
+        assert [line.split("  ")[0] for line in result["stdout"].splitlines() if line.startswith("v")] == [
+            "v1.100",
+            "v1.99",
+        ]
+
+    def test_json_carries_the_raw_rows_and_a_refusal_is_a_document_too(self, seedgo_dir: Path) -> None:
+        result = _release(["list", "--json", "--limit", "1"], _AIPASS_RELEASES, [])
+        refused = _release(["list", "--repo", "AIOSAI/gone", "--json"], _AIPASS_RELEASES, [])
+
+        assert json.loads(result["stdout"]) == {
+            "ok": True,
+            "repo": "AIOSAI/AIPass",
+            "count": 1,
+            "releases": [
+                {"tag": "v3", "published_at": "2026-10-03T00:00:00Z", "name": "three", "body": "## v3\r\n\r\n- fix"}
+            ],
+            "message": "1 release(s) of github.com/AIOSAI/AIPass",
+        }
+        assert result["exit_code"] == 0
+        assert json.loads(refused["stdout"]) == {
+            "ok": False,
+            "repo": "AIOSAI/gone",
+            "message": release_handler.REFUSE_UNKNOWN.format(repo="AIOSAI/gone"),
+        }
+        assert refused["exit_code"] == 1
+
+    def test_a_private_repo_an_unknown_repo_and_a_missing_gh_are_refused_by_name(self, seedgo_dir: Path) -> None:
+        """Mutant: the privacy check removed — a private repo's releases are read and printed."""
+        private_calls: list[str] = []
+        answers = {"repos/AIOSAI/secret": {"private": True}, "repos/AIOSAI/secret/releases?per_page=100&page=1": []}
+
+        private = _release(["list", "--repo", "AIOSAI/secret"], answers, private_calls)
+        unknown = _release(["list", "--repo", "AIOSAI/gone"], answers, [])
+        missing = _release(["list"], answers, [], gh_missing=True)
+
+        assert private["stderr"] == release_handler.REFUSE_PRIVATE.format(repo="AIOSAI/secret")
+        assert private_calls == ["repos/AIOSAI/secret"]
+        assert unknown["stderr"] == release_handler.REFUSE_UNKNOWN.format(repo="AIOSAI/gone")
+        assert missing["stderr"] == release_handler.REFUSE_NO_GH
+        assert {private["exit_code"], unknown["exit_code"], missing["exit_code"]} == {1}
+
+    def test_repo_is_gh_owner_name_never_the_external_repo_door(self, seedgo_dir: Path) -> None:
+        """Mutant: release left out of the door's exclusion — --repo is read as a path and refused for no grant."""
+        calls: list[str] = []
+        answers = {"repos/AIOSAI/other": _PUBLIC, "repos/AIOSAI/other/releases?per_page=100&page=1": []}
+
+        result = _release(["list", "--repo", "AIOSAI/other"], answers, calls)
+
+        assert result == {"stdout": "No published releases of github.com/AIOSAI/other.", "stderr": "", "exit_code": 0}
+        assert calls == ["repos/AIOSAI/other", "repos/AIOSAI/other/releases?per_page=100&page=1"]
+
+    @pytest.mark.parametrize(
+        ("args", "refusal"),
+        [
+            (["list", "--repo", "not a slug"], release_handler.REFUSE_SLUG.format(repo="not a slug")),
+            (["list", "--limit", "0"], release_handler.REFUSE_LIMIT.format(value="0")),
+            (["list", "--since"], release_handler.REFUSE_NO_VALUE.format(flag="--since")),
+            (["list", "--draft"], release_handler.REFUSE_FLAG.format(arg="--draft")),
+            (["create", "v9"], release_handler.REFUSE_SUB.format(sub="create")),
+            ([], release_handler.USAGE),
+        ],
+        ids=["slug", "limit", "no-value", "flag", "write", "bare"],
+    )
+    def test_a_malformed_call_is_refused_before_gh_runs(self, seedgo_dir: Path, args: list[str], refusal: str) -> None:
+        calls: list[str] = []
+
+        result = _release(args, _AIPASS_RELEASES, calls)
+
+        assert result["stderr"] == refusal
+        assert result["exit_code"] == 1
+        assert calls == []
+
+    def test_release_is_global_tier_and_help_names_it_in_the_page_list_and_twins(self) -> None:
+        text = get_help()
+
+        assert "release" in GIT_ACCESS_TIERS["global"]["commands"]
+        assert "release" not in GIT_ACCESS_TIERS["owner"]["commands"]
+        assert get_help("release").startswith("git release list [--repo OWNER/NAME] [--since TAG] [--limit N] ")
+        assert release_handler.REFUSE_PRIVATE.format(repo="<repo>") in get_help("release")
+        assert "  release list           Published releases and their notes (release --help)\n" in text
+        assert "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n" in text

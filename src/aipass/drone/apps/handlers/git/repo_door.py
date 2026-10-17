@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-09-13
 # Modified: 2026-10-15
 # =============================================
@@ -54,8 +54,23 @@ REPO_FLAG = "--repo"
 # Nothing that encodes AIPass's own dev->PR->main train (merge, pr, smart-sync,
 # ...) — a project's PR flow is the project's later choice, not this door's
 # (DPLAN-0344 design table). The door's sync is not AIPass's sync: it never
-# rebases, never merges, and refuses a diverged branch.
-DOOR_VERBS = ("status", "diff", "log", "commit", "push", "tag", "fetch", "sync", "merge-upstream", "run")
+# rebases, never merges, and refuses a diverged branch. tracked and untrack so a
+# file a catch-all commit or a soft reset left in the index can be taken out
+# again, the working tree untouched (2026-10-15, projects/aipass-site).
+DOOR_VERBS = (
+    "status",
+    "diff",
+    "log",
+    "tracked",
+    "commit",
+    "untrack",
+    "push",
+    "tag",
+    "fetch",
+    "sync",
+    "merge-upstream",
+    "run",
+)
 
 # gh's run, read side only, so a release build pushed through the door can be
 # watched through it (2026-10-13). rerun, cancel, delete and download stay
@@ -173,6 +188,7 @@ def help_block() -> str:
         "External-repo door — admin seat only (DPLAN-0344):\n"
         "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
         "  fetch | sync | merge-upstream  --repo <path>\n"
+        "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"
         "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
         "  fetch fetches origin and prints ahead/behind against the branch's upstream, with\n"
         "  the commits on each side; nothing local moves. sync does the same fetch, then\n"

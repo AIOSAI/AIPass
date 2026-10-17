@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-10-15
 # =============================================
@@ -26,7 +26,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     GIT_ACCESS_TIERS,
     verify_git_access,
 )
-from aipass.drone.apps.handlers.git import repo_door
+from aipass.drone.apps.handlers.git import repo_door, untrack_handler
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
 from .conftest import make_owner_project
@@ -962,3 +962,82 @@ class TestRepoDoorGitRunner:
             "stderr": f"{verb} failed in {ext}: git fetch timed out after 120 s in {ext}",
             "exit_code": 1,
         }
+
+
+# ===========================================================================
+# tracked | untrack --repo <path>: a staged file out of another repo's index
+# ===========================================================================
+
+
+@pytest.fixture()
+def restaged_world(door_world: dict[str, Path]) -> dict[str, Path]:
+    """door_world where a catch-all commit swept in an ignored file and a soft reset left it staged."""
+    ext = door_world["ext"]
+    (ext / ".gitignore").write_text("*.jsonl\n", encoding="utf-8")
+    _git(ext, "add", ".gitignore")
+    _git(ext, "commit", "-q", "-m", "ignore ledgers")
+    (ext / "ledger.jsonl").write_text("{}\n", encoding="utf-8")
+    _git(ext, "add", "-f", "ledger.jsonl")
+    _git(ext, "commit", "-q", "-m", "catch-all")
+    _git(ext, "reset", "-q", "--soft", "HEAD~1")
+    return door_world
+
+
+class TestRepoDoorTrackedAndUntrack:
+    """Through the door, tracked and untrack run their home handlers rooted at the named repo."""
+
+    def test_a_soft_reset_restaged_ignored_file_leaves_the_index_and_stays_on_disk(
+        self, restaged_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Red first: untrack was refused with REFUSE_VERB, so the staged file had no drone way out."""
+        ext = restaged_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            before = handle_command("tracked", ["ledger.jsonl", "--repo", "projects/ext"])
+            result = handle_command("untrack", ["ledger.jsonl", "--repo", "projects/ext"])
+            after = handle_command("tracked", ["ledger.jsonl", "--repo", "projects/ext"])
+
+        assert before == {"stdout": "tracked    ledger.jsonl", "stderr": "", "exit_code": 0}
+        assert result == {
+            "stdout": "left the index  ledger.jsonl\n" + untrack_handler.NEXT_STEP.format(count=1),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert after["stdout"] == "ignored    ledger.jsonl"
+        assert _git(ext, "diff", "--cached", "--name-only") == ""
+        assert (ext / "ledger.jsonl").read_text(encoding="utf-8") == "{}\n"
+        assert _git(ext, "rev-parse", "HEAD") == head, "untrack never commits"
+        assert [(r["verb"], r["outcome"], r["exit_code"]) for r in _ledger(tmp_path)] == [
+            ("tracked", "ran", 0),
+            ("untrack", "ran", 0),
+            ("tracked", "ran", 0),
+        ]
+
+    def test_a_path_is_read_against_the_named_repo_not_the_callers_directory(
+        self, restaged_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the door hands the caller's cwd on, and ledger.jsonl is looked for in the devpulse seat."""
+        (restaged_world["seat"] / "ledger.jsonl").write_text("seat's own\n", encoding="utf-8")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("untrack", ["ledger.jsonl", "--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert result["stdout"].splitlines()[0] == "left the index  ledger.jsonl"
+
+    def test_untrack_without_the_admin_grant_is_refused_and_the_index_is_untouched(
+        self, restaged_world: dict[str, Path]
+    ) -> None:
+        ext = restaged_world["ext"]
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=False):
+            result = handle_command("untrack", ["ledger.jsonl", "--repo", "projects/ext"])
+
+        assert result["exit_code"] == 1
+        assert "admin" in result["stderr"]
+        assert _git(ext, "diff", "--cached", "--name-only") == "ledger.jsonl"
+
+    def test_help_names_both_verbs_on_the_door(self) -> None:
+        assert "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>" in get_help()
+        assert "tracked" in repo_door.DOOR_VERBS and "untrack" in repo_door.DOOR_VERBS
