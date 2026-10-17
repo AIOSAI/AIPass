@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-08-31
 # Modified: 2026-10-16
 # =============================================
@@ -15,6 +15,7 @@
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -169,9 +170,19 @@ class _ResolveDeniedPath(type(Path())):
 class TestSafePathHelper:
     """module_file degrades to the raw absolute spelling, never to a crash."""
 
-    def test_returns_resolved_path_normally(self) -> None:
-        """In a healthy world it behaves like resolve()."""
-        assert module_paths.module_file(__file__) == Path(__file__).resolve()
+    def test_returns_resolved_path_normally(self, tmp_path: Path) -> None:
+        """In a healthy world a symlinked module file collapses to the real file it names."""
+        base = Path(os.path.realpath(tmp_path))
+        real = base / "real" / "mod.py"
+        real.parent.mkdir()
+        real.write_text("", encoding="utf-8")
+        link = base / "link"
+        try:
+            link.symlink_to(real.parent, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks cannot be made here (Windows without the privilege): {exc}")
+
+        assert module_paths.module_file(str(link / "mod.py")) == base / "real" / "mod.py"
 
     def test_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """An OSError from resolve() yields the same file's absolute spelling, not an exception."""
