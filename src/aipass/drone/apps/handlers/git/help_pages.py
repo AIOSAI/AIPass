@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-04
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -131,6 +131,8 @@ def page(command: str | None = None) -> str:
         return (
             "git dev-pr <description> — Push dev branch and create PR to main [owner]\n"
             "  Description becomes the PR title.\n"
+            "  External project, its manager's seat: refused unless on dev, no tracked\n"
+            "  file modified, dev ahead of origin/main. The PR opens on origin's GitHub repo.\n"
         )
     if command == "delete-branch":
         return (
@@ -170,6 +172,8 @@ def page(command: str | None = None) -> str:
             "  Runs gh pr merge --merge --delete-branch, then git pull --rebase.\n"
             "  Joint-decision gate: terminal sessions get a y/N prompt; headless\n"
             "  callers must pass --confirm or the merge is refused.\n"
+            "  External project, its manager's seat: merges on origin's GitHub repo, then\n"
+            "  checks out dev and fast-forwards it to origin/dev.\n"
         )
     if command == "smart-sync":
         return "git smart-sync — Fetch origin and rebase if behind [owner]\n"
@@ -234,7 +238,7 @@ def page(command: str | None = None) -> str:
         "  run list|view|watch    gh run reads (view <id> --log | --log-failed)\n"
         "  workflow list|view     gh workflow reads\n"
         "  release list           Published releases and their notes (release --help)\n"
-        "Owner (devpulse only):\n"
+        "Owner (the repo's registry owner: devpulse in AIPass):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
         "  checkout <main|dev>    Switch branches\n"
@@ -255,6 +259,9 @@ def page(command: str | None = None) -> str:
         "  run <write>            gh run rerun, cancel, delete, download\n"
         "  workflow <write>       gh workflow run, enable, disable\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
+        "  An external project's manager, from its own seat, runs: commit,\n"
+        "  untrack, checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp,\n"
+        "  tag, issue <write>, run <write>, workflow <write>. The rest refuse there.\n"
         "\n"
         "RAW GIT READS AND THEIR TWINS (raw git is blocked for agents; use these):\n"
         "  git log -n 5 -- <path>   drone @git log 5 <path>  (deleted path: after --)\n"

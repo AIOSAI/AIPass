@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
 # Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-08-18
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
@@ -659,7 +659,7 @@ class TestGhPassthroughTiers:
 
     def test_the_page_lists_the_reads_as_global_and_the_writes_as_owner(self) -> None:
         page = get_help()
-        global_part, owner_part = page.split("Owner (devpulse only):\n", 1)
+        global_part, owner_part = page.split("Owner (the repo's registry owner: devpulse in AIPass):\n", 1)
         owner_part = owner_part.split("\n\n", 1)[0]
         for command, table in GH_SUBCOMMANDS.items():
             assert f"  {command} {'|'.join(table['read'])}" in global_part
@@ -1164,7 +1164,9 @@ class TestMergeMain:
         for claim in ("--no-ff", "never pushes", "never forces", "never stashes", "dev-pr"):
             assert claim in verb
         assert "drone @git merge-main" in get_help("fix")
-        owner_part = get_help().split("Owner (devpulse only):\n", 1)[1].split("\n\n", 1)[0]
+        owner_part = (
+            get_help().split("Owner (the repo's registry owner: devpulse in AIPass):\n", 1)[1].split("\n\n", 1)[0]
+        )
         assert "  merge-main " in owner_part
 
 

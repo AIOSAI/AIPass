@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_plugins.py
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-30
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
@@ -129,6 +129,7 @@ class TestMergePrHappyPath:
         self, mock_run: MagicMock, mock_root: MagicMock, mock_bus: MagicMock, tmp_path: Path
     ) -> None:
         """A merge fires pr_merged; the bus is replaced where merge_pr binds it, never fired for real."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -165,6 +166,7 @@ class TestMergePrFailure:
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
     def test_merge_pr_merge_fails(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         mock_root.return_value = tmp_path
 
         proc = MagicMock()
@@ -552,6 +554,7 @@ class TestGitModuleRouting:
         tmp_path: Path,
     ) -> None:
         """merge routes to merge_pr, which fires pr_merged on the recorder, never the live bus."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         mock_root.return_value = tmp_path
 
         proc = MagicMock()

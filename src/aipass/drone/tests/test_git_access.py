@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -22,8 +22,10 @@ import pytest
 
 from aipass.drone.apps.plugins.devpulse_ops.auth import (
     GIT_ACCESS_TIERS,
+    external_owner_verbs,
     verify_git_access,
 )
+from aipass.drone.apps.handlers.git import help_pages
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import OWNER_REGISTRY_ID, make_owner_project
@@ -539,16 +541,22 @@ class TestExternalRepoVerbTranslation:
         monkeypatch.chdir(home)
         return home
 
-    @pytest.mark.parametrize("command", ["commit", "sync", "checkout", "unlock", "tag"])
+    @pytest.mark.parametrize("command", ["commit", "sync", "checkout", "unlock", "tag", "dev-pr", "merge"])
     def test_portable_verbs_work(self, vera_home: Path, command: str) -> None:
-        """Translated scope: these work in any git repo for its manager.
-
-        'tag' joined the list in DPLAN-0290 item 1 — the handler tags that repo's
-        own HEAD, so the gate no longer has a half-run to protect anyone from.
-        """
+        """Translated scope: these work in any git repo for its manager, each aimed at that repo."""
         assert verify_git_access(command) == "VERA"
 
-    @pytest.mark.parametrize("command", ["dev-pr", "pr", "merge", "fix"])
+    def test_the_refusal_and_the_help_name_exactly_the_verbs_the_gate_lets_through(self, vera_home: Path) -> None:
+        """Mutant: dev-pr back on the untranslated list — the help still names it as runnable."""
+        runnable = external_owner_verbs()
+        with pytest.raises(PermissionError) as exc_info:
+            verify_git_access("pr")
+
+        assert "dev-pr" in runnable and "merge" in runnable and "pr" not in runnable
+        assert str(exc_info.value).endswith(f"these work here: {', '.join(runnable)}.")
+        assert f"own seat, runs: {', '.join(runnable)}. The rest refuse there." in " ".join(help_pages.page().split())
+
+    @pytest.mark.parametrize("command", ["pr", "close-pr", "fix"])
     def test_aipass_flow_verbs_refuse_honestly(self, vera_home: Path, command: str) -> None:
         """These assume our dev→PR→main flow; refusing beats half-running in someone's repo."""
         with pytest.raises(PermissionError, match="not translated for external repos"):
@@ -561,7 +569,7 @@ class TestExternalRepoVerbTranslation:
         monkeypatch.chdir(tmp_path)
         assert verify_git_access(command) == "devpulse"
 
-    @pytest.mark.parametrize("command", ["dev-pr", "pr", "merge", "fix"])
+    @pytest.mark.parametrize("command", ["pr", "close-pr", "fix"])
     def test_warn_mode_does_not_lift_an_untranslated_verb(
         self, vera_home: Path, monkeypatch: pytest.MonkeyPatch, command: str
     ) -> None:

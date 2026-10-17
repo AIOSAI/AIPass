@@ -48,12 +48,22 @@ had an authority problem. Why the rollback is scoped: a flag that lifted every r
 let `pr` run to completion inside an external repo. A rollback named for one migration has no
 business re-arming a half-run of our merge flow in someone else's repository.
 
-**Which verbs refuse outside AIPass:** `dev-pr`, `pr`, `close-pr`, `merge`, `smart-sync`, `fix`,
-`delete-branch` — they assume a `dev` branch, our PR conventions, or `pyproject` versioning, so
-against an arbitrary repo they would half-run and leave a mess. `commit`, `sync` and `tag` work
-from an external seat, and the refusal names those three so a manager who hits the wall learns what
-they *can* use. For an external repo, the door is `--repo` — see
+**Which verbs refuse outside AIPass:** `pr`, `close-pr`, `smart-sync`, `fix`, `delete-branch` —
+they assume our PR conventions, our lock or our events, so against an arbitrary repo they would
+half-run and leave a mess. Every other owner verb runs for the project's manager from its own seat;
+`auth.external_owner_verbs()` is the list, and both the refusal and `drone @git --help` print it.
+The admin seat's door into an external repo is `--repo` — see
 [external_repo_door.md](external_repo_door.md).
+
+**`dev-pr` and `merge` in an external repo** run the same dev → main model, aimed at the repo's own
+GitHub slug from its origin URL (`external_pr_handler.py`). `dev-pr` refuses before any push unless
+HEAD is `dev`, no tracked file is modified, and dev holds commits `origin/main` does not (it fetches
+main first); then it pushes dev and opens the PR with `gh pr create -R OWNER/NAME`. `merge` keeps the
+joint-decision gate, merges with `gh pr merge -R OWNER/NAME --merge` (deleting the head branch only
+when it is known and not `dev` or `main`), then checks out `dev` and fast-forwards it to `origin/dev`.
+A local step that fails after GitHub merged exits 1 and still names the merge. No PR lock, no sync
+with AIPass, and no `pr_merged` event: that event syncs AIPass's own status page. Pinned in
+`tests/test_git_module_merge.py` against a real repo and a bare origin, gh stubbed.
 
 **WARNING is not silence.** @trigger's `watch_branch_log_warnings` feeds branch-log WARNINGs into
 the escalation digest — ten occurrences of one signature in sixty minutes mails @devpulse. A
@@ -86,7 +96,7 @@ administration, not routing logic.
 
 | Plugin | Verb | Purpose |
 |--------|------|---------|
-| `merge_plugin` | `merge` | Straight-merge a PR and sync local main |
+| `merge_plugin` | `merge` | Straight-merge a PR and sync local main; an external repo takes `external_pr_handler` |
 | `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase |
 | `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD |
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dev_pr_handler.py
 # Description: Dev branch PR handler — push dev and create PR to main
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-10-17
 # =============================================
 
 """Branch PR handlers — generic and dev-specific."""
@@ -15,7 +15,9 @@ import subprocess
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
+from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 
 
 def _slugify(text: str) -> str:
@@ -118,11 +120,14 @@ def create_dev_pr(description: str) -> dict:
     """Push dev branch and create a PR to main.
 
     Verifies HEAD is on dev, pushes to origin, then creates a PR via gh CLI.
+    An external project's repo takes its own lane, aimed at its own GitHub slug.
 
     Returns:
         Dict with success, message, and pr_url keys.
     """
     repo_root = find_repo_root()
+    if not is_aipass_repo(repo_root):
+        return external_pr_handler.create_dev_pr(repo_root, description)
 
     try:
         head = subprocess.run(

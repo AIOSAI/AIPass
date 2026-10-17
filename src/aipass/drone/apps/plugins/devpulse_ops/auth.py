@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-30
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -122,18 +122,15 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     return None
 
 
-# Owner-tier is earned, not listed (DPLAN-0281, the owner's ruling). A caller holds it
-# iff ALL of these hold — devpulse-in-AIPass qualifies through the general rule,
-# with no special case, and any project's manager qualifies in their own repo:
+# Owner-tier is earned, not listed. A caller holds it iff ALL of these hold, so any
+# project's manager qualifies in its own repo, devpulse in AIPass by the same rule:
 #   1. passport citizen_class == manager
 #   2. tenancy: passport citizenship.registry_id == registry metadata.id  (F59 4.1)
 #   3. the registry for THAT repo lists the caller with owner: true
 #   4. path-binding: the passport lives at/under the registry-recorded path (F59 4.2a)
 #
-# Check 4 is the one that closes T-A: a rogue sub-agent can forge a passport naming
-# any branch and copy the registry id off local disk, but it cannot place that
-# passport inside the real manager's directory without defeating the pre-edit hook
-# layer and OS permissions first.
+# Check 4 stops a forged passport: copying the registry id is easy, placing the file
+# inside the real manager's directory is not.
 _MANAGER_CLASS = "manager"
 
 # Rollback is one env var (F59 6.1). 'warn' logs the refusal and allows, for
@@ -141,27 +138,15 @@ _MANAGER_CLASS = "manager"
 # a rollback that needs an edit is not a rollback.
 _AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
 
-# Owner-tier verbs that encode AIPass's OWN dev→PR→main flow: they assume a `dev`
-# branch, our PR conventions, or pyproject versioning. Against an arbitrary project
-# repo they would half-run and leave a mess, so they refuse honestly until
-# translated. `commit` and `sync` translated in DPLAN-0281 P2; `tag` in DPLAN-0290
-# item 1 — an external seat tags its own HEAD, so it is no longer on this list.
-_AIPASS_FLOW_VERBS = frozenset({"dev-pr", "pr", "close-pr", "merge", "smart-sync", "fix", "delete-branch"})
+# Owner-tier verbs that encode AIPass's OWN flow (our PR conventions, our lock, our
+# events). Against an arbitrary project repo they would half-run and leave a mess,
+# so they refuse honestly until translated.
+_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch"})
 
-# Verbs that DO work from an external seat, named in the refusal so a manager who
-# hits one of the above learns what they can use instead of guessing.
-_TRANSLATED_VERBS = "'commit', 'sync' and 'tag'"
-
-# Owner-tier refuses for two reasons that are NOT interchangeable, and conflating
-# them cost us both a false page and a real hole:
-#   authority  — the caller is not, or cannot be shown to be, this repo's owner.
-#                Fault-shaped, so it logs ERROR, and warn-mode DOES lift it —
-#                rolling back the authority migration is exactly that switch's job.
-#   capability — the caller IS the proven owner; the verb simply is not translated
-#                for this repo yet (_AIPASS_FLOW_VERBS). Not a fault, so it logs
-#                WARNING for the same reason _resolve_caller does, and warn-mode
-#                must NOT lift it: this refusal predates that migration and exists
-#                to stop a half-run in someone else's repo, which no rollback wants.
+# Two refusal species, not interchangeable:
+#   authority  — the caller is not shown to be this repo's owner. Logs ERROR; warn-mode lifts it.
+#   capability — a proven owner, an untranslated verb. Logs WARNING; warn-mode must NOT lift it,
+#                since it stops a half-run in someone else's repo.
 _AUTHORITY = "authority"
 _CAPABILITY = "capability"
 
@@ -174,6 +159,15 @@ _REROUTED_VERBS: dict[str, str] = {
     "pull": "Use 'sync'.",
     "fetch": "Fetching is part of 'sync'. An external repo: 'fetch --repo <path>' (admin seat only).",
 }
+
+
+def external_owner_verbs() -> list[str]:
+    """The owner-tier verbs a project's manager may run in its own repo, in tier order, gh writes as '<cmd> <write>'."""
+    return [
+        verb.replace("-write", " <write>")
+        for verb in GIT_ACCESS_TIERS["owner"]["commands"]
+        if verb not in _AIPASS_FLOW_VERBS
+    ]
 
 
 def _rerouted_hint(command: str) -> str:
@@ -454,8 +448,8 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     # proven owner and this is purely a missing translation — hence _CAPABILITY.
     if registry_path.name != AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
         return Refusal(
-            f"'{command}' encodes AIPass's own dev→PR→main flow and is not translated for "
-            f"external repos yet — {_TRANSLATED_VERBS} work here today (DPLAN-0281 P2, DPLAN-0290)",
+            f"'{command}' encodes AIPass's own flow and is not translated for external repos yet — "
+            f"these work here: {', '.join(external_owner_verbs())}",
             _CAPABILITY,
         )
 
