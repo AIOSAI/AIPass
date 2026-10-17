@@ -3,21 +3,10 @@
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
-
-# Tests for Phase 2 of FPLAN-0270: check_entry validator + lint handler.
-#
-# Covers:
-#   - check_entry boundary checks (at-cap, cap+1, larger over)
-#   - Character-not-byte counting (em-dash, tree glyphs)
-#   - Unknown entry_type handling
-#   - Dict container measurement (plain string + dict-with-field)
-#   - List container measurement + missing-field refusal
-#   - Lint handler finds violations with correct counts
-#   - Lint handler is read-only (files unchanged after scan)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — the wording of lint's print_help() and print_introspection() panels
@@ -35,26 +24,11 @@ from aipass.memory.apps.handlers.json import entry_limits, lint_handler
 from aipass.memory.apps.modules import lint as lint_module
 
 
-# ---------------------------------------------------------------------------
-# Helpers: the real modules, their operation log lines kept off disk
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _quiet_operation_logs(monkeypatch):
-    """Each module binds json_handler at import; its log lines go to a recorder, never memory_json.
-
-    Until leg 5 of DPLAN-0354 each test evicted these modules and imported
-    them fresh under the conftest's stub; the real modules are now imported
-    once at the top and the one edge is replaced where the product looks.
-    """
+    """Each module binds json_handler at import; its log lines go to a recorder, never memory_json."""
     for module in (entry_limits, lint_handler, lint_module):
         monkeypatch.setattr(module, "json_handler", MagicMock())
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_limits(entry_types: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -70,11 +44,6 @@ def _make_limits(entry_types: dict[str, Any] | None = None) -> dict[str, Any]:
             },
         }
     return {"enabled": True, "enforce": False, "entry_types": entry_types}
-
-
-# ===========================================================================
-# 1. check_entry tests
-# ===========================================================================
 
 
 class TestCheckEntryAtCap:
@@ -170,11 +139,6 @@ class TestCheckEntryUnknownType:
         assert result["length"] == len("any text")
 
 
-# ===========================================================================
-# 2. Container handling tests
-# ===========================================================================
-
-
 class TestDictContainerStringValue:
     """Dict container where value is a plain string (key_learnings style)."""
 
@@ -268,16 +232,9 @@ class TestListContainer:
 
 
 class TestListContainerMissingField:
-    """A missing canonical field is REPORTED, not skipped (reversed 2026-08-26).
+    """A missing canonical field is REPORTED, not skipped: the write gate refuses that shape.
 
-    This class used to pin the opposite: an item lacking the field was dropped
-    on the reading that shape belongs to the trinity checker, not to a char-cap
-    scanner. @hooks proved what that boundary cost — the write gate refuses
-    those entries, so lint could tell a branch it was compliant and the branch
-    would then be blocked on its next write for a shape lint had already seen.
-    An audit that stays quiet about a shape the gate blocks is not a narrower
-    audit, it is a wrong one. The no-crash guarantee the old name promised is
-    kept: the scan completes and names every entry it cannot measure.
+    The scan still completes and names every entry it cannot measure.
     """
 
     def test_missing_field_is_reported(self, tmp_path: Path) -> None:
@@ -314,11 +271,6 @@ class TestListContainerMissingField:
         assert violations[0]["reason"] == "missing_field"
         assert violations[0]["field"] == "note"
         assert violations[0]["found_type"] == "missing"
-
-
-# ===========================================================================
-# 3. Lint handler integration tests
-# ===========================================================================
 
 
 class TestLintHandlerFindsViolations:
@@ -495,14 +447,9 @@ class TestUnknownBranchIsAnError:
         scanned.assert_called_once_with(registry, branch_filter=None)
 
     def test_a_declared_external_branch_is_not_refused(self) -> None:
-        """The read lane resolves names through the scope that holds the external tier.
+        """The read lane resolves names through the scope that holds the external tier, not the write scope.
 
-        From the write fence of 2026-09-18 until this pin, ``lint @vera``
-        answered "Unknown branch": the lane resolved through the WRITE scope,
-        which stops at the repo edge, so a declared external citizen could not
-        be named even for a read. Patching ``read_scope`` is the binding under
-        test — if the lane ever reaches back for ``_read_registry`` this call
-        raises AttributeError rather than passing quietly.
+        Patching ``read_scope`` is the binding under test: reaching for ``_read_registry`` raises instead.
         """
         lint = lint_module
         external = [{"name": "vera", "path": str(Path(tempfile.gettempdir()) / "vera")}]
@@ -543,19 +490,8 @@ class TestLintHelpFlag:
         scanned.assert_called_once()
 
 
-# ===========================================================================
-# The exit seam — a refusal that exits 0 is half a refusal
-# ===========================================================================
-
-
 class TestTheEmptyRegistryRefusalReachesTheExitCode:
-    """The fleet refusal sweep, 2026-09-07: an empty registry exited 0.
-
-    "No branches found in registry" is a refusal — nothing was linted and the
-    caller must not read that as a clean bill of health. It printed through
-    `warning()`, which marks nothing, so the entry point returned 0. Through
-    `error()` the process failure flag is set and `resolve_exit` returns 2.
-    """
+    """An empty registry is a refusal and exits 2, not a clean 0 (it must print through `error()`)."""
 
     def test_an_empty_registry_exits_two(self, capsys):
         lint = lint_module
@@ -569,14 +505,8 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
         assert "No branches found" in captured.out + captured.err
 
 
-# ===========================================================================
-# 4. Fields mode — the closed-shape inventory (FPLAN-0593 / DPLAN-0347)
-#
-# One capped field per entry type is what let a 917-char `status` ride past
-# every gate while the fleet median was 9. These pin the second measurement:
-# every string field listed by chars, everything outside the shape flagged,
+# Fields mode: every string field listed by chars, everything outside the shape flagged,
 # and the canonical field left to the mode that already owns it.
-# ===========================================================================
 
 
 _BUDGETS = {"passport.json": {"max_chars": 6000, "max_string_chars": 600}}

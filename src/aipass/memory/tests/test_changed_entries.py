@@ -3,20 +3,10 @@
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
-
-# Tests for Phase 3 of FPLAN-0270: changed_entries diff helper and
-# write_memory_file entry-limits wiring.
-#
-# Covers:
-#   - changed_entries: new over-limit, changed over-limit, unchanged legacy
-#     fat entries (rollover-safe), shrinking, dict/list containers, empty before.
-#   - write_memory_file wiring: warn mode writes through + logs, enforce mode
-#     rejects new fat entries, enforce mode allows unchanged legacy fat entries,
-#     non-trinity files unaffected, passport.json unaffected.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
@@ -32,10 +22,7 @@ import pytest
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.json import entry_limits, memory_files
 
-# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
-# whole path: a checkout that lives under a directory named dropbox must not hide itself.
-# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
-# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+# Judged by the parts BELOW the walk's root: a checkout under a dir named dropbox must not hide itself.
 _SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -53,26 +40,12 @@ def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path:
     assert _walk(root) == [root / "live" / "test_x.py"]
 
 
-# ---------------------------------------------------------------------------
-# Per-test fixture: fresh-import modules with mocks in place
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _quiet_operation_logs(monkeypatch):
-    """Both modules bind json_handler at import; its log lines go to a recorder, never memory_json.
-
-    Until leg 5 of DPLAN-0354 each test evicted the json package and imported
-    it fresh under the conftest's stub; the real modules are now imported once
-    at the top and the one edge is replaced where the product looks.
-    """
+    """Both modules bind json_handler at import; its log lines go to a recorder, never memory_json."""
     monkeypatch.setattr(entry_limits, "json_handler", MagicMock())
     monkeypatch.setattr(memory_files, "json_handler", MagicMock())
 
-
-# ---------------------------------------------------------------------------
-# Helpers: build limits dicts for testing
-# ---------------------------------------------------------------------------
 
 _KEY_LEARNINGS_ONLY: dict[str, Any] = {
     "enabled": True,
@@ -143,11 +116,6 @@ def _full_limits(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-# ===========================================================================
-# 1. changed_entries: new over-limit entry detected
-# ===========================================================================
-
-
 class TestNewOverLimitEntry:
     """A new dict entry that exceeds the cap is returned as a violation."""
 
@@ -167,11 +135,6 @@ class TestNewOverLimitEntry:
         assert result[0]["over_by"] == 50
 
 
-# ===========================================================================
-# 2. changed_entries: changed entry exceeds cap
-# ===========================================================================
-
-
 class TestChangedEntryOverCap:
     """An existing entry whose text grew past the cap is flagged."""
 
@@ -187,23 +150,8 @@ class TestChangedEntryOverCap:
         assert result[0]["over_by"] == 100
 
 
-# ===========================================================================
-# 3. changed_entries: UNCHANGED legacy over-limit entry NOT returned
-# ===========================================================================
-
-
 class TestUnchangedLegacyFatEntry:
-    """THE KEY TEST, and it has been rewritten twice.
-
-    2026-08-27 narrowed "unchanged and over cap passes" to `todos`, on the
-    reasoning that the trinity push had cured drift fleet-wide and the clause
-    now hid new drift instead of protecting old.
-
-    2026-08-30 reversed it: drift recurs, and this gate never sees the writes
-    that cause it (Bash lanes bypass @hooks entirely). Refusing the next write
-    deadlocked rollover — the one lane whose write is always a shrink. The
-    entry is now CARRIED: not refused, and no longer silent either.
-    """
+    """An unchanged over-cap entry is CARRIED: not refused (that deadlocks rollover), not silent."""
 
     def test_unchanged_500char_key_learning_is_carried_not_flagged(self) -> None:
         mod = entry_limits
@@ -221,10 +169,7 @@ class TestUnchangedLegacyFatEntry:
 class TestReshapeOnlyKeepsTheExemption:
     """`todos` is the one container where legacy drift legitimately persists.
 
-    The trinity push is forbidden to archive open work (1.1.0), so nothing but
-    the branch's own agent can ever cure a drifted todo. Refusing every write
-    to that file would brick its rollover — the debt preserved by destroying
-    the lane that preserves everything else.
+    Only the branch's own agent can cure a drifted todo; refusing would brick its rollover.
     """
 
     _TODOS_ONLY = {
@@ -257,28 +202,10 @@ class TestReshapeOnlyKeepsTheExemption:
     }
 
     def test_editing_a_drifted_todo_into_another_drifted_shape_is_caught(self) -> None:
-        """@hooks' M5, and it SURVIVED my set until they named it (2026-08-27).
+        """Identity is the raw value, not the field name: a different drifted value is a change.
 
-        The exemption is for the entry that is ALREADY ON DISK — not for "the
-        canonical field is missing on both sides". Both values here are
-        unmeasurable (a list where a string belongs) and they are DIFFERENT
-        values under the same key, so this write really did change the entry
-        and must be reported. Keying identity on the field name instead of the
-        raw value reads the second as untouched and exempts a drift this write
-        introduced: one drifted todo would license every future edit of it.
-
-        A NEW key never reaches this comparison at all (`key_known` is False
-        and the entry is checked outright), which is why the obvious two-key
-        version of this test does NOT bite the mutant — the surviving line is
-        only reachable when the key exists and the value moved.
-
-        HONEST ABOUT THE COVERAGE: this exercises the DICT container path,
-        which no shipped entry type reaches — all four are `kind: list` since
-        the grandfather clause narrowed to todos, so `_is_unchanged`'s exempt
-        branch is currently unreachable in production. That is the other half
-        of why the mutation survived. Pinned at the contract rather than end
-        to end, because the branch is one config edit from live and a dead
-        branch that is also unpinned comes back wrong.
+        Same key on purpose (a new key never reaches the comparison). The dict path is
+        unreachable in production today (all types are lists), one config edit from live.
         """
         mod = entry_limits
         on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
@@ -299,11 +226,6 @@ class TestReshapeOnlyKeepsTheExemption:
         assert result == []
 
 
-# ===========================================================================
-# 4. changed_entries: shrinking an entry is not flagged
-# ===========================================================================
-
-
 class TestShrinkingEntry:
     """An entry that went from 500 chars to 100 is not flagged."""
 
@@ -315,11 +237,6 @@ class TestShrinkingEntry:
         result = mod.changed_entries(before, after, _KEY_LEARNINGS_ONLY)
 
         assert result == []
-
-
-# ===========================================================================
-# 5. changed_entries: dict container — value-as-string and value-as-dict
-# ===========================================================================
 
 
 class TestDictContainerShapes:
@@ -344,11 +261,6 @@ class TestDictContainerShapes:
 
         assert len(result) == 1
         assert result[0]["length"] == 250
-
-
-# ===========================================================================
-# 6. changed_entries: list container — appended and unchanged
-# ===========================================================================
 
 
 class TestListContainer:
@@ -378,22 +290,13 @@ class TestListContainer:
         assert len(mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]) == 1
 
 
-# ===========================================================================
-# 7. changed_entries: list prepend identity-match (Fix 1 — FPLAN-0276 cleanup)
-# ===========================================================================
-
-
 class TestListPrependIdentityMatch:
     """Prepending a new entry must NOT re-flag shifted legacy over-cap entries."""
 
     def test_prepend_carries_the_legacy_entries_it_shifted_past(self) -> None:
         """The prepend is clean, and the five it shifted past are not its doing.
 
-        Identity is the TEXT, never the index — the whole point. A prepend
-        moves every legacy entry one slot down; an index-keyed diff would call
-        all five newly authored and refuse a write that authored one short
-        entry. They are reported as carried debt instead, and the new entry is
-        not among them because it is within cap.
+        Identity is the TEXT, never the index: an index-keyed diff would call all five authored.
         """
         mod = entry_limits
         legacy = [{"session_number": i, "summary": "s" * 400} for i in range(5, 0, -1)]
@@ -433,11 +336,6 @@ class TestListPrependIdentityMatch:
         assert result[0]["over_by"] == 100
 
 
-# ===========================================================================
-# 8. changed_entries: empty before (new file) — all entries treated as new
-# ===========================================================================
-
-
 class TestEmptyBefore:
     """When before is empty, all after entries are treated as new."""
 
@@ -461,11 +359,6 @@ class TestEmptyBefore:
         assert result == []
 
 
-# ===========================================================================
-# 8. write_memory_file: warn mode writes through + logs warning
-# ===========================================================================
-
-
 class TestWarnModeWritesThrough:
     """In warn mode (enforce=False), over-limit entries log a warning but file is written."""
 
@@ -474,7 +367,6 @@ class TestWarnModeWritesThrough:
         mock_logger = MagicMock()
         monkeypatch.setattr(mem_mod, "logger", mock_logger)
 
-        # Build .trinity/local.json path
         trinity = tmp_path / "test_branch" / ".trinity"
         trinity.mkdir(parents=True)
         local_path = trinity / "local.json"
@@ -496,11 +388,6 @@ class TestWarnModeWritesThrough:
         mock_logger.warning.assert_called()
         warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
         assert any("entry_limits" in w for w in warning_calls)
-
-
-# ===========================================================================
-# 9. write_memory_file: enforce mode rejects new over-limit entry
-# ===========================================================================
 
 
 class TestEnforceModeRejects:
@@ -531,19 +418,8 @@ class TestEnforceModeRejects:
         assert "new_fat" not in on_disk["key_learnings"]
 
 
-# ===========================================================================
-# 10. write_memory_file: enforce mode ALLOWS unchanged legacy fat entries
-# ===========================================================================
-
-
 class TestEnforceAllowsUnchangedLegacy:
-    """THE CRITICAL ROLLOVER-SAFE TEST: enforce mode allows writing back same fat data.
-
-    The class name has been right the whole time; between 2026-08-27 and
-    2026-08-30 the method under it asserted the opposite, which is its own
-    small lesson — a name describing a rule the body no longer holds reads as
-    proof the rule is there.
-    """
+    """THE CRITICAL ROLLOVER-SAFE TEST: enforce mode allows writing back same fat data."""
 
     def test_enforce_allows_same_data_with_fat_entries(
         self,
@@ -564,17 +440,10 @@ class TestEnforceAllowsUnchangedLegacy:
 
         result = mem_mod.write_memory_file(local_path, fat_data)
 
-        # Reversed 2026-08-30: the write authored nothing, so it is not refused.
-        # Refusing it cured nothing and deadlocked rollover, whose write is
-        # always the smaller document.
+        # The write authored nothing, so it is not refused.
         assert result["success"] is True
         on_disk = json.loads(local_path.read_text(encoding="utf-8"))
         assert on_disk["key_learnings"]["legacy"] == "z" * 500
-
-
-# ===========================================================================
-# 11. write_memory_file: non-trinity file unaffected
-# ===========================================================================
 
 
 class TestNonTrinityFileUnaffected:
@@ -592,11 +461,6 @@ class TestNonTrinityFileUnaffected:
         assert output_path.exists()
         written = json.loads(output_path.read_text(encoding="utf-8"))
         assert written == data
-
-
-# ===========================================================================
-# 12. write_memory_file: passport.json unaffected
-# ===========================================================================
 
 
 class TestPassportUnaffected:
@@ -619,47 +483,9 @@ class TestPassportUnaffected:
         assert written == data
 
 
-# ===========================================================================
-# 13. THE SHRINK-WRITE DEADLOCK (2026-08-30)
-# ===========================================================================
-#
-# @devpulse, via four @trigger repeat-signatures: rollover erroring identically
-# every 20 minutes for three hours. The extractor removed the tail, wrote the
-# document back, and the write gate refused the WHOLE file for an entry the
-# extraction never touched — @seedgo's 343-char summary sitting in the head.
-#
-# That is a deadlock with the archiver on the losing side: the file cannot get
-# smaller because it is too big. The lane that preserves everything else was
-# bricked by one entry it is not allowed to shrink.
-#
-# THE NARROWING THAT CAUSED IT (2026-08-27) reasoned that the trinity push had
-# cured drift fleet-wide, so "unchanged and over cap passes" now hid new drift
-# instead of protecting old. Both halves were wrong about the world:
-#
-#   - Drift is not cured, it RECURS. @ai_mail carried three over-cap
-#     key_learnings the same evening; @seedgo one.
-#   - The write gate is structurally BLIND to how drift arrives. @hooks'
-#     edit_gate says so in its own refusal text: writes made through Bash
-#     (python -c, heredoc, sed) never reach it. @baud drifted to 2529/300 for
-#     a week through that lane. An entry the gate never saw written cannot be
-#     caught by refusing the next write — it can only be caught by READING THE
-#     FILE, which is exactly what `drone @memory lint` does, on demand, fleet-
-#     wide, read-only.
-#
-# So the narrowing put the detection job on the one component that cannot see
-# the drift arrive, and paid for it with rollover.
-#
-# THE RULE, restored and widened: a write is judged by what it AUTHORS, never
-# by what it carries. An entry byte-identical to one already on disk was not
-# written by this write and cannot be refused to it. The silence that the
-# narrowing rightly objected to is cured where silence was the actual defect —
-# carried debt is now REPORTED on every write instead of skipped without a
-# word, and `lint` remains the lane that reads disk.
-#
-# This is one classifier with two labels, not two rules: `changed_entries`
-# answers "what did this write author", `carried_entries` answers "what is it
-# carrying". Each consumer sets its own policy from the same measurement.
-
+# A write is judged by what it AUTHORS, never by what it carries: refusing an
+# unchanged over-cap entry deadlocks rollover, whose write is always a shrink.
+# Carried debt is reported on every write; `drone @memory lint` reads disk.
 
 _FAT_SUMMARY = "X" * 343  # the @seedgo shape: over the 300-char sessions cap
 
@@ -804,19 +630,8 @@ class TestRenamedFieldEntryDoesNotBrickRollover:
 class TestTheBypassClaimIsMeasuredNotAsserted:
     """`.seedgo/bypass.json` claims @hooks calls `changed_entries` — this checks it.
 
-    seedgo's unused_function checker is branch-local, so it correctly cannot see
-    that this function's only caller lives in another tree. The bypass rule is
-    the sanctioned way to say so, but a bypass is a CLAIM, and a claim nobody
-    measures is how a real entry point gets deleted for a green audit two
-    refactors from now.
-
-    So the justification is pinned. The day @hooks stops calling it, this goes
-    red and the bypass is provably stale — which is the moment to delete the
-    function, not before.
-
-    READ-ONLY and TOLERANT OF ABSENCE: it greps @hooks' tree for the call rather
-    than pinning a line number, and skips where hooks is not installed, because
-    an external checkout of this branch alone is a real world and not a failure.
+    Red the day @hooks stops calling it: the bypass is stale and the function can go.
+    Skips where @hooks is not installed (a lone checkout is not a failure).
     """
 
     @staticmethod
@@ -862,14 +677,7 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
 
 
 class TestTheNearCapLineArrivesWhileThereIsStillRoom:
-    """@ai_mail's ask, and their own evidence was the argument for it.
-
-    They wrote over the cap FOUR HOURS after being burned by it — knowing the
-    number, with it in front of them. Their sentence, which is the design
-    brief: "nothing in the act of writing shows you the limit — the only
-    instrument is downstream." A refusal teaches at the moment it is already
-    too late. This teaches one entry early.
-    """
+    """A refusal arrives too late; the near-cap line teaches one entry early."""
 
     def test_an_authored_entry_close_to_the_cap_is_reported(self) -> None:
         mod = entry_limits
@@ -906,12 +714,7 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
         assert split["near"] == []
 
     def test_carried_near_cap_text_is_not_reported(self) -> None:
-        """The discriminator that decides refusals, applied to the softer signal.
-
-        A near-cap entry this write did not author is not this write's business,
-        and a line on every write about text nobody touched is how a channel
-        becomes noise nobody reads.
-        """
+        """A near-cap entry this write did not author is not reported (noise nobody reads)."""
         mod = entry_limits
         standing = {"key_learnings": {"old": "x" * 195}}
 
@@ -973,29 +776,9 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
 
 class TestTheNearCapLineIsAPerTypeKnob:
-    """One ratio across four containers was one number doing four jobs.
+    """One ratio across four containers was one number doing four jobs; it lives beside max_chars.
 
-    @ai_mail asked for the near-cap line, then asked for the fleet number before
-    accepting its threshold, then read the number and WITHDREW their own follow-up
-    ask — the measurement said a gate-time warning would fire on well over half
-    of all edits, and a warning that common teaches people to click past the
-    refusals beside it.
-
-    What survived their retraction is the sharper observation: the fleet's four
-    containers fire at 65.0 / 60.5 / 48.6 / 35.8 percent under a single 0.9, and
-    a distribution with no knee cannot be tuned into a rare signal by moving one
-    number that all four share.
-
-    So the knob moved to where ``max_chars`` lives rather than being turned here.
-    Whoever owns the caps owns the warning's tightness for each type, and this
-    file does not have to pick a number it cannot justify. The module default
-    stays 0.9 on measured value — it has caught @ai_mail three times and this
-    branch four in the days it has existed.
-
-    ``check_entry`` publishes ``near_at`` as a CHARACTER COUNT rather than
-    letting callers re-derive it from a ratio, for the same reason it publishes
-    ``over_by``: a second implementation of the same arithmetic is a second
-    chance for the warning and the refusal to disagree about one entry.
+    ``near_at`` is published as a CHARACTER COUNT so no caller re-derives it and disagrees.
     """
 
     @staticmethod
@@ -1024,12 +807,7 @@ class TestTheNearCapLineIsAPerTypeKnob:
         assert entry_limits.is_near_cap(verdict) is False
 
     def test_a_nonsense_ratio_is_refused_rather_than_obeyed(self):
-        """A ratio of 0 would silence the line; a ratio of 5 would delete it.
-
-        Both read as configuration and neither is, so the default is used and
-        the operator is told — silently obeying an out-of-range number is how a
-        channel goes dark without anyone deciding it should.
-        """
+        """A ratio of 0 would silence the line, 5 would delete it: the default is used instead."""
         for bad in (0, -0.5, 5, "0.9", None):
             verdict = entry_limits.check_entry("notes", "x" * 90, self._limits(near_cap_ratio=bad))
             assert verdict["near_at"] == 100 * entry_limits.NEAR_CAP_RATIO, f"obeyed {bad!r}"
@@ -1042,17 +820,10 @@ class TestTheNearCapLineIsAPerTypeKnob:
         assert entry_limits.is_near_cap(legacy) is False
 
 
-# =============================================================================
-# THE CLOSED FIELD SHAPE (FPLAN-0593 / DPLAN-0347)
-# =============================================================================
-
-
 class TestTheClosedFieldShape:
     """Every field an entry may carry, its type and its cap — and the two reasons.
 
-    One capped field per entry type is what let a 917-char ``status`` ride past
-    every gate while the fleet median was 9. These pin the shape that closes
-    that hole, and the refusal shapes @hooks renders.
+    One capped field per type let an uncapped field ride past every gate; @hooks renders these.
     """
 
     @staticmethod

@@ -3,16 +3,12 @@
 # Description: The config verbs' --json machine surface - one document on stdout, payloads, in-band refusals
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rollover_json.py — the `--json` surface of the config and rollover verbs."""
 
-# Split from test_config_verbs.py on 2026-10-08 (oversize_test_file): the JSON
-# lane, one subject - what `config ... --json` and `rollover push --json` put on
-# stdout (@api reads this instead of the screen): exactly one parseable
-# document, the payload shapes, every refusal in band as ok:false carrying the
-# sentence the human path prints, and the flag honoured in any slot.
+# @api reads this stdout instead of the screen: one document, refusals in band as ok:false.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the human-path refusal sentences, tests/test_config_verbs_refusals.py
@@ -38,11 +34,6 @@ def _payload_rollover(verbs: SimpleNamespace, capsys: pytest.CaptureFixture, *ar
     capsys.readouterr()
     _run_rollover(verbs, *args)
     return json.loads(capsys.readouterr().out)
-
-
-# ===========================================================================
-# 7. --json -- the machine surface (@api reads this instead of the screen)
-# ===========================================================================
 
 
 class TestJsonIsOneDocumentOnStdout:
@@ -374,17 +365,9 @@ class TestJsonUnreadableConfigRefusal:
 
 
 class TestJsonSurvivesRich:
-    """The payload must never travel through Rich. Two ways it gets ruined.
+    """The payload must never travel through Rich: it wraps at width 80 and eats `[...]` as markup.
 
-    1. The shared console is width-80 with is_terminal=False, so it wraps a
-       long document -- a wrap landing inside a string value inserts a
-       newline INTO the value.
-    2. It parses markup, so a `[...]` token inside a string is eaten as a
-       style name (that is how @daemon's lowercase [skip] markers vanished
-       from the screen while the tests on the returned string stayed green).
-
-    Both are invisible to a test that asserts on the string handed to the
-    printer. These assert on what reached the pipe.
+    These assert on what reached the pipe, not on the string handed to the printer.
     """
 
     def test_a_long_refusal_arrives_unwrapped(self, verbs, capsys) -> None:

@@ -3,53 +3,13 @@
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
 
-# Residency is DECLARED in a passport and ANCHORED in a registry. Both, or out.
-#
-# DPLAN-0318 defined the fleet with a named 4-tuple of resident registries. That
-# constant did one job the passport field cannot do on its own: it kept
-# ``marketstand`` out. ``marketstand``'s registry still marks its branch
-# ``active`` while the project itself is parked, so anything that trusted a
-# registry status field alone would sweep a held project into every rollover,
-# lint and push in the system.
-#
-# Wave 3 replaces the constant as the CLASSIFIER, not as the exclusion. The
-# semantics these tests pin:
-#
-# DISCOVERY is registry-led and shallow. Candidates are exactly
-# ``projects/<project>/<NAME>_REGISTRY.json`` — one level under ``projects/``,
-# with any dot-prefixed path component refused. Never a passport walk.
-#
-#     That is not a stylistic preference. On this machine a passport walk under
-#     ``projects/`` returns EIGHT passports for FOUR residents: ``baud`` alone
-#     carries two more under ``.backup/versioned/`` and ``.backup/snapshots/``,
-#     each a byte-identical copy declaring ``residency: resident``. A backup copy
-#     of a passport is a real passport making a real declaration. Discovery that
-#     starts from passports counts baud three times; discovery that starts from
-#     registries reads a passport only at a path a registry declared.
-#
-# CLASSIFICATION reads ``citizenship.residency`` off the passport at that
-# registry-declared path. ``resident`` is included; anything else is refused and
-# named — missing passport, unreadable passport, absent field, ``core`` (a core
-# citizen cannot also be a resident), or a value nobody defined.
-#
-# THE TRUST MODEL, which decides who wins when they disagree. A passport is
-# agent-writable; a registry is not. So the passport can never ADD scope on its
-# own — a declared resident that no discovered registry lists is not reachable by
-# construction, because nothing walks passports. And for core citizens the sealed
-# registry is the anchor: a core citizen missing the field is LOGGED, never
-# dropped, because letting an agent edit its own passport to leave the
-# maintenance fleet is the same defect pointed the other way.
-#
-# EXCLUSION holds three deep, and each layer alone is enough to keep
-# ``marketstand`` out: it lives under a dot-directory, its passport declares no
-# residency, and its registry is not at glob depth one. The tests below assert
-# each layer independently, so removing one cannot quietly open the door on the
-# strength of another still standing.
+# Residency is DECLARED in a passport and ANCHORED in a registry. Both, or out. Discovery
+# never walks passports: a backup copy of a passport is a real passport declaring.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — registry_scope.external_branches(); tests/test_declared_roots.py
@@ -70,10 +30,7 @@ from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.memory.tests.dead_cwd import DEAD_CWD_WORLD
 
-# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
-# whole path: a checkout that lives under a directory named dropbox must not hide itself.
-# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
-# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+# Judged by the parts BELOW the walk's root: a checkout under a directory named dropbox must not hide.
 _SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -119,14 +76,11 @@ def _passport(residency: str | None) -> dict:
 def fleet(tmp_path):
     """A synthetic repo root holding every case this module has to judge.
 
-    Built rather than mocked: the classifier's whole job is reading two files
-    off disk in a particular relationship, and a mock of that relationship
-    would test the mock.
+    Built rather than mocked: a mock of the two-file relationship would test the mock.
     """
     root = tmp_path / "repo"
 
-    # Core: the sealed registry, one citizen declaring core and one declaring
-    # nothing — the second is the "never drop a core citizen" case.
+    # beta declares nothing: the "never drop a core citizen" case.
     _write(
         root / "AIPASS_REGISTRY.json",
         _registry(_branch("alpha", "src/aipass/alpha"), _branch("beta", "src/aipass/beta")),
@@ -134,50 +88,34 @@ def fleet(tmp_path):
     _write(root / "src/aipass/alpha/.trinity/passport.json", _passport("core"))
     _write(root / "src/aipass/beta/.trinity/passport.json", _passport(None))
 
-    # A genuine resident: registry lists it, passport declares it.
     _write(root / "projects/live/LIVE_REGISTRY.json", _registry(_branch("live", "src/live/live")))
     _write(root / "projects/live/src/live/live/.trinity/passport.json", _passport("resident"))
 
-    # A backup copy of that same passport, declaring resident, exactly as baud
-    # carries on the live machine. Registry-led discovery must never reach it.
+    # A backup copy declaring resident: registry-led discovery must never reach it.
     _write(root / "projects/live/.backup/versioned/src/live/live/.trinity/passport.json", _passport("resident"))
     _write(root / "projects/live/.backup/LIVE_REGISTRY.json", _registry(_branch("live", "src/live/live")))
 
-    # Listed active, declares nothing — the undeclared case.
     _write(root / "projects/mute/MUTE_REGISTRY.json", _registry(_branch("mute", "src/mute/mute")))
     _write(root / "projects/mute/src/mute/mute/.trinity/passport.json", _passport(None))
 
-    # Listed active, claims to be a core citizen from inside projects/.
     _write(root / "projects/impostor/IMPOSTOR_REGISTRY.json", _registry(_branch("impostor", "src/impostor/impostor")))
     _write(root / "projects/impostor/src/impostor/impostor/.trinity/passport.json", _passport("core"))
 
-    # Listed active, no passport on disk at all.
     _write(root / "projects/ghost/GHOST_REGISTRY.json", _registry(_branch("ghost", "src/ghost/ghost")))
 
-    # Listed active, passport declares a value nobody defined.
     _write(root / "projects/martian/MARTIAN_REGISTRY.json", _registry(_branch("martian", "src/martian/martian")))
     _write(root / "projects/martian/src/martian/martian/.trinity/passport.json", _passport("visitor"))
 
-    # THE MARKETSTAND SHAPE: archived, registry still says active, and — worse
-    # than the real one — its passport DOES declare resident. If the dot-dir
-    # rule ever stops holding, this is what walks in.
+    # The marketstand shape: archived, registry says active, passport declares resident.
     _write(root / "projects/.archive/stale/STALE_REGISTRY.json", _registry(_branch("stale", "src/stale/stale")))
     _write(root / "projects/.archive/stale/src/stale/stale/.trinity/passport.json", _passport("resident"))
 
-    # TWO SINGLE-LAYER CASES, and they exist because the first mutation run on
-    # this file proved the marketstand shape needs BOTH layers gone before
-    # anything changes. Deleting the dot-prefix filter left every test green,
-    # and so did widening the glob to `**`, because each mutation was masked by
-    # the layer the fixture still tripped. Defence in depth hides single-layer
-    # regressions unless something is excluded by exactly one layer.
-
-    # Dot-prefixed AT depth one: matches the `*/*` glob, so only the dot filter
-    # keeps it out.
+    # Two single-layer cases: defence in depth hides a one-layer regression otherwise.
+    # Dot-prefixed AT depth one: only the dot filter keeps it out.
     _write(root / "projects/.hidden/HIDDEN_REGISTRY.json", _registry(_branch("hidden", "src/hidden/hidden")))
     _write(root / "projects/.hidden/src/hidden/hidden/.trinity/passport.json", _passport("resident"))
 
-    # Nested one level too deep with no dot anywhere: only the shallow glob
-    # keeps it out.
+    # Nested too deep with no dot: only the shallow glob keeps it out.
     _write(root / "projects/live/nested/NESTED_REGISTRY.json", _registry(_branch("nested", "src/nested/nested")))
     _write(root / "projects/live/nested/src/nested/nested/.trinity/passport.json", _passport("resident"))
 
@@ -200,15 +138,7 @@ class TestDiscoveryIsRegistryLedAndShallow:
     def test_discovery_does_not_descend_past_one_level(self, fleet):
         """A registry two levels down is not a project — it is a copy of one.
 
-        ``projects/live/.backup/LIVE_REGISTRY.json`` is excluded twice over, by
-        depth and by dot-directory. Asserted on depth alone here so the two
-        rules cannot be mistaken for one.
-
-        The non-empty guard is the whole test. A depth rule asserted inside a
-        loop is proven by the paths that ENTER it, so a discovery returning
-        nothing passes this green while checking nothing at all.
-
-        Mutant (2026-09-27, killed): the glob widened to `**/*_REGISTRY.json`.
+        The non-empty guard is the whole test: an empty discovery would pass a loop vacuously.
         """
         found = rs.resident_registry_paths(fleet)
         relative = sorted(path.relative_to(fleet / "projects").as_posix() for path in found)
@@ -257,9 +187,7 @@ class TestClassificationReadsThePassport:
     def test_a_core_citizen_is_never_dropped_for_a_missing_declaration(self, fleet):
         """``beta``'s passport declares nothing. The sealed registry still wins.
 
-        The passport is agent-writable. If an absent field could remove a
-        citizen from the maintenance fleet, an agent could stop its own
-        memories being rolled over by deleting one line of its own file.
+        Otherwise an agent could leave the maintenance fleet by editing its own passport.
         """
         names = {item["name"] for item in rs.fleet_branches(fleet)}
         assert {"alpha", "beta"} <= names
@@ -282,11 +210,7 @@ class TestTheArchiveExclusionHoldsThreeDeep:
     def test_layer_one_alone_the_dot_filter_excludes_a_shallow_hidden_project(self, fleet):
         """``projects/.hidden/`` sits at depth one, so the glob would take it.
 
-        Only the dot-prefix filter stops it, which makes this the test that
-        actually holds that filter. The marketstand shape does not: it is three
-        parts deep, so the shallow glob refuses it whether the filter exists or
-        not — and a mutation run proved exactly that by deleting the filter and
-        watching every test stay green.
+        Only the dot-prefix filter stops it; the marketstand shape is refused by depth anyway.
         """
         names = {item["name"] for item in rs.fleet_branches(fleet)}
         assert "hidden" not in names, "a dot-prefixed project at depth one was swept in"
@@ -299,8 +223,7 @@ class TestTheArchiveExclusionHoldsThreeDeep:
     def test_layer_three_the_registry_status_field_is_not_trusted_alone(self, fleet):
         """The stale registry says ``active``. That is the field that lied.
 
-        Read directly so the claim is about the FIXTURE's honesty: if this ever
-        stops saying active, the exclusion tests above stop proving anything.
+        Pins the FIXTURE's honesty: if it stops saying active, the exclusion tests prove nothing.
         """
         data = json.loads((fleet / "projects/.archive/stale/STALE_REGISTRY.json").read_text(encoding="utf-8"))
         assert data["branches"][0]["status"] == "active"
@@ -323,29 +246,12 @@ class TestDeclaredResidency:
 
 
 class TestEveryLaneReadsTheOneDefinition:
-    """Convergence pinned, because a split definition is how this started.
-
-    Before DPLAN-0318 the push resolved its own scope and the registry lane
-    resolved another, and they disagreed by three citizens for months without
-    anything saying so. Both had a defensible implementation; neither was
-    wrong on its own terms. That is what makes duplicate policy dangerous —
-    it does not look like a bug until you count.
-    """
+    """Convergence pinned, because a split definition is how this started."""
 
     _APPS = Path(__file__).resolve().parents[1] / "apps"
 
     def test_the_named_resident_tuple_is_gone_from_the_branch(self):
-        """It decided nothing for a wave; now it does not exist.
-
-        The constant survived DPLAN-0319 only because @ai_mail's mirror
-        AST-parsed the assignment. That mirror landed on 2026-08-28, so the
-        anchor went with it. This is the pin that used to say "no lane may
-        SELECT on it" — with the tuple deleted the honest claim is stronger and
-        simpler: the name appears nowhere, so nothing can quietly grow a second
-        definition out of it again.
-
-        No mutant run (2026-09-27): the pin reads apps/ source off disk, which a module mutant cannot reach.
-        """
+        """It decided nothing for a wave; now it does not exist."""
         offenders = []
         for path in _walk(self._APPS):
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -359,17 +265,9 @@ class TestEveryLaneReadsTheOneDefinition:
         assert "registry_scope.fleet_branches(" in body, "the push lane has its own scope resolution again"
 
     def test_the_detector_filters_residents_through_the_classifier(self, fleet, monkeypatch):
-        """BEHAVIOURAL, and it started as a source pin that proved nothing.
+        """BEHAVIOURAL: the detector's scope holds only the declared resident.
 
-        The first version asserted ``accepted_resident_paths(`` appeared in the
-        function. A mutation that deleted the FILTER but kept the assignment
-        line sailed straight through it — the string was still there, the
-        classification was gone, 29 tests green. Reading the code under test
-        is not the same as running it, and grep-shaped pins fail exactly where
-        it matters: on a change that keeps the words and drops the behaviour.
-
-        Read through the public ``read_scope`` (leg 11): the fleet declares no
-        external roots, so its rows are exactly the write scope's.
+        A grep-shaped pin survived a mutant that dropped the filter but kept the words.
         """
         monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
@@ -385,14 +283,9 @@ class TestEveryLaneReadsTheOneDefinition:
         assert accepted == {str(fleet / "projects/live/src/live/live")}
 
     def test_the_read_scope_names_a_declared_external_the_write_scope_does_not(self, fleet, monkeypatch, tmp_path):
-        """The write fence of 2026-09-18 took the NAME RESOLVER with it.
+        """The read scope names a declared external; the write scope does not.
 
-        ``lint @vera`` and ``health @vera`` answered "Unknown branch" from the
-        day the fence landed — reported by @vera through @devpulse on 09-19.
-        The fence is right and stays: reads were simply never in its scope. So
-        the cure is not a wider write scope, it is a READ scope reaching the
-        external tier through the DECLARED roots, never through a caller's
-        cwd. Reads see the declared fleet; writes stop at the repo edge.
+        Reads see the declared fleet through the declared roots, never cwd; writes stop at the repo edge.
         """
         outside = tmp_path / "outside"
         _write(outside / "OUTSIDE_REGISTRY.json", _registry(_branch("ext", "src/ext/ext")))
@@ -413,12 +306,7 @@ class TestEveryLaneReadsTheOneDefinition:
         assert write_names <= read_names, "the read scope dropped a branch the write scope holds"
 
     def test_the_caller_lane_is_deliberately_not_classified(self):
-        """External callers are a different mechanism — pinned so it stays a choice.
-
-        A future reader tightening "everything must declare residency" would
-        break an external project calling in from its own tree, which never had
-        a passport in this fleet to declare anything with.
-        """
+        """External callers are a different mechanism — pinned so it stays a choice."""
         source = (self._APPS / "handlers" / "monitor" / "detector.py").read_text(encoding="utf-8")
         caller_loop = source[source.index("for reg_path in _find_caller_registries():") :]
         assert "accepted" not in caller_loop.split("return branches")[0]
@@ -428,28 +316,12 @@ class TestTheLiveFleetStillCountsTwentyTwo:
     """The receipt the dispatch asked for, measured rather than asserted."""
 
     def test_discovery_names_exactly_the_four_resident_projects(self, live_residents):
-        """What the deleted anchor used to be compared against, measured directly.
-
-        The old version diffed discovery against the demoted tuple, which made
-        it a test of two constants agreeing. With the tuple gone the claim is
-        about the machine: these four projects, no more, no fewer.
-        """
+        """What the deleted anchor used to be compared against, measured directly."""
         found = {path.parent.name for path in rs.resident_registry_paths(live_residents)}
         assert found == {"baud", "earmark", "finch", "aipass-site"}
 
     def test_the_live_fleet_is_eighteen_core_and_four_residents(self, live_residents):
-        """Counted BY TIER now, not by total — and the change is the point.
-
-        This asserted a flat 22 until the external tier landed, and it went red
-        on the first run afterwards because the fleet legitimately grew. Pinning
-        a total made the guard a tripwire for its own feature: the two numbers it
-        was written to protect (18 core, 4 residents) were never what it read.
-
-        So it counts what it means, and the external tier is asserted against
-        the DECLARATION rather than a number — this machine happens to declare
-        four roots today and that is the owner's to change without breaking a test
-        in my branch.
-        """
+        """Counted BY TIER now, not by total — and the change is the point."""
         branches = rs.fleet_branches(live_residents)
         tiers = Counter(item["residency"] for item in branches)
         assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 4), [item["name"] for item in branches]
@@ -462,11 +334,7 @@ class TestTheLiveFleetStillCountsTwentyTwo:
     def test_every_live_resident_declares_itself_one(self, live_residents):
         """The declaration is the classifier now — so it had better be there.
 
-        Counted, not just iterated: two nested loops over live discovery mean
-        two chances to check nothing. The fixture already skips when the
-        registries are missing, so reaching here with a count of zero is a
-        different failure — discovery found the files and read no branches out
-        of them — and it must not read as agreement.
+        Counted, so a discovery that reads no branches cannot read as agreement.
         """
         checked = 0
         for registry_path in rs.resident_registry_paths(live_residents):
@@ -491,14 +359,7 @@ class TestTheLiveFleetStillCountsTwentyTwo:
 class TestTheRecordCarriesTheAddress:
     """A fleet record without an email is unusable by every email-addressed lane.
 
-    Asked for by @daemon (dispatch 16fbf1c0) and ruled in their favour: the row
-    is already read and the field already thrown away, so resolving it anywhere
-    else would mean a second reader of the same registry rows — the exact defect
-    this module exists to end.  @ai_mail is email-addressed too, so shipping the
-    record without it would strand both of the lanes 2.0.0 was meant to converge.
-
-    Pass-through, never derived.  ``name`` may come from the directory, and an
-    address guessed from a directory name is a wrong answer that looks right.
+    Pass-through, never derived: an address guessed from a directory name looks right and is wrong.
     """
 
     def test_every_record_carries_an_email_key(self, fleet):
@@ -509,12 +370,7 @@ class TestTheRecordCarriesTheAddress:
         assert addressless == [], f"records with no email key: {addressless}"
 
     def test_the_email_is_the_registrys_verbatim_not_derived_from_the_name(self, tmp_path):
-        """A row whose address looks nothing like its name or its directory.
-
-        ``@daemon`` asked for the field; this pins WHERE it comes from. Both
-        plausible derivations — lowercase the name, or read the directory —
-        produce a different string here, so either one fails this outright.
-        """
+        """A row whose address looks nothing like its name or its directory."""
         _write(
             tmp_path / "AIPASS_REGISTRY.json",
             _registry({"name": "ALPHA", "path": "src/aipass/alpha", "email": "@not-the-name", "status": "active"}),
@@ -524,14 +380,7 @@ class TestTheRecordCarriesTheAddress:
         assert record["email"] == "@not-the-name"
 
     def test_a_row_with_no_email_keeps_the_branch_and_reports_none(self, tmp_path):
-        """Addressless is a condition to hand on, not a reason to drop a citizen.
-
-        Path-based lanes (trinity_push, rollover) never touch the address, so
-        dropping the branch here would break them to protect a caller that has
-        not asked yet.  The record reports ``None`` and the caller refuses on
-        its own terms.  Measured on the live fleet at 22 of 22 rows carrying an
-        address, so this is the shape of a future defect, not today's.
-        """
+        """Addressless is a condition to hand on, not a reason to drop a citizen."""
         _write(
             tmp_path / "AIPASS_REGISTRY.json",
             _registry({"name": "ALPHA", "path": "src/aipass/alpha", "status": "active"}),
@@ -542,10 +391,7 @@ class TestTheRecordCarriesTheAddress:
         assert record["email"] is None
 
     def test_the_live_fleet_is_addressable_end_to_end(self, live_fleet):
-        """The guard that would have caught this before @daemon had to ask.
-
-        Mutant (2026-09-27, killed): the `"email"` key dropped from the record.
-        """
+        """Every live citizen's registry row carries an address."""
         records = rs.fleet_branches(live_fleet)
         assert "memory" in {r["name"] for r in records}, "live discovery missed this branch -- this proved nothing"
         unaddressed = [r["name"] for r in records if not r.get("email")]
@@ -554,13 +400,7 @@ class TestTheRecordCarriesTheAddress:
     def test_each_record_gets_its_own_rows_address_not_a_neighbours(self, tmp_path):
         """Three rows, three addresses, none guessable from its own name.
 
-        Found by mutation: a version handing every record the FIRST row's email
-        survived every other test in this class, because the single-row
-        registries above cannot see a cross-row mixup and the live guard only
-        asks whether an address is present. For an email-addressed scheduler
-        that mutant is the worst available failure — every job would wake a real
-        citizen, just never the right one — so it is pinned by pairing, not by
-        presence.
+        Pinned by pairing, not presence: a mutant handing every record the first row's email survived.
         """
         rows = [
             {"name": "ALPHA", "path": "src/aipass/alpha", "email": "@third", "status": "active"},
@@ -577,25 +417,8 @@ class TestTheRecordCarriesTheAddress:
 class TestMalformedJsonDeclaresNothingAndNeverRaises:
     """A file that parses as JSON but is the wrong SHAPE must refuse, not crash.
 
-    Reported by @daemon (dispatch 5031a591) against declared_residency, and the
-    provenance is the point: their deleted reader had an explicit isinstance
-    guard that mine never had. Removing the duplicate removed the stricter of
-    two implementations, and nobody knew which one was stricter.
-
-    Why it is fleet-wide rather than branch-local: declared_residency is called
-    once per core citizen by fleet_branches and once per candidate by
-    _accepted_residents, and read_registry_branches is called for every registry
-    in scope. An uncaught raise in either does not refuse ONE branch -- it takes
-    out rollover, lint, health, trinity_push and @daemon's scheduler together,
-    with a traceback naming this module rather than the file that is wrong.
-
-    The module docstring is the specification being broken: an unreadable
-    passport "declares NOTHING and does not raise". A non-dict root is
-    unreadable in every sense that matters.
-
-    Every root is pinned separately. @daemon's own suite pinned only "[]", and a
-    fix tested against a list alone would have let a string root through -- so
-    the parametrisation is the test, not decoration.
+    An uncaught raise here takes out every fleet lane at once, not one branch.
+    Every root is pinned separately: a fix tested against a list alone lets a string through.
     """
 
     @pytest.mark.parametrize(
@@ -624,13 +447,7 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         ],
     )
     def test_a_non_dict_citizenship_block_declares_nothing(self, tmp_path, label, document):
-        """The second `.get` on the same line had the same defect.
-
-        `data.get("citizenship", {}).get("residency")` guards an ABSENT block
-        with its default and a PRESENT-but-wrong one not at all, so fixing only
-        the root would have left the identical crash one key deeper. Not in
-        @daemon's report -- found by reading the line that was reported.
-        """
+        """The second `.get` on the same line had the same defect."""
         branch = tmp_path / f"branch_cz_{label}"
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".trinity" / "passport.json").write_text(document, encoding="utf-8")
@@ -645,14 +462,8 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
             ("null root", "null"),
             ("branches is a mapping", '{"branches": {"alpha": 1}}'),
             ("branches is a string", '{"branches": "alpha"}'),
-            # The three NON-ITERABLE values. Found by mutation: with only the
-            # mapping and string cases above, deleting the `branches` list guard
-            # SURVIVED, because iterating a dict or a string still yields items
-            # and the row guard below catches every one of them. A number, a
-            # bool or an explicit null raises TypeError at the `for` itself,
-            # where no row guard can ever reach. `null` is the live shape of the
-            # three: `data.get("branches", [])` returns None when the key is
-            # PRESENT and null, so the default never fires.
+            # Non-iterable values raise at the `for` itself, where no row guard reaches;
+            # without them a mutant dropping the list guard survived. A present null skips the default.
             ("branches is a number", '{"branches": 7}'),
             ("branches is a bool", '{"branches": true}'),
             ("branches is null", '{"branches": null}'),
@@ -663,22 +474,14 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
     def test_a_malformed_registry_yields_no_branches(self, tmp_path, label, document):
         """The registry reader has the same defect and nobody had tested it.
 
-        Worse than the passport case, because a registry is the SEALED ANCHOR:
-        the passport is agent-written and expected to be wrong sometimes, while
-        every lane trusts the registry to be the thing a passport cannot forge.
-        A registry that crashes the reader takes the anchor with it.
+        The registry is the sealed anchor; a registry that crashes the reader takes the anchor with it.
         """
         registry = tmp_path / f"{label.replace(' ', '_')}_REGISTRY.json"
         registry.write_text(document, encoding="utf-8")
         assert rs.read_registry_branches(registry) == []
 
     def test_a_malformed_row_is_skipped_and_the_good_rows_survive(self, tmp_path):
-        """One bad row must cost one row, not the whole registry.
-
-        This is the difference between refusing and crashing, stated as a test:
-        a fleet where one typo hides every other citizen is not failing honestly,
-        it is failing loudly in the wrong place.
-        """
+        """One bad row must cost one row, not the whole registry."""
         registry = tmp_path / "MIXED_REGISTRY.json"
         registry.write_text(
             json.dumps(
@@ -697,14 +500,7 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         assert [record["name"] for record in found] == ["GOOD"]
 
     def test_a_non_string_name_or_address_never_reaches_the_record(self, tmp_path):
-        """Wrong TYPE is a wrong answer, not a crash -- and it is still wrong.
-
-        Neither of these raises, so they would have survived the guard above.
-        An int name breaks any caller that formats it, and a non-string address
-        is unmailable; @daemon consumes both. Name falls back to the directory,
-        which is a real answer; an address has no honest fallback, so it is None
-        and the caller refuses on its own terms.
-        """
+        """Wrong TYPE is a wrong answer, not a crash -- and it is still wrong."""
         registry = tmp_path / "TYPES_REGISTRY.json"
         registry.write_text(
             json.dumps({"branches": [{"name": 42, "path": "src/alpha", "email": ["@a"], "status": "active"}]}),
@@ -715,36 +511,8 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         assert record["email"] is None
 
 
-# ===========================================================================
-# THE MODULE-LEVEL CWD FALLBACK (2026-08-31)
-# ===========================================================================
-#
-# @drone, routed by @devpulse with an isolated repro: `find_repo_root` ends
-# `return Path.cwd()` when the walk up from `__file__` finds no
-# AIPASS_REGISTRY.json, and `REPO_ROOT = find_repo_root()` runs at MODULE
-# level. A clean checkout has no registry — it is gitignored and machine-local
-# — so a bare CI runner takes that fallback on every import, and a process
-# whose working directory has been deleted raises FileNotFoundError while
-# merely IMPORTING this module.
-#
-# It took down every import of drone on CI — router, `drone rm`, `drone
-# systems` — because their registry_handler imported the gateway at module
-# level. They contained their half honestly (the import moved inside the guard
-# that already promised the gateway could not take routing down) and reported
-# the line as mine rather than patching my tree. It is mine, and it was latent
-# for every other consumer.
-#
-# TWO DEFECTS IN ONE LINE. The crash is the loud one. The quiet one is that
-# `Path.cwd()` is a GUESS: the directory a process happened to start in has
-# nothing to do with where this source file lives, so on a registry-less tree
-# every fleet lane would silently resolve against whatever the caller's shell
-# was pointing at. That is the fallback species the owner outlawed — the same
-# ruling as `_first_registry_in`, "a fallback wearing a determinism costume".
-#
-# THE ANSWER: the root is derived from THIS FILE's own location, never from the
-# process. `src/` is the layout's own marker, so a registry-less checkout
-# resolves to the checkout — which is the true answer there, not a guess — and
-# the absence is said out loud at WARNING rather than passed over.
+# REPO_ROOT resolves at import, so a registry-less tree in a dead cwd must not crash or
+# guess: the root derives from this file's location, never the process, and says so at WARNING.
 
 
 class TestRepoRootNeverReadsTheProcessDirectory:
@@ -754,32 +522,13 @@ class TestRepoRootNeverReadsTheProcessDirectory:
     is built by denying ``getcwd`` rather than by deleting a directory.
     """
 
-    # The condition is "os.getcwd() raises", NOT "a directory was deleted".
-    # Deleting the working directory is one cause of it and the one @drone's
-    # repro used; it is also IMPOSSIBLE on Windows, which locks the directory a
-    # process stands in, so the rmdir raises PermissionError before the pin's
-    # own claim is reached. Denying getcwd produces the same condition from the
-    # same call site on every platform. test_repo_root.py proves the two worlds
-    # agree on POSIX, which is what licenses using this one where the other
-    # cannot be built.
-    # ONE definition of the world, in tests/dead_cwd.py. This file used to carry
-    # its own spelling of the denial and it drifted in two ways at once: a
-    # zero-argument lambda, which 3.10's pathlib accessor calls with one
-    # argument, and the denial installed AFTER `import pathlib`, which on 3.10
-    # means the accessor already captured the real getcwd and these pins were
-    # asserting nothing at all. CI could only see the first. The world goes
-    # first here now, and it is imported rather than retyped.
+    # Denying getcwd, not deleting the cwd: Windows locks a process's directory against rmdir.
+    # The world is imported from tests/dead_cwd.py and goes BEFORE `import pathlib` (3.10 captures getcwd).
     _PROBE = "{world}import sys, pathlib\nsys.path.insert(0, {src!r})\n{body}\n"
 
     @classmethod
     def _in_a_dead_cwd(cls, body):
-        """Run *body* in a subprocess that cannot read its working directory.
-
-        A subprocess because the condition is process-wide and unfixable from
-        inside: once cwd cannot be read, every `Path.cwd()` in the interpreter
-        raises, including pytest's own. Imposing it on the test runner would
-        take the suite with it.
-        """
+        """Run *body* in a subprocess that cannot read its working directory."""
         src = str(Path(rs.__file__).resolve().parents[6])
         return subprocess.run(
             [sys.executable, "-c", cls._PROBE.format(world=DEAD_CWD_WORLD, src=src, body=body)],
@@ -812,22 +561,7 @@ class TestRepoRootNeverReadsTheProcessDirectory:
     def test_importing_the_module_survives_a_deleted_working_directory(self):
         """The CI chain: REPO_ROOT is resolved at import, so import is the crash site.
 
-        Honest about its own reach: on a machine that HAS a registry above this
-        file the walk succeeds and the fallback is never taken, so this pin
-        cannot go red here. It is the CI shape, kept because that is the
-        environment the defect lives in and a test that only runs where the bug
-        cannot happen is the one nobody writes until after the outage.
-
-        AND IT WORKED — twice. On CI it went red on ``detector.py``, the same
-        defect one file over, which is what put the whole ten-copy sweep in
-        ``handlers/repo_root.py``. Then, with all ten cured, it went red again
-        on @prax: every handler in the fleet calls ``get_system_logger()`` at
-        module level and prax's ``config/load.py`` carries the same species. So
-        @prax swept eight sites of the same species and their fix landed the
-        same night, verified here: 11/11 memory modules import clean in a dead
-        cwd against their tree with no substitution. So this is a HARD failure
-        again — an xfail that outlives its blocker stops reporting regressions —
-        and what survives is the attribution in the message.
+        Cannot go red on a machine with a registry above this file; it is the CI shape, kept hard (no xfail).
         """
         result = self._in_a_dead_cwd(
             "from aipass.memory.apps.handlers.monitor import registry_scope as rs\nprint('OK', rs.REPO_ROOT)"
@@ -844,11 +578,7 @@ class TestRepoRootNeverReadsTheProcessDirectory:
         )
 
     def test_a_registryless_world_resolves_to_the_source_tree_not_the_caller(self, tmp_path, monkeypatch):
-        """The QUIET defect: cwd is a guess about where the code lives.
-
-        Stand in a directory that is not the repo and ask about a tree with no
-        registry. The old answer was "wherever you happen to be standing".
-        """
+        """The QUIET defect: cwd is a guess about where the code lives."""
         bare = tmp_path / "bare"
         bare.mkdir()
         monkeypatch.chdir(tmp_path)
@@ -880,17 +610,10 @@ class TestRepoRootNeverReadsTheProcessDirectory:
 
 
 class TestTheResidentWalkReadsNamesNotSpellings:
-    """The same widening @drone found on Windows, on the other of my two globs.
+    """A case-insensitive filesystem must not widen the resident registry glob.
 
-    ``*/*_REGISTRY.json`` is a rule about names; a glob on a case-insensitive
-    filesystem is wider than the rule it spells. The consequence here differs
-    from the external walk's and is worse in one way: this one does not refuse,
-    it ADMITS. A project carrying a lowercase registry beside its real one gets
-    both read, and a branch nobody declared active in the file that counts
-    becomes a resident on Windows and not on Linux.
-
-    See ``case_insensitive_filesystem`` in conftest for why this is injected
-    rather than skipped off-platform.
+    A case-insensitive glob is wider than the rule it spells, and here it ADMITS a resident.
+    See ``case_insensitive_filesystem`` in conftest for why this is injected rather than skipped.
     """
 
     def test_the_injected_world_really_widens(self, fleet, case_insensitive_filesystem):
@@ -921,14 +644,9 @@ class TestTheResidentWalkReadsNamesNotSpellings:
 
 
 class TestAnUnreadableCoreRegistryNeverHandsOverANamesake:
-    """Leg 10 of DPLAN-0354: the name-keyed write lanes refuse when the core registry cannot be read.
+    """The name-keyed write lanes refuse when the core registry cannot be read.
 
-    The world: a resident project carries a branch whose directory is ``alpha``, the same name as
-    the core citizen. A todo backlog lives at ``.backup/todo/<name>/`` and the push matches by
-    name, so with the core row present both lanes refuse or act on both. With the core registry
-    unreadable the core row vanished, and the resident ``alpha`` was the only answer for ``alpha``:
-    its todos would merge into the core citizen's backlog. Red first: both lanes resolved to the
-    resident.
+    A resident ``alpha`` must never become the only answer for the core citizen ``alpha``'s backlog.
     """
 
     @staticmethod
@@ -969,8 +687,7 @@ class TestAnUnreadableCoreRegistryNeverHandsOverANamesake:
         ]
 
     def test_an_absent_core_registry_is_no_refusal(self, fleet, monkeypatch):
-        """A fresh clone has no core registry: the residents still resolve. Green from its first run; its proof is
-        the mutant that drops ``core.exists()`` from the strict read."""
+        """A fresh clone has no core registry: the residents still resolve."""
         (fleet / "AIPASS_REGISTRY.json").unlink()
         monkeypatch.setattr(todo_roll, "_find_repo_root", lambda: fleet)
         monkeypatch.setattr(trinity_push, "_REPO_ROOT", fleet)

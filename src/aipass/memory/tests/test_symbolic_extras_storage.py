@@ -3,16 +3,11 @@
 # Description: Tests for symbolic handler storage and search - store, delete, dedupe, chroma client, retrieval
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/symbolic/storage.py, deduplicator.py, chroma_client.py, retriever.py and extractor.py."""
 
-# Split from test_symbolic_extras.py on 2026-10-08 (oversize_test_file): the
-# storage-and-search half, one subject - how a fragment is flattened, stored,
-# deleted, deduplicated and found again, and the extractor's operation log.
-# The recall-and-surfacing half (hook.py) stays in test_symbolic_extras.py.
-#
 # Covers imports required by the seedgo test scanner:
 #     from aipass.memory.apps.handlers.symbolic.storage import flatten_dimensions
 #     from aipass.memory.apps.handlers.symbolic.storage import store_fragment
@@ -27,14 +22,7 @@
 #     from aipass.memory.apps.handlers.symbolic.retriever import search_by_triggers
 #     from aipass.memory.apps.handlers.symbolic.retriever import retrieve_fragments
 
-# ---------------------------------------------------------------------------
-# PARKED 2026-08-14 — the owner's ruling. The symbolic fragments tier is disabled
-# (unused; the Agent Memory Atlas review flagged the AUDN deduplicator for acting
-# on an LLM Delete verdict with no record of what was removed). These tests are
-# KEPT, not deleted: they document the feature for revival.
-# Active curated-truth piece: Compass — drone @devpulse compass.
-# Revive: tests/parked/symbolic_20260814/README.md
-# ---------------------------------------------------------------------------
+# The symbolic tier is PARKED; kept to document it. Revive: tests/parked/symbolic_20260814/README.md
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — SymbolicTierParked, the parked import; tests/test_symbolic_parked.py
@@ -55,11 +43,6 @@ from unittest.mock import MagicMock, patch
 from aipass.memory.tests.support_symbolic_extras import _mock_handler_deps as _mock_handler_deps
 from aipass.memory.tests.support_symbolic_extras import _reset_chroma_clients as _reset_chroma_clients
 from aipass.memory.tests.support_symbolic_extras import _reset_hook_session as _reset_hook_session
-
-
-# ---------------------------------------------------------------------------
-# Import helpers (must be called inside tests, after mocks are installed)
-# ---------------------------------------------------------------------------
 
 
 def _import_storage():
@@ -112,11 +95,6 @@ def _import_retriever():
         "search_by_triggers": search_by_triggers,
         "retrieve_fragments": retrieve_fragments,
     }
-
-
-# ---------------------------------------------------------------------------
-# Sample data helpers
-# ---------------------------------------------------------------------------
 
 
 def _v1_fragment():
@@ -184,11 +162,6 @@ def _mock_chroma_client(collection=None):
     return client
 
 
-# ===========================================================================
-# 12. storage.flatten_dimensions
-# ===========================================================================
-
-
 class TestFlattenDimensions:
     """Tests for storage.flatten_dimensions."""
 
@@ -242,11 +215,6 @@ class TestFlattenDimensions:
         assert "technical_5" not in meta
 
 
-# ===========================================================================
-# 13. storage.store_fragment
-# ===========================================================================
-
-
 class TestStoreFragment:
     """Tests for storage.store_fragment."""
 
@@ -292,11 +260,6 @@ class TestStoreFragment:
 
         assert result["success"] is False
         assert "Embedding failed" in result["error"]
-
-
-# ===========================================================================
-# 14. storage.store_fragments_batch
-# ===========================================================================
 
 
 class TestStoreFragmentsBatch:
@@ -357,11 +320,6 @@ class TestStoreFragmentsBatch:
         assert "mismatch" in result["error"]
 
 
-# ===========================================================================
-# 15. storage.store_llm_fragment
-# ===========================================================================
-
-
 class TestStoreLlmFragment:
     """Tests for storage.store_llm_fragment."""
 
@@ -402,11 +360,6 @@ class TestStoreLlmFragment:
 
         assert result["success"] is False
         assert "missing summary" in result["error"]
-
-
-# ===========================================================================
-# 16. storage.store_llm_fragments_batch
-# ===========================================================================
 
 
 class TestStoreLlmFragmentsBatch:
@@ -465,11 +418,6 @@ class TestStoreLlmFragmentsBatch:
         assert "No valid" in result["error"]
 
 
-# ===========================================================================
-# 17. storage.delete_fragment
-# ===========================================================================
-
-
 class TestDeleteFragment:
     """Tests for storage.delete_fragment."""
 
@@ -478,9 +426,7 @@ class TestDeleteFragment:
         s = _import_storage()
         client = _mock_chroma_client()
 
-        # Re-import chroma_client so mock.patch and the code resolve to the
-        # same module object.  The autouse fixture deletes it from sys.modules;
-        # on Python 3.10 mock._dot_lookup finds a stale parent attribute.
+        # Re-import so mock.patch and the code share one module object (Python 3.10 _dot_lookup finds a stale parent).
         import importlib
 
         importlib.import_module("aipass.memory.apps.handlers.symbolic.chroma_client")
@@ -513,11 +459,6 @@ class TestDeleteFragment:
 
         assert result["success"] is False
         assert "failed" in result["error"].lower()
-
-
-# ===========================================================================
-# 18. deduplicator.deduplicate_fragment
-# ===========================================================================
 
 
 class TestDeduplicateFragment:
@@ -634,11 +575,6 @@ class TestDeduplicateFragment:
         )
 
 
-# ===========================================================================
-# 19. chroma_client.get_chroma_client
-# ===========================================================================
-
-
 class TestGetChromaClient:
     """Tests for chroma_client.get_chroma_client."""
 
@@ -681,11 +617,6 @@ class TestGetChromaClient:
         assert result == mock_client
 
 
-# ===========================================================================
-# 20. retriever.search_by_vector
-# ===========================================================================
-
-
 class TestSearchByVector:
     """Tests for retriever.search_by_vector."""
 
@@ -726,11 +657,6 @@ class TestSearchByVector:
 
         assert result["success"] is True
         assert result["results"] == []
-
-
-# ===========================================================================
-# 21. retriever.search_by_dimensions
-# ===========================================================================
 
 
 class TestSearchByDimensions:
@@ -778,11 +704,6 @@ class TestSearchByDimensions:
 
         assert result["success"] is True
         assert result["results"] == []
-
-
-# ===========================================================================
-# 22. retriever.search_by_triggers
-# ===========================================================================
 
 
 class TestSearchByTriggers:
@@ -838,11 +759,6 @@ class TestSearchByTriggers:
 
         assert result["success"] is True
         assert len(result["results"]) == 1
-
-
-# ===========================================================================
-# 23. retriever.retrieve_fragments
-# ===========================================================================
 
 
 class TestRetrieveFragments:
@@ -918,11 +834,6 @@ class TestRetrieveFragments:
         assert frag_ids.count("frag-1") == 1
         if result["results"]:
             assert result["results"][0].get("relevance_score", 0) > 0
-
-
-# =============================================================================
-# extract_fragments_llm operation logging (extractor.py)
-# =============================================================================
 
 
 class TestExtractFragmentsLlmLogging:

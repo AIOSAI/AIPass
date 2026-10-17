@@ -3,32 +3,12 @@
 # Description: Template lifecycle for AIPASS_ROOTS.json — init, add, remove, list, heal
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-10-17
 # =============================================
 
 """The WRITE half of the fleet anchor. ``registry_scope`` reads; this writes.
 
-FPLAN-0460 phase 4. @devpulse created ``AIPASS_ROOTS.json`` by hand and the owner
-ruled on seeing it: "jsons are normally created by code, so if they corrupt or
-get deleted they are always rebuilt from default settings from a template
-directory."
-
-WHY A SEPARATE MODULE. ``registry_scope`` is the single definition of who is in
-the fleet, consumed cross-branch through ``modules/fleet.py``. A reader that also
-writes is two jobs in one file and one import away from a lane that meant to ask
-a question and changed an answer instead. The two halves share the FILENAME and
-the OVERLAP PREDICATE by import, so they cannot drift on the two things that
-would matter.
-
-THE ASYMMETRY THIS EXISTS TO FIX. The reader already refuses a row it cannot use
-— a path that does not exist, one that overlaps AIPass home, a duplicate. Refused
-at READ time, that row still sits in the file, and the only trace of its being
-wrong is a log line nobody is reading. Every one of those refusals now happens at
-WRITE time too, against ``registry_scope.overlaps_home`` itself rather than a
-copy of its logic, so the file cannot carry a declaration that will be silently
-dropped.
-
-HEALING IS DELIBERATE, NEVER AUTOMATIC. See :func:`heal`.
+Reference: docs/rollover_pipeline.md
 """
 
 import json
@@ -46,22 +26,16 @@ from aipass.memory.apps.handlers.monitor.registry_scope import (
 )
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# Imported, never re-spelled: the reader owns these and the write side must
-# refuse exactly what the read side refuses. `overlaps_home` is used under the
-# reader's own name at its call site rather than aliased here — an alias is a
-# second spelling of one rule, which is the thing this comment exists to refuse.
+# Imported from the reader, never re-spelled: the write side refuses exactly what it refuses.
 ROOTS_FILE = DECLARED_ROOTS
 
 ROOTS_SCHEMA_VERSION = "1.0.0"
 TEMPLATE_NAME = "AIPASS_ROOTS.template.json"
 CORRUPT_SUFFIX_NAME = f"{DECLARED_ROOTS}.corrupt"
 
-# Branch home is four parents up from apps/handlers/monitor/roots_file.py.
 _BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
 
-# Best-effort salvage only. This finds path-shaped strings in a file that no
-# longer parses so a human can read what was lost; nothing here is ever written
-# back as a declaration.
+# Salvage is for a human to read; nothing it finds is ever written back as a declaration.
 _SALVAGE = re.compile(r'"path"\s*:\s*"([^"]+)"')
 
 
@@ -75,12 +49,7 @@ def _today() -> str:
 
 
 def render_scaffold(today: str | None = None) -> dict:
-    """The default document: current metadata, and NOBODY DECLARED.
-
-    An empty ``roots`` is the only honest default. A template that shipped with
-    example roots would declare on an installation's behalf the moment it was
-    rendered, which is the thing this whole tier forbids.
-    """
+    """The default document: current metadata, and NOBODY DECLARED (examples would declare for you)."""
     stamp = today or _today()
     document = json.loads(template_path().read_text(encoding="utf-8"))
     document["metadata"]["last_updated"] = stamp
@@ -132,25 +101,7 @@ def _resolve(repo_root: Path | None, raw: str) -> Path:
 def _spell(repo_root: Path | None, resolved: Path) -> str:
     """Relative to home when it fits, absolute when it does not — POSIX-spelled either way.
 
-    Relative keeps ``/home/<someone>`` out of a public repo and survives a
-    checkout move as long as siblings stay siblings; a root that lives nowhere
-    near home has no relative spelling worth reading and keeps its absolute one.
-
-    THE SEPARATOR IS PART OF THE CONTRACT, decided 2026-08-31 after a Windows CI
-    red, and decided rather than worked around: a declared row is ALWAYS written
-    with forward slashes. ``str()`` on a Windows path yields ``..\\wren``, so the
-    same declaration had two spellings depending on which machine ran ``add``.
-
-    Forward slashes because they are the only spelling BOTH platforms read:
-    ``Path("../wren")`` and ``Path("C:/proj/wren")`` resolve correctly on
-    Windows, while ``..\\wren`` is a filename on POSIX, not a path. One
-    spelling means a row can be compared, copied and diffed without knowing who
-    wrote it — and the anchor is a declaration the owner blesses, so it has to
-    read the same to a human on either machine.
-
-    Bending the test instead would have left the writer emitting whichever
-    separator the OS happened to prefer, which is not a contract, it is a
-    coincidence that has been holding.
+    Forward slashes are the contract: the only spelling both platforms read as a path.
     """
     root = (Path(repo_root) if repo_root is not None else find_repo_root()).resolve()
     try:
@@ -161,12 +112,7 @@ def _spell(repo_root: Path | None, resolved: Path) -> str:
 
 
 def init_roots(repo_root: Path | None = None, today: str | None = None) -> tuple[bool, str]:
-    """Render the scaffold, but never over something already there.
-
-    Refuses an existing file whether it parses or not. Unreadable is not absent:
-    overwriting a corrupt anchor here would be the silent rebuild that
-    :func:`heal` exists to keep deliberate.
-    """
+    """Render the scaffold, never over an existing file: unreadable is not absent (that is ``heal``)."""
     anchor = _path_of(repo_root)
     if anchor.exists():
         return False, f"{ROOTS_FILE} already exists at {anchor} — refusing to overwrite declarations"
@@ -212,12 +158,7 @@ def add_root(
 
 
 def remove_root(repo_root: Path | None = None, raw_path: str = "", today: str | None = None) -> tuple[bool, str]:
-    """Retire a declaration.
-
-    Matches on the RESOLVED path so any spelling of the same directory works,
-    and deliberately does not require the directory to still exist — retiring a
-    deleted repo must not mean resurrecting it first.
-    """
+    """Retire a declaration by resolved path; the directory need not still exist."""
     document, problem = _load(repo_root)
     if document is None:
         return False, problem
@@ -239,12 +180,7 @@ def remove_root(repo_root: Path | None = None, raw_path: str = "", today: str | 
 
 
 def list_roots(repo_root: Path | None = None) -> list[dict]:
-    """Every declared row plus what it actually resolves to.
-
-    ``reachable`` is the point of the verb: a row the reader will drop looks
-    exactly like a working one in the file, and the only other place that shows
-    up is a log line.
-    """
+    """Every declared row plus what it resolves to; ``reachable`` shows a row the reader will drop."""
     document, _ = _load(repo_root)
     if document is None:
         return []
@@ -270,23 +206,9 @@ def list_roots(repo_root: Path | None = None) -> list[dict]:
 def heal(repo_root: Path | None = None, today: str | None = None) -> tuple[bool, str, list[str]]:
     """Rebuild a broken anchor as an EMPTY scaffold, loudly, on purpose.
 
-    DELIBERATE, NEVER AUTOMATIC, and this is the design ruling rather than an
-    implementation detail. If reading could trigger a rebuild, any lane that
-    happened to read a corrupt anchor first — rollover, lint, health, @daemon's
-    scheduler — would replace the operator's declarations with an empty
-    scaffold as a side effect. And because ZERO ROOTS IS A LEGAL STATE, nothing
-    downstream would fail: the system would keep running and quietly maintain
-    nothing. That is re-declaring on the operator's behalf, which is exactly
-    what declaration-is-the-credential forbids. So the reader stays a reader,
-    and repair is something a human asks for.
-
-    NEVER RE-DECLARES. Path-shaped strings are recovered from the wreckage and
-    RETURNED for a human to read, never written back. A salvaged path is a guess
-    about intent, and a guess that installs itself is indistinguishable from a
-    declaration.
-
-    The broken file is set aside, not deleted — a rebuild that destroys the
-    evidence of what it repaired cannot be audited.
+    Never automatic: zero roots is legal, so a read-triggered rebuild would silently
+    maintain nothing. Salvaged paths are returned, never re-declared; the broken
+    file is preserved, not deleted.
     """
     anchor = _path_of(repo_root)
     if not anchor.exists():

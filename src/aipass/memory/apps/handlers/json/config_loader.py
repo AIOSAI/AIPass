@@ -3,32 +3,14 @@
 # Description: Unified config loader for memory.config.json
 # Version: 1.7.0
 # Created: 2026-06-13
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unified Config Loader
 
-Single entry point for reading memory.config.json.  Replaces the 9
-ad-hoc readers that previously loaded the file independently, each
-with subtly different defaults and error handling.
-
-Provides a canonical DEFAULT_CONFIG, a non-mutating deep_merge, and a
-load() that guarantees callers always receive a usable dict.
-
-Doctrine (the owner, S193): configs live inside JSONs, not inside code.
-memory.config.json on disk is the RUNTIME AUTHORITY the operator edits.
-DEFAULT_CONFIG exists so that file can be REGENERATED when it goes
-missing — it is the regeneration seed, not a rival source of truth.
-Keep the two in lockstep: what ships as default here is what an operator
-finds in the file after a regen.  A file that exists but will not parse
-is never written over (DPLAN-0206): defaults are served in memory only.
-
-Usage:
-    from aipass.memory.apps.handlers.json.config_loader import load, section
-
-    cfg = load()
-    rollover = section("rollover")
+DEFAULT_CONFIG is the regeneration seed for a MISSING file, not a rival source: keep the two
+in lockstep. A file that exists but will not parse is never written over; defaults serve in memory.
 """
 
 import copy
@@ -89,15 +71,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "entry_limits": {
         "enabled": True,
-        # true = regenerate what we actually operate (the owner, S193). The June
-        # fail-safe lean (false) was written when enforcement was still rolling
-        # out; the fleet has run true for months, so a reborn file that came
-        # back warn-only would silently drop enforcement, not protect anyone.
+        # true = regenerate what the fleet operates; a reborn warn-only file would silently drop enforcement.
         "enforce": True,
-        # The length an agent drafts to, as a percent of the cap it will be
-        # measured against. One number for the whole fleet, derived from each
-        # cap rather than stored beside it. Published here so @seedgo's meta
-        # line can read it instead of mirroring it (FPLAN-0593 Phase 5).
+        # Percent of each cap an agent drafts to; @seedgo's meta line reads it, never mirrors it.
         "draft_percent": 80,
         "entry_types": {
             "key_learnings": {
@@ -154,10 +130,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 },
             },
         },
-        # The whole-file ceilings. Read, never copied: @seedgo's startup_budget
-        # pack and the keep-count check both come here for these three numbers.
-        # passport.json is SIZE only — @spawn owns its schema, so there is no
-        # closed field shape for it, just a file budget and a per-string cap.
+        # Read, never copied: seedgo's startup_budget and the keep-count check read these.
+        # passport.json is SIZE only: @spawn owns its schema.
         "file_budgets": {
             "local.json": {"max_chars": 25000},
             "observations.json": {"max_chars": 15000},
@@ -172,10 +146,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "supported_extensions": [".md"],
     },
     "rollover": {
-        # How many records a todo backlog keeps before the OLDEST move to the
-        # sibling archive file. Not a cap on what exists — a cap on what the
-        # working file holds. A backlog is the only copy of a rolled todo and
-        # is never vectorised, so nothing here may delete one (FPLAN-0593 Ph5).
+        # Records a todo backlog keeps before the OLDEST move to the archive file. A backlog is
+        # the only copy of a rolled todo and is never vectorised, so nothing here may delete one.
         "backlog": {"max_records": 100},
         "defaults": {
             "local": {
@@ -194,9 +166,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-# Entry type -> (file key, leaf key) inside the rollover limits tree. The FILE
-# key is the unit the rollover engine resolves per branch (see _resolve_limits);
-# the leaf key is the entry family inside it.
+# Entry type -> (file key, leaf key). The FILE key is the unit the engine resolves per branch.
 ENTRY_TYPE_KEYS: dict[str, tuple[str, str]] = {
     "sessions": ("local", "sessions"),
     "key_learnings": ("local", "key_learnings"),
@@ -204,14 +174,10 @@ ENTRY_TYPE_KEYS: dict[str, tuple[str, str]] = {
     "todos": ("local", "todos"),
 }
 
-# The three the vector rollover engine enforces, and the only ones `config set` writes.
 SETTABLE_ENTRY_TYPES: tuple[str, ...] = ("sessions", "key_learnings", "observations")
 
-# COUNT ONLY (DPLAN-0345). todos resolve a count here so every surface reads one
-# number, but nothing on the vector lane acts on it: detector._should_rollover,
-# the extractor and the orchestrator name their three families explicitly and
-# never read this key. The one consumer that acts is rollover/todo_roll.py, for
-# ONE branch at a time. Display-only in v1, like auto_compact_cap.
+# COUNT ONLY: todos resolve a count here, but the vector lane never reads it; only
+# rollover/todo_roll.py acts on it, one branch at a time.
 COUNT_ONLY_ENTRY_TYPES: tuple[str, ...] = ("todos",)
 
 
@@ -227,20 +193,9 @@ def deep_merge(base: dict, overrides: dict) -> dict:
 
 
 def _write_config_file(config: dict[str, Any]) -> bool:
-    """Write *config* to _CONFIG_PATH atomically.
+    """Write *config* to _CONFIG_PATH atomically (watcher, rollover and CLI read it concurrently).
 
-    Atomic because the watcher, rollover subprocesses and the CLI all read
-    this file concurrently — a half-written file would be read as corrupt,
-    turning a routine write into a fleet-wide fall back to defaults.
-
-    ``ensure_ascii=False`` matches every other JSON writer on this branch
-    (memory_files, central_writer, detector, normalize, both pushers) and is
-    what the operator's file already holds.  With the default True, setting a
-    single limit rewrote every em-dash in the file as ``\\u2014`` — a whole-file
-    diff carrying no change, on the file BAUD puts in front of the operator.
-
-    Returns:
-        True if the file was written, False if the write failed (logged).
+    ``ensure_ascii=False`` matches every other writer here; True rewrites every em-dash as a whole-file diff.
     """
     tmp_path = _CONFIG_PATH.parent / f"{_CONFIG_PATH.name}.tmp-{os.getpid()}"
     try:
@@ -252,7 +207,6 @@ def _write_config_file(config: dict[str, Any]) -> bool:
         logger.error(f"[config_loader] Failed to write {_CONFIG_PATH}: {exc}")
         return False
     finally:
-        # Never leave a half-written temp behind for the next reader to find
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
@@ -260,19 +214,7 @@ def _write_config_file(config: dict[str, Any]) -> bool:
 
 
 def _regenerate(reason: str) -> dict[str, Any]:
-    """Rebuild the config file from DEFAULT_CONFIG and return the defaults.
-
-    Fires on a genuinely-missing file ONLY.  A file that exists but cannot be
-    read is never regenerated over — see load().
-
-    Args:
-        reason: Why regeneration fired — logged.
-
-    Returns:
-        A fresh copy of DEFAULT_CONFIG, whether or not the write succeeded.
-        A failed write is logged as an error, never silently swallowed, and
-        the caller still gets a usable config.
-    """
+    """Rebuild the config file from DEFAULT_CONFIG and return the defaults; fires on a MISSING file only."""
     written = _write_config_file(DEFAULT_CONFIG)
     if written:
         logger.info(f"[config_loader] Regenerated {_CONFIG_PATH} from defaults ({reason})")
@@ -287,22 +229,8 @@ def _regenerate(reason: str) -> dict[str, Any]:
 def load() -> dict[str, Any]:
     """Load memory.config.json, deep-merged over DEFAULT_CONFIG.
 
-    The file on disk is the runtime authority.  A genuinely-MISSING file is
-    regenerated in full from DEFAULT_CONFIG, so the operator always has a
-    real file to edit — that is the whole reason code carries defaults.
-
-    A file that EXISTS but cannot be read is a different case and is never
-    written over (DPLAN-0206 red flag, seedgo-consulted): it may be one stray
-    comma away from correct and carry hand-tuned per_branch limits.  Log an
-    ERROR, serve defaults in memory, and leave the operator's file for the
-    operator to fix.
-
-    "Cannot be read" means for ANY reason (json_structure v3.0.0) — bad bytes
-    and bad permissions are as unreadable as bad syntax, and none of them may
-    escape as a raw exception into a caller that only wanted a config.
-
-    Returns:
-        The effective config dict (always safe to use).
+    MISSING regenerates in full. EXISTS but unreadable for ANY reason (syntax, bytes, permissions,
+    shape) is never written over and never raises: log ERROR, serve defaults in memory.
     """
     if not _CONFIG_PATH.exists():
         logger.info(f"[config_loader] No config at {_CONFIG_PATH}, regenerating from defaults")
@@ -311,7 +239,6 @@ def load() -> dict[str, Any]:
     try:
         raw = _CONFIG_PATH.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        # Unopenable or undecodable — same no-clobber contract as malformed.
         logger.error(f"[config_loader] Cannot read {_CONFIG_PATH}: {type(exc).__name__}: {exc}")
         json_handler.log_operation(
             "config_load_unreadable",
@@ -323,7 +250,6 @@ def load() -> dict[str, Any]:
     try:
         file_config = json.loads(raw)
     except json.JSONDecodeError as exc:
-        # Fail loud, do NOT overwrite — the operator must fix their file.
         logger.error(f"[config_loader] Malformed JSON in {_CONFIG_PATH}: {exc}")
         json_handler.log_operation(
             "config_load_malformed",
@@ -333,8 +259,7 @@ def load() -> dict[str, Any]:
         return copy.deepcopy(DEFAULT_CONFIG)
 
     if not isinstance(file_config, dict):
-        # Valid JSON, wrong shape (a list, a bare string). deep_merge would
-        # raise on it, so it takes the same no-clobber path as malformed.
+        # Valid JSON, wrong shape: deep_merge would raise on it.
         logger.error(f"[config_loader] Config at {_CONFIG_PATH} is {type(file_config).__name__}, expected object")
         json_handler.log_operation(
             "config_load_wrong_shape",
@@ -358,16 +283,9 @@ def section(name: str) -> dict[str, Any]:
 
 
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``, never the process CWD.
 
-    IMPORTED INSIDE THE FUNCTION, not at module level. ``handlers/json/__init__``
-    imports this module, and ``repo_root`` imports ``handlers.json`` for its
-    audit line, so a module-level edge here would be a cycle that only appears
-    in whichever import order CI happens to take.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
+    Imported inside the function: a module-level import is a cycle via ``handlers/json/__init__``.
     """
     from aipass.memory.apps.handlers import repo_root
 
@@ -375,25 +293,16 @@ def _find_repo_root() -> Path:
 
 
 class RegistryUnreadable(ValueError):
-    """AIPASS_REGISTRY.json exists and cannot be read.
-
-    Raised rather than answered with ``{}``, which is what a registry with no
-    active branch gives (DPLAN-0354 leg 3).
-    """
+    """AIPASS_REGISTRY.json exists and cannot be read; raised rather than answered with ``{}`` (no active branch)."""
 
 
 def materialize_per_branch() -> dict[str, Any]:
-    """Build per_branch from AIPASS_REGISTRY.json, seeded from rollover.defaults.
-
-    Raises:
-        RegistryUnreadable: the registry exists and cannot be read.
-    """
+    """Build per_branch from AIPASS_REGISTRY.json, seeded from rollover.defaults; raises RegistryUnreadable."""
     repo_root = _find_repo_root()
     registry_path = repo_root / "AIPASS_REGISTRY.json"
     from aipass.memory.apps.handlers import repo_root
 
-    # exists_exactly, not exists(): see handlers/repo_root.py. Function-local
-    # import for the same cycle reason _find_repo_root uses one.
+    # exists_exactly, not exists(): see handlers/repo_root.py. Local import: same cycle as _find_repo_root.
     if not repo_root.exists_exactly(registry_path):
         logger.warning("[config_loader] AIPASS_REGISTRY.json not found")
         return {}
@@ -424,11 +333,7 @@ def materialize_per_branch() -> dict[str, Any]:
 
 
 def push_defaults_to_per_branch() -> dict[str, Any]:
-    """Overwrite every per_branch entry with defaults (full replacement, not merge).
-
-    Returns:
-        Dict with branch count and the new per_branch data.
-    """
+    """Overwrite every per_branch entry with defaults (full replacement, not merge)."""
     try:
         per_branch = materialize_per_branch()
     except RegistryUnreadable as exc:
@@ -443,15 +348,12 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
         try:
             loaded = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-            # Bad syntax, bad bytes and bad permissions all mean the same thing
-            # here: we cannot know what is in the file, so we must not write it.
+            # Unknowable content must not be written over.
             logger.error(f"[config_loader] Cannot push onto unreadable config: {type(exc).__name__}: {exc}")
         if isinstance(loaded, dict):
             current = loaded
         else:
-            # Same rule as load(): never write over a broken operator file.
-            # Refusing is the honest outcome — the old behaviour rebuilt from
-            # scratch and silently discarded everything they had.
+            # Same rule as load(): refuse, never rebuild over a broken operator file.
             logger.error(f"[config_loader] Refusing push onto unreadable {_CONFIG_PATH}")
             return {
                 "success": False,
@@ -465,69 +367,28 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
     return {"success": True, "branches": len(per_branch), "per_branch": per_branch}
 
 
-# =============================================================================
-# ROLLOVER LIMITS — READ
-# =============================================================================
-
-
 def _as_dict(value: Any) -> dict[str, Any]:
-    """Return *value* when it is a dict, else an empty dict.
-
-    Every node in this tree is hand-editable, so a string or a list can turn
-    up anywhere.  Coercing to {} keeps a malformed corner from raising into a
-    caller that only asked what a limit is.
-    """
+    """Return *value* when it is a dict, else an empty dict (every node is hand-editable)."""
     return value if isinstance(value, dict) else {}
 
 
 def _co_tenant_text(file_key: str, counts: dict[str, Any], entry_types: dict[str, Any], entry_type: str) -> str:
-    """Render the co-tenant counts a ceiling was computed against.
-
-    Args:
-        file_key: ``"local.json"`` or ``"observations.json"``.
-        counts: ``{entry_type: count}`` as resolved.
-        entry_types: The ``entry_limits.entry_types`` map.
-        entry_type: The type being measured — left out of its own company.
-
-    Returns:
-        ``"key_learnings 15, todos 10"``, or ``"no co-tenants"`` when the type
-        has the file to itself.
-    """
+    """Render the co-tenant counts a ceiling was computed against, or ``"no co-tenants"``."""
     others = budget.co_tenants(file_key, counts, entry_types, exclude=entry_type)
     return ", ".join(f"{name} {count}" for name, count in others.items()) if others else "no co-tenants"
 
 
 def _clamp_to_budget(resolved: dict[str, Any], entry_cfg: dict[str, Any], branch: str) -> None:
-    """Lower any resolved count whose worst-case file would bust its budget.
+    """Lower any resolved count whose worst-case file would bust its budget; mutates *resolved*.
 
-    A keep-count multiplies an entry that is individually legal until the FILE
-    it lives in is not.  Nothing measured that until now, so a hand-edit of
-    memory.config.json could put a branch permanently over budget with every
-    single entry inside its cap — and the number was reported, and obeyed, as
-    if it were enforceable.  It is not: the budget is the harder bound.
-
-    The count is lowered to the ceiling rather than dropped, because a branch
-    with no limit rolls nothing and grows without end.  The raw value stays on
-    the row as ``requested_count`` so ``config get`` can still show what the
-    operator wrote next to what the engine will do.
-
-    Mutates *resolved* in place.
-
-    Args:
-        resolved: The rows built by :func:`_resolve_limits`.
-        entry_cfg: The ``entry_limits`` section — its ``entry_types`` shapes
-            and ``file_budgets``.  Anything else is no ceiling data and the
-            rows are left exactly as resolved.
-        branch: Branch name, for the warning.
+    Lowered to the ceiling, never dropped (no limit means unbounded growth); the raw value stays as ``requested_count``.
     """
     entry_types = _as_dict(entry_cfg.get("entry_types"))
     budgets = _as_dict(entry_cfg.get("file_budgets"))
     if not entry_types or not budgets:
         return
 
-    # The snapshot is taken BEFORE any clamp so every ceiling is measured
-    # against the same co-tenants; clamping one type must not silently buy
-    # room for the next one in iteration order.
+    # Snapshot BEFORE any clamp: clamping one type must not buy room for the next in iteration order.
     counts = {name: row["count"] for name, row in resolved.items()}
 
     for entry_type, row in resolved.items():
@@ -551,11 +412,7 @@ def _clamp_to_budget(resolved: dict[str, Any], entry_cfg: dict[str, Any], branch
 
 
 def _is_override(row: dict[str, Any]) -> bool:
-    """The one rule: the count in force came from per_branch AND differs from the default.
-
-    ``source`` names where the count came from, so a clamped default stays a
-    default and a per_branch count equal to the default is not an override.
-    """
+    """The one rule: the count in force came from per_branch AND differs from the default."""
     return row["source"] == "per_branch" and row["count"] != row["default_count"]
 
 
@@ -566,46 +423,9 @@ def _resolve_limits(
 ) -> dict[str, Any]:
     """Resolve the limits the rollover engine will REALLY apply to *branch*.
 
-    Mirrors ``monitor/detector.py`` ``_should_rollover`` exactly: the lookup is
-    per FILE KEY, not per leaf key.  If ``per_branch[branch]["local"]`` exists
-    at all then ``defaults["local"]`` is never consulted for that branch — so a
-    per-branch entry carrying only ``sessions`` leaves ``key_learnings`` with
-    NO limit, not the default one.  A deep merge here would report a limit the
-    engine does not enforce, which is the one thing this function must not do.
-
-    "Override" is decided BY VALUE, not by where the number came from: all 17
-    branches carry a materialized per_branch entry, and calling every one of
-    them an override would be pure noise.  A value is an override when it
-    differs from the corresponding default.
-
-    THE COUNT IS ALSO CLAMPED TO THE FILE BUDGET (1.5.0, FPLAN-0593).  A
-    keep-count is a multiplier on an entry cap, and nothing measured the
-    product: 40 sessions of 706 legal chars is a 25,000-char budget missed by
-    a third, with every entry inside its cap.  When *entry_cfg* is supplied,
-    any count above :func:`budget.count_ceiling` is lowered to the ceiling and
-    the raw value is kept on the row as ``requested_count``.
-
-    *entry_cfg* is a PARAMETER and not a read because this function promises
-    no I/O and means it: ``config_loader.load()`` writes an operation-log line
-    through a read-modify-write of a 1,000-entry JSON file, and the fleet tab
-    renderer resolves limits four times per branch.  Fetching budgets here
-    would have turned one dashboard refresh into ~70 of those.  Every caller
-    that has already loaded the config passes the section along and gets the
-    clamp; a caller holding only the rollover section gets the pre-1.5.0
-    behaviour, unclamped, which is why the accessors below all pass it.
-
-    Args:
-        rollover_cfg: The ``rollover`` section (already loaded — no I/O here).
-        branch: Branch name, matched case-insensitively.
-        entry_cfg: The ``entry_limits`` section, when the caller has it. No
-            ceiling data means no clamp.
-
-    Returns:
-        ``{entry_type: {"count", "requested_count", "default_count",
-        "auto_compact_cap", "source", "is_override"}}`` for each of
-        ``ENTRY_TYPE_KEYS``.  ``count`` is None when neither per_branch nor
-        defaults set one, and is the ceiling when the configured value was
-        above it; ``requested_count`` is always what the config actually says.
+    Mirrors detector ``_should_rollover``: lookup is per FILE KEY, so a per_branch ``local`` with only
+    ``sessions`` leaves ``key_learnings`` with NO limit. A deep merge would report an unenforced limit.
+    *entry_cfg* is passed, never fetched: no I/O here (load() logs a write); without it, no budget clamp.
     """
     per_branch = _as_dict(rollover_cfg.get("per_branch"))
     defaults = _as_dict(rollover_cfg.get("defaults"))
@@ -624,9 +444,7 @@ def _resolve_limits(
         count = leaf.get("count")
         default_count = default_leaf.get("count")
         if count is None and entry_type in COUNT_ONLY_ENTRY_TYPES:
-            # A per_branch `local` block written without a todos count must not
-            # silently stop that branch's roll. The per-file-key rule above
-            # stays exact for the three vector families.
+            # A per_branch `local` block without a todos count must not stop that branch's roll.
             count = default_count
             source = "defaults"
 
@@ -650,38 +468,12 @@ def resolve_limits(
     branch: str,
     entry_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Public, no-I/O resolver — the ONE implementation of "what does the engine enforce".
-
-    Takes an already-loaded ``rollover`` section so a caller rendering every
-    branch reads the config once, not once per branch.
-
-    Every surface that answers "what limit applies to this branch" must come
-    through here.  ``config get`` and ``tab_renderer`` both used to carry their
-    own lookup; the tab's copy resolved per-branch-dict instead of per-file-key
-    and hard-defaulted a missing count to 15, so it could print a banner
-    claiming a limit the engine does not enforce — into the agent's own memory
-    file, where it reads as an instruction.  Two writers, one truth: this is
-    the writer.
-
-    Args:
-        rollover_cfg: The ``rollover`` section, already loaded.
-        branch: Branch name, matched case-insensitively.
-        entry_cfg: The ``entry_limits`` section, when the caller has it.
-            Without it there is no budget to clamp against — see
-            ``_resolve_limits`` for why this is passed and never fetched.
-
-    Returns:
-        See ``_resolve_limits``.
-    """
+    """Public, no-I/O resolver — the ONE implementation of "what does the engine enforce"."""
     return _resolve_limits(rollover_cfg, branch, entry_cfg)
 
 
 def get_default_limits() -> dict[str, Any]:
-    """Return the global default limit for each entry type.
-
-    Returns:
-        ``{entry_type: {"count": int | None, "auto_compact_cap": int | None}}``.
-    """
+    """Return the global default limit for each entry type."""
     defaults = _as_dict(section("rollover").get("defaults"))
 
     limits: dict[str, Any] = {}
@@ -693,31 +485,15 @@ def get_default_limits() -> dict[str, Any]:
 
 
 def get_effective_limits(branch: str) -> dict[str, Any]:
-    """Return the limits the rollover engine applies to *branch*.
-
-    Args:
-        branch: Branch name, matched case-insensitively.
-
-    Returns:
-        See ``_resolve_limits`` — one entry per settable entry type, clamped
-        to the file budgets.
-    """
+    """Return the limits the rollover engine applies to *branch*, clamped to the file budgets."""
     config = load()
     return _resolve_limits(_as_dict(config.get("rollover")), branch, _as_dict(config.get("entry_limits")))
 
 
 def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> int | None:
-    """The todo pad size for *branch*, through the one resolver.
+    """The todo pad size for *branch*, through the one resolver; None unless a whole number >= 1.
 
-    Args:
-        branch: Branch directory name, matched case-insensitively.
-        rollover_cfg: An already-loaded ``rollover`` section; loaded when None.
-            Supplying it keeps this call free of I/O, and therefore free of
-            the budget clamp — the same trade ``_resolve_limits`` documents.
-
-    Returns:
-        A whole number >= 1, or None when no usable count is configured (a
-        bool, a string, zero or a negative number is not a pad size).
+    A supplied *rollover_cfg* keeps the call I/O-free and therefore unclamped.
     """
     if rollover_cfg is not None:
         cfg, entry_cfg = rollover_cfg, None
@@ -733,15 +509,7 @@ def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> 
 def get_backlog_ceiling() -> int | None:
     """How many records a todo backlog keeps before the oldest are archived.
 
-    Fleet-wide, not per branch: a backlog is a plain file nobody reads on a
-    schedule, and the number exists to keep it readable rather than to ration
-    anything. Nothing about it is a deadline.
-
-    Returns:
-        A whole number >= 1, or None when no usable ceiling is configured —
-        and None means NO TRIM, never a trim to zero. A config that lost the
-        key must leave every record where it is; the failure mode of this
-        number is "the file stays long", never "the last copy is gone".
+    None means NO TRIM, never a trim to zero: a lost key must leave every record where it is.
     """
     raw = _as_dict(_as_dict(section("rollover")).get("backlog")).get("max_records")
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
@@ -752,14 +520,7 @@ def get_backlog_ceiling() -> int | None:
 
 
 def get_branches_with_overrides() -> dict[str, Any]:
-    """Return only the configured branches whose limits deviate from defaults.
-
-    Loads the config once, not once per branch: 17 loads would mean 17 reads
-    and 17 operation-log lines for a single display.
-
-    Returns:
-        ``{branch: effective_limits}``, branch-sorted, deviating branches only.
-    """
+    """Return only the configured branches whose limits deviate from defaults (one config load)."""
     config = load()
     rollover_cfg = _as_dict(config.get("rollover"))
     entry_cfg = _as_dict(config.get("entry_limits"))
@@ -774,26 +535,8 @@ def get_branches_with_overrides() -> dict[str, Any]:
     return deviating
 
 
-# =============================================================================
-# ENTRY LIMITS — READ
-# =============================================================================
-
-
 def get_file_budgets() -> dict[str, Any]:
-    """Return the whole-file ceilings for the .trinity files.
-
-    config_loader owns config reads, so the keep-count ceiling comes here for
-    the budgets rather than opening the file itself.  ``entry_limits``
-    publishes the same three numbers under its own name for callers already
-    holding its module, and that name DELEGATES here — two readers of one key
-    is exactly the drift ``load()`` was written to end.
-
-    Returns:
-        ``{file_name: {"max_chars": int, "max_string_chars": int?}}`` — a
-        private copy, so a caller cannot edit the fleet's budgets by mutating
-        what it was handed.  The regeneration seed's budgets when the config
-        publishes none.
-    """
+    """Return a private copy of the whole-file ceilings; ``entry_limits`` delegates here (one reader per key)."""
     budgets = _as_dict(section("entry_limits").get("file_budgets"))
     if not budgets:
         logger.warning("[config_loader] No 'file_budgets' in config — serving the regeneration seed")
@@ -802,19 +545,7 @@ def get_file_budgets() -> dict[str, Any]:
 
 
 def get_draft_percent() -> int:
-    """Return the percent of a cap an agent should draft to.
-
-    The number every ``*_meta`` line's "draft to N" is computed from, fleet-wide
-    and not per entry type: the target is derived from each cap, so one percent
-    covers every type and no second number can go stale when a cap moves.
-    ``entry_limits.draft_percent()`` DELEGATES here for the same reason
-    ``load_file_budgets`` does — config reads live in one module.
-
-    Returns:
-        The published percent as an int.  The regeneration seed's 80 when the
-        config publishes nothing usable, so a truncated config narrows the
-        draft target rather than removing it.
-    """
+    """Return the percent of a cap an agent should draft to; the seed's 80 when unusable, never removed."""
     raw = section("entry_limits").get("draft_percent")
     if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100:
         if raw is not None:
@@ -826,21 +557,8 @@ def get_draft_percent() -> int:
 def get_count_ceilings(branch: str | None = None) -> dict[str, Any]:
     """The largest keep-count each entry type may take, and what bounds it.
 
-    One config read for the whole table.  The ceiling is per type and per
-    file: local.json's budget is shared by sessions, key_learnings and todos,
-    so each type's ceiling is what is left once the other two hold their
-    counts — raise one and the others' ceilings drop.
-
-    Args:
-        branch: Whose counts are the co-tenants.  None asks about the fleet
-            defaults, which is the company a ``set-default`` lands in.
-
-    Returns:
-        ``{entry_type: {"ceiling", "count", "file_key", "budget_chars",
-        "co_tenants", "fixed_chars", "entry_chars"}}``, empty when the config
-        publishes no entry shapes or no budgets — nothing measurable is
-        nothing to enforce.  ``fixed_chars + n * entry_chars`` is the file's
-        worst case at any keep-count *n*, which is what a refusal quotes.
+    Per file: co-tenants share a budget, so raising one type lowers the others' ceilings.
+    ``fixed_chars + n * entry_chars`` is the worst case at keep-count *n*; empty when unmeasurable.
     """
     config = load()
     entry_cfg = _as_dict(config.get("entry_limits"))
@@ -879,22 +597,9 @@ def get_count_ceilings(branch: str | None = None) -> dict[str, Any]:
 
 
 def ceiling_refusal(entry_type: str, count: int, branch: str | None = None) -> dict[str, Any] | None:
-    """Judge one proposed keep-count against its file budget.
+    """Judge one proposed keep-count against its file budget; None when it fits or is unmeasurable.
 
-    THE SENTENCE LIVES HERE, not at the verb, for the same reason
-    ``set_branch_limit``'s refusals do: config_loader owns config reads, and a
-    refusal that quoted numbers the verb had fetched itself would be a second
-    reader free to drift from this one.
-
-    Args:
-        entry_type: The type the count is for.
-        count: The proposed keep-count.
-        branch: The branch being written, or None for the fleet defaults.
-
-    Returns:
-        ``{"error", "suggestion", "ceiling", "file_key", "budget_chars"}``
-        when the count busts the budget, else None — an unmeasurable or
-        unconfigured ceiling refuses nothing.
+    The sentence lives here, not at the verb, so the numbers it quotes have one reader.
     """
     row = get_count_ceilings(branch).get(entry_type)
     if row is None or count <= row["ceiling"]:
@@ -922,23 +627,8 @@ def ceiling_refusal(entry_type: str, count: int, branch: str | None = None) -> d
     }
 
 
-# =============================================================================
-# ROLLOVER LIMITS — WRITE
-# =============================================================================
-
-
 def _read_config_for_write() -> tuple[dict[str, Any] | None, str | None]:
-    """Read the config for a read-modify-write, or refuse to touch it.
-
-    Same no-clobber contract as ``load()`` and ``push_defaults_to_per_branch()``:
-    a file that EXISTS but cannot be read is never written over — it may be one
-    stray comma from correct and carry hand-tuned per-branch limits.  A
-    genuinely-MISSING file is regenerated first (load()'s documented contract),
-    so an operator's edit lands in a complete file rather than a stub.
-
-    Returns:
-        ``(config, None)`` when the file is usable, else ``(None, refusal)``.
-    """
+    """Read the config for a read-modify-write, or refuse to touch it (same no-clobber contract as load())."""
     if not _CONFIG_PATH.exists():
         load()
 
@@ -946,8 +636,7 @@ def _read_config_for_write() -> tuple[dict[str, Any] | None, str | None]:
     try:
         loaded = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-        # Bad syntax, bad bytes and bad permissions all mean the same thing
-        # here: we cannot know what is in the file, so we must not write it.
+        # Unknowable content must not be written over.
         logger.error(f"[config_loader] Cannot write onto unreadable config: {type(exc).__name__}: {exc}")
 
     if isinstance(loaded, dict):
@@ -958,12 +647,7 @@ def _read_config_for_write() -> tuple[dict[str, Any] | None, str | None]:
 
 
 def _apply_limit(tree: dict[str, Any], file_key: str, leaf_key: str, count: int) -> None:
-    """Set ``tree[file_key][leaf_key]["count"] = count`` in place.
-
-    Only the count is touched.  ``auto_compact_cap`` — and anything else an
-    operator parked beside it — survives, because v1 sets one number rather
-    than rewriting the leaf.
-    """
+    """Set ``tree[file_key][leaf_key]["count"] = count`` in place; siblings like auto_compact_cap survive."""
     file_section = _as_dict(tree.get(file_key))
     leaf_section = _as_dict(file_section.get(leaf_key))
     leaf_section["count"] = count
@@ -972,15 +656,7 @@ def _apply_limit(tree: dict[str, Any], file_key: str, leaf_key: str, count: int)
 
 
 def _seed_branch_entry(defaults: dict[str, Any], branch: str) -> dict[str, Any]:
-    """Build a fresh per_branch entry in the shape materialize_per_branch() makes.
-
-    Args:
-        defaults: The ``rollover.defaults`` tree to seed from.
-        branch: Lowercase branch key.
-
-    Returns:
-        Limits copied from defaults plus the same ``_note`` line a push writes.
-    """
+    """Build a fresh per_branch entry in the shape materialize_per_branch() makes."""
     entry = {key: copy.deepcopy(val) for key, val in defaults.items() if key != "_note"}
     entry["_note"] = f"Limits for @{branch}. Manual edits persist until next push."
     return entry
@@ -989,14 +665,7 @@ def _seed_branch_entry(defaults: dict[str, Any], branch: str) -> dict[str, Any]:
 def _materialize_todos(entry: dict[str, Any], defaults: dict[str, Any]) -> None:
     """Carry the todos count into a per_branch ``local`` block that lacks one, in place.
 
-    Limits resolve per FILE key as a whole block, so a ``local`` block written
-    by ``config set @b sessions 12`` without ``todos`` reads as "no todo count"
-    to any reader following that rule (hooks' count advisory does). The
-    resolver falls back anyway; this keeps the file saying the same thing.
-
-    Args:
-        entry: One per_branch entry, edited in place.
-        defaults: The ``rollover.defaults`` tree to take the count from.
+    Readers resolving per FILE key (hooks' advisory) would otherwise see no todo count.
     """
     local = entry.get("local")
     if not isinstance(local, dict):
@@ -1021,21 +690,9 @@ def _refuse_unsettable(entry_type: str) -> dict[str, Any] | None:
 
 
 def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]:
-    """Write one per-branch rollover limit override.
+    """Write one per-branch rollover limit override; never prints, never raises.
 
-    Never prints and never raises: the module layer owns the refusal wording.
-
-    Args:
-        branch: Branch name — the lowercase form is always what gets written.
-        entry_type: One of ``SETTABLE_ENTRY_TYPES``.
-        count: The new limit (bounds are the module layer's contract).
-
-    Returns:
-        ``{"success": True, "branch", "entry_type", "count", "pushed"}`` or
-        ``{"success": False, "error": <sentence>}``.  ``pushed`` is always
-        False: this writes ONE branch's entry, it never runs the fleet-wide
-        push.  It is reported rather than assumed so the machine surface
-        states the delivery semantics in data instead of in prose.
+    ``pushed`` is always False: this writes ONE branch, never the fleet-wide push.
     """
     refused = _refuse_unsettable(entry_type)
     if refused:
@@ -1072,21 +729,9 @@ def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]
 
 
 def set_default_limit(entry_type: str, count: int) -> dict[str, Any]:
-    """Write one global default rollover limit.
+    """Write one global default rollover limit; ``per_branch`` is left alone.
 
-    ``per_branch`` is deliberately left alone — ``rollover push`` stays the one
-    explicit fleet-wide reset, so raising a default never silently rewrites
-    seventeen branches an operator may have tuned by hand.
-
-    Args:
-        entry_type: One of ``SETTABLE_ENTRY_TYPES``.
-        count: The new default limit.
-
-    Returns:
-        ``{"success": True, "entry_type", "count", "pushed"}`` or
-        ``{"success": False, "error": <sentence>}``.  ``pushed`` is always
-        False and says the load-bearing thing about this verb: the new
-        default reached NO branch.  ``rollover push`` is what delivers it.
+    ``pushed`` is always False: the new default reaches NO branch until ``rollover push``.
     """
     refused = _refuse_unsettable(entry_type)
     if refused:

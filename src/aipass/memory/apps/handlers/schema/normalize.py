@@ -3,19 +3,13 @@
 # Description: Memory File Schema Normalizer
 # Version: 0.6.0
 # Created: 2026-01-22
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory File Schema Normalizer
 
-Reconciles memory files against their canonical template schema.
-Strips any key not present in the template at every level (root,
-document_metadata, limits, status). Template = the whole truth.
-
-Also holds the newest-first re-sort guardrail. It never fails open silently:
-an entry with an unusable 'number' is reported (result warnings + prax WARNING)
-and left at its index while the rows beside it are still ordered.
+Template = the whole truth: any key it does not declare is stripped, at every level.
 """
 
 import json
@@ -39,16 +33,7 @@ class TemplateUnreadable(ValueError):
 
 
 def _load_template(file_path: Path) -> Dict[str, Any] | None:
-    """Load the matching template for a memory file (local or observations).
-
-    Returns None only for a file with no template (neither local nor
-    observations).
-
-    Raises:
-        TemplateUnreadable: the template cannot be read. It used to answer None
-            too, so the conformance pass was skipped with no warning in the
-            result (DPLAN-0354 leg 3).
-    """
+    """Load the matching template; None only for a file with no template, TemplateUnreadable if unreadable."""
     templates_dir = _MEMORY_ROOT / "templates"
     name = file_path.name.lower()
 
@@ -75,11 +60,7 @@ def _strip_orphan_keys(data: Dict, allowed: set, level_name: str, changes: list)
 
 
 def _read_entry_number(entry: Any) -> int | None:
-    """Read an entry's 'number' as an int, or None when it cannot be one.
-
-    Numeric strings and integral floats are readable (they are repaired in
-    place by the caller); missing keys, booleans, and anything else are not.
-    """
+    """Read an entry's 'number' as an int, or None (booleans are not numbers; numeric strings are)."""
     if not isinstance(entry, dict):
         return None
 
@@ -101,18 +82,8 @@ def _read_entry_number(entry: Any) -> int | None:
 def _sort_container_newest_first(container: list, container_name: str, changes: list, warnings: list) -> list | None:
     """Order the numbered entries of a container newest-first, tolerating bad rows.
 
-    An entry whose 'number' cannot be read keeps its exact index and costs the
-    rows beside it nothing; the readable entries are ordered among the slots
-    they already occupy. Unreadable rows are always reported (GH #728: this
-    guardrail used to skip the whole container silently on a single bad entry).
-
-    Returns the reordered list, or None when the container carries no numbers
-    at all. That was written when a numberless todo was the legitimate shape;
-    the closed field shape (FPLAN-0593) made ``number`` required on every entry
-    type, todos included, so a container with none is LEGACY rather than
-    intended. Still not a defect to handle here: this function orders entries
-    and does not judge them, and the write gate is where a missing required
-    field is named. Leaving it unordered is the honest answer either way.
+    An unreadable row keeps its index and is always reported; None when no entry has a number
+    (ordering only — the write gate names a missing required field).
     """
     numbers = [_read_entry_number(entry) for entry in container]
     slots = [i for i, number in enumerate(numbers) if number is not None]
@@ -121,7 +92,6 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
     if not slots:
         return None
 
-    # Repair readable-but-wrongly-typed numbers so the container stops degrading
     for i in slots:
         stored = container[i].get("number")
         if not isinstance(stored, int) or isinstance(stored, bool):
@@ -145,28 +115,13 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
 def _find_repo_root() -> Path:
     """Repo root for this lane — resolved by ``handlers/repo_root.py``.
 
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
+    Kept as a local name because callers and tests patch it here; never the working directory.
     """
     return repo_root.find_repo_root(caller="normalize")
 
 
 def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, Any]:
-    """
-    Normalize a memory file against its canonical template.
-
-    Args:
-        file_path: Path to memory JSON file
-        dry_run: If True, report changes without writing
-
-    Returns:
-        Dict with success status and changes made
-    """
+    """Normalize a memory file against its canonical template."""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
@@ -180,14 +135,12 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
     changes = []
     warnings = []
 
-    # Ensure document_metadata exists
     if "document_metadata" not in data:
         data["document_metadata"] = {}
         changes.append("Created document_metadata")
 
     metadata = data["document_metadata"]
 
-    # Legacy fix: move root 'limits' into document_metadata.limits
     if "limits" in data and "limits" not in metadata:
         metadata["limits"] = data.pop("limits")
         changes.append("Moved root 'limits' into document_metadata")
@@ -198,22 +151,11 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
                 metadata["limits"][key] = val
         changes.append("Merged root 'limits' into document_metadata.limits")
 
-    # Legacy fix: drop a root-level 'status' block.
-    #
-    # It is not relocated into document_metadata any more. The owner's ruling of
-    # 2026-08-25 deleted status.health from the standard outright: it stored a
-    # DERIVABLE fact — a second source of truth waiting to go stale, the exact
-    # disease this standard cures — and it read "healthy" hardcoded from 2025-11
-    # onwards without a single consumer noticing. Health is computed by the
-    # checker at run time and never stamped into a memory file.
-    #
-    # The template-conformance pass below strips whatever `status` remains in
-    # document_metadata, because the gold-source templates no longer declare one.
+    # Dropped, not relocated: health is derived at run time, never stamped into a memory file.
     if "status" in data:
         data.pop("status")
         changes.append("Removed redundant root 'status'")
 
-    # Template-conformance: strip orphan keys at every level
     try:
         template = _load_template(file_path)
     except TemplateUnreadable as e:
@@ -222,23 +164,18 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
     if template is not None:
         tmpl_meta = template.get("document_metadata", {})
 
-        # Root level
         _strip_orphan_keys(data, set(template.keys()), "root", changes)
 
-        # document_metadata level
         _strip_orphan_keys(metadata, set(tmpl_meta.keys()), "document_metadata", changes)
 
-        # limits level
         tmpl_limits = tmpl_meta.get("limits", {})
         if "limits" in metadata:
             _strip_orphan_keys(metadata["limits"], set(tmpl_limits.keys()), "limits", changes)
 
-        # status level
         tmpl_status = tmpl_meta.get("status", {})
         if "status" in metadata:
             _strip_orphan_keys(metadata["status"], set(tmpl_status.keys()), "status", changes)
 
-    # Sort list entries newest-first by number (self-heal guardrail)
     for container_name in _SORTED_CONTAINERS:
         container = data.get(container_name)
         if not isinstance(container, list) or len(container) <= 1:
@@ -252,7 +189,6 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
     for warning in warnings:
         logger.warning(f"[normalize] {file_path.name}: {warning}")
 
-    # Write if changes made and not dry run
     if changes and not dry_run:
         refusal = write_fence.fence_write(file_path, lane="normalize_memory_file")
         if refusal is not None:
@@ -280,21 +216,11 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
 
 
 def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
-    """
-    Normalize schema for all memory files in AIPASS_REGISTRY.
-
-    Args:
-        dry_run: If True, report changes without writing
-
-    Returns:
-        Dict with statistics
-    """
-    # Read registry
+    """Normalize schema for all memory files in AIPASS_REGISTRY."""
     registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-    # exists_exactly, not exists(): a folding filesystem answers this question
-    # about aipass_registry.json, and this lane REWRITES every memory file the
-    # answer names. See handlers/repo_root.py.
+    # exists_exactly, not exists(): a case-folding filesystem would answer for aipass_registry.json,
+    # and this lane REWRITES every file the answer names.
     if not repo_root.exists_exactly(registry_path):
         return {"success": False, "error": "AIPASS_REGISTRY.json not found"}
 
@@ -322,7 +248,6 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
         if not branch_path.exists():
             continue
 
-        # Check both file types
         for memory_type in ["local", "observations"]:
             file_name = f"{branch_name}.{memory_type}.json"
             file_path = branch_path / file_name
@@ -352,7 +277,6 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
     return results
 
 
-# CLI entry point
 if __name__ == "__main__":
     import argparse
 

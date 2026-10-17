@@ -3,27 +3,12 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
 
-# Tests for the config_loader handler (Phase 1 of FPLAN-0271).
-#
-# Doctrine (the owner, S193): the JSON file is the runtime authority; code
-# carries DEFAULT_CONFIG so that file can be regenerated when lost.
-#
-# Covers:
-#   1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
-#   2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
-#   4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
-#   5. Full config                    -- passthrough of file values.
-#   6. section()                      -- returns named section or empty dict for unknown.
-#   7. deep_merge()                   -- nested merge, non-mutation, override precedence.
-#   8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
-#   9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
-#                                       per-file keep-count ceiling and its co-tenants,
-#                                       the clamp on load, and that no shipped default clamps.
+# The JSON file is the runtime authority; DEFAULT_CONFIG exists so the file can be regenerated.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — set_branch_limit and set_default_limit, in tests/test_entry_limits.py
@@ -42,27 +27,11 @@ import pytest
 from aipass.memory.apps.handlers.json import budget
 
 
-# ---------------------------------------------------------------------------
-# Helpers: fresh-import the module under test with mocks already in place
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _fresh_config_loader(monkeypatch):
     """Drop cached module so each test gets a fresh import.
 
-    Historically this popped the json package because conftest replaced it
-    with a MagicMock, which has no __path__ and so blocked sub-module
-    discovery.  Conftest now impersonates the package with a real module
-    object carrying the real __path__, so discovery works either way -- the
-    eviction here is now only about getting a FRESH config_loader per test.
-
-    It is a ``monkeypatch.delitem`` rather than a bare ``sys.modules.pop``
-    because a bare pop is one-way: the eviction outlives the test and every
-    later test in the same process inherits it.  Three test files invented
-    that same workaround independently and all three leaked; one of them is
-    what turned two receipt tests red on a single xdist worker on a single
-    run.  delitem gives the same fresh import and puts the real module back.
+    ``monkeypatch.delitem``, never a bare pop: a bare eviction outlives the test and poisons later ones.
     """
     for name in (
         "aipass.memory.apps.handlers.json",
@@ -78,11 +47,6 @@ def _get_module():
     return importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 def _write_config(tmp_path: Path, data: dict) -> Path:
     """Write a memory.config.json into tmp_path/custom_config/ and return its path."""
     config_dir = tmp_path / "custom_config"
@@ -90,11 +54,6 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
     config_path = config_dir / "memory.config.json"
     config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return config_path
-
-
-# ===========================================================================
-# 1+2. Missing file -- REGENERATES the full file from defaults
-# ===========================================================================
 
 
 class TestMissingFile:
@@ -220,11 +179,6 @@ class TestMissingFile:
         mock_logger.info.assert_any_call(f"[config_loader] No config at {missing_path}, regenerating from defaults")
 
 
-# ===========================================================================
-# 3. Unreadable file -- NEVER written over; ERROR logged, defaults in memory
-# ===========================================================================
-
-
 class TestMalformedJson:
     """A file that EXISTS but will not parse is the operator's problem to fix,
     not the loader's to heal (DPLAN-0206 red flag, seedgo-consulted).  It may
@@ -348,11 +302,6 @@ class TestMalformedJson:
         assert mock_logger.error.call_args[0][0].startswith(f"[config_loader] Malformed JSON in {bad_config}: ")
 
 
-# ===========================================================================
-# 3b. Unreadable for any OTHER reason -- bad bytes, bad permissions
-# ===========================================================================
-
-
 class TestUnreadableFile:
     """json_structure v3.0.0: unreadable for ANY reason takes the malformed
     path.  A file with bad bytes or the wrong permissions is exactly as
@@ -446,12 +395,7 @@ class TestUnreadableFile:
     def test_push_names_an_unreadable_registry_rather_than_an_empty_one(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A broken registry is reported as broken, and the config is not written.
-
-        Until leg 3 of DPLAN-0354 materialize_per_branch() answered {} here, the
-        answer of a registry with no active branch, so the push said "No
-        branches found in registry" over a file it could not read.
-        """
+        """A broken registry is reported as broken, not as empty, and the config is not written."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("NOT JSON {{{", encoding="utf-8")
         mod = _get_module()
@@ -465,11 +409,6 @@ class TestUnreadableFile:
         assert result["success"] is False
         assert str(registry) in result["error"]
         assert config.read_bytes() == original
-
-
-# ===========================================================================
-# 4. Partial config -- deep_merge fills missing defaults, preserves file values
-# ===========================================================================
 
 
 class TestPartialConfig:
@@ -486,7 +425,6 @@ class TestPartialConfig:
 
         result = mod.load()
 
-        # memory_pool, rollover, plans should be filled in from defaults
         assert "memory_pool" in result
         assert "rollover" in result
         assert "plans" in result
@@ -512,9 +450,7 @@ class TestPartialConfig:
         result = mod.load()
         el = result["entry_limits"]
 
-        # enabled should come from default
         assert el["enabled"] is True
-        # entry_types should be filled from default
         assert "entry_types" in el
         assert "key_learnings" in el["entry_types"]
 
@@ -528,7 +464,6 @@ class TestPartialConfig:
         result = mod.load()
 
         assert result["memory_pool"]["enabled"] is False
-        # Other memory_pool keys should be filled from defaults
         assert "supported_extensions" in result["memory_pool"]
 
     def test_partial_does_not_mutate_default_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -545,11 +480,6 @@ class TestPartialConfig:
         assert mod.DEFAULT_CONFIG == original_default
 
 
-# ===========================================================================
-# 5. Full config -- passthrough of file values
-# ===========================================================================
-
-
 class TestFullConfig:
     """When the config file contains a complete config, load() should
     return the file values as-is (deep_merge should be a no-op).
@@ -558,7 +488,6 @@ class TestFullConfig:
     def test_returns_file_values(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         mod = _get_module()
         full = copy.deepcopy(mod.DEFAULT_CONFIG)
-        # Customize some values to differentiate from defaults
         full["memory_pool"]["chunk_size"] = 2000
         full["entry_limits"]["enforce"] = False
 
@@ -579,11 +508,6 @@ class TestFullConfig:
         result = mod.load()
 
         assert result == full
-
-
-# ===========================================================================
-# 6. section() -- returns named section or empty dict for unknown
-# ===========================================================================
 
 
 class TestSection:
@@ -631,11 +555,6 @@ class TestSection:
         result = mod.section("rollover")
 
         assert result["defaults"]["max_lines"] == 999
-
-
-# ===========================================================================
-# 7. deep_merge() -- nested merge, non-mutation, override precedence
-# ===========================================================================
 
 
 class TestDeepMerge:
@@ -729,11 +648,6 @@ class TestDeepMerge:
         result = mod.deep_merge(base, overrides)
 
         assert result["a"] == "flat_string"
-
-
-# ===========================================================================
-# 8. Todos count (DPLAN-0345) -- count only, display-only, carried into per_branch
-# ===========================================================================
 
 
 def _keys_anywhere(node):
@@ -868,11 +782,6 @@ class TestTodosCountMaterializes:
         assert path.read_bytes() == before
 
 
-# ===========================================================================
-# 9. File budgets (FPLAN-0593) -- a keep-count is a MULTIPLIER on an entry cap
-# ===========================================================================
-
-
 def _budget_module():
     """Return the pure budget-arithmetic module."""
     return budget
@@ -910,12 +819,7 @@ class TestWorstEntryChars:
         assert sessions > key_learnings > todos
 
     def test_it_equals_what_a_real_container_pays_for_one_more_entry(self) -> None:
-        """The number IS the delta, at the indent an entry sits at on disk.
-
-        Pinned against a second serialization rather than a literal: a
-        hand-summed count of braces, quotes and indentation is exactly the
-        arithmetic this function exists to stop anyone doing.
-        """
+        """The number IS the delta, at the on-disk indent; pinned against a second serialization, not a literal."""
         mod, bud = _get_module(), _budget_module()
         entry = {"number": 999, "date": "x" * 10, "task": "x" * 100, "priority": "x" * 10}
         one = len(json.dumps({"todos": [entry]}, indent=2, ensure_ascii=False))

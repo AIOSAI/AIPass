@@ -3,40 +3,12 @@
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
 # Version: 1.0.0
 # Created: 2026-02-14
-# Modified: 2026-08-27
+# Modified: 2026-10-17
 # =============================================
 
 """Template Lane
 
-@memory owns the gold-source memory templates in ``memory/templates/``. This
-module is the CLI over them: propagate them into @spawn's scaffold sets, report
-who carries which version, and be the site where a version bump heals the fleet.
-
-WHAT WAS RETIRED HERE, AND WHY IT MATTERS (2026-08-27, DPLAN-0318 marker 7)
---------------------------------------------------------------------------
-``push-templates`` and ``diff-templates`` scanned each branch's ROOT directory
-for files ending ``.local.json`` / ``.observations.json`` — a naming convention
-that predates ``.trinity/``. The live layout is ``<branch>/.trinity/local.json``,
-which does not end in ``.local.json`` and is not in the directory being scanned,
-so **zero real matches were possible**. Measured before retirement,
-``diff-templates`` announced "16 branches have template differences" and not one
-was a memory file; the only thing it ever matched was an unrelated
-``CLOSED_PLANS.local.json``.
-
-A lane aimed at a dead layout is worse than a missing one: it answers, it looks
-like it worked, and it is a silent no-op waiting to be trusted. Both verbs now
-REFUSE and name the live lane; the handlers are in
-``tests/parked/dead_template_lane_20260827/`` with the measurement written down.
-
-The half that always worked — propagating the templates into @spawn's scaffold
-sets, which really do use the ``.trinity/`` layout — survives under its own
-honest name, ``spawn-templates``. It used to run as a side effect of the dead
-verb, which is why it went unnoticed.
-
-``template-status`` survives too, repointed. It used to read a fleet-side push
-log whose ``last_push`` only the retired lane could ever move; it now reads the
-per-branch ``.trinity/.template_version.json`` receipts, written by lanes that
-are alive.
+Reference: docs/templates_and_tabs.md
 """
 
 import json
@@ -67,9 +39,7 @@ _SUBCOMMANDS = {
     "bump": "Heal the fleet after a template version bump (dry run unless --confirm)",
 }
 
-# Verbs retired 2026-08-27 -> what to run instead. They still ROUTE: a removed
-# verb tells a caller nothing about its replacement, and these two spent months
-# reporting confident results about a layout that does not exist.
+# Retired verbs still ROUTE: a removed verb tells a caller nothing about its replacement.
 RETIRED_VERBS = {
     "push-templates": (
         "it pushed into a pre-.trinity layout and matched nothing",
@@ -83,21 +53,8 @@ RETIRED_VERBS = {
 }
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """Route the templates verbs.
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Route the templates verbs."""
     if command in ("--help", "-h", "help"):
         print_help()
         return True
@@ -106,13 +63,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         if not args:
             print_introspection()
             return True
-        # A help flag ANYWHERE wins — asking about a verb must never run it.
         if wants_help(args, allow_bare_word=True):
             print_help()
             return True
         return _route(args[0], args[1:])
 
-    # Backward-compatible top-level commands (entry point still routes these)
     if command in RETIRED_VERBS or command in _SUBCOMMANDS:
         return _route(command, args)
 
@@ -156,11 +111,6 @@ def _announce_retired(verb: str) -> None:
     console.print("[dim]Handlers archived at tests/parked/dead_template_lane_20260827/ with the measurement.[/dim]")
     console.print()
     json_handler.log_operation("retired_verb_called", {"verb": verb}, module_name="templates")
-
-
-# =============================================================================
-# THE LIVE LANES
-# =============================================================================
 
 
 def _run_spawn_push(dry_run: bool) -> None:
@@ -254,21 +204,7 @@ def _show_status() -> None:
 def _announce_bump(outcome: dict) -> None:
     """Announce a bump on @trigger's bus. Best effort — the bus never gates a heal.
 
-    Lives in the module layer, not beside the bump's domain logic: reaching the
-    bus means importing @trigger's module layer, and a handler doing that is
-    orchestration in a handler's clothing. The handler owns the event's NAME
-    (`template_bump.BUMP_EVENT`); this owns the sending.
-
-    Fired AFTER the outcome is known, so the event carries what happened rather
-    than what was about to be attempted — a listener cannot influence the push's
-    gates anyway, and should not be told a heal ran when it was refused.
-
-    The two failures are logged DIFFERENTLY on purpose. An ImportError means
-    @trigger is not installed here — an environment fact, nothing to repair.
-    Anything else raised on this path is OUR bug (this exact call shipped for a
-    few hours with `json` unimported, and a broad "bus unavailable" line made a
-    NameError read as a missing dependency: the announcement never fired and
-    nothing in the log said so). One catch, two sentences, two repairs.
+    ImportError (trigger absent) and any other raise (our bug) log differently on purpose.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -331,11 +267,6 @@ def _run_bump(confirm: bool) -> None:
     else:
         console.print("[cyan]Dry run — nothing written.[/cyan] Re-run with --confirm to heal the fleet.")
     console.print()
-
-
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
 
 
 def print_introspection() -> None:

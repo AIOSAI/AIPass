@@ -3,32 +3,12 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
 
-# Marker 7 — the memory lane, and the rulings that came with it.
-#
-# THE LAW OF THE MARKER: self-healing is TRIGGER-DRIVEN, never a daemon. Idle
-# means zero processes.  Every pin here is written against that shape — a lane
-# that heals because something HAPPENED, not because something is watching.
-#
-# The five behaviours under test, and the wrong implementation each pin kills:
-#
-# - **One fleet, one definition** — rollover/lint/health reaching 19 branches
-#   while the push reaches 22, so three citizens' memories could overflow with
-#   no rollover ever running on them.
-# - **Rollover normalizes on touch, SCOPED** — a branch that rolls heals its own
-#   machine frame; healing the fleet from one branch's rollover is the 23:37
-#   write that opened this whole arc.
-# - **A verb whose name promises a write it no longer does** — `sync-lines`
-#   stopped writing when the health stamp was deleted, and kept the name.
-# - **The grandfather clause, narrowed not removed** — post-push the fleet is
-#   green, so "unchanged and over cap" hides new drift for the three archivable
-#   containers; for `todos` it is the only thing standing between a branch the
-#   push may not prune and a rollover lane that refuses to write to it.
-# - **A template bump heals through the push's gates** — never around them.
+# Self-healing is TRIGGER-DRIVEN, never a daemon: a lane heals because something happened.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — rollover.show_status(), driven by tests/test_rollover_pipeline.py
@@ -44,12 +24,7 @@ import pytest
 from _pytest.outcomes import Skipped  # what pytest.skip() raises — caught here, never raised
 from unittest.mock import MagicMock, patch
 
-# Imported at MODULE level on purpose. conftest's autouse fixture replaces
-# `aipass.memory.apps.handlers.json` with a MagicMock package for the duration
-# of each test, so any handler importing `...handlers.json.memory_files` from
-# inside a test body raises "not a package". Collection-time imports resolve
-# against the real modules and are cached — the pattern the rest of the suite
-# already follows.
+# MODULE level on purpose: conftest swaps `handlers.json` for a MagicMock package inside each test.
 from aipass.cli.apps.modules import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.monitor import detector
@@ -65,10 +40,7 @@ from aipass.memory.apps.handlers.templates import spawn_pusher
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
 
-# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
-# whole path: a checkout that lives under a directory named dropbox must not hide itself.
-# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
-# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+# Judged by the parts BELOW the walk's root: a checkout under a directory named dropbox must not hide itself.
 _SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -96,72 +68,35 @@ _REPO_ROOT = _MEMORY_ROOT.parents[2]
 
 
 class TestOneFleetOneDefinition:
-    """Every @memory lane answers "which branches?" from the same source.
-
-    Mutation notes: dropping a resident from the constant, letting the scope
-    fall back to a glob over projects/ (which would sweep the held
-    marketstand), or leaving detector reading only the core registry.
-    """
+    """Every @memory lane answers "which branches?" from the same source."""
 
     def test_the_fleet_reaches_all_four_resident_projects(self, live_residents):
-        """Repointed 2026-08-28: there is no constant to read any more.
-
-        This used to join the named tuple into a string and look for four
-        substrings — a test that two literals agreed, which would have passed
-        just as happily if the resolver had stopped working entirely. It now
-        asks the resolver, which is the thing that has to be right.
-        """
+        """Asks the resolver, not a literal: the resolver is the thing that has to be right."""
         names = {item["name"] for item in registry_scope.fleet_branches(live_residents)}
         assert {"baud", "earmark", "finch", "aipass_site"} <= names
 
     def test_a_held_project_is_never_swept_in(self, live_fleet):
         """marketstand marks its branch active INSIDE a directory named (on _hold).
 
-        Guarded even though it passes on a clean checkout: with no registry the
-        scope is EMPTY, and `"marketstand" not in set()` is true for the one
-        reason that makes the assertion worthless. A green that measures
-        nothing is the failure mode this branch keeps finding in other lanes.
+        Guarded: with no registry the scope is empty and the assertion would measure nothing.
         """
         names = [item["name"] for item in registry_scope.fleet_branches()]
         assert "marketstand" not in names
         assert not any("hold" in name for name in names)
 
     def test_the_shared_scope_reaches_every_resident(self, live_residents):
-        """Guarded on the RESIDENT FILES, not just on "aipass is installed".
-
-        The Windows e2e lane installs aipass from the wheel: a real registry,
-        the core citizens, and none of the four residents — which live in
-        `projects/` on one machine. `live_fleet` correctly called that a live
-        installation and let this run, and it failed on a claim that was never
-        about the software. `live_residents` reads the four registry files off
-        disk with pathlib; present-but-unreachable is still a failure.
-        """
+        """Guarded on the RESIDENT FILES, not just on "aipass is installed" (a wheel install has none)."""
         names = {item["name"] for item in registry_scope.fleet_branches()}
         assert {"earmark", "finch", "aipass_site", "baud"} <= names
 
     def test_the_push_and_the_registry_lane_agree_on_the_fleet(self, live_fleet):
-        """The two lanes disagreeing by three citizens is the defect being closed.
-
-        Guarded for the same reason as the held-project pin: two empty sets
-        satisfy `<=` and agree about nothing.
-        """
+        """The push and the registry lane must agree on the fleet; guarded, as two empty sets agree on nothing."""
         push_names = {item["name"].lower() for item in trinity_push.resolve_scope()["branches"]}
         registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
 
     def test_the_push_never_reaches_into_another_repository(self, live_fleet):
-        """The template push WRITES. So its scope stops at this repo's edge.
-
-        `fleet_branches` grew an external tier in 3.0.0 and this lane consumes
-        it, which briefly put six citizens in four sibling repositories into the
-        scope of a lane whose whole job is writing files into branches. Nothing
-        in the external tier build writes to another repo, and the push must not
-        become the exception.
-
-        The reader is not wrong and the consumer is not wrong about which
-        function to call — the scope is the thing that needed narrowing, at the
-        one lane that acts on it rather than reads it.
-        """
+        """The template push WRITES. So its scope stops at this repo's edge, external tier excluded."""
         scoped = trinity_push.resolve_scope()["branches"]
         assert scoped, "empty scope proves nothing about what it excludes"
         outsiders = [item for item in scoped if item.get("residency") == registry_scope.RESIDENCY_EXTERNAL]
@@ -171,18 +106,7 @@ class TestOneFleetOneDefinition:
     def test_every_fleet_record_carries_exactly_the_five_agreed_keys(self, live_all_tiers):
         """The whole record shape, across ALL THREE TIERS, not just externals.
 
-        Guarded on `live_all_tiers`, not `live_fleet`: this is the test CI
-        failed with "got {'core'}" — the guard confirmed a registry existed and
-        said nothing about the two tiers this assertion is actually about. A
-        test that needs three tiers must be guarded on three tiers.
-
-        The `scheduler` field was withdrawn from the record on 2026-08-30 at the
-        request of the only branch that ever wanted it, and the replacement pin
-        was written against `external_branches` alone. So core and resident rows
-        were unpinned: a mutant re-adding `item["scheduler"]` to the core loop
-        passed the entire suite. A record nobody consumes should have to come
-        past a test on the way in — which only works if the test covers the
-        tiers a new field would actually be added to.
+        A test that needs three tiers is guarded on three tiers (`live_all_tiers`).
         """
         rows = registry_scope.fleet_branches(live_all_tiers)
         assert rows, "an empty fleet proves nothing about record shape"
@@ -196,24 +120,9 @@ class TestOneFleetOneDefinition:
             assert set(row) == {"name", "path", "registry", "email", "residency"}, row
 
     def test_the_normalize_lane_never_reaches_into_another_repository(self, live_fleet, monkeypatch):
-        """The third writing lane, found by @trigger's escalation not by design.
+        """The normalize lane writes, so it never reaches into another repository.
 
-        GUARDED 2026-08-31, found by running this suite against a bare-checkout
-        stand-in: it reads `fleet_branches()` off the live machine and its own
-        `assert seen` correctly refuses to pass over an empty fleet — so on CI
-        it was a RED where the honest answer is "this machine has no fleet to
-        measure". The assertion was right; the guard was missing.
-
-        `_normalize_rolled` resolved `fleet_branches()` — the whole fleet,
-        externals included — and then matched rolled branches BY NAME. It
-        writes: `normalize_branch` re-renders the machine frame in place. So the
-        day any external project names a branch `api` or `flow`, rolling our own
-        @api would silently rewrite a file in a sibling repository.
-
-        There is no collision today; that is luck, not a guard. Six external
-        names against twenty-two of ours, and nothing stops the twenty-third.
-
-        Mutant (2026-09-27, killed): `wanted` built from `rolled[:1]` only.
+        Rolled branches are matched by name; an external branch sharing a name must never be rewritten.
         """
         seen = []
         monkeypatch.setattr(
@@ -221,7 +130,6 @@ class TestOneFleetOneDefinition:
             "normalize_branch",
             lambda name, path, config: seen.append((name, Path(path))) or {"success": True},
         )
-        # Every citizen in the fleet claims to have rolled, external ones included.
         fleet = registry_scope.fleet_branches()
         every_name = [item["name"] for item in fleet]
         in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
@@ -233,29 +141,16 @@ class TestOneFleetOneDefinition:
         assert not outside, f"normalize would write outside this repo: {outside}"
 
     def test_a_branch_whose_frame_could_not_be_written_is_named(self, live_fleet, monkeypatch, caplog):
-        """The normalizer reports failure by return value; the caller dropped it.
+        """The normalizer reports failure by return value; the caller must name the branch, not drop it.
 
-        GUARDED 2026-08-31, same stand-in run, same species one step subtler:
-        `_normalize_rolled(["memory"])` resolves @memory through the live fleet
-        to decide it is in scope. With no registry the branch is not in scope,
-        so the OUT-OF-SCOPE warning fires instead of the write-failure one and
-        the test fails naming the wrong message. It reads as a defect in the
-        reporting it pins, and it is a statement about the machine.
-
-        `if normalize_branch(...)["success"]:` — a False just failed to
-        increment a counter. The `except` below it catches exceptions the
-        normalizer explicitly promises never to raise, so it was decorative.
-        Meanwhile the out-of-scope case IS named. One failure mode announced,
-        the other invisible, in the same function.
+        Guarded on `live_fleet`: with no registry @memory is out of scope and the other warning fires.
         """
         monkeypatch.setattr(
             normalizer,
             "normalize_branch",
             lambda name, path, config: {"success": False, "error": f"{name}: local.json write failed"},
         )
-        # Captured at the logger, not via caplog: prax's logger does not
-        # necessarily propagate to the root under every suite ordering, and a
-        # pin that only holds when it runs first is not a pin.
+        # Captured at the logger, not via caplog: prax's logger does not always propagate to the root.
         said = []
         monkeypatch.setattr(rollover.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
 
@@ -268,18 +163,7 @@ class TestOneFleetOneDefinition:
     def test_the_rollover_lane_never_reaches_into_another_repository(self, live_fleet):
         """Rollover WRITES too — it trims memory files. Same edge as the push.
 
-        The detector resolves through `accepted_resident_paths`, not
-        `fleet_branches`, so it never inherited the external tier. That is the
-        correct scope and this pins it, because repointing the detector at the
-        richer function is an obvious-looking one-line "simplification" and it
-        would put four sibling repositories inside the write scope of a lane
-        that edits other citizens' memories.
-
-        Measured while writing it: three external citizens (@verify, @vera,
-        @research) carry 49 over-cap entries between them. Rollover reaching
-        them would be a lane writing into repos nobody declared it for.
-
-        Mutant (2026-09-27, killed): detector's core registry read replaced by `[]`.
+        Trap: repointing the detector at `fleet_branches` would pull the external tier into a write scope.
         """
         rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
         assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
@@ -287,16 +171,7 @@ class TestOneFleetOneDefinition:
         outside = [p for p in rolled if home not in p.parents and p != home]
         assert outside == [], f"rollover would write outside this repo: {outside}"
 
-    # -- THE WRITE FENCE (2026-09-18) -----------------------------------------
-    #
-    # The scope pins above hold the FLEET to this repo, and on 2026-09-17 07:47
-    # that was not enough: one `drone @memory` call from Vera Studio's cwd
-    # persisted that project's registry, and every rollover after it WROTE four
-    # Vera Studio branches' memories, backups and local stores. The scope was
-    # the only thing standing between a write lane and another repo, and a
-    # scope is a list anyone's cwd could add to. The ruling that followed: memory
-    # may READ another project, never WRITE one — so the refusal lives at the
-    # write, where no scope decision can route around it.
+    # The write fence: memory may READ another project, never WRITE one, refused at the write itself.
 
     @staticmethod
     def _fenced_world(tmp_path, monkeypatch):
@@ -312,10 +187,7 @@ class TestOneFleetOneDefinition:
     def test_a_write_into_another_root_is_refused_and_the_file_is_untouched(self, tmp_path, monkeypatch):
         """The minimum pin: the gate most .trinity writers share says no, and means it.
 
-        Refused means four things, each asserted: a failure the caller already
-        knows how to read, the foreign bytes unchanged, no temp file left beside
-        them, and an ERROR naming BOTH the path and the root — a refusal that
-        does not say which fence it hit cannot be argued with.
+        Refused: a failure result, foreign bytes unchanged, no temp file, an ERROR naming path and root.
         """
         home, foreign = self._fenced_world(tmp_path, monkeypatch)
         before = foreign.read_bytes()
@@ -328,8 +200,7 @@ class TestOneFleetOneDefinition:
         assert memory_files.write_memory_file_simple(foreign, {"sessions": []}) is False
         assert foreign.read_bytes() == before
         assert sorted(p.name for p in foreign.parent.iterdir()) == ["local.json"], "a temp file was left behind"
-        # The rendered messages, never str(call): a call's repr doubles every
-        # backslash, so a Windows path is never found in it (CI red 35426157867).
+        # The rendered messages, never str(call): a call's repr doubles every Windows backslash.
         errors = " ".join(str(arg) for call in said.error.call_args_list for arg in call.args)
         assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors
 
@@ -374,9 +245,7 @@ class TestOneFleetOneDefinition:
     def test_the_verdict_is_containment_not_a_shared_prefix(self, tmp_path):
         """The pure predicate, alone: ``/x/aipass_other`` is not inside ``/x/aipass``.
 
-        A string ``startswith`` passes that sibling — the classic fence bug, and
-        the exact spelling `the push never reaches` above uses for its own
-        measurement, which is fine for a measurement and wrong for a gate.
+        A string ``startswith`` passes that sibling: fine for a measurement, wrong for a gate.
         """
         root = tmp_path / "aipass"
 
@@ -389,9 +258,7 @@ class TestOneFleetOneDefinition:
     def test_a_filesystem_root_anchor_admits_nothing(self, tmp_path):
         """``repo_root``'s last resort is the filesystem root, and ``/`` contains everything.
 
-        On an installed wheel with no registry above it, ``SOURCE_ROOT`` finds no
-        ``src/`` and resolves to ``parents[-1]``. A fence anchored there would
-        pass every write on the machine — open exactly where nobody is looking.
+        An installed wheel's ``SOURCE_ROOT`` can be ``parents[-1]``; a fence anchored there passes every write.
         """
         anchor = Path(tmp_path.anchor)
         target = tmp_path / "other_root" / ".trinity" / "local.json"
@@ -410,18 +277,7 @@ class TestOneFleetOneDefinition:
         assert foreign.read_bytes() == before
 
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
-        """Repointed 2026-08-28: the shared constant is gone, the agreement is not.
-
-        Comparing two re-exported tuples proved they were the same object. The
-        claim worth holding is that the two LANES answer the same question the
-        same way, which survives the constant and would have caught the split
-        this module was built to end.
-
-        Narrowed 2026-08-30: the push answers the same question, over the tiers
-        that live in this repository. The external tier is subtracted HERE, in
-        the expectation, so the difference between the two lanes stays one named
-        line of test rather than a drift nobody wrote down.
-        """
+        """The two LANES answer the same fleet; the external tier is subtracted here, in the expectation."""
         in_repo = {
             item["name"]
             for item in registry_scope.fleet_branches(live_fleet)
@@ -478,12 +334,7 @@ class TestOneFleetOneDefinition:
 
 
 class TestRolloverHealsWhatItTouches:
-    """A branch that rolls re-renders its OWN machine frame. Nobody else's.
-
-    Mutation notes: normalizing every branch instead of the rolled one (the
-    23:37 fleet write, wearing a new hat), normalizing nothing, or letting a
-    normalize failure take down the rollover that already succeeded.
-    """
+    """A branch that rolls re-renders its OWN machine frame. Nobody else's."""
 
     @staticmethod
     def _drifted(tmp_path: Path, name: str) -> Path:
@@ -516,9 +367,7 @@ class TestRolloverHealsWhatItTouches:
     def test_normalizing_never_prunes_an_entry(self, tmp_path):
         """Rollover's frame heal is the FRAME. Archiving is the push's mandate.
 
-        A normalize that quietly pruned would be a vectorize-verify-prune lane
-        running with no report, no receipt and no note — the push's dangerous
-        half without any of its gates.
+        A normalize that pruned would be the push's dangerous half without any of its gates.
         """
         root = self._drifted(tmp_path, "guinea")
         local = root / ".trinity" / "local.json"
@@ -570,13 +419,7 @@ class TestRolloverHealsWhatItTouches:
         }
 
     def test_the_rollover_actually_calls_the_normalizer(self):
-        """The wiring, not just the handler.
-
-        Found by mutation: deleting the `_normalize_rolled(rolled)` call from
-        `run_rollover` left all four normalizer pins green, because every one
-        of them calls the handler directly. A self-healing lane nothing invokes
-        is a lane that does not exist.
-        """
+        """The wiring, not just the handler: the other normalizer pins call the handler directly."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
             patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
@@ -588,7 +431,7 @@ class TestRolloverHealsWhatItTouches:
         tabs.assert_called_once_with(branches=["guinea"])
 
     def test_the_rollover_normalizes_only_the_branches_it_rolled(self):
-        """The 2026-08-25 shape: a per-branch verb with a fleet-wide tail."""
+        """A per-branch verb must not grow a fleet-wide tail."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea", "guinea")),
             patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
@@ -628,10 +471,7 @@ class TestRolloverHealsWhatItTouches:
         tabs.assert_called_once_with(branches=["guinea"])
 
     def test_a_tab_refresh_crash_is_logged_as_an_error_and_keeps_the_rollover(self):
-        """The rollover landed, so the run stands; the fault is an error, not a degradation.
-
-        Leg 4 of DPLAN-0354 (answer D of leg 3b): it was logged at warning.
-        """
+        """The rollover landed, so the run stands; the fault is an error, not a degradation."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
             patch(
@@ -654,20 +494,13 @@ class TestRolloverHealsWhatItTouches:
 
 
 class TestSyncLinesTellsTheTruth:
-    """`sync-lines` wrote nothing after the health stamp was deleted.
-
-    Mutation notes: keeping the old name silently, or keeping the unscoped
-    fleet-wide `refresh_all_tabs()` inside what is now a read-only reporter.
-    """
+    """`sync-lines` wrote nothing after the health stamp was deleted, so the verb is renamed and read-only."""
 
     @staticmethod
     def _tmp_fleet(tmp_path: Path, monkeypatch) -> tuple[list[Path], MagicMock]:
         """A one-citizen fleet under tmp_path, and the detector pointed at it.
 
-        The reporter reads every branch the detector's write scope names; left
-        alone that is the live machine's fleet. The core registry is read off
-        ``detector._REPO_ROOT`` and caller discovery walks the cwd, so both are
-        repointed: the only memory files in reach are the two written here.
+        Both ``detector._REPO_ROOT`` and caller discovery are repointed, or the live fleet is in reach.
         """
         trinity = tmp_path / "guinea" / ".trinity"
         trinity.mkdir(parents=True)
@@ -688,11 +521,7 @@ class TestSyncLinesTellsTheTruth:
         assert "report-lines" in rollover.SUBCOMMANDS
 
     def test_the_old_name_still_routes_and_says_what_changed(self, tmp_path, monkeypatch, capsys):
-        """Never a silent removal: the old verb answers, and names its successor.
-
-        The router's True alone passed with the rename notice deleted and the
-        reporter never run; the notice and the measured count are the effect.
-        """
+        """Never a silent removal: the old verb answers, names its successor, and still measures."""
         self._tmp_fleet(tmp_path, monkeypatch)
 
         assert rollover.handle_command("rollover", ["sync-lines"]) is True
@@ -702,11 +531,7 @@ class TestSyncLinesTellsTheTruth:
         assert "Measured 2 files" in said.out, said.out
 
     def test_the_reporter_measures_the_fleet_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
-        """report_line_counts, run for real over a tmp_path fleet.
-
-        Mutation: dropping `_handler_sync_line_counts()` for a constant zero
-        result, or re-adding a stamp write to the measured files.
-        """
+        """report_line_counts, run for real over a tmp_path fleet."""
         files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
         before = [path.read_bytes() for path in files]
 
@@ -719,14 +544,7 @@ class TestSyncLinesTellsTheTruth:
     def test_push_defaults_rewrites_per_branch_in_a_redirected_config(self, tmp_path, monkeypatch, capsys):
         """push_defaults, run for real — against a tmp_path config, never the operator's.
 
-        It WRITES memory.config.json, so the redirect is proved before the call:
-        the patched loader must be the very module the product's function-local
-        import will resolve, its path must sit under tmp_path, and the operator
-        file's bytes are hashed before and after. A redirect that stopped
-        holding fails here instead of writing the live file.
-
-        Mutation: merging per_branch instead of replacing it (the stale entry
-        survives), or dropping the operator's other keys on the write.
+        It WRITES memory.config.json, so the redirect is proved before the call and the live file is hashed.
         """
         _files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
         seeded = tmp_path / "memory.config.json"
@@ -775,23 +593,9 @@ class TestSyncLinesTellsTheTruth:
 
 
 class TestGrandfatherNarrowedToTodos:
-    """The clause was narrowed to todos on 2026-08-27 and widened back on 08-30.
+    """A write is refused for what it AUTHORS: carried over-cap entries never brick a rollover.
 
-    The narrowing's own argument for the todos exemption — refusing every
-    write to a file carrying a debt no machine may prune BRICKS that branch's
-    rollover, the slow-motion data loss item 7 exists to prevent — turned out
-    to hold for every container, because rollover's write is always a shrink
-    and it may not touch the entry it is refused for. Three hours of identical
-    errors were the receipt.
-
-    So the rule is one rule now: a write is refused for what it AUTHORS.
-    todos are no longer a special case at the cap gate. Since DPLAN-0345 they
-    are no exception at the push either: a todo leaves the pad for its backlog
-    file, so the push's exemption constant has zero consumers and is retired.
-
-    Mutation notes: refusing carried entries (deadlocks rollover), skipping
-    carried entries silently (the 08-27 objection, still valid), or matching
-    list identity on index instead of text (a prepend re-authors the file).
+    Identity is matched on text, not index: a prepend must not re-author the file.
     """
 
     @staticmethod
@@ -846,11 +650,7 @@ class TestGrandfatherNarrowedToTodos:
         assert [hit["entry_type"] for hit in hits] == ["todos"]
 
     def test_the_reshape_only_constant_is_retired_from_both_modules(self):
-        """DPLAN-0345: zero consumers, so it goes, as its own comment said it should.
-
-        A copy re-introduced in either module is the old never-move exemption
-        coming back beside the backlog rule.
-        """
+        """Zero consumers, so retired: a copy in either module is the old never-move exemption back."""
         assert not hasattr(entry_limits, "RESHAPE_ONLY_SECTIONS")
         assert not hasattr(trinity_push, "RESHAPE_ONLY_SECTIONS")
 
@@ -861,12 +661,7 @@ class TestGrandfatherNarrowedToTodos:
 
 
 class TestTemplateBumpFiresThePush:
-    """The bump is the trigger. The push is the lane. The gates stay on.
-
-    Mutation notes: firing a WRITING push from a bump (a fleet-wide unprompted
-    rewrite, the exact thing --confirm exists to stop), reporting no drift when
-    the ledger is stale, or recording the new version when the push refused.
-    """
+    """The bump is the trigger. The push is the lane. The gates stay on."""
 
     def test_a_matching_ledger_reports_no_bump(self, tmp_path, monkeypatch):
         monkeypatch.setattr(template_bump, "_ledger_path", lambda: tmp_path / "ledger.json")
@@ -893,15 +688,7 @@ class TestTemplateBumpFiresThePush:
         assert template_bump.bump_pending()["pending"] is True
 
     def test_the_retired_lanes_own_ledger_shape_reads_as_pending_not_as_current(self, tmp_path, monkeypatch):
-        """A real fossil, found on disk 2026-08-27 in `memory/templates/`.
-
-        The dead pre-`.trinity` pusher wrote `{last_push, last_push_branches}`
-        — a date and sixteen uppercase branch names, no version anywhere. A
-        reader that treated "a ledger exists" as "the fleet is current" would
-        take that file's word for a push that happened in June, through a lane
-        that could never match a memory file. Only `template_versions` is an
-        answer; every other shape is an absence wearing a record's clothes.
-        """
+        """The retired lane's `{last_push, ...}` ledger is no answer: only `template_versions` is."""
         ledger = tmp_path / "ledger.json"
         ledger.write_text(
             json.dumps({"last_push": "2026-06-25 01:55:01", "last_push_branches": ["COMMONS", "HOOKS"]}),
@@ -957,10 +744,7 @@ class TestTemplateBumpFiresThePush:
     def test_the_handler_owns_the_events_name_and_not_its_sending(self):
         """The name lives with the fact; reaching @trigger's bus lives with the caller.
 
-        A handler that imports another branch's module layer is orchestration
-        in domain-logic clothes. So `template_bump` names the event and never
-        sends it — asserted at source, because "it happens not to import it
-        today" is not the same promise as "it must not".
+        A handler must not import another branch's module layer; asserted at source.
         """
         source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "template_bump.py").read_text(encoding="utf-8")
 
@@ -970,27 +754,9 @@ class TestTemplateBumpFiresThePush:
     def test_the_bump_announces_itself_on_the_bus(self, monkeypatch):
         """Trigger-driven, never a poller: the bump ANNOUNCES what it did.
 
-        Fires through the REAL call path with a real outcome dict — the payload
-        is built inside the try, so a broken payload expression is swallowed by
-        the best-effort catch and the announcement silently never happens. That
-        shipped once (`json` unimported); only an end-to-end pin bites it.
-
-        REAL MODULE OBJECTS, NOT MagicMocks, and not a string-target `patch`.
-        `_announce_bump` imports the bus INSIDE the function, so what it gets
-        depends on import machinery. conftest's autouse fixture puts MagicMocks
-        in `sys.modules` for the `aipass.trigger` chain, and a MagicMock has no
-        `__path__` — so `from aipass.trigger.apps.modules.core import trigger`
-        resolves only while the interpreter serves the leaf straight out of
-        `sys.modules`. 3.12 does; 3.10 entered the parent traversal, raised
-        ModuleNotFoundError, and `_announce_bump` swallowed it by design —
-        green on three interpreters and red on the fourth, for a reason that
-        had nothing to do with the behaviour under test.
-
-        Packages carry `__path__` here, so the import resolves the same way on
-        every version. And the reachability check below runs FIRST: without it
-        this test has two causes for one symptom — "the bus was never reached"
-        and "the code chose not to fire" both arrive as an empty list, which is
-        the exact ambiguity this branch keeps refusing to ship in product code.
+        The real call path: the payload is built inside a best-effort try, so a broken one is swallowed.
+        Real packages with `__path__`, not MagicMocks: on 3.10 the lazy import traverses the parent.
+        The reachability check runs first, so "never reached" and "chose not to fire" stay apart.
         """
         fired = []
 
@@ -1007,8 +773,7 @@ class TestTemplateBumpFiresThePush:
         bus_module.trigger = _Bus  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", bus_module)
 
-        # Exactly the bytecode `from X import trigger` compiles to, so the
-        # check cannot pass by a route the code under test does not take.
+        # Exactly what `from X import trigger` compiles to: no route the code under test does not take.
         reached = __import__("aipass.trigger.apps.modules.core", fromlist=["trigger"])
         assert reached.trigger is _Bus, "the bus stand-in is not reachable by the import _announce_bump uses"
 
@@ -1053,16 +818,7 @@ class TestTemplateBumpFiresThePush:
 
 
 class TestTheDeadTemplateLaneIsRetired:
-    """`push-templates` and `diff-templates` scanned a pre-.trinity layout.
-
-    They matched `*.local.json` at the branch ROOT — a naming convention no
-    citizen has used since `.trinity/` landed, so zero real matches were
-    possible and `diff-templates` reported 16 branches of phantom drift. The
-    live half (propagating templates into @spawn's scaffold sets) is kept.
-
-    Mutation notes: leaving either verb silently performing its no-op, or
-    retiring the spawn half along with the dead half.
-    """
+    """`push-templates` and `diff-templates` scanned a pre-.trinity layout; the spawn half is kept."""
 
     def test_the_dead_handlers_are_out_of_the_live_tree(self):
         """Not importable is the point: a no-op nobody can call cannot be trusted."""
@@ -1086,12 +842,7 @@ class TestTheDeadTemplateLaneIsRetired:
     def test_the_park_keeps_them_with_the_measurement(self):
         """Never a casual delete — the record of WHY outlives the code.
 
-        A TRACKED park, not `.archive/`. The owner's fleet-wide ruling of
-        2026-08-18 makes `.archive/` the disposal zone: gitignored, cleaned
-        without warning, present in no clone. This build put them there first,
-        which would have made this very assertion pass only on machines that
-        happened to still have the files — the exact CI failure that produced
-        the ruling. The park is where a record that must survive a clone lives.
+        A TRACKED park, not `.archive/`: `.archive/` is gitignored and present in no clone.
         """
         parked = _MEMORY_ROOT / "tests" / "parked" / "dead_template_lane_20260827"
 
@@ -1109,11 +860,7 @@ class TestTheDeadTemplateLaneIsRetired:
         assert (_MEMORY_ROOT / "tests" / "parked" / "conftest.py").is_file()
 
     def test_the_retired_verbs_refuse_and_name_the_live_lane(self, capsys):
-        """REWRITTEN 2026-09-08: a refusal that exits 0 is half a refusal.
-
-        `is True` says the verb was CLAIMED. It said nothing about the exit code,
-        and under `warning()` that code was 0 — the shape the fleet sweep found.
-        """
+        """A refusal that exits 0 is half a refusal: claimed, exit 2, and the live lane named."""
         for verb in ("push-templates", "diff-templates"):
             reset_command_state()
             assert templates.handle_command(verb, ["--dry-run"]) is True
@@ -1125,10 +872,7 @@ class TestTheDeadTemplateLaneIsRetired:
         assert hasattr(spawn_pusher, "push_to_spawn_templates")
 
     def test_template_status_reports_the_live_receipts(self, live_fleet):
-        """The old status read a push log only the dead lane could ever move.
-
-        Reads every citizen's receipt off disk, so it needs a real fleet.
-        """
+        """Status reads every citizen's live receipt off disk, so it needs a real fleet."""
         status = template_bump.receipt_status()
 
         assert status["gold"] == template_bump.gold_versions()
@@ -1136,40 +880,8 @@ class TestTheDeadTemplateLaneIsRetired:
         assert all("branch" in row and "carries" in row for row in status["branches"])
 
 
-# ===========================================================================
-# THE GUARD THAT TRUSTED EXISTENCE (2026-08-31)
-# ===========================================================================
-#
-# CI on PR#750, bare ubuntu checkout, `pytest -n auto --dist loadscope` from the
-# repo root: `test_every_fleet_record_carries_exactly_the_five_agreed_keys`
-# failed with "all three tiers must be exercised, got {'core'}".
-#
-# The guard was not absent — it PASSED. `live_fleet` asks one question, "is
-# there an AIPASS_REGISTRY.json here", and on that worker there was one. It held
-# core rows only: no `projects/` in a checkout, so no residents, and
-# AIPASS_ROOTS.json is gitignored, so no externals. A three-tier assertion ran
-# against a one-tier world and reported the world's shape as a code defect.
-#
-# @devpulse's evidence for WHY a registry was there at all: on the same worker,
-# one test observed registry-absent and a later test observed a core-only
-# registry. Nothing ships one. Something in the whole-repo run mints it.
-#
-# EXISTENCE IS NOT SUFFICIENCY, and it was never only about the third tier —
-# `test_the_push_and_the_registry_lane_agree_on_the_fleet` asserts
-# `push_names <= registry_names`, which TWO EMPTY SETS satisfy. Its own
-# docstring says it is guarded against exactly that, and it was not: an empty
-# minted registry passes a file-exists check and the test then agrees about
-# nothing. So the guard now reads the rows, not the filename.
-#
-# The narrowing follows `live_residents`' precedent rather than tightening
-# `live_fleet` for everyone: two of its consumers legitimately need only core,
-# and a guard that demanded three tiers from all of them would convert honest
-# coverage into skips. One question per fixture.
-#
-# Ground truth is read with pathlib and json, NEVER through registry_scope.
-# Asking the code under test whether its own inputs are sufficient would turn
-# every regression in the resolver into a SKIP — the guard deleting the failure
-# it exists to expose. Same argument as live_residents' literal paths.
+# Existence is not sufficiency: a live guard reads the rows, not the filename, one question per fixture.
+# Ground truth is read with pathlib and json, NEVER through registry_scope, or a resolver regression is a SKIP.
 
 
 class TestTheLiveGuardRefusesAHalfPresentWorld:
@@ -1226,14 +938,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
     def _resolved(request, name):
         """Resolve a guard fixture, turning an over-skip into a RED.
 
-        `pytest.skip()` inside a fixture marks the requesting test SKIPPED, and
-        a skip reads as green. So every positive guard test — "a real world
-        must pass the guard" — was silenceable by the exact failure it exists
-        to catch: a mutant that skipped unconditionally turned them into skips,
-        not failures, and survived.
-
-        Found by mutation, not by reading. A test that cannot fail is not a
-        test, and one that reports its own defeat as a pass is worse.
+        A skip inside a fixture reads as green, so an unconditional-skip mutant would silence the positive pins.
         """
         try:
             return request.getfixturevalue(name)
@@ -1301,8 +1006,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
     def test_a_genuine_three_tier_world_passes(self, request, monkeypatch, tmp_path):
         """All three tiers really on disk — the guard must let the assertion run.
 
-        Without this the whole class could be satisfied by a fixture that skips
-        unconditionally, which would silence the CI red by deleting the test.
+        Without this the class is satisfied by a fixture that skips unconditionally.
         """
         root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True, roots=True, external_citizen=True)
         self._point_both_lanes_at(monkeypatch, root)
@@ -1310,15 +1014,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         assert self._resolved(request, "live_all_tiers") == root
 
     def test_a_registered_external_branch_with_no_passport_is_not_a_citizen(self, request, monkeypatch, tmp_path):
-        """A ROW is not a citizen either — found by a mutant, not by design.
-
-        Deleting the passport check from the guard left every test green: my
-        only "no external" world had no registry at all, so the walk stopped
-        one step earlier and the passport line never ran. Membership is
-        PRESENCE — a sibling registry naming `wren` while `wren/` is gone is a
-        declaration about a citizen who is not there, which is the ordinary
-        state of a machine that has moved on.
-        """
+        """A ROW is not a citizen either: membership is PRESENCE, so a registered but absent `wren` is not one."""
         root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True, roots=True, registered_but_absent=True)
         self._point_both_lanes_at(monkeypatch, root)
 
@@ -1327,13 +1023,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         assert "external" in str(skipped.value).lower()
 
     def test_a_dict_shaped_registry_is_read_not_called_empty(self, request, monkeypatch, tmp_path):
-        """Both registry shapes ship. A reader that knows one calls half the fleet empty.
-
-        Also a mutant's find: making the dict branch return `[]` passed every
-        test, because every world I had written used the list shape. A guard
-        that reads only one shape would skip on a real installation of the
-        other and call it "no fleet here".
-        """
+        """Both registry shapes ship. A reader that knows one calls half the fleet empty."""
         root = self._world(
             tmp_path,
             rows={"memory": {"name": "memory", "path": "src/aipass/memory"}},

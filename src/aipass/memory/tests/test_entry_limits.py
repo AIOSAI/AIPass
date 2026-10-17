@@ -3,23 +3,13 @@
 # Description: entry_limits config reader and the apps/modules/limits.py gateway over it
 # Version: 1.1.1
 # Created: 2026-06-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and its gateway apps/modules/limits.py."""
 
-# Tests for the entry_limits config reader (Phase 1 of FPLAN-0270).
-#
-# Covers:
-#   - Normal config read returns four default entry types.
-#   - per_branch override changes a cap.
-#   - per_branch adds a new entry type.
-#   - Missing config file returns safe defaults (no crash).
-#   - Malformed JSON returns safe defaults + error logged (no crash).
-#
-# Note: entry_limits delegates config reading to config_loader, so tests
-# patch config_loader._CONFIG_PATH rather than a removed entry_limits attr.
+# entry_limits reads through config_loader, so tests patch config_loader._CONFIG_PATH.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — classify_entries(), is_near_cap(): tests/test_changed_entries.py
@@ -37,29 +27,15 @@ from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.modules import limits as _limits
 
 
-# ---------------------------------------------------------------------------
-# Helpers: the real modules, imported once, patched at the edge per test
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _recorded_config_logger(monkeypatch):
-    """The prax logger is the edge: a recorder per test, so a test reads what config_loader logged.
-
-    Every other seam (``_CONFIG_PATH``) is monkeypatched by the test that
-    needs it, on the config_loader entry_limits actually bound.
-    """
+    """The prax logger is the edge: a recorder per test, so a test reads what config_loader logged."""
     monkeypatch.setattr(_entry_limits.config_loader, "logger", MagicMock())
 
 
 def _get_modules():
     """Return (entry_limits, config_loader) — the config_loader entry_limits reads through."""
     return _entry_limits, _entry_limits.config_loader
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 def _write_config(tmp_path: Path, data: dict) -> Path:
@@ -72,10 +48,7 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
 
 
 def _full_config(**entry_limits_overrides) -> dict:
-    """Return a minimal memory.config.json dict with an entry_limits section.
-
-    Any keyword args are merged into the entry_limits section.
-    """
+    """Return a minimal memory.config.json dict; keyword args merge into its entry_limits section."""
     section = {
         "enabled": True,
         "enforce": False,
@@ -115,11 +88,6 @@ def _full_config(**entry_limits_overrides) -> dict:
     return {"entry_limits": section}
 
 
-# ===========================================================================
-# 1. Normal config returns four default entry types
-# ===========================================================================
-
-
 class TestNormalConfig:
     """Reader returns the four default caps with a normal config."""
 
@@ -146,9 +114,7 @@ class TestNormalConfig:
     def test_enforce_false_on_disk_overrides_the_code_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The file is the authority: code seeds enforce=True, but an operator
-        who sets False in the file gets warn-only.
-        """
+        """The file is the authority: code seeds enforce=True, but False in the file means warn-only."""
         config_path = _write_config(tmp_path, _full_config())
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
@@ -171,11 +137,6 @@ class TestNormalConfig:
         assert types["observations"]["max_chars"] == 600
 
 
-# ===========================================================================
-# 2. per_branch override changes a cap
-# ===========================================================================
-
-
 class TestPerBranchOverride:
     """per_branch override changes a cap for the specified branch."""
 
@@ -188,7 +149,6 @@ class TestPerBranchOverride:
         result = mod.load_entry_limits("devpulse")
 
         assert result["entry_types"]["sessions"]["max_chars"] == 400
-        # Other fields on sessions should be preserved from base
         assert result["entry_types"]["sessions"]["file"] == "local.json"
         assert result["entry_types"]["sessions"]["container"] == "sessions"
 
@@ -200,7 +160,6 @@ class TestPerBranchOverride:
 
         result = mod.load_entry_limits("memory")
 
-        # memory branch should get the default, not devpulse's override
         assert result["entry_types"]["sessions"]["max_chars"] == 300
 
     def test_override_does_not_affect_other_types(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,14 +170,8 @@ class TestPerBranchOverride:
 
         result = mod.load_entry_limits("devpulse")
 
-        # Other types should be unchanged
         assert result["entry_types"]["key_learnings"]["max_chars"] == 200
         assert result["entry_types"]["observations"]["max_chars"] == 600
-
-
-# ===========================================================================
-# 3. per_branch adds a NEW entry type
-# ===========================================================================
 
 
 class TestPerBranchNewType:
@@ -242,7 +195,6 @@ class TestPerBranchNewType:
         assert "custom_notes" in result["entry_types"]
         assert result["entry_types"]["custom_notes"]["max_chars"] == 500
         assert result["entry_types"]["custom_notes"]["container"] == "custom_notes"
-        # Original four types still present
         assert len(result["entry_types"]) == 5
 
     def test_new_type_not_present_for_other_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,11 +216,6 @@ class TestPerBranchNewType:
         assert len(result["entry_types"]) == 4
 
 
-# ===========================================================================
-# 4. Missing config file returns safe defaults (no crash)
-# ===========================================================================
-
-
 class TestMissingConfig:
     """Missing config file returns safe defaults without crashing."""
 
@@ -288,11 +235,7 @@ class TestMissingConfig:
     def test_missing_config_logs_info_and_regenerates_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """config_loader serves defaults at INFO level and restores the file.
-
-        The caps an operator edits live in that file, so a caller reaching
-        limits through a missing config must leave a real file behind to edit.
-        """
+        """config_loader serves defaults at INFO level and restores the file the operator edits."""
         missing_path = tmp_path / "nonexistent" / "memory.config.json"
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", missing_path)
@@ -305,11 +248,6 @@ class TestMissingConfig:
         assert "config" in info_msg.lower()
         assert missing_path.exists()
         assert json.loads(missing_path.read_text(encoding="utf-8"))["entry_limits"]["enforce"] is True
-
-
-# ===========================================================================
-# 5. Malformed JSON returns safe defaults + error logged (no crash)
-# ===========================================================================
 
 
 class TestMalformedJson:
@@ -348,9 +286,7 @@ class TestMalformedJson:
 
         mock_logger.error.assert_called()
         error_msg = mock_logger.error.call_args[0][0]
-        # The whole sentence: the tag that routes it, the verdict, the offending
-        # path and the parser's own reason. An `or` over two words passed on any
-        # message carrying either, including one that named no file at all.
+        # The whole sentence: tag, verdict, path and the parser's reason — an `or` over words passed a pathless message.
         assert error_msg.startswith("[config_loader] Malformed JSON in ")
         assert str(bad_config) in error_msg
         assert error_msg.endswith("Expecting property name enclosed in double quotes: line 1 column 2 (char 1)")
@@ -370,23 +306,10 @@ class TestMalformedJson:
         assert len(result["entry_types"]) == 4
 
 
-# ===========================================================================
-# 6. draft_percent is a CONFIG KEY, not a module constant (FPLAN-0593 Phase 5)
-# ===========================================================================
-
-
 class TestTheDraftPercentComesFromTheConfig:
-    """The number an agent drafts to has one source, and it is the config.
+    """The number an agent drafts to has one source, the config key draft_percent.
 
-    It was ``entry_limits.DRAFT_PERCENT = 80`` until FPLAN-0593 Phase 5. Because
-    a module constant is not readable as configuration, @seedgo mirrored it as
-    ``_DRAFT_PERCENT = 80`` in ``trinity_groups.py`` and pinned the mirror
-    against @memory's ``draft_target()`` — which is a copy that happens to be
-    tested, not a source. Publishing the key is what lets that mirror retire.
-
-    These pins measure the property, not the number: move the key and the target
-    moves with it. A test asserting 80 would pass just as happily against a
-    hardcoded constant, which is the exact thing being ended.
+    These pins measure the property, not the number: a test asserting 80 would pass against a hardcoded constant.
     """
 
     def test_the_published_percent_is_the_config_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,11 +339,7 @@ class TestTheDraftPercentComesFromTheConfig:
         assert mod.draft_target(101) < 101
 
     def test_the_old_module_constant_is_gone(self) -> None:
-        """Named explicitly: a surviving constant is a second source of truth.
-
-        @seedgo's retirement note points at this name. If it comes back, the
-        mirror it is meant to replace becomes correct again by accident.
-        """
+        """Named explicitly: a surviving DRAFT_PERCENT constant is a second source of truth."""
         mod, _ = _get_modules()
 
         assert not hasattr(mod, "DRAFT_PERCENT"), "DRAFT_PERCENT is back — the config key is no longer the only source"
@@ -429,12 +348,7 @@ class TestTheDraftPercentComesFromTheConfig:
     def test_an_unusable_percent_serves_the_seed_rather_than_removing_the_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: object
     ) -> None:
-        """Narrow the draft target, never delete it.
-
-        A truncated or hand-edited config must not leave the fleet with no
-        target to aim at — that would be a cap with nothing below it, which is
-        how an agent finds the wall instead of the line.
-        """
+        """Narrow the draft target, never delete it: a bad config still leaves a line below the cap."""
         config_path = _write_config(tmp_path, _full_config(draft_percent=bad))
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
@@ -444,18 +358,13 @@ class TestTheDraftPercentComesFromTheConfig:
     def test_a_config_with_no_draft_percent_at_all_still_answers(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The key is new; every config written before Phase 5 lacks it."""
+        """Configs written before the key existed lack it and still get the seed."""
         config_path = _write_config(tmp_path, _full_config())
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
 
         assert mod.draft_percent() == 80
         assert mod.draft_target(300) == 240
-
-
-# ===========================================================================
-# 7. The public gateway: apps/modules/limits.py is a door, not a copy
-# ===========================================================================
 
 
 _GATEWAY_CONTRACT = (
@@ -480,15 +389,7 @@ def _get_gateway():
 
 
 class TestTheLimitsGatewayIsADoorNotACopy:
-    """``apps/handlers/`` is private implementation; ``apps/modules/`` is the door.
-
-    @seedgo's ``check_handler_independence`` sends cross-branch callers to a
-    branch's ``modules`` package. Today @hooks reaches past that into
-    ``handlers/json/entry_limits.py`` by dotted path and @seedgo guard-imports
-    ``draft_target`` from it — not because they went around the rule, but
-    because no door existed to reach for. ``apps/modules/fleet.py`` is the same
-    pattern for the same reason.
-    """
+    """``apps/handlers/`` is private implementation; ``apps/modules/`` is the door other branches use."""
 
     @pytest.mark.parametrize("name", _GATEWAY_CONTRACT)
     def test_every_contract_name_is_the_same_object_as_the_handler_s(self, name: str) -> None:
@@ -526,12 +427,7 @@ class TestTheLimitsGatewayIsADoorNotACopy:
         assert "limits Module" in capsys.readouterr().out
 
     def test_an_unknown_subcommand_is_named_and_exits_nonzero(self, capsys: pytest.CaptureFixture) -> None:
-        """Claimed and REPORTED — never a silent no-op that looks like success.
-
-        Both streams are read: the refusal routes to stderr under @seedgo's
-        output-routing standard, and the exit code is what tells a caller the
-        difference between "described the contract" and "did not understand you".
-        """
+        """Claimed and REPORTED with a nonzero exit — never a silent no-op that looks like success."""
         limits, _ = _get_gateway()
         reset_command_state()
 
@@ -541,13 +437,7 @@ class TestTheLimitsGatewayIsADoorNotACopy:
         assert "nonsense" in captured.out + captured.err
 
     def test_the_command_surface_reads_but_never_writes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The pin that keeps this a door: changing a cap is ``config set``, not this.
-
-        Introspection prints the live ``draft_percent()``, so this does not
-        claim the CLI computes nothing — it claims the CLI never writes. A
-        gateway that could move a cap would be a second write surface for the
-        numbers the whole fleet is measured against.
-        """
+        """The pin that keeps this a door: changing a cap is ``config set``, never this CLI."""
         limits, entry_limits = _get_gateway()
         writes: list = []
         for name in ("set_branch_limit", "set_default_limit", "save", "push_defaults_to_per_branch"):

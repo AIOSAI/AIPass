@@ -3,16 +3,13 @@
 # Description: Surfacing governance module — public API
 # Version: 1.1.0
 # Created: 2026-07-16
-# Modified: 2026-07-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Surfacing Governance Module — Public API
 
-Thin module re-exporting governance engine from handlers/governance/engine.py.
-Cross-branch consumers import from here:
-
-    from aipass.memory.apps.modules.governance import should_surface, record_message, new_state
+Cross-branch consumers (@hooks' compass_recall, every prompt) import from here.
 """
 
 import os
@@ -35,11 +32,6 @@ from aipass.memory.apps.handlers.governance.engine import (
 )
 
 __all__ = ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"]
-
-
-# =============================================================================
-# MODULE ROUTING (handle_command for drone auto-discovery)
-# =============================================================================
 
 
 def print_introspection() -> None:

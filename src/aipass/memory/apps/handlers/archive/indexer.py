@@ -3,18 +3,11 @@
 # Description: Code Archive Indexer
 # Version: 0.2.0
 # Created: 2025-11-27
-# Modified: 2026-03-06
+# Modified: 2026-10-17
 # =============================================
 
 """
 Code Archive Indexer
-
-Indexes Python files in code_archive directory:
-1. Scans for .py files
-2. Extracts docstrings and metadata
-3. Creates/updates index.json catalog
-
-No vectorization - just a searchable catalog.
 """
 
 import ast
@@ -29,26 +22,16 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
-# Paths resolved relative to handler location
 _MEMORY_ROOT = module_file(__file__).parents[3]
 CODE_ARCHIVE_PATH = _MEMORY_ROOT / "code_archive"
 INDEX_PATH = CODE_ARCHIVE_PATH / "index.json"
 
 
 def extract_file_info(file_path: Path) -> Dict[str, Any]:
-    """
-    Extract metadata from a Python file.
-
-    Args:
-        file_path: Path to Python file
-
-    Returns:
-        Dict with filename, docstring, functions, classes
-    """
+    """Extract filename, docstring, functions and classes from a Python file."""
     try:
         content = file_path.read_text(encoding="utf-8")
 
-        # Parse AST
         try:
             tree = ast.parse(content)
         except SyntaxError:
@@ -62,10 +45,8 @@ def extract_file_info(file_path: Path) -> Dict[str, Any]:
                 "indexed_at": datetime.now().isoformat(),
             }
 
-        # Get module docstring
         docstring = ast.get_docstring(tree)
 
-        # Get function and class names
         functions = []
         classes = []
 
@@ -96,28 +77,17 @@ def extract_file_info(file_path: Path) -> Dict[str, Any]:
 
 
 def get_archive_files() -> List[Path]:
-    """
-    Get all Python files in code_archive.
-
-    Returns:
-        List of Path objects for all .py files
-    """
+    """All .py files in code_archive except __init__.py, sorted."""
     if not CODE_ARCHIVE_PATH.exists():
         return []
 
     files = list(CODE_ARCHIVE_PATH.rglob("*.py"))
-    # Exclude __init__.py files
     files = [f for f in files if f.name != "__init__.py"]
     return sorted(files)
 
 
 def load_index() -> Dict[str, Any]:
-    """
-    Load existing index.json or create empty structure.
-
-    Returns:
-        Index dict with metadata and files
-    """
+    """Load existing index.json or create empty structure."""
     if INDEX_PATH.exists():
         try:
             with open(INDEX_PATH, encoding="utf-8") as f:
@@ -139,15 +109,7 @@ def load_index() -> Dict[str, Any]:
 
 
 def save_index(index: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Save index.json.
-
-    Args:
-        index: Index dict to save
-
-    Returns:
-        Dict with success status
-    """
+    """Save index.json."""
     try:
         index["metadata"]["last_updated"] = datetime.now().isoformat()
         index["metadata"]["total_files"] = len(index["files"])
@@ -162,14 +124,7 @@ def save_index(index: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_index() -> Dict[str, Any]:
-    """
-    Build complete index from scratch.
-
-    Scans all Python files and creates full index.json.
-
-    Returns:
-        Dict with success status and stats
-    """
+    """Build complete index from scratch."""
     files = get_archive_files()
 
     if not files:
@@ -181,11 +136,9 @@ def build_index() -> Dict[str, Any]:
     for file_path in files:
         info = extract_file_info(file_path)
 
-        # Use relative path as key
         key = info["path"]
         index["files"][key] = info
 
-        # Track categories (subdirectories)
         category = file_path.parent.name
         if category != "code_archive":
             if category not in categories:
@@ -203,14 +156,7 @@ def build_index() -> Dict[str, Any]:
 
 
 def check_for_new_files() -> Dict[str, Any]:
-    """
-    Sync index with actual files.
-
-    Adds new files, removes deleted files from index.
-
-    Returns:
-        Dict with changes made
-    """
+    """Sync index with actual files: add new, remove deleted."""
     index = load_index()
     current_files = get_archive_files()
 
@@ -223,14 +169,12 @@ def check_for_new_files() -> Dict[str, Any]:
     if not new_files and not deleted_files:
         return {"success": True, "new_files": 0, "deleted_files": 0, "action": "none"}
 
-    # Index new files
     for rel_path in new_files:
         file_path = CODE_ARCHIVE_PATH / rel_path
         if file_path.exists():
             info = extract_file_info(file_path)
             index["files"][rel_path] = info
 
-            # Update category
             category = file_path.parent.name
             if category != "code_archive":
                 if category not in index["categories"]:
@@ -238,18 +182,15 @@ def check_for_new_files() -> Dict[str, Any]:
                 if info["filename"] not in index["categories"][category]:
                     index["categories"][category].append(info["filename"])
 
-    # Remove deleted files from index
     for rel_path in deleted_files:
         if rel_path in index["files"]:
             filename = index["files"][rel_path].get("filename")
             del index["files"][rel_path]
 
-            # Clean up category
             for cat, files in index["categories"].items():
                 if filename in files:
                     files.remove(filename)
 
-    # Rebuild categories from current files
     index["categories"] = {}
     for rel_path, info in index["files"].items():
         file_path = CODE_ARCHIVE_PATH / rel_path
@@ -277,12 +218,7 @@ def check_for_new_files() -> Dict[str, Any]:
 
 
 def get_index_status() -> Dict[str, Any]:
-    """
-    Get current index status.
-
-    Returns:
-        Dict with file counts, categories, last update
-    """
+    """Get current index status: file counts, categories, last update."""
     index = load_index()
     current_files = get_archive_files()
 
@@ -298,7 +234,6 @@ def get_index_status() -> Dict[str, Any]:
     }
 
 
-# Standalone execution
 if __name__ == "__main__":
     import sys
 

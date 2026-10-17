@@ -3,43 +3,13 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
 # Version: 1.9.0
 # Created: 2026-08-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""
 
-# Tests for `drone @memory config` -- the verb surface over rollover limits.
-#
-# DPLAN-0302. The CLI output and the refusal sentences ARE the API contract
-# (@api exec's this CLI to serve BAUD's memory-settings screen), so these
-# tests pin the exact sentences, not merely "an error happened".
-#
-# Split by subject on 2026-10-08 (oversize_test_file). This file keeps the
-# writes, the display, help and isolation; its siblings hold the rest:
-#   - test_config_verbs_refusals.py -- every refusal sentence, verbatim, and the ceiling
-#   - test_config_verbs_json.py     -- the --json machine surface
-#   - test_config_verbs_todo.py     -- the todos count, the rollover pad, the todo verbs
-# The minted world and the shared helpers live in support_config_verbs.py; the
-# `verbs` fixture is in conftest.py.
-#
-# Covers:
-#   - `set @branch <type> <count>` lands in per_branch and reads back as an override
-#   - `set-default` writes defaults and leaves per_branch untouched
-#   - Round-trip: set -> `rollover push` returns the branch to defaults
-#   - Effective limits resolve per FILE KEY exactly like detector._should_rollover
-#     (a deep merge would report a limit the engine does not enforce)
-#   - auto_compact_cap survives a `sessions` set (never dropped, never settable)
-#   - A help flag in ANY slot prints help and leaves the file byte-identical,
-#     and --help still outranks --json
-#   - Rich actually renders the [DEFAULT] / [OVERRIDE] markers on screen
-#     (a lowercase [default] tag is eaten by Rich's markup parser while the
-#     source string still reads correctly -- the assertion must see the screen)
-#   - Every example count a refusal or the help page prints is within its ceiling
-#
-# Isolation: the live memory_json/custom_config/memory.config.json is COPIED
-# into tmp_path and config_loader._CONFIG_PATH is repointed at the copy. These
-# tests write limits; a suite that edited the fleet config would be the exact
-# accident these verbs exist to prevent.
+# The CLI output is an API contract (@api execs it for BAUD's settings screen),
+# so these pin exact sentences. Siblings: test_config_verbs_{refusals,json,todo}.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
@@ -53,8 +23,6 @@ from types import SimpleNamespace
 
 import pytest
 
-# The minted verbs world (conftest's `verbs` fixture is _real_verbs) and the
-# run/read helpers the split config-verbs files share.
 from aipass.memory.tests.support_config_verbs import (
     _HANDLER_MODULES,
     _ROLLOVER_MODULE,
@@ -74,9 +42,7 @@ class TestVerbsFixtureIsUndoneAtTeardown:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         names = (*_HANDLER_MODULES, _ROLLOVER_MODULE)
-        # A known object in each parent slot the fixture evicts, so the parent-attribute half is read on
-        # every worker: run alone, neither parent package is imported yet and there is nothing to restore.
-        # This test's own monkeypatch takes the stand-ins away again.
+        # Stand-ins in each parent slot, so the parent-attribute half is exercised even when run alone.
         for name in (_HANDLER_MODULES[0], _ROLLOVER_MODULE):
             parent_name, _, leaf = name.rpartition(".")
             stand_in = SimpleNamespace(stand_in=name)
@@ -88,7 +54,6 @@ class TestVerbsFixtureIsUndoneAtTeardown:
 
         with pytest.MonkeyPatch.context() as mp:
             fixture = _real_verbs(tmp_path, mp)
-            # Guard the guard: the fixture really re-imported config_loader and rollover.
             assert fixture.loader is sys.modules[_HANDLER_MODULES[-1]]
             assert fixture.loader is not modules_before[_HANDLER_MODULES[-1]]
             assert fixture.rollover is not modules_before[_ROLLOVER_MODULE]
@@ -101,25 +66,9 @@ class TestVerbsFixtureIsUndoneAtTeardown:
         assert renamed == [], f"a parent package still names the fixture's {renamed}"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _snapshot(path: Path) -> bytes | None:
-    """Bytes if the file is there, None if it is not -- absence IS a state.
-
-    On a dev machine the operator's config exists and the guard is about its
-    bytes. On a fresh clone it does not exist, and the same guard then says the
-    suite did not CREATE it. Reading it unconditionally is what turned this
-    file's isolation tests into CI errors.
-    """
+    """Bytes if the file is there, None if it is not -- absence IS a state (a fresh clone has none)."""
     return path.read_bytes() if path.exists() else None
-
-
-# ===========================================================================
-# 2. Writes that land
-# ===========================================================================
 
 
 class TestSetBranchLimit:
@@ -180,13 +129,7 @@ class TestSetBranchLimit:
 
 
 class TestWriteDoesNotReencodeTheFile:
-    """A one-limit edit must not rewrite every non-ASCII character in the file.
-
-    _write_config_file used json.dumps' default ensure_ascii=True while the
-    operator's file (and every other JSON writer on this branch) holds literal
-    UTF-8. One `config set` therefore turned every em-dash into \\u2014 -- a
-    whole-file diff carrying no change, on the file BAUD shows the operator.
-    """
+    """A one-limit edit must not rewrite every non-ASCII character in the file (ensure_ascii)."""
 
     def test_em_dashes_stay_literal(self, verbs) -> None:
         assert "—" in verbs.path.read_text(encoding="utf-8")
@@ -298,18 +241,10 @@ class TestPushRoundTrip:
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 15
 
 
-# ===========================================================================
-# 3. Effective-limit semantics -- must mirror detector._should_rollover
-# ===========================================================================
-
-
 class TestEffectiveLimitsPerFileKey:
-    """The lookup is per FILE KEY, not per leaf key, and not a deep merge.
+    """The lookup is per FILE KEY, not a deep merge, mirroring detector._should_rollover.
 
-    detector._should_rollover reads per_branch[branch][file_type] and falls
-    back to defaults[file_type] ONLY when that whole dict is absent. So a
-    per_branch entry carrying only `sessions` leaves key_learnings with NO
-    limit -- a deep merge would claim 15 and the engine would enforce none.
+    A per_branch entry carrying only `sessions` leaves key_learnings with NO limit.
     """
 
     def _plant_partial_local(self, verbs) -> None:
@@ -353,15 +288,9 @@ class TestEffectiveLimitsPerFileKey:
 
         should, _lines, _schema, reason = verbs.detector._should_rollover(local)
 
-        # 20 sessions >= 22? No. 99 key_learnings has NO limit at all.
         assert "key_learnings" not in reason
         assert should is False
         assert verbs.loader.get_effective_limits("memory")["key_learnings"]["count"] is None
-
-
-# ===========================================================================
-# 4. Display -- rendered through Rich, not asserted on source strings
-# ===========================================================================
 
 
 class TestGetDisplay:
@@ -393,11 +322,7 @@ class TestGetDisplay:
 
 
 class TestBranchDisplayMarkers:
-    """Rich eats a lowercase [default] tag silently -- assert on the SCREEN.
-
-    Learned live by @daemon: console.print() parses markup, so the source
-    string can read perfectly while the terminal shows nothing at all.
-    """
+    """Rich eats a lowercase [default] tag silently -- assert on the SCREEN."""
 
     def test_default_marker_survives_rich(self, verbs, capsys) -> None:
         _run(verbs, "get", "@memory")
@@ -424,12 +349,7 @@ class TestBranchDisplayMarkers:
             assert entry_type in out
 
 
-# ===========================================================================
-# 5. A help flag is never an instruction
-# ===========================================================================
-
-# A help flag beside --json, in every position. TestHelpOutranksJson asks what
-# they print; TestHelpNeverWrites asks that none of them writes.
+# Shared: TestHelpOutranksJson asks what these print, TestHelpNeverWrites that none writes.
 _HELP_WITH_JSON = [
     ("set", "@memory", "sessions", "12", "--help", "--json"),
     ("set", "@memory", "sessions", "12", "--json", "--help"),
@@ -456,12 +376,7 @@ class TestHelpNeverWrites:
         + _HELP_WITH_JSON,
     )
     def test_file_is_byte_identical(self, verbs, args) -> None:
-        """A help request, alone or beside --json, leaves the config byte-identical.
-
-        The --json half was a second test of the same name and body in
-        TestHelpOutranksJson; it was retired into this table in leg 7 (compass 443),
-        so the twelve requests are still each run once.
-        """
+        """A help request, alone or beside --json, leaves the config byte-identical."""
         before = verbs.path.read_bytes()
         assert _run(verbs, *args) is True
         assert verbs.path.read_bytes() == before
@@ -509,18 +424,8 @@ class TestIntrospectionAndHelp:
         assert "USAGE" in _streams(capsys)
 
 
-# ===========================================================================
-# 6. The live config is never touched by this suite
-# ===========================================================================
-
-
 class TestOperatorConfigIsolation:
-    """A test that edited the fleet config would be the accident, not the guard.
-
-    The operator's file is gitignored: present on every dev machine, absent on
-    a fresh clone. The guard therefore compares SNAPSHOTS rather than bytes --
-    "still absent" is as much a pass as "unchanged", and neither is a skip.
-    """
+    """The operator's config is never touched; snapshots, because it is absent on a fresh clone."""
 
     def test_config_path_is_repointed(self, verbs, tmp_path) -> None:
         assert verbs.loader._CONFIG_PATH != verbs.operator_path
@@ -540,12 +445,7 @@ class TestOperatorConfigIsolation:
         assert _snapshot(verbs.operator_path) == before
 
     def test_no_registry_of_this_machine_is_reachable(self, verbs, tmp_path) -> None:
-        """The second registry door: _find_caller_registries walks up from CWD.
-
-        Left open, a run started inside a checkout picks up the fleet's own
-        AIPASS_REGISTRY.json and the suite passes for a reason that has
-        nothing to do with the code under test.
-        """
+        """The second registry door (_find_caller_registries walks up from CWD) is closed too."""
         names = {b["name"] for b in verbs.detector._read_registry()}
         assert names == {"memory", "DEVPULSE", "DAEMON"}
 
@@ -581,13 +481,7 @@ class TestHelpOutranksJson:
 
 
 class TestThePrintedExamplesAreLegalCommands:
-    """A suggestion naming a command the next verb refuses teaches the wrong thing.
-
-    The count ceiling (FPLAN-0593) turned `sessions 25` — printed in four
-    refusals and the help block — into an illegal command overnight. Nothing
-    caught it; three tests pinned the stale text and went red only because the
-    string moved. This pins the PROPERTY instead of the string.
-    """
+    """A printed example the next verb refuses teaches the wrong thing; pins the property, not the string."""
 
     def test_every_example_count_in_a_refusal_is_within_its_ceiling(self):
         import re
@@ -597,11 +491,7 @@ class TestThePrintedExamplesAreLegalCommands:
         from aipass.memory.apps.handlers.cli import config_content
         from aipass.memory.apps.modules import rollover_config
 
-        # Every file an example can be printed from: the verbs (and every
-        # refusal they print) moved to rollover_config.py, the routing stayed in
-        # rollover.py, and the help page's TEXT moved to config_content.py — the
-        # file holding `set @b sessions 12`. Leaving it out would let the one
-        # page operators copy from drift past its own ceiling unpinned.
+        # Every file an example can be printed from, the help page's text included.
         source = "".join(
             Path(str(module.__file__)).read_text(encoding="utf-8")
             for module in (rollover_mod, rollover_config, config_content)
@@ -617,15 +507,7 @@ class TestThePrintedExamplesAreLegalCommands:
 
 
 class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
-    """handlers/cli/config_content.py: the help page and limit blocks as lines.
-
-    FPLAN-0593 Phase 5. rollover_config.py sat at 657 lines against @seedgo's
-    600-line module band, and its display code could not move to handlers/
-    because handlers may not print. The TEXT could: this handler builds it and
-    returns it, the module prints it. These pins hold both halves of that
-    bargain — the handler never reaches a console, and the module prints exactly
-    what the handler returns, so the page an operator reads is the page built.
-    """
+    """handlers/cli/config_content.py builds lines and never prints; the module prints exactly those."""
 
     def test_the_handler_never_imports_the_cli_service_or_prints(self):
         import ast
@@ -659,8 +541,7 @@ class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
             assert block[-1] == ""
 
     def test_the_help_bounds_print_the_ceilings_they_are_handed(self):
-        # Data in, lines out: the handler reads no config of its own, so the
-        # BOUNDS block cannot print a ceiling the refusal would contradict.
+        # The handler reads no config, so BOUNDS cannot contradict the refusal.
         from aipass.memory.apps.handlers.cli import config_content as cc
 
         lines = cc.help_lines(
@@ -679,11 +560,7 @@ class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
         assert "unset" in line and " 0" not in line
 
     def test_the_module_prints_exactly_what_the_handler_returns(self, verbs, monkeypatch):
-        """`config get` prints the defaults block the handler builds, line for line, after its banner.
-
-        Through the command since leg 6 of DPLAN-0354: the handler is a recorder
-        that answers two known lines, so the assert needs no private name.
-        """
+        """`config get` prints the defaults block the handler builds, line for line, after its banner."""
         from aipass.memory.apps.handlers.cli import config_content as cc
         from aipass.memory.apps.modules import rollover_config
 
@@ -704,11 +581,6 @@ class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
         assert handed == [verbs.loader.get_default_limits()]
 
 
-# ===========================================================================
-# A limit write re-renders the meta line it changed (DPLAN-0414 T7)
-# ===========================================================================
-
-
 def _seat(verbs, branch: str) -> Path:
     """A minimal local.json for one minted branch, where the registry says it lives; its path."""
     local = verbs.detector._REPO_ROOT / "src" / "aipass" / branch / ".trinity" / "local.json"
@@ -723,6 +595,8 @@ def _sessions_meta(local: Path) -> str:
 
 
 class TestALimitWriteReRendersTheMetaLine:
+    """A limit write re-renders the sessions_meta line it changed."""
+
     def test_set_rewrites_the_branch_sessions_meta_to_the_new_keep(self, verbs) -> None:
         local = _seat(verbs, "memory")
 

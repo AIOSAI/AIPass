@@ -3,34 +3,14 @@
 # Description: Read-only lint handler for .trinity entry limit violations
 # Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Lint Handler — Entry Limit Violation Scanner
 
-Scans .trinity memory files across branches and reports entries that
-exceed their configured character caps.  Strictly **read-only** — never
-writes, modifies, truncates, or deletes any file.
-
-Called by the ``lint`` module (thin CLI layer).
-
-TWO MODES, ONE TRAVERSAL SHAPE (FPLAN-0593 / DPLAN-0347)
--------------------------------------------------------
-``run_lint`` measures the CANONICAL text field against its cap — the scan
-this handler has always done, unchanged.
-
-``run_lint_fields`` measures EVERY OTHER field against the closed shape
-``entry_limits`` publishes, because one capped field per entry type is what
-let @devpulse carry a 917-char ``status`` past every gate while the fleet
-median is 9.  It is an INVENTORY first and a violation report second: every
-string field is listed by characters whether or not it is in breach, since
-the number nobody could see is the reason the drift survived.
-
-The two modes never report the same defect twice.  ``check_fields`` skips
-the canonical field by contract and ``run_lint_fields`` never re-derives a
-cap — the canonical field appears in the fields-mode inventory so the
-picture is complete, and its violation stays with ``run_lint``.
+Read-only. ``run_lint`` judges the canonical field; ``run_lint_fields`` inventories every
+other field, so the two never report the same defect twice.
 """
 
 import json
@@ -62,30 +42,13 @@ UNITS_CHARS = "chars"
 UNITS_ITEMS = "items"
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _measure_dict_container(
     data: dict[str, Any],
     field: str,
 ) -> list[tuple[str, Any, bool]]:
     """Extract (key, payload, field_present) triples from a dict-style container.
 
-    Each value may be:
-      - a plain string (the entry itself), or
-      - a dict containing *field* (the entry is ``value[field]``).
-
-    The payload is returned **as it sits in the file**, whatever its type.
-    Judging it is ``check_entry``'s job, and it refuses anything it cannot
-    measure — filtering non-strings out here would restore the silence this
-    scanner exists to break.
-
-    ``field_present`` distinguishes the two refusal species: a value the
-    scanner cannot READ from a field it cannot FIND. An entry that lacks the
-    canonical key used to be dropped here, so lint answered "compliant" for a
-    shape the write gate refuses.
+    The payload stays untyped and missing fields are kept: ``check_entry`` must see what the write gate refuses.
     """
     pairs: list[tuple[str, Any, bool]] = []
     for key, value in data.items():
@@ -102,21 +65,7 @@ def _measure_list_container(
 ) -> list[tuple[str, Any, bool]]:
     """Extract (index-label, payload, field_present) triples from a list container.
 
-    Each item is expected to be a dict containing *field*; a bare string item
-    carries its own text, matching ``_extract_text``.
-
-    The payload is returned untyped, on purpose. This function used to hand
-    ``item[field]`` straight to ``len()``: a ``note`` holding three dicts
-    measured as **3** and sailed under a 300-char cap. That was the second
-    independent silent pass over the same corruption (the first being the
-    edit-time gate), and two blind measurements agreeing is what made the
-    drift look verified.
-
-    Items lacking the canonical field used to be skipped here, on the reading
-    that a missing field is a shape question for the trinity checker. That
-    boundary cost more than it bought: the write gate refuses those entries,
-    so a branch could be told it was compliant and then be blocked on its next
-    write for a shape lint had already seen and said nothing about.
+    Untyped on purpose: ``len()`` on a list of dicts measured 3 and passed a 300-char cap.
     """
     pairs: list[tuple[str, Any, bool]] = []
     for idx, item in enumerate(data):
@@ -125,11 +74,6 @@ def _measure_list_container(
         else:
             pairs.append((f"[{idx}]", item, True))
     return pairs
-
-
-# ---------------------------------------------------------------------------
-# Core lint logic
-# ---------------------------------------------------------------------------
 
 
 def _violation_record(
@@ -143,12 +87,7 @@ def _violation_record(
     field: str,
     present: bool,
 ) -> dict[str, Any]:
-    """Build one violation record and log the cause it names.
-
-    Two refusal species share the eight base keys and differ in what the agent
-    must DO about them: ``missing_field`` names the key to rename,
-    ``unmeasurable`` names the type that arrived where a string belongs.
-    """
+    """Build one violation record; ``missing_field`` names a key to rename, ``unmeasurable`` a wrong type."""
     violation: dict[str, Any] = {
         "branch": branch_name,
         "file": file_name,
@@ -186,13 +125,7 @@ def _lint_branch(
     branch_path: str,
     limits: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Lint a single branch and return a list of violation dicts.
-
-    Each violation dict has keys:
-        branch, file, container, key, length, cap, over_by, entry_type
-    An unmeasurable payload adds ``reason`` and ``found_type``; a missing
-    canonical field adds ``field`` beside them.
-    """
+    """Lint a single branch and return a list of violation dicts."""
     violations: list[dict[str, Any]] = []
     trinity_dir = Path(branch_path) / ".trinity"
 
@@ -224,7 +157,6 @@ def _lint_branch(
         if container_data is None:
             continue
 
-        # Build (key, text) pairs depending on kind
         if kind == "dict" and isinstance(container_data, dict):
             pairs = _measure_dict_container(container_data, field)
         elif kind == "list" and isinstance(container_data, list):
@@ -242,36 +174,11 @@ def _lint_branch(
     return violations
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def run_lint(
     branches: list[dict[str, Any]],
     branch_filter: str | None = None,
 ) -> dict[str, Any]:
-    """Scan branches for entry-limit violations.
-
-    This function is **read-only** — it never writes, modifies, truncates,
-    or deletes any file.
-
-    Args:
-        branches: List of branch dicts (``{"name": ..., "path": ...}``),
-            typically from ``_read_registry()`` in the module layer.
-        branch_filter: If provided, only lint this branch (case-insensitive).
-
-    Returns:
-        Result dict::
-
-            {
-                "success": True,
-                "violations": [...],      # sorted worst-first (highest over_by)
-                "total_violations": int,
-                "branches_scanned": int,
-                "branches_skipped": int,
-            }
-    """
+    """Scan branches for entry-limit violations (read-only), worst-first."""
     all_violations: list[dict[str, Any]] = []
     branches_scanned = 0
     branches_skipped = 0
@@ -280,7 +187,6 @@ def run_lint(
         name = branch.get("name", "unknown")
         path = branch.get("path", "")
 
-        # Apply branch filter (case-insensitive)
         if branch_filter and name.lower() != branch_filter.lower():
             continue
 
@@ -294,7 +200,6 @@ def run_lint(
         all_violations.extend(branch_violations)
         branches_scanned += 1
 
-    # Sort worst-first (highest over_by)
     all_violations.sort(key=lambda v: v["over_by"], reverse=True)
 
     json_handler.log_operation(
@@ -316,24 +221,10 @@ def run_lint(
     }
 
 
-# ---------------------------------------------------------------------------
-# Fields mode — the closed-shape inventory (FPLAN-0593)
-# ---------------------------------------------------------------------------
-
-
 def _percentile(values: list[int], fraction: float) -> int:
-    """Return the nearest-rank *fraction* percentile of *values*.
+    """Return the nearest-rank *fraction* percentile of *values* (0 when empty).
 
-    Nearest-rank rather than interpolated: every number this prints is a
-    length some entry actually has, so an agent can go and find it. An
-    interpolated 271.4 belongs to no entry and cannot be acted on.
-
-    Args:
-        values: Measured lengths, in any order.
-        fraction: Percentile as a fraction, e.g. ``0.95``.
-
-    Returns:
-        The value at that rank, or 0 when there is nothing to measure.
+    Nearest-rank, not interpolated: every number printed is a length some entry really has.
     """
     if not values:
         return 0
@@ -343,11 +234,7 @@ def _percentile(values: list[int], fraction: float) -> int:
 
 
 def _cap_of(spec: Any, key: str) -> int:
-    """Read one integer cap off a field spec, 0 when it publishes none.
-
-    0 means "no cap known for this field" everywhere in this module — the
-    same convention ``check_entry`` already uses for an unknown entry type.
-    """
+    """Read one integer cap off a field spec, 0 when it publishes none (``check_entry``'s convention)."""
     if not isinstance(spec, dict):
         return 0
     cap = spec.get(key)
@@ -355,12 +242,7 @@ def _cap_of(spec: Any, key: str) -> int:
 
 
 def _entry_pairs(container_data: Any, kind: str) -> list[tuple[str, Any]]:
-    """Return (key-label, WHOLE entry) pairs for a container.
-
-    Deliberately not ``_measure_dict_container``: those two extract the
-    canonical TEXT, which is the one field this mode does not judge. The
-    fields mode needs the entry itself, every key of it.
-    """
+    """Return (key-label, WHOLE entry) pairs; the _measure_* helpers extract only the canonical text."""
     if kind == "dict" and isinstance(container_data, dict):
         return [(str(key), value) for key, value in container_data.items()]
     if kind == "list" and isinstance(container_data, list):
@@ -371,22 +253,8 @@ def _entry_pairs(container_data: Any, kind: str) -> list[tuple[str, Any]]:
 def _measure_fields(entry: Any, shape: dict[str, Any], canonical: str) -> list[dict[str, Any]]:
     """Measure every string-bearing field of ONE entry.
 
-    An inventory, not a judgement: a field outside the shape is measured and
-    reported with ``cap`` 0 rather than dropped, because "how many characters
-    is this thing nobody configured" is the question the mode exists to
-    answer. ``check_fields`` decides separately whether it is in breach.
-
-    A ``list[str]`` field yields TWO rows — items and joined characters —
-    because the shape caps it both ways and a list can bust either alone.
-
-    Args:
-        entry: The entry as it sits in the file.
-        shape: The closed field shape for this entry type (may be empty).
-        canonical: Name of the canonical text field.
-
-    Returns:
-        Partial records: ``field``, ``units``, ``length``, ``cap``,
-        ``canonical``. The caller stamps branch/file/type on them.
+    An inventory: an unshaped field is reported with ``cap`` 0, not dropped. A ``list[str]`` field
+    yields an items row and a chars row, since the shape caps it both ways.
     """
     if isinstance(entry, str):
         # The legacy dict-container shape: the value IS the canonical text.
@@ -438,11 +306,7 @@ def _measure_fields(entry: Any, shape: dict[str, Any], canonical: str) -> list[d
 
 
 def _read_trinity_file(branch_name: str, path: Path) -> tuple[str, Any]:
-    """Read and parse one .trinity file, returning ``("", None)`` on any failure.
-
-    Read-only by construction: this is the only filesystem call the fields
-    mode makes, and it opens for reading.
-    """
+    """Read and parse one .trinity file, returning ``("", None)`` on any failure (the fields mode's only I/O)."""
     try:
         raw = path.read_text(encoding="utf-8")
         return raw, json.loads(raw)
@@ -456,22 +320,7 @@ def _lint_branch_fields(
     branch_path: str,
     limits: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Inventory every string field of one branch, and flag what is outside the shape.
-
-    Same traversal as :func:`_lint_branch` — the entry types name their own
-    file, container and kind, so the two modes can never disagree about which
-    files belong to a branch.
-
-    Args:
-        branch_name: Branch name, for the records and the log.
-        branch_path: Absolute path to the branch root.
-        limits: The dict returned by ``load_entry_limits``.
-
-    Returns:
-        ``(records, violations)``. Records are the inventory, one per
-        measured field per entry; violations come from ``check_fields``
-        with ``branch`` and ``file`` stamped on.
-    """
+    """Inventory every string field of one branch and flag what is outside the shape (same walk as _lint_branch)."""
     records: list[dict[str, Any]] = []
     violations: list[dict[str, Any]] = []
     trinity_dir = Path(branch_path) / ".trinity"
@@ -511,21 +360,7 @@ def _lint_branch_passport(
     branch_path: str,
     budgets: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    """Measure one branch's passport.json against its whole-file budget.
-
-    The passport has no closed field shape — @spawn owns its schema — so it
-    is measured by size only: the whole file against 6,000 characters and
-    every single string in it against 600.
-
-    Args:
-        branch_name: Branch name, for the records.
-        branch_path: Absolute path to the branch root.
-        budgets: The map returned by ``load_file_budgets``.
-
-    Returns:
-        ``(row, violations)``. The row is None when the branch has no
-        passport; violations carry ``branch`` and ``file``.
-    """
+    """Measure one branch's passport.json against its whole-file budget; row is None with no passport."""
     file_path = Path(branch_path) / ".trinity" / PASSPORT_FILE
     if not file_path.is_file():
         logger.info(f"[lint] {branch_name}: no {PASSPORT_FILE}, skipping the passport row")
@@ -554,25 +389,7 @@ def summarize_fields(
     records: list[dict[str, Any]],
     violations: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Roll the per-entry inventory up to one row per branch/type/field/units.
-
-    803 entries across 22 branches is not something anyone reads entry by
-    entry; ``max`` and ``p95`` beside the cap are what showed the 917-char
-    ``status`` against a fleet median of 9 in the first place.
-
-    Pure — no I/O.
-
-    Args:
-        records: Inventory records from :func:`_lint_branch_fields`.
-        violations: The flags for the same scan, so each row can say how
-            many of its measurements are in breach.
-
-    Returns:
-        Rows with ``branch``, ``file``, ``entry_type``, ``field``, ``units``,
-        ``count``, ``max``, ``p95``, ``cap``, ``canonical``, ``flagged`` and
-        ``worst_over``. Grouped by branch, entry types in config order,
-        fields worst-first within a type.
-    """
+    """Roll the per-entry inventory up to one row per branch/type/field/units (pure)."""
     flags: dict[tuple[str, ...], dict[str, int]] = {}
     for hit in violations or []:
         key = (hit.get("branch", ""), hit.get("entry_type", ""), hit.get("field", ""), hit.get("units", UNITS_CHARS))
@@ -615,9 +432,7 @@ def summarize_fields(
             }
         )
 
-    # A field ranks by its WORST unit, so a list's items row and chars row stay
-    # side by side. Ranking each row on its own split `tags` across the block
-    # and made one field look like two.
+    # A field ranks by its WORST unit so a list's items and chars rows stay adjacent.
     rank: dict[tuple[str, str, str], tuple[int, int]] = {}
     for row in rows:
         key = (row["branch"], row["entry_type"], row["field"])
@@ -640,31 +455,7 @@ def run_lint_fields(
     branches: list[dict[str, Any]],
     branch_filter: str | None = None,
 ) -> dict[str, Any]:
-    """Inventory every .trinity string field across branches, flagging the closed shape.
-
-    This function is **read-only** — it never writes, modifies, truncates,
-    or deletes any file.
-
-    Args:
-        branches: List of branch dicts (``{"name": ..., "path": ...}``),
-            typically from ``_read_registry()`` in the module layer.
-        branch_filter: If provided, only scan this branch (case-insensitive).
-
-    Returns:
-        Result dict::
-
-            {
-                "success": True,
-                "fields": [...],       # per-entry inventory records
-                "summary": [...],      # one row per branch/type/field/units
-                "violations": [...],   # sorted worst-first (highest over_by)
-                "passport": [...],     # one whole-file row per branch
-                "total_fields": int,
-                "total_violations": int,
-                "branches_scanned": int,
-                "branches_skipped": int,
-            }
-    """
+    """Inventory every .trinity string field across branches, flagging the closed shape (read-only)."""
     budgets = load_file_budgets()
     records: list[dict[str, Any]] = []
     all_violations: list[dict[str, Any]] = []
@@ -694,7 +485,6 @@ def run_lint_fields(
             passports.append(passport_row)
         branches_scanned += 1
 
-    # Worst-first, exactly as the canonical mode sorts.
     all_violations.sort(key=lambda v: v.get("over_by", 0), reverse=True)
 
     json_handler.log_operation(

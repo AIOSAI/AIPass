@@ -3,29 +3,15 @@
 # Description: Todo module — the pad at a glance, its backlog, and restore (CLI routing only)
 # Version: 1.0.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Todo Module — the sticky-note pad and its backlog (DPLAN-0345, FPLAN-0590 row 5)
 
-    drone @memory todo [@name]             ONE line: the pad against its configured count, and the backlog count
-    drone @memory todo backlog [@name]     the backlog: number, date, priority, rolled, reason, task
-    drone @memory todo restore <number>    one backlog todo back onto YOUR pad, under the next number
-
-Routing and printing only. What resolves, what is read and what is refused
-lives in handlers/rollover/todo_report.py; the roll and the restore
-themselves in handlers/rollover/todo_roll.py.
-
-Bare ``todo`` answers with the pad line, not an introspection page: that line
-IS the verb (DPLAN-0345 @memory review §4 - one line, pad count and backlog
-count). The module map prints after a refused argument; the manual under
-``--help``.
-
-Every refusal goes through ``error()``, so the entry point exits 2 - a refusal
-that exits 0 is only half a refusal. ``--json`` is not taken: no consumer reads
-these verbs by machine, and the flag is refused like any other unknown
-argument rather than silently ignored.
+Routing and printing only; the logic lives in handlers/rollover/todo_report.py and todo_roll.py.
+Every refusal goes through ``error()`` so the entry point exits 2. ``--json`` is refused, not ignored.
+Reference: docs/todos_and_backlog.md
 """
 
 import os
@@ -64,28 +50,8 @@ _FORMS = (
 )
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Route the ``todo`` verbs.
-
-    Routing:
-        todo [@name | --branch @name]          -> one pad line
-        todo backlog [@name | --branch @name]  -> the backlog, one record per line
-        todo restore <number>                  -> restore onto the caller's own pad
-        todo --help / -h / help (any slot)     -> print_help()
-
-    Args:
-        command: Command name
-        args: Tokens after ``todo``
-
-    Returns:
-        True for ``todo`` (handled, possibly refused), False for any other command
-    """
+    """Route the ``todo`` verbs; True for ``todo`` (handled, possibly refused), False otherwise."""
     if command != "todo":
         return False
 
@@ -111,11 +77,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     _refuse(f"Unknown todo argument: '{sub}'")
     print_introspection()
     return True
-
-
-# =============================================================================
-# ROUTING HELPERS
-# =============================================================================
 
 
 def _refuse(message: str) -> None:
@@ -174,11 +135,6 @@ def _restore(tokens: List[str]) -> None:
     branch, refused = _branch(tokens[1:], "todo restore")
     if not refused:
         _print(todo_report.restore_pad(tokens[0], branch))
-
-
-# =============================================================================
-# INTROSPECTION & HELP
-# =============================================================================
 
 
 def print_introspection() -> None:

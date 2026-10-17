@@ -3,18 +3,10 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
-
-# Tests for the rollover trigger detection module (apps/handlers/monitor/detector).
-#
-# Uses tmp_path for all file operations. Creates real temp files with JSON content
-# rather than mocking open(). The detector module is imported inside each test
-# to ensure the autouse conftest fixture for json_handler is already applied.
-# (2026-09-27: detector is now imported once at the top; the fixture patches its
-# json_handler, config_loader and logger at the edge with monkeypatch.setattr.)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — resident tier, read_scope() externals: tests/test_residency_scope.py
@@ -38,38 +30,24 @@ logger = logging.getLogger(__name__)
 _ONE_BRANCH = '{"branches":[{"name":"%s","path":"src/b"}]}'
 
 
-# ---------------------------------------------------------------------------
-# Autouse fixture -- mock heavy infrastructure before detector is imported
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_detector_infrastructure(monkeypatch):
     """Mock prax logger and json_handler so detector.py can be imported."""
 
-    # -- prax logger --------------------------------------------------------
     monkeypatch.setattr(detector, "logger", MagicMock())
 
-    # -- memory json handler ------------------------------------------------
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
-    # -- config_loader (must return real dicts, not MagicMocks) -------------
+    # Real dicts, not MagicMocks: the detector indexes into them.
     mock_config_loader = MagicMock()
     mock_config_loader.load.return_value = {
         "rollover": {"defaults": {}, "per_branch": {}},
     }
     mock_config_loader.section.side_effect = lambda name: mock_config_loader.load.return_value.get(name, {})
 
-    # Patched at the edge on the real module: detector is imported once at the
-    # top of this file, and monkeypatch restores each attribute after the test.
     monkeypatch.setattr(detector, "json_handler", mock_json_handler)
     monkeypatch.setattr(detector, "config_loader", mock_config_loader)
-
-
-# ===========================================================================
-# Memory file resolution, read through get_rollover_stats (a read-only walk)
-# ===========================================================================
 
 
 def _stats_over(tmp_path: Path, monkeypatch, branch_path: str) -> dict:
@@ -135,11 +113,7 @@ class TestGetRolloverStats:
     """get_rollover_stats() counts a tmp fleet's files: checked, ready, undrainable."""
 
     def test_counts_one_branch_with_a_ready_file_and_an_undrainable_one(self, tmp_path: Path, monkeypatch):
-        """local is over its sessions count and holds a dict of learnings; observations is under.
-
-        Mutants: `stats["files_ready"] += 1` -> `+= 2`, and
-        `stats["files_undrainable"] += 1` -> `+= 0` - both redden this test.
-        """
+        """local is over its sessions count and holds a dict of learnings; observations is under."""
         trinity = tmp_path / "writer" / ".trinity"
         trinity.mkdir(parents=True)
         local = {
@@ -165,11 +139,6 @@ class TestGetRolloverStats:
             "4/3 key_learnings held as a dict, not a list (schema 2.0.0)"
         ]
         assert stats["branches"]["b"]["observations"] == {"current": 1, "ready": False, "schema_version": "3.0.0"}
-
-
-# ===========================================================================
-# check_single_file
-# ===========================================================================
 
 
 class TestCheckSingleFile:
@@ -266,12 +235,7 @@ class TestCheckSingleFile:
         assert result["should_rollover"] is False
 
     def test_v2_list_key_learnings_triggers_rollover(self, tmp_path: Path, monkeypatch):
-        """List-shaped key_learnings ABOVE count triggers v2 rollover.
-
-        Above, not "at/over": keep-3 means the file may hold 3. Firing at the
-        limit while the extractor drains `len - limit` (nothing) is the
-        NOTHING DRAINED skip loop — see test_trinity_standard.py::TestKeepNKeepsN.
-        """
+        """List-shaped key_learnings ABOVE count triggers v2 rollover; at the limit is the NOTHING DRAINED loop."""
         mem_file = tmp_path / "DEVPULSE.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
@@ -334,12 +298,7 @@ class TestCheckSingleFile:
         return mem_file
 
     def test_a_dict_over_its_count_is_undrainable_not_a_trigger(self, tmp_path: Path, monkeypatch):
-        """A dict has no order and no numbers, and the extractor drains lists only.
-
-        It used to count here while the extractor skipped it as "No entries
-        exceed v2 limits": VERA sat at 250/15 "ready for rollover" on every run
-        and every PreCompact fired a fleet run that could not move it.
-        """
+        """A dict has no order and no numbers, and the extractor drains lists only: never a trigger."""
         mem_file = self._dict_learnings(tmp_path, 4)
 
         limits = {"per_branch": {}, "defaults": {"local": {"key_learnings": {"count": 3}}}}
@@ -541,11 +500,6 @@ class TestSessionAutoCompactBudget:
         assert "12/10 sessions" in result["trigger"].v2_reason
 
 
-# ===========================================================================
-# _read_registry
-# ===========================================================================
-
-
 class TestReadRegistry:
     """The registry read, through read_scope(): a tmp root declares no external roots, so it is the write scope."""
 
@@ -560,7 +514,6 @@ class TestReadRegistry:
         }
         registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
 
-        # Point _REPO_ROOT at our tmp_path
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
@@ -568,13 +521,11 @@ class TestReadRegistry:
 
         assert len(result) == 2
         assert result[0]["name"] == "memory"
-        # Paths should be resolved to absolute
         assert Path(result[0]["path"]).is_absolute()
 
     def test_missing_registry_returns_empty(self, tmp_path: Path, monkeypatch):
         """Missing registry file should return empty list."""
 
-        # Point _REPO_ROOT at a directory with no registry file
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
@@ -583,12 +534,7 @@ class TestReadRegistry:
         assert result == []
 
     def test_an_unreadable_core_registry_is_not_an_empty_fleet(self, tmp_path: Path, monkeypatch):
-        """An unreadable core registry is a failure the walk reports, never "No branches in registry".
-
-        Until leg 3 of DPLAN-0354 the read answered [] here, the list an empty
-        registry gives, so check_all_branches said success with nothing to do
-        and no rollover ran anywhere.
-        """
+        """An unreadable core registry is a failure the walk reports, never "No branches in registry"."""
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text("NOT JSON {{{", encoding="utf-8")
 
@@ -651,11 +597,6 @@ class TestReadRegistry:
         result = detector.read_scope()
 
         assert result == []
-
-
-# ===========================================================================
-# Self-healing recreation (_recreate_trinity_file)
-# ===========================================================================
 
 
 def _heal(tmp_path: Path, monkeypatch, branch_dir: Path, name: str) -> dict:
@@ -737,12 +678,7 @@ class TestRecreateTrinityFile:
         assert "limits" not in data["document_metadata"]
 
     def test_a_branch_outside_the_aipass_root_is_never_reseeded(self, tmp_path: Path, monkeypatch):
-        """The template seed carries the "archived to @memory" promise into the file it makes.
-
-        That promise is only true of files inside the AIPass root, so the seed
-        is refused outside it — and refused before the ``.trinity/`` directory
-        is made, because making it is already a write.
-        """
+        """The seed is refused outside the AIPass root, before ``.trinity/`` is made (that is a write)."""
 
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
@@ -759,7 +695,6 @@ class TestRecreateTrinityFile:
         branch_dir = tmp_path / "mybranch"
         trinity_dir = branch_dir / ".trinity"
         trinity_dir.mkdir(parents=True)
-        # Only create observations, NOT local — local should be recreated
         obs_data = {
             "document_metadata": {"schema_version": "1.0.0", "limits": {"max_lines": 600}},
             "observations": [],
@@ -806,10 +741,6 @@ class TestRecreateTrinityFile:
         assert data["document_metadata"]["document_name"] == "mybranch.LOCAL"
         assert "limits" not in data["document_metadata"]
 
-
-# ===========================================================================
-# Todos -- COUNT ONLY, never on the fleet walk (DPLAN-0345)
-# ===========================================================================
 
 _ROLLOVER_WITH_TODOS = {
     "defaults": {
@@ -898,26 +829,11 @@ class TestTodosAreCountOnly:
         counter.assert_not_called()
 
 
-# ===========================================================================
-# Known registries -- RETIRED 2026-09-18; the caller walk remembers nothing
-# ===========================================================================
-
-
 class TestKnownRegistries:
     """``known_registries.json`` is retired: a caller's cwd is never remembered.
 
-    It was a list that grew by where people stood. On 2026-09-17 07:47 one
-    ``drone @memory`` call from Vera Studio's cwd added that project's registry,
-    and from then on every rollover walk — from ANY cwd — wrote four Vera Studio
-    branches' memories. It also held three pytest tmp paths, written by a test
-    whose patch landed on a stale module, and a deleted scratchpad probe.
-    Nothing legitimate was left in it: @baud reaches the fleet as a declared
-    resident through ``registry_scope``, never through this file.
-
-    The caller walk still runs, because an agent standing in a project inside
-    the AIPass root is a real caller — but what it finds is scoped to THIS
-    call, and anything outside the root is dropped through the write fence's
-    own predicate before it can reach a lane that writes.
+    The caller walk is scoped to THIS call, and anything outside the root is dropped
+    through the write fence's own predicate before a writing lane sees it.
     """
 
     def test_the_persistence_api_is_gone(self):
@@ -959,11 +875,7 @@ class TestKnownRegistries:
         return home
 
     def test_a_caller_registry_outside_the_root_never_enters_the_write_scope(self, tmp_path: Path, monkeypatch):
-        """THE 07:47 CALL, replayed: standing in another repo adds nothing to rollover.
-
-        Logged once, at INFO — standing in another repo is expected, not a
-        fault, and a WARNING on every call from there would be noise nobody reads.
-        """
+        """Standing in another repo adds nothing to rollover, logged once at INFO (expected, not a fault)."""
 
         self._home_with_memory(tmp_path, monkeypatch)
         log = MagicMock()
@@ -1017,29 +929,11 @@ class TestKnownRegistries:
 
 
 class TestTheCallerCwdWalkReadsNamesNotSpellings:
-    """The third of this tree's four ``*_REGISTRY.json`` walks, and the costliest.
+    """The caller-cwd ``*_REGISTRY.json`` walk matches exact-case names on a case-folding filesystem.
 
-    @drone found the case-folding widening on the Windows CI leg and @devpulse
-    routed it to every walk owner; ``registry_scope`` was cured first and this
-    site was named next, by @seedgo's measured fleet discriminator.
-
-    WHY THIS ONE HAD THE MOST TO LOSE. It walks up from the CALLER'S directory —
-    an arbitrary repo this branch does not own — so the bait is not
-    hypothetical: flow's plan counters and ``.spawn/.template_registry.json``
-    sit in every branch. And a folded match here is not merely read once:
-
-    * it was ``persist_registry()``'d into known_registries.json PERMANENTLY, so
-      one run on a folding filesystem left the wrong file in the fleet's state
-      forever — retired 2026-09-18 with the file itself (``TestKnownRegistries``),
-      so the walk now remembers nothing past the call, and
-    * the ``break`` after the first hit means a spurious NEARER match stops the
-      walk before the real registry above it is ever seen.
-
-    Refusing, admitting and forgetting — the other three walks each do one of
-    those. This one did all three; forgetting is now the only one it can't.
-
-    See ``case_insensitive_filesystem`` in conftest for why the condition is
-    injected rather than skipped off-platform.
+    The bait is real (``.spawn/.template_registry.json`` sits in every branch), and the
+    ``break`` means a nearer folded match hides the real registry. The condition is
+    injected (conftest ``case_insensitive_filesystem``), not skipped off-platform.
     """
 
     @pytest.fixture
@@ -1072,12 +966,7 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
     def test_bait_nearer_than_the_real_registry_does_not_end_the_walk(
         self, tmp_path, monkeypatch, case_insensitive_filesystem
     ):
-        """The ``break`` is the second defect, and it is invisible in the first test.
-
-        With the bait in a SUBdirectory the walk starts from, an unfiltered glob
-        stops there and the genuine registry one level up is never found — a
-        silent narrowing, not a noisy wrong answer.
-        """
+        """Bait nearer than the real registry must not end the walk before the real one is found."""
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
         monkeypatch.setattr(write_fence, "ROOT", tmp_path)

@@ -3,18 +3,13 @@
 # Description: Tests for search query_executor subprocess encoding and vector search
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/search/query_executor.py."""
 
-# Covers:
-#     from aipass.memory.apps.handlers.search.query_executor import encode_query_subprocess
-#     from aipass.memory.apps.handlers.search.query_executor import search_vectors_subprocess
-#
-# Tests subprocess-based encoding/search.
-# All tests use mocks -- no live subprocess, ML model, or ChromaDB access.
+# All tests use mocks: no live subprocess, ML model, or ChromaDB access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — query_executor._pin_plan_id_matches(); tests/test_chroma_source_match.py
@@ -25,11 +20,6 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.search import query_executor
-
-
-# ===========================================================================
-# Tests: encode_query_subprocess
-# ===========================================================================
 
 
 class TestEncodeQuerySubprocess:
@@ -67,7 +57,7 @@ class TestEncodeQuerySubprocess:
         assert "Model not found" in result["error"]
 
     def test_an_embedder_refusal_names_its_cause(self):
-        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty (leg 9)."""
+        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty."""
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = json.dumps({"success": False, "error": "inhomogeneous shape"})
@@ -126,11 +116,6 @@ class TestEncodeQuerySubprocess:
 
         assert result["success"] is False
         assert "Cannot execute" in result["error"]
-
-
-# ===========================================================================
-# Tests: search_vectors_subprocess
-# ===========================================================================
 
 
 class TestSearchVectorsSubprocess:
@@ -228,23 +213,11 @@ class TestSearchVectorsSubprocess:
         assert "Cannot execute" in result["error"]
 
 
-# ===========================================================================
-# Tests: the exact plan-ID pin when its store answer fails (leg 8)
-# ===========================================================================
-
-
 class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
     """A store that fails is not a store with no match: the search says so.
 
-    Before leg 8 a non-zero exit of the plan fetch answered [] without a word,
-    the same answer as "no chunk carries this plan ID", so the exact-ID pin
-    vanished silently. The one test here that starts a process runs a stand-in
-    script under tmp_path that exits 3; the store is never opened.
-
-    Each stand-in reads its stdin first, as the real store does. One that exits
-    unread leaves the search writing into a closed pipe, and a worker whose
-    SIGPIPE is the kernel default dies there with no traceback (macOS CI
-    38128154826; flow.py's import-time SIG_DFL, since moved under __main__).
+    Each stand-in reads its stdin first, as the real store does: one that exits unread
+    leaves the search writing into a closed pipe, where a default-SIGPIPE worker dies silently.
     """
 
     def _search(self, monkeypatch, tmp_path, script_text):

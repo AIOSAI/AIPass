@@ -3,29 +3,12 @@
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/health.py -- get_branch_health()."""
 
-# health.get_branch_health() wraps two existing read-only checks (rollover
-# entry-count via handlers/monitor/detector.py, character-cap entry-size via
-# handlers/json/lint_handler.py) into one public function for @daemon to
-# import from its modules/ layer.
-#
-# Covers:
-#   - Unknown branch returns success=False with an error message
-#   - A known branch with no violations and no rollover due (default shape)
-#   - A known branch where entry-count DOES trigger rollover (True branch)
-#   - A known branch with planted entry-size violations
-#   - A memory_type whose .trinity file is missing is skipped gracefully
-#   - Case-insensitive branch resolution
-#   - Read-only: files are byte-identical before/after the call
-#   - The exact returned-dict shape
-#   - A pin against THIS branch's own real .trinity/local.json and
-#     .trinity/observations.json -- not just synthetic fixtures (per
-#     @daemon's own lesson: a synthetic fixture carried a field their real
-#     files did not, and the gap was the actual bug)
+# get_branch_health() is @daemon's public import: detector entry-count plus lint_handler entry-size, read-only.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — entry cap rules in handlers/json/lint_handler.py; tests/test_lint.py
@@ -45,36 +28,19 @@ from aipass.memory.apps.handlers.monitor import detector as _detector
 from aipass.memory.apps.modules import health as _health
 
 
-# ---------------------------------------------------------------------------
-# Infrastructure: the real chain, patched at the edge.
-#
-# The whole health -> detector / lint_handler -> entry_limits / config_loader
-# / json_handler chain is imported for real at the top of this file (real
-# packages have a real __path__, so the dotted imports resolve), and then only
-# the two behaviors that matter are monkeypatched, on the very objects that
-# chain bound: config_loader returns controlled dicts (deterministic, no
-# coupling to live memory.config.json), and json_handler.log_operation is
-# stubbed so tests never write real operational log files.
-# ---------------------------------------------------------------------------
+# The real chain, patched at the edge: config_loader and json_handler.log_operation, on the objects it bound.
 
 _CHAIN = (_health, _detector, _lint_handler, _entry_limits)
 
 
 @pytest.fixture(autouse=True)
 def _mock_health_infrastructure(monkeypatch):
-    """Patch config_loader to controlled dicts and json_handler.log_operation
-    to a no-op on every module of the real health chain."""
+    """Patch config_loader to controlled dicts and log_operation to a no-op across the health chain."""
 
-    # Never let a test write a real entry into memory_json/*.json.
     for json_service in {id(mod.json_handler): mod.json_handler for mod in _CHAIN}.values():
         monkeypatch.setattr(json_service, "log_operation", MagicMock(return_value=True))
 
-    # Default: a "config gap" for rollover (empty defaults/per_branch) so
-    # check_single_file deterministically reports should_rollover=False,
-    # and an empty entry_limits.entry_types so run_lint deterministically
-    # reports zero violations -- independent of live memory.config.json.
-    # Individual tests override via monkeypatch when they need a specific
-    # scenario (rollover due / planted violation).
+    # Default: a config gap, so no rollover is due and lint finds nothing, whatever the live config says.
     for config_loader in {id(mod.config_loader): mod.config_loader for mod in (_detector, _entry_limits)}.values():
         monkeypatch.setattr(
             config_loader,
@@ -99,11 +65,6 @@ def _get_detector():
 
 def _get_lint_handler():
     return _lint_handler
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
 
 
 def _valid_local_json() -> dict[str, Any]:
@@ -132,11 +93,6 @@ def _make_branch(tmp_path: Path, name: str = "test_branch", with_observations: b
     return {"name": name, "path": str(branch_dir)}
 
 
-# ===========================================================================
-# 1. Unknown branch
-# ===========================================================================
-
-
 class TestUnknownBranch:
     def test_unknown_branch_returns_error(self, tmp_path: Path):
         health = _get_health()
@@ -148,7 +104,7 @@ class TestUnknownBranch:
         assert result == {"success": False, "error": "Unknown branch: nosuchbranch"}
 
     def test_an_unreadable_registry_is_answered_never_raised(self, tmp_path: Path):
-        """@daemon calls this outside any try, from a function promising never to raise (DPLAN-0354 leg 3b)."""
+        """@daemon calls this outside any try, from a function promising never to raise."""
         health = _get_health()
         registry = tmp_path / "AIPASS_REGISTRY.json"
         refusal = _detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
@@ -169,14 +125,7 @@ class TestUnknownBranch:
         assert "anything" in result["error"]
 
     def test_a_declared_external_branch_is_not_unknown(self, tmp_path: Path):
-        """Health reads, so it resolves names through the scope holding the external tier.
-
-        The write fence of 2026-09-18 was right and stays; it also left this
-        lane resolving through the WRITE scope, so ``health @vera`` answered
-        "Unknown branch" for a read that was never fenced. ``read_scope`` is
-        the binding under test: reach back for ``_read_registry`` and this
-        patch raises AttributeError instead of passing quietly.
-        """
+        """Health reads, so it resolves names through read_scope (external tier included), not the write scope."""
         health = _get_health()
         external = _make_branch(tmp_path, name="vera")
 
@@ -185,11 +134,6 @@ class TestUnknownBranch:
 
         assert result["success"] is True, result.get("error")
         assert result["branch"] == "vera"
-
-
-# ===========================================================================
-# 2. Known branch -- no violations, no rollover due (default shape)
-# ===========================================================================
 
 
 class TestKnownBranchNoViolations:
@@ -223,11 +167,6 @@ class TestKnownBranchNoViolations:
         assert result["branch"] == "clean_branch"
 
 
-# ===========================================================================
-# 3. Known branch -- entry-count DOES trigger rollover
-# ===========================================================================
-
-
 class TestKnownBranchRolloverDue:
     def test_should_rollover_true_carries_trigger_fields(self, tmp_path: Path, monkeypatch):
         health = _get_health()
@@ -243,9 +182,7 @@ class TestKnownBranchRolloverDue:
         (trinity / "local.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
         (trinity / "observations.json").write_text(json.dumps(_valid_observations_json(), indent=2), encoding="utf-8")
 
-        # health.py imports check_single_file/_get_memory_file_path directly
-        # from detector, so patch config_loader on the detector module the
-        # already-imported names came from (same object health.py is using).
+        # health.py imported detector's functions by name, so patch the config_loader they bound.
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -266,11 +203,6 @@ class TestKnownBranchRolloverDue:
         assert result["entry_count"]["observations"]["should_rollover"] is False
 
 
-# ===========================================================================
-# 4. A memory_type file that does not exist is skipped gracefully
-# ===========================================================================
-
-
 class TestMissingMemoryFile:
     def test_missing_observations_is_none_not_an_error(self, tmp_path: Path):
         health = _get_health()
@@ -282,11 +214,6 @@ class TestMissingMemoryFile:
         assert result["success"] is True
         assert result["entry_count"]["observations"] is None
         assert result["entry_count"]["local"] is not None
-
-
-# ===========================================================================
-# 5. Entry-size violations carry through
-# ===========================================================================
 
 
 class TestEntrySizeViolations:
@@ -333,11 +260,6 @@ class TestEntrySizeViolations:
         assert v["over_by"] == 5
 
 
-# ===========================================================================
-# 6. Read-only -- files unchanged after the call
-# ===========================================================================
-
-
 class TestReadOnly:
     def test_files_unchanged_after_call(self, tmp_path: Path):
         health = _get_health()
@@ -353,11 +275,6 @@ class TestReadOnly:
 
         assert local_path.read_text(encoding="utf-8") == local_before, "local.json was modified!"
         assert obs_path.read_text(encoding="utf-8") == obs_before, "observations.json was modified!"
-
-
-# ===========================================================================
-# 7. Public surface
-# ===========================================================================
 
 
 class TestPublicSurface:
@@ -385,26 +302,10 @@ class TestPublicSurface:
             assert set(result["entry_count"][memory_type].keys()) == {"should_rollover", "current_lines", "reason"}
 
 
-# ===========================================================================
-# 8. REAL .trinity FILES (production truth, not fixtures)
-# ===========================================================================
-
-
 class TestRealTrinityFiles:
-    """Pin against @memory's OWN live .trinity files, not just synthetic
-    fixtures.
+    """Pin against @memory's OWN live .trinity files: a synthetic fixture cannot fail the way real data can.
 
-    Per @daemon's own hard-won lesson this week (recorded in their mail): a
-    synthetic fixture carried a field their real files did not, and the gap
-    between "the fixture models reality" and reality was the actual bug. A
-    synthetic tmp_path branch cannot fail the way real production data can,
-    so this reads the real files on disk.
-
-    config_loader stays mocked (same controlled dicts as every other test in
-    this file, config-gap / empty entry_types) so the assertions do not
-    depend on live rollover thresholds drifting over time -- what is real
-    here is the FILE: real path resolution via the real registry shape,
-    real JSON parsing, real line counting.
+    config_loader stays mocked so live thresholds cannot drift the assertions; what is real is the FILE.
     """
 
     BRANCH_ROOT = Path(__file__).resolve().parents[1]
@@ -443,20 +344,8 @@ class TestRealTrinityFiles:
         assert isinstance(result["entry_size"]["total_violations"], int)
 
 
-# ===========================================================================
-# The exit seam — a refusal that exits 0 is half a refusal
-# ===========================================================================
-
-
 class TestTheUnknownSubcommandRefusalReachesTheExitCode:
-    """The fleet refusal sweep, 2026-09-07: `health <bogus>` exited 0.
-
-    It printed the right sentence through `warning()`, which colours the line
-    and marks nothing, so `resolve_exit(True)` in the entry point read a clean
-    command and returned 0. A script asking whether the verb existed was told
-    yes. The sentence is unchanged; it goes through `error()` now, which sets
-    the process failure flag the entry point reads.
-    """
+    """`health <bogus>` must exit 2: a refusal through `warning()` marks nothing and exits 0."""
 
     def test_an_unknown_subcommand_exits_two(self, capsys):
 
@@ -478,11 +367,6 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
         captured = capsys.readouterr()
         assert "health Module" in captured.out
         assert "get_branch_health" in captured.out
-
-
-# ===========================================================================
-# The branch form — `health @name` renders get_branch_health (DPLAN-0414 T7)
-# ===========================================================================
 
 
 def _due_and_oversize_branch(tmp_path: Path, monkeypatch) -> dict[str, str]:

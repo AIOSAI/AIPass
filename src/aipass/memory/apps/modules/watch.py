@@ -3,28 +3,14 @@
 # Description: Memory Watcher Module
 # Version: 0.2.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory Watcher Module
 
-Starts the auto-rollover watcher: monitors every registered branch's .trinity/
-files and rolls them over when entry counts exceed the configured limits.
-
-Purpose:
-    Thin CLI routing over handlers/monitor/watch_runner.py -- argument
-    handling, help, and introspection only.
-
-Design:
-    `watch` was a built-in on the entry point until 2026-08-13, which meant the
-    entry point imported two monitor handlers directly (encapsulation 66% on
-    apps/memory.py, APLAN-0010). It is a module like every other command now.
-
-    No-args runs introspection and *then* starts the watcher: `drone @memory
-    watch` starting the watcher is the live contract -- README, entry-point help
-    and operator habit all rely on it -- so introspection is printed as the
-    watcher's banner rather than replacing the action.
+No-args prints introspection and THEN starts the watcher: README, entry-point
+help and operator habit rely on bare `watch` starting it.
 """
 
 import os
@@ -54,28 +40,9 @@ from aipass.memory.apps.handlers.monitor.watch_runner import (
 )
 
 
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle the watch command with seedgo-compliant introspection.
-
-    Routing:
-        watch (no args)         -> introspection banner, then start the watcher
-        watch --help/-h/help    -> print_help()
-        watch <anything else>   -> error naming the valid usage
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
-    # Top-level help (backward compat -- entry point may send these)
+    """Handle the watch command with seedgo-compliant introspection."""
+    # The entry point may still send top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
         return True
@@ -87,14 +54,12 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_help()
             return True
 
-        # No args -> introspection, then the action (see module docstring)
         if not args:
             print_introspection()
             _start_session()
             return True
 
-        # `watch` takes no arguments -- fail loudly rather than silently
-        # starting a long-running process the caller did not ask for.
+        # Fail loudly rather than start a long-running process nobody asked for.
         error(
             f"Unknown argument: {args[0]}",
             suggestion="Run 'drone @memory watch' to start the watcher, or 'drone @memory watch --help'",
@@ -106,18 +71,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     return False
 
 
-# =============================================================================
-# WATCH SESSION (display + orchestration -- handlers hold the lifecycle)
-# =============================================================================
-
-
 def _start_session() -> None:
-    """
-    Run a watch session: start the watcher, report it, block until Ctrl+C.
-
-    Every line printed here is display; the lifecycle itself lives in
-    handlers/monitor/watch_runner.py.
-    """
+    """Run a watch session: start the watcher, report it, block until Ctrl+C."""
 
     def signal_handler(sig, frame):
         """Handle SIGINT for graceful watcher shutdown."""
@@ -144,7 +99,6 @@ def _start_session() -> None:
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     console.print()
 
-    # Initial over-cap count, so the operator sees the backlog before waiting
     stats = current_stats()
     if stats.get("success"):
         ready = stats.get("files_ready", 0)
@@ -157,18 +111,8 @@ def _start_session() -> None:
     wait_forever()
 
 
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
-
-
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard).
-
-    Printed as the watcher's banner when 'watch' is invoked with no arguments,
-    so the operator sees which handlers the watcher is wired to before it
-    takes over the terminal.
-    """
+    """Display module introspection info (seedgo standard); also the watcher's banner."""
     console.print()
     console.print("[bold cyan]watch Module[/bold cyan]")
     console.print("Starts the auto-rollover watcher over every registered branch")
@@ -200,22 +144,15 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
 if __name__ == "__main__":
-    # No args -> introspection + watcher (seedgo standard, see module docstring)
     if len(sys.argv) < 2:
         handle_command("watch", [])
         sys.exit(0)
 
-    # --help -> full help
     if sys.argv[1] in ("--help", "-h", "help"):
         handle_command("watch", ["--help"])
         sys.exit(0)
 
-    # Execute command via handle_command
     command = sys.argv[1]
     if not handle_command(command, sys.argv[2:]):
         error(f"Unknown command: {command}", suggestion="Run 'drone @memory watch --help' for available commands")

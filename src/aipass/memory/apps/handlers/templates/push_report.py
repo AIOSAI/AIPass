@@ -3,30 +3,13 @@
 # Description: Renders and persists the trinity push report — the artifact the dry-run exists to produce
 # Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Trinity Push Report
 
-The dry-run's whole purpose is a report a human reads before granting a fleet
-GO, so the rendering lives in a handler rather than in the CLI module: it is
-domain work with its own rules, not display sugar.
-
-Three of those rules earn their keep:
-
-- **Per branch, never a wall.** The fleet report covers 22 branches; a flat
-  list of 366 prune lines is technically complete and practically unreadable.
-  Each branch gets its own block, and the per-entry detail is capped with the
-  remainder counted out loud rather than silently dropped.
-- **What is NOT in scope is stated.** Stray files in a branch's ``.trinity/``
-  are reported in the same breath as the prunes and explicitly marked as
-  outside the push's mandate, so a reader cannot mistake the push's silence
-  about them for the push having handled them.
-- **Todos are counted, reasoned and located on EVERY branch** (DPLAN-0345). A
-  todo that leaves the pad goes to ``.backup/todo/<branch>/backlog.json``, so
-  each branch says how many it saw, how many move and why, and whether that
-  backlog already exists. A zero is spoken too: "I owe nothing" and "my pad
-  was emptied" must never render the same.
+Per branch, never a wall; out-of-scope files and zero todos are said out loud, never left silent.
+Reference: docs/trinity_push.md
 """
 
 from datetime import datetime
@@ -40,27 +23,14 @@ from aipass.memory.apps.handlers.templates.trinity_push import DEFECT_ORDER
 _MEMORY_ROOT = module_file(__file__).parents[3]
 REPORTS_DIR = _MEMORY_ROOT / "artifacts" / "push_reports"
 
-# Per-entry detail is capped per branch; the remainder is COUNTED, never
-# silently dropped — a truncation that does not announce itself reads as
-# completeness.
+# The remainder past the cap is COUNTED: a silent truncation reads as completeness.
 MAX_PRUNE_SAMPLES = 6
 
-# How the todo chars are measured, stated once under the fleet line. It is the
-# measure behind DPLAN-0345's "Todo JSON is 106,408 chars" (devpulse 69,680,
-# seedgo 16,127 reproduce with it).
 CHARS_MEASURE = "chars = len(json.dumps(<the todos moved, as one list>, ensure_ascii=False)) per branch, summed"
 
 
 def render(result: dict, label: str) -> List[str]:
-    """Render the whole report as plain lines.
-
-    Args:
-        result: The payload from ``trinity_push.push``.
-        label: Scope label — ``@branch`` or ``FLEET``.
-
-    Returns:
-        The report, one line per element, ready to print or write.
-    """
+    """Render the whole report (``trinity_push.push`` payload) as plain lines."""
     lines = [
         f"Trinity push report · scope {label} · {'DRY RUN — nothing written' if result['dry_run'] else 'EXECUTED'}",
         f"Generated {datetime.now().isoformat(timespec='seconds')}",
@@ -101,17 +71,12 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
         )
         lines.extend(_todo_lines(entry, dry_run))
         lines.extend(f"     ! {message}" for message in entry.get("errors", []))
-        # Why the pruned entries reached the global store only (leg 6 of DPLAN-0354).
         if entry.get("local_store"):
             lines.append(f"   local store: none ({entry['local_store']}) — global store only")
 
     strays = entry.get("strays", [])
     if strays:
-        # "NOT push scope" alone read as a verdict on the BRANCH — @spawn and
-        # @devpulse both took it that way on 2026-09-07 and held the first real
-        # bump back on the strength of it, when every one of those branches was
-        # being pruned and carried normally on the line directly above. The
-        # files are out of scope; the branch never was.
+        # Name the FILES as out of scope: a bare "NOT push scope" reads as a verdict on the branch.
         lines.append(
             f"   {len(strays)} file(s) in .trinity/ are not push scope (reported, never deleted): {', '.join(strays)}"
         )
@@ -122,9 +87,7 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
 def _todo_lines(entry: dict, dry_run: bool) -> List[str]:
     """What the push saw in ``todos`` and where the leavers go — stated on EVERY branch, every run.
 
-    Silence used to be the report's answer for a branch with no drifted todos,
-    which made "this agent owes nothing" and "this agent's open work is gone"
-    render identically (67 todos archived across 8 branches on 2026-08-27).
+    A zero is spoken too: "owes nothing" and "open work is gone" must never render the same.
     """
     seen = entry.get("todos_seen", 0)
     planned = entry.get("todos_to_backlog", 0)
@@ -171,12 +134,7 @@ def _frame_lines(frame_changes: dict) -> List[str]:
 def todo_totals(branches: List[dict], dry_run: bool) -> tuple[int, int, int]:
     """Fleet todo totals: (todos, branches, chars) planned on a dry run, verified moved on a real one.
 
-    Args:
-        branches: The per-branch entries from ``trinity_push.push``.
-        dry_run: Whether the entries are dry-run plans.
-
-    Returns:
-        ``(todos, branches, chars)``. A refused branch moved nothing and counts nothing.
+    A refused branch moved nothing and counts nothing.
     """
     key = "todos_to_backlog" if dry_run else "todos_moved"
     movers = [entry for entry in branches if not entry.get("refused") and entry.get(key, 0)]
@@ -207,16 +165,7 @@ def _summary_block(result: dict) -> List[str]:
 
 
 def save(lines: List[str], label: str, dry_run: bool) -> str:
-    """Persist the report so the artifact outlives the terminal.
-
-    Args:
-        lines: The rendered report.
-        label: Scope label, used in the filename.
-        dry_run: Whether this was a dry run, also used in the filename.
-
-    Returns:
-        The path written, or an empty string when it could not be saved.
-    """
+    """Persist the report so the artifact outlives the terminal; the path, or "" when unsaved."""
     try:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")

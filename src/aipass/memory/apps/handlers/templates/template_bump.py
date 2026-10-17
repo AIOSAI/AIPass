@@ -3,53 +3,13 @@
 # Description: The gold-template bump site — announces the bump and heals the fleet through the push's gates
 # Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Template Bump
 
-When the gold-source templates change version, every branch's memory files
-are carrying an older structure.  This module is the BUMP SITE: the one place
-that notices, announces it on the event bus, and heals the fleet by running
-the trinity push.
-
-TRIGGER-DRIVEN, NEVER A DAEMON
-------------------------------
-Nothing here watches anything.  ``bump_pending()`` is a comparison between two
-files that are already on disk — the gold templates and the bump ledger — and
-it only runs when somebody invokes the lane.  There is no timer, no poller and
-no background process; idle costs nothing, which is the law of the marker.
-
-The bump is ANNOUNCED as well as acted on, but not from here: this handler
-owns the NAME of the event (``BUMP_EVENT``) and the module layer does the
-firing.  Reaching @trigger's bus means importing ``trigger.apps.modules``, and
-a handler that imports another branch's module layer is orchestration wearing
-domain-logic clothes — @seedgo's audit says so and it is right.  The name lives
-with the fact it describes; the announcement lives with the caller.
-
-THE GATES STAY ON
------------------
-A bump runs the push as a DRY RUN by default and prints the report.  It would
-be trivial to make a version bump rewrite 22 branches' memory files
-automatically, and that is precisely the fleet-wide unprompted write that
-``--confirm`` exists to prevent — this branch has already performed one of
-those by accident and it is the reason the push has gates at all.  Self-healing
-that no operator has read is not healing, it is an unattended fleet write with
-better branding.  ``--confirm`` runs it for real; everything downstream (the
-vectorize-verify-prune order, the receipts, the todo exemption) is the push's
-own machinery, untouched.
-
-THE LEDGER
-----------
-``memory/templates/.template_version.json`` records which gold version the
-fleet was last pushed at.  It is stamped ONLY by a push that actually ran and
-actually succeeded: a dry-run that stamped it would tell the next bump the
-work was already done, and a failed push that stamped it would do the same
-while leaving the fleet stale.  No ledger at all reads as "bump pending",
-never as "nothing to do" — absent and up-to-date are opposite answers.
-
-Not to be confused with a branch's own ``.trinity/.template_version.json``
-receipt, which records what THAT branch carries. This one is fleet-side.
+The ledger is stamped only by a push that ran and succeeded; no ledger reads as pending.
+Reference: docs/templates_and_tabs.md
 """
 
 import json
@@ -75,12 +35,7 @@ def _ledger_path() -> Path:
 
 
 def gold_versions() -> dict[str, str]:
-    """The structural version the gold templates currently carry.
-
-    Reuses ``receipt.template_versions`` — the receipt writer and the bump
-    detector must never disagree about what "the current version" is, and two
-    readers of the same field is exactly how they would.
-    """
+    """The gold version, via ``receipt.template_versions`` so receipt and bump never disagree."""
     return receipt.template_versions()
 
 
@@ -98,13 +53,7 @@ def _read_ledger() -> dict[str, Any] | None:
 
 
 def bump_pending() -> dict[str, Any]:
-    """Whether the gold templates have moved past the last pushed version.
-
-    Returns:
-        ``{"pending": bool, "was": dict | None, "now": dict, "reason": str}``.
-        ``was`` is None when there is no readable ledger, which counts as
-        PENDING: a missing record of a push is not a record of a push.
-    """
+    """Whether the gold templates have moved past the last pushed version; no ledger is PENDING."""
     try:
         now = gold_versions()
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -148,17 +97,9 @@ def _run_push(dry_run: bool) -> dict[str, Any]:
 
 
 def on_bump(confirm: bool = False) -> dict[str, Any]:
-    """The bump site: announce, then heal the fleet through the push.
+    """The bump site: heal the fleet through the push, a DRY RUN unless *confirm*.
 
-    Args:
-        confirm: False (default) runs the push as a DRY RUN and writes
-            nothing anywhere. True executes it and, only on success, stamps
-            the ledger.
-
-    Returns:
-        ``{"pending", "was", "now", "dry_run", "push", "stamped", "reason"}``.
-        ``push`` is None when there was no bump to act on. The caller announces
-        this outcome on the bus under ``BUMP_EVENT``.
+    The caller announces the outcome on the bus under ``BUMP_EVENT``.
     """
     pending = bump_pending()
     out: dict[str, Any] = {
@@ -180,8 +121,7 @@ def on_bump(confirm: bool = False) -> dict[str, Any]:
     if confirm and isinstance(result, dict) and result.get("success"):
         out["stamped"] = _stamp_ledger(pending["now"])
     elif confirm:
-        # A ledger stamped after a refused push would tell the NEXT bump the
-        # work was done, and the fleet would stay stale with a clean record.
+        # A stamp after a refused push would tell the next bump the work was done.
         logger.error("[template_bump] Push did not succeed — ledger deliberately NOT stamped")
 
     json_handler.log_operation(
@@ -193,19 +133,7 @@ def on_bump(confirm: bool = False) -> dict[str, Any]:
 
 
 def receipt_status() -> dict[str, Any]:
-    """What every branch's receipt says it carries, against the gold source.
-
-    This replaces the old ``template-status``, which read the fleet-side push
-    log and reported a date only the retired pre-``.trinity`` lane could ever
-    have moved.  The per-branch receipts are written by lanes that are alive,
-    so this answers the question the verb always claimed to: *who actually
-    carries the current standard?*
-
-    Returns:
-        ``{"gold", "ledger", "branches": [{"branch", "carries", "current",
-        "stamped", "stamped_by"}]}``. A branch with no receipt is listed with
-        ``carries: None`` — absent is an answer, not an omission.
-    """
+    """What every branch's receipt says it carries, against the gold source; no receipt lists as None."""
     from aipass.memory.apps.handlers.monitor import registry_scope
 
     try:
@@ -219,7 +147,6 @@ def receipt_status() -> dict[str, Any]:
         try:
             data = receipt.read_receipt(Path(item["path"]) / ".trinity")
         except receipt.ReceiptUnreadable as exc:
-            # Listed as carrying nothing readable, as before; the error line names the file.
             logger.error(f"[template_bump] {exc}")
             data = None
         carries = data.get("template_versions") if isinstance(data, dict) else None

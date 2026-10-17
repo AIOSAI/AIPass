@@ -3,29 +3,13 @@
 # Description: Rollover Trigger Detection Handler
 # Version: 0.7.0
 # Created: 2025-11-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rollover Trigger Detection Handler
 
-Monitors branch memory files via AIPASS_REGISTRY.json and detects when
-entry counts exceed v2 limits (sessions, key_learnings, observations).
-
-Purpose:
-    Detect rollover conditions without active monitoring. Called by
-    rollover module to check all branches for files needing rollover.
-    All branches use v2 entry-count limits from memory.config.json
-    (per_branch with defaults fallback). No line-count fallbacks.
-
-Todos (DPLAN-0345):
-    COUNT ONLY, through check_todos() for ONE branch. They are deliberately
-    absent from _should_rollover and check_all_branches: those feed the
-    detached fleet walk (auto_process -> execute_rollover), which would roll an
-    awake agent's pad mid-session. The roll itself is rollover/todo_roll.py.
-
-Independence:
-    No module imports - pure handler, transportable
+Todos are counted (check_todos, one branch) but never fed to the fleet walk: it would roll an awake agent's pad.
 """
 
 import json
@@ -42,21 +26,9 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
-# No service imports - handlers are pure workers (3-tier architecture)
-# No module imports (handler independence)
-
 
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
-    """
+    """Repo root for this lane, by ``handlers/repo_root.py``; a local name because tests patch it here."""
     return repo_root.find_repo_root(caller="detector")
 
 
@@ -66,11 +38,7 @@ _REPO_ROOT = _find_repo_root()
 def _find_caller_registries() -> List[Path]:
     """Registries reachable from the caller's cwd, inside the AIPass root, for THIS call only.
 
-    Nothing found here is remembered. Until 2026-09-18 every hit was persisted
-    into known_registries.json, so one call from Vera-Studio's cwd on 09-17 put
-    four branches of another project into every later rollover, from any cwd.
-    A registry outside the root is read past, logged once per walk at INFO, and
-    never returned: @memory may read another project, never write one.
+    Nothing found here is remembered. A registry outside the root is logged and never returned.
     """
     import os
 
@@ -83,14 +51,8 @@ def _find_caller_registries() -> List[Path]:
 
     cwd_found: List[Path] = []
     for parent in [caller_cwd] + list(caller_cwd.parents):
-        # EXACT CASE, and this walk is the one that had most to lose by it.
-        # It runs from the CALLER'S directory -- an arbitrary repo -- and a
-        # folding filesystem serves any lowercase *_registry.json there:
-        # flow's plan counters, .spawn/.template_registry.json, bait in every
-        # branch. A match here was once persisted into known_registries.json
-        # permanently (retired 2026-09-18), and the `break` below means a
-        # spurious nearer hit STOPS the walk before the real registry above it
-        # is ever seen. See repo_root.exactly_named.
+        # EXACT CASE: a folding filesystem serves any lowercase *_registry.json in the caller's
+        # repo, and the `break` below would stop at that bait before the real registry above it.
         for reg in repo_root.exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
@@ -106,11 +68,6 @@ def _find_caller_registries() -> List[Path]:
         registries.append(reg)
 
     return registries
-
-
-# =============================================================================
-# DATA STRUCTURES
-# =============================================================================
 
 
 @dataclass
@@ -141,27 +98,15 @@ class UndrainableFile:
         return f"{self.branch}.{self.memory_type} ({'; '.join(self.reasons)})"
 
 
-# =============================================================================
-# REGISTRY OPERATIONS
-# =============================================================================
-
-
 class RegistryUnreadable(RuntimeError):
     """A registry file exists but cannot be read as a registry.
 
-    Raised rather than answered with ``[]``: an empty list is what an empty
-    registry gives, and a walk that reads "no branches" does no rollover and
-    reports success (DPLAN-0354 leg 3).
+    Raised rather than ``[]``: a walk that reads "no branches" does no rollover and reports success.
     """
 
 
 def _read_single_registry(registry_path: Path, root: Path) -> List[Dict[str, Any]]:
-    """Read branches from a single registry file, resolving paths against root.
-
-    An absent file has no branches. A file that exists and cannot be read
-    raises ``RegistryUnreadable``: the caller decides what one broken registry
-    costs.
-    """
+    """Read branches from a single registry file, resolving paths against root; unreadable raises."""
     if not registry_path.exists():
         return []
 
@@ -195,42 +140,9 @@ def _read_registry() -> List[Dict[str, Any]]:
     """
     Read every registry this fleet covers: core, residents, then callers.
 
-    THE RESIDENTS ARE NOT DISCOVERED, THEY ARE NAMED. Until 2026-08-27 this
-    function reached 19 of the fleet's 22 branches: the core citizens plus
-    whatever external registry a caller's cwd had once persisted into
-    known_registries.json. `baud` was in there by accident of where somebody
-    happened to stand; `earmark`, `finch` and `aipass_site` were not, so their
-    memory files could overflow with no rollover ever running on them while
-    the trinity push — which resolved its own scope from a named constant —
-    saw all 22. A gap that depends on a caller's working directory is not a
-    policy, and a citizen whose memories can overflow unattended is
-    slow-motion data loss.
-
-    Every lane now resolves residents through `registry_scope`, so the fleet
-    has exactly one definition. As of 2026-08-28 that definition is the
-    passport's `citizenship.residency` field rather than a named tuple:
-    discovery globs `projects/` for candidate registries and classification
-    reads the declaration, so this function filters what it reads against
-    `registry_scope.accepted_resident_paths()`. Without that filter the glob
-    would widen this lane to any directory under `projects/` carrying a
-    registry — discovery is deliberately generous and classification is what
-    makes it safe.
-
-    Caller discovery still runs after the residents — a project calling in
-    from its own tree is a different mechanism with a different purpose, and
-    is NOT residency-classified. Since 2026-09-18 it is fenced instead: only a
-    registry inside the AIPass root is read, only its branches inside the root
-    are offered, and nothing a caller's cwd found outlives the call.
-
-    Registry paths are relative — resolved against their respective project root.
-
-    Returns:
-        List of branch dictionaries with absolute paths
-
-    Raises:
-        RegistryUnreadable: the core registry exists and cannot be read. An
-            unreadable resident or caller registry costs only its own rows and
-            is logged at error level; the core one leaves nothing to walk.
+    Residents are named, not discovered: the glob is generous and ``accepted_resident_paths()``
+    (the passport's residency) is what makes it safe. Callers are fenced to the AIPass root and
+    nothing they found outlives the call. An unreadable core registry raises ``RegistryUnreadable``.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
@@ -263,38 +175,15 @@ def _read_registry() -> List[Dict[str, Any]]:
 def read_scope() -> List[Dict[str, Any]]:
     """Every branch a READ-ONLY lane may name: the write scope plus declared externals.
 
-    ``_read_registry()`` above is the WRITE scope -- what rollover, the
-    normalizer and the watcher walk -- and it stops at the repo edge on
-    purpose. The fence that made it stop there (2026-09-18) took the NAME
-    RESOLVER with it: ``lint @vera`` and ``health @vera`` began answering
-    "Unknown branch" for a read that was never in the fence's scope. @vera
-    reported it through @devpulse on 09-19.
-
-    The cure is not a wider write scope. It is this second, read-only answer,
-    reaching the external tier the way the fleet definition already does --
-    through the roots DECLARED in ``AIPASS_ROOTS.json``, which someone wrote
-    down, and never through whatever directory a caller happened to stand in.
-    That distinction is the whole lesson of ``known_registries.json``: one
-    call from another project's cwd put four of its branches into every later
-    rollover. A declaration cannot do that, because it does not accumulate.
-
-    Nothing here writes, and no caller of this function may: a lane that
-    resolves a branch through ``read_scope`` and then writes to it has crossed
-    the fence, and ``write_fence`` refuses it at the write itself.
-
-    Returns:
-        ``_read_registry()`` rows, then declared-external rows in the same
-        shape (``path`` as a string), deduplicated by resolved path.
+    ``_read_registry()`` is the WRITE scope and stops at the repo edge. Externals come only from
+    roots declared in ``AIPASS_ROOTS.json``, never a caller's cwd. Nothing resolved here may be written.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
     branches = _read_registry()
     seen_paths = {str(Path(branch["path"]).resolve()) for branch in branches if branch.get("path")}
 
-    # name_from="path": the DIRECTORY is the address. @drone routes by it, the
-    # other fleet lanes key on it, and Demo's registry spells its citizen
-    # MY_AGENT while the branch answers to @my-agent -- a resolver naming it
-    # from the registry refuses the only spelling anyone can type.
+    # name_from="path": the directory is the address; a registry may spell the name differently.
     for item in registry_scope.external_branches(_REPO_ROOT, name_from="path"):
         key = str(Path(item["path"]).resolve())
         if key in seen_paths:
@@ -306,19 +195,7 @@ def read_scope() -> List[Dict[str, Any]]:
 
 
 def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
-    """
-    Get path to memory file for branch.
-
-    Memory files live in .trinity/ subdirectory as {memory_type}.json
-    (e.g., .trinity/local.json, .trinity/observations.json).
-
-    Args:
-        branch: Branch dict from registry (path already resolved to absolute)
-        memory_type: 'observations' or 'local'
-
-    Returns:
-        Path to memory file, or None if not found
-    """
+    """Path to a branch's ``.trinity/{memory_type}.json``, or None if not found."""
     raw_path = branch.get("path", "")
     if not raw_path:
         return None
@@ -326,27 +203,13 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
     if not branch_path.exists():
         return None
 
-    # Memory files are in .trinity/ subdirectory
     file_path = branch_path / ".trinity" / f"{memory_type}.json"
 
     return file_path if file_path.exists() else None
 
 
-# =============================================================================
-# LINE COUNTING
-# =============================================================================
-
-
 def _count_file_lines(file_path: Path) -> int:
-    """
-    Count physical lines in memory file
-
-    Args:
-        file_path: Path to JSON file
-
-    Returns:
-        Number of physical lines in file
-    """
+    """Count physical lines in memory file"""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return len(f.readlines())
@@ -366,7 +229,7 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
     """Recreate a missing .trinity file from canonical template (never outside the AIPass root)."""
     trinity_dir = branch_path / ".trinity"
     file_path = trinity_dir / f"{memory_type}.json"
-    # The seed carries the "archived to @memory" promise; refused before the mkdir, which is already a write
+    # Refused before the mkdir, which is already a write.
     if write_fence.fence_write(file_path, lane="recreate_trinity_file") is not None:
         return None
 
@@ -413,18 +276,10 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
         return None
 
 
-# =============================================================================
-# ROLLOVER DETECTION
-# =============================================================================
-
-
 def _limits_for(file_path: Path) -> tuple[str, str, Dict[str, Any]]:
     """The v2 limits for one memory file -> ``(branch_name, file_type, file_limits)``.
 
-    per_branch[branch][file_type], falling back to defaults[file_type];
-    ``file_limits`` is ``{}`` when neither has any. `.trinity/local.json` ->
-    ("<branch dir>", "local"); a flat `SEEDGO.observations.json` ->
-    ("seedgo", "observations").
+    per_branch[branch][file_type], falling back to defaults[file_type]; ``{}`` when neither has any.
     """
     if file_path.parent.name == ".trinity":
         branch_name = file_path.parents[1].name.lower()
@@ -447,18 +302,8 @@ _CAPPED_CONTAINERS = ("sessions", "key_learnings", "observations")
 def undrainable_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
     """Capped containers over their count that rollover cannot drain — held as a dict, not a list.
 
-    Rollover archives the OLDEST entries, and only a list says which those are:
-    newest-first by position, confirmed by each entry's number. A schema 2.0.0
-    dict (``{"KL-001": {...}}``) has neither, so no amount of running drains
-    it. It is not "no excess" and it is not a trigger: it is a file rollover
-    cannot fix, and the only cure is migrating the container to the 3.0.0 list.
-
-    Pure: the detector and the extractor share it, so the two cannot disagree
-    about which containers are drainable.
-
-    Returns:
-        One reason per undrainable container, e.g.
-        ``"250/15 key_learnings held as a dict, not a list (schema 2.0.0)"``.
+    Only a list says which entries are oldest; a 2.0.0 dict never drains, so it is reported, not triggered.
+    Pure and shared with the extractor, so the two cannot disagree.
     """
     if not isinstance(data, dict):
         return []
@@ -477,8 +322,7 @@ def undrainable_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
 def undrainable_containers(file_path: Path) -> List[str]:
     """``undrainable_in`` for one file on disk; ``[]`` when it cannot be read or has no limits.
 
-    Both of those are already reported by ``_should_rollover`` in the same walk
-    (PARSE FAILURE, CONFIG GAP), so they are not reported twice here.
+    ``_should_rollover`` already reports both in the same walk.
     """
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -491,39 +335,22 @@ def undrainable_containers(file_path: Path) -> List[str]:
 
 def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
     """
-    Check if file should rollover (v2 entry-count based only).
+    Check if file should rollover -> (should_rollover, current_lines, schema_version, v2_reason).
 
-    All branches use v2 entry-count limits from config (per_branch with
-    defaults fallback). No line-count fallbacks — errors over silent fallbacks.
-
-    Fires only ABOVE the limit, never at it: keep-15 means the file is allowed
-    to hold 15. This threshold and rollover/extractor.py's `_extract_tail_excess`
-    are one decision in two places — the extractor drains `len - limit`, so a
-    detector firing at `>=` would flag a file the extractor correctly refuses to
-    touch, and the pair would spin on it forever (NOTHING DRAINED). Pinned by
-    `test_detector_and_extractor_never_disagree`, swept across the boundary.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Tuple of (should_rollover, current_lines, schema_version, v2_reason)
+    Fires only ABOVE the limit: the extractor drains `len - limit`, so `>=` here would spin forever.
     """
     current_lines = _count_file_lines(file_path)
 
-    # Read file data once for limit checks
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        # Can't parse — do NOT fall back to 600. Fail honestly.
         logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
         return (False, current_lines, "3.0.0", "parse failure — skipped")
 
     branch_name, file_type, file_limits = _limits_for(file_path)
 
     if not file_limits:
-        # Neither per_branch NOR defaults have limits for this branch/file_type
         logger.warning(
             f"[detector] CONFIG GAP: no v2 limits for branch={branch_name} file_type={file_type} "
             f"in per_branch or defaults — skipping rollover"
@@ -545,10 +372,7 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
             if max_sessions is not None and regular_count > max_sessions:
                 reasons.append(f"{regular_count}/{max_sessions} sessions")
 
-    # A list only. A 2.0.0 dict used to count here while the extractor drains
-    # lists only, so VERA (250/15) and WRITER (63/15) were "ready for rollover"
-    # for weeks and skipped as "No entries exceed v2 limits" on every run. The
-    # dict is reported by undrainable_containers(), never as a trigger.
+    # A list only: the extractor drains lists only, so a dict is reported by undrainable_containers().
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None:
         key_learnings = data.get("key_learnings", [])
@@ -571,19 +395,11 @@ def check_all_branches() -> Dict[str, Any]:
     """
     Check all branches for rollover triggers
 
-    Scans AIPASS_REGISTRY.json and checks each branch's memory files
-    (observations and local) for rollover conditions.
-
-    Returns:
-        Dict with success status, triggers list, and count, plus
-        ``undrainable``: files over a limit that rollover cannot drain
-        (``UndrainableFile``). Never triggers — running does nothing for them —
-        and never silent: one WARNING per file per walk until it is migrated.
+    ``undrainable`` files never trigger and never go silent: one WARNING per file per walk.
     """
     triggers = []
     undrainable: List[UndrainableFile] = []
 
-    # Read registry
     try:
         branches = _read_registry()
     except RegistryUnreadable as e:
@@ -592,11 +408,9 @@ def check_all_branches() -> Dict[str, Any]:
     if not branches:
         return {"success": True, "triggers": [], "count": 0, "undrainable": [], "message": "No branches in registry"}
 
-    # Check each branch
     for branch in branches:
         branch_name = branch.get("name", "UNKNOWN")
 
-        # Check both memory types
         for memory_type in ["observations", "local"]:
             file_path = _get_memory_file_path(branch, memory_type)
 
@@ -646,22 +460,13 @@ def check_all_branches() -> Dict[str, Any]:
 
 
 def check_single_file(file_path: Path) -> Dict[str, Any]:
-    """
-    Check single file for rollover trigger
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Dict with trigger status and details
-    """
+    """Check single file for rollover trigger"""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
     should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path)
 
     if should_trigger:
-        # Extract branch and type from file path
         if file_path.parent.name == ".trinity":
             branch_name = file_path.parents[1].name
             memory_type = file_path.stem  # "local" or "observations"
@@ -695,20 +500,7 @@ def check_todos(file_path: Path, branch_name: str | None = None) -> Dict[str, An
     """
     Count ONE branch's todo pad against its configured count. COUNT ONLY.
 
-    Not part of ``_should_rollover`` or ``check_all_branches``, on purpose: the
-    fleet walk rolls whatever those report, and todos roll for the own branch
-    only (``rollover check`` / ``rollover run`` with ``--branch`` or the
-    caller's cwd). The count comes from ``config_loader.get_todos_count`` - the
-    same resolver the roll uses - so the check and the roll cannot disagree.
-
-    Args:
-        file_path: The branch's local memory file (the one carrying ``todos``).
-        branch_name: Branch directory name; derived from the path when None.
-
-    Returns:
-        ``{"success", "branch", "pad", "count", "over", "excess"}`` or
-        ``{"success": False, "error"}``. ``count`` is None when no usable
-        count is configured, and then nothing is ever over.
+    Kept out of the fleet walk on purpose; the count shares the roll's resolver so they cannot disagree.
     """
     name = branch_name or file_path.parents[1].name
     if not file_path.exists():
@@ -738,18 +530,8 @@ def check_todos(file_path: Path, branch_name: str | None = None) -> Dict[str, An
     }
 
 
-# =============================================================================
-# STATISTICS
-# =============================================================================
-
-
 def get_rollover_stats() -> Dict[str, Any]:
-    """
-    Get rollover statistics for all branches
-
-    Returns:
-        Dict with statistics for all branches
-    """
+    """Get rollover statistics for all branches"""
     stats = {
         "success": True,
         "total_branches": 0,

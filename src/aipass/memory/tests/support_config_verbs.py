@@ -3,16 +3,10 @@
 # Description: Shared helpers for the test_config_verbs files - the minted verbs world and the run/read helpers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Helpers for tests/test_config_verbs*.py (no test_ prefix: never collected).
-
-The minted config-and-registry world behind conftest's `verbs` fixture, and the
-helpers two or more of the split config-verbs files use to run a verb and read
-what it printed or wrote. Moved verbatim from test_config_verbs.py when it was
-split by subject (2026-10-08).
-"""
+"""Helpers for tests/test_config_verbs*.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -27,17 +21,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# The real display module, imported once at the top: nothing in the suite
-# stands it in, conftest imports it the same way, and its consoles are patched
-# at the edge (their width) per test.
 from aipass.cli.apps.modules import display
 
-# The registry these tests address, MINTED per test in tmp_path.
-# AIPASS_REGISTRY.json is machine-managed and gitignored: on a fresh clone it
-# does not exist at all, so a suite that read the live one proved only that
-# THIS machine had already run AIPass. Mixed casing is deliberate -- the real
-# registry carries lowercase and UPPERCASE names side by side, and
-# case-insensitive branch matching is one of the things under test.
+# The registry is MINTED per test: the live one is gitignored and absent on a fresh clone.
+# Mixed casing is deliberate: case-insensitive branch matching is under test.
 _REGISTRY_BRANCHES = [
     {"name": "memory", "path": "src/aipass/memory", "status": "active"},
     {"name": "DEVPULSE", "path": "src/aipass/devpulse", "status": "active"},
@@ -59,42 +46,14 @@ _ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
 _ROLLOVER_CONFIG_MODULE = "aipass.memory.apps.modules.rollover_config"
 
 
-# ---------------------------------------------------------------------------
-# Fixture: real modules, throwaway config
-# ---------------------------------------------------------------------------
-
-
 def _pin_console_width(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fix both shared Rich consoles at a known width.
-
-    Rich resolves its width from the ENVIRONMENT -- a real terminal if there
-    is one, else COLUMNS, else 80. These tests assert refusal sentences that
-    carry a tmp path, and under an xdist worker that path is long enough that
-    an 80-column console folds a newline INTO the sentence: the assertion then
-    fails on output that is perfectly correct. Green on a dev machine with a
-    wide terminal, red on a runner with none. @daemon paid for this twice on
-    08-16 one layer along -- name the rendering explicitly, never let the shell
-    decide it.
-
-    `_width` and not the public `width` setter: these are module-global console
-    objects shared with every other suite, and monkeypatch would restore
-    `width` by writing back the number it read (80), leaving the console pinned
-    for whoever ran next. `_width` starts as None and restores as None, and it
-    is the attribute Console.size honours last.
-    """
+    """Pin both shared consoles' `_width` (the setter would restore as 80) so a tmp path never folds."""
     for console_obj in (display.CONSOLE, display.err_console):
         monkeypatch.setattr(console_obj, "_width", _CONSOLE_WIDTH)
 
 
 def _evict(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-    """Drop *name* from the import cache, recorded first so teardown puts back exactly what stood there.
-
-    The parent package's attribute goes the same way while the parent is still
-    cached, because the re-import rebinds it. A bare pop left the fixture's
-    re-imported json package, config_loader and rollover cached after teardown
-    (seedgo module_eviction, 2026-09-15) - the species test_rollover.py's
-    _import_rollover cured the same morning.
-    """
+    """Drop *name* from the import cache, recorded first so teardown puts back exactly what stood there."""
     monkeypatch.setitem(sys.modules, name, None)
     del sys.modules[name]
     parent_name, _, leaf = name.rpartition(".")
@@ -107,34 +66,13 @@ def _evict(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
 def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Real config_loader + rollover module wired to a MINTED config and registry.
 
-    Hermetic on purpose: nothing here reads state that exists only on a machine
-    someone has already run AIPass on.
-
-      * The config is built from config_loader.DEFAULT_CONFIG -- the in-tree
-        regeneration seed, kept in lockstep with the operator file by S193
-        doctrine -- and written by the real writer, through load()'s
-        regeneration of a missing file. A hand-formatted copy would make the
-        no-op-set byte-identity test assert against this file's formatting
-        instead of the writer's.
-      * per_branch is filled by the real push_defaults_to_per_branch() reading the
-        minted registry, so the fixture and the engine cannot disagree about
-        the seeded shape.
-      * BOTH registry doors are shut. detector._read_registry reads
-        _REPO_ROOT/AIPASS_REGISTRY.json and then walks up from the caller's CWD
-        for any other *_REGISTRY.json -- run from a checkout, that second door
-        finds the fleet's own registry and the suite goes quietly non-hermetic.
-
-    conftest replaces the handlers.json package with a MagicMock, which would
-    make the lazy `from ... import config_loader` inside the module return a
-    mock instead of the code under test. Evicting it forces a real import;
-    :func:`_evict` records each eviction, so teardown restores what stood there.
+    Config and per_branch come from the real writers; BOTH registry doors are shut; conftest's mocks are evicted.
     """
     for name in _HANDLER_MODULES:
         _evict(monkeypatch, name)
     config_loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
 
-    # Captured BEFORE the repoint: the guard in TestOperatorConfigIsolation
-    # needs to know where the real file would have been.
+    # Captured BEFORE the repoint: TestOperatorConfigIsolation needs the real file's path.
     operator_config_path = config_loader._CONFIG_PATH
 
     config_path = tmp_path / "custom_config" / "memory.config.json"
@@ -151,9 +89,6 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
     monkeypatch.setattr(detector, "config_loader", config_loader)
 
-    # Minted through the public doors, in the order a fresh install meets them:
-    # load() on a missing file regenerates DEFAULT_CONFIG, and the push fills
-    # per_branch from the minted registry. Both write only the tmp path above.
     config_loader.load()
     pushed = config_loader.push_defaults_to_per_branch()
     assert pushed["success"], f"fixture could not write its own config: {pushed}"
@@ -162,12 +97,8 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     rollover = importlib.import_module(_ROLLOVER_MODULE)
     monkeypatch.setattr(rollover, "json_handler", MagicMock())
 
-    # The config verbs live in modules/rollover_config.py and read
-    # `json_handler` from THEIR OWN module globals, so the patch above does not
-    # reach them: without this second one, config get/set/set-default log
-    # through the real service while the test believes it is sandboxed. That
-    # module is NOT evicted with rollover -- the re-import above binds the same
-    # cached object -- so patching it here is what makes the seam hold.
+    # rollover_config reads `json_handler` from its own globals and is not evicted: patch it too,
+    # or config verbs log through the real service.
     rollover_config = importlib.import_module(_ROLLOVER_CONFIG_MODULE)
     monkeypatch.setattr(rollover_config, "json_handler", MagicMock())
 
@@ -182,35 +113,19 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _run(verbs: SimpleNamespace, *args: str) -> bool:
     """Invoke `config <args>` exactly as the entry point routes it."""
     return verbs.rollover.handle_command("config", list(args))
 
 
 def _streams(capsys: pytest.CaptureFixture) -> str:
-    """Both streams joined and ANSI-stripped -- refusals to stderr, displays to stdout.
-
-    Stripping is not cosmetic. FORCE_COLOR makes Rich emit attributes into a
-    captured non-terminal stream, so `assert "[DEFAULT]" in out` passes in one
-    shell and fails in the next on byte-identical code (@daemon, 08-16).
-    """
+    """Both streams joined and ANSI-stripped (FORCE_COLOR leaks attributes into captured streams)."""
     captured = capsys.readouterr()
     return _ANSI.sub("", captured.out + captured.err)
 
 
 def _unwrapped(text: str) -> str:
-    """All whitespace removed -- the only comparison that survives ANY wrap.
-
-    A Rich fold can land mid-token (`custom_config` arrives as `custom_con` +
-    newline + `fig`), so collapsing runs of whitespace is not enough. Used for
-    the refusal sentences that carry a tmp path; the console width is pinned
-    as well, and this is the belt to that pair of braces.
-    """
+    """All whitespace removed -- the only comparison that survives ANY wrap (Rich folds mid-token)."""
     return "".join(text.split())
 
 
@@ -232,10 +147,5 @@ def _raw_stdout(verbs: SimpleNamespace, capsys: pytest.CaptureFixture, *args: st
 
 
 def _payload(verbs: SimpleNamespace, capsys: pytest.CaptureFixture, *args: str) -> dict:
-    """Run `config <args>` and parse the WHOLE of stdout as one document.
-
-    Deliberately not a substring search: a banner line, a stray trailing
-    blank or a Rich-injected wrap all make json.loads fail right here --
-    which is the contract, because @api pipes this straight into a parser.
-    """
+    """Run `config <args>` and parse the WHOLE of stdout as one document (@api pipes it into a parser)."""
     return json.loads(_raw_stdout(verbs, capsys, *args))

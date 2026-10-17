@@ -3,16 +3,12 @@
 # Description: The config verbs' refusal sentences, verbatim - the API contract a refused set prints
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — the refusals the config verbs print, through apps/modules/rollover.py."""
 
-# Split from test_config_verbs.py on 2026-10-08 (oversize_test_file): the refusal
-# lane, one subject - what `config get/set/set-default` refuse and the exact
-# sentence each refusal prints. The CLI output and the refusal sentences ARE the
-# API contract (@api exec's this CLI), so these pin the sentences verbatim.
-# The JSON-mode refusals live in test_config_verbs_json.py.
+# The refusal sentences ARE the API contract (@api exec's this CLI), so they are pinned verbatim.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
@@ -23,23 +19,13 @@ from aipass.memory.tests.support_config_verbs import _payload, _rollover_section
 
 
 def _ceiling(verbs: SimpleNamespace, entry_type: str, branch: str | None = None) -> int:
-    """The keep-count ceiling the THROWAWAY config publishes for *entry_type*.
-
-    Read, never hard-coded: the number falls out of the entry caps and the
-    file budget, and a test that pinned today's arithmetic as a literal would
-    go red the day a cap moves without anything being wrong.
-    """
+    """The keep-count ceiling the THROWAWAY config publishes for *entry_type*; read, never hard-coded."""
     return verbs.loader.get_count_ceilings(branch)[entry_type]["ceiling"]
 
 
 def _budget_chars(verbs: SimpleNamespace, entry_type: str) -> int:
     """The whole-file budget the ceiling for *entry_type* was measured against."""
     return verbs.loader.get_count_ceilings()[entry_type]["budget_chars"]
-
-
-# ===========================================================================
-# 1. Refusal sentences -- the API contract, verbatim
-# ===========================================================================
 
 
 class TestUnknownBranchRefusal:
@@ -129,12 +115,7 @@ class TestCountRefusals:
         assert "Count must not exceed 100 (got 101)" in _streams(capsys)
 
     def test_bounds_are_inclusive(self, verbs) -> None:
-        """1 and the file ceiling are legal -- the refusal is for what lies outside.
-
-        100 used to be legal here. The numeric cap is still 100, but FPLAN-0593
-        put a second, lower bound under it: local.json's budget refuses a
-        sessions count long before the flat cap does.
-        """
+        """1 and the file ceiling are legal; the file budget is a lower bound than the flat cap of 100."""
         assert _run(verbs, "set", "@memory", "sessions", "1") is True
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 1
         ceiling = _ceiling(verbs, "sessions")
@@ -150,11 +131,7 @@ class TestCountRefusals:
 class TestCountCeilingRefusal:
     """A keep-count multiplies an entry cap, so it is refused at the FILE budget.
 
-    FPLAN-0593. 25 sessions of 706 legal chars is local.json's 25,000-char
-    budget missed by a third with every entry inside its cap, and until now
-    the verb wrote it. The refusal has to carry the arithmetic: the ceiling,
-    the worst case it measured, the budget, and the co-tenant counts the
-    ceiling was computed against -- a bare "too big" is unanswerable.
+    The refusal carries the arithmetic (ceiling, worst case, budget, co-tenants); a bare "too big" is unanswerable.
     """
 
     def test_set_names_the_ceiling(self, verbs, capsys) -> None:

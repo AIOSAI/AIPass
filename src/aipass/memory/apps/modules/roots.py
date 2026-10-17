@@ -3,30 +3,14 @@
 # Description: Declared-roots module — the operator lane for AIPASS_ROOTS.json
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-10-17
 # =============================================
 
 """
 Declared Roots Module — the operator lane for the fleet anchor
 
-``drone @memory roots init | add | remove | list | heal``
-
-WHY NOT ON ``modules/fleet.py``. That module is the cross-branch library
-gateway, and it carries a test asserting its command surface DESCRIBES the
-contract and computes nothing — a gateway whose CLI starts doing work is a
-second public surface. These verbs are the opposite job: an operator writing a
-machine-managed file. Different job, different module.
-
-WHY VERBS AT ALL. The owner's ruling, on seeing a hand-made AIPASS_ROOTS.json:
-"jsons are normally created by code, so if they corrupt or get deleted they are
-always rebuilt from default settings from a template directory." The verbs are
-how a declaration gets made without anyone opening an editor, and they refuse at
-WRITE time exactly what the reader refuses at READ time — against the reader's
-own predicate, not a copy of it — so the file cannot carry a row that will be
-silently dropped.
-
-``heal`` is deliberate and never automatic; see ``handlers/monitor/roots_file.py``
-for the ruling and its reasoning.
+Kept off modules/fleet.py: that gateway's CLI must describe, never compute.
+Verbs refuse at write time what the reader refuses at read time, via the reader's own predicate.
 """
 
 from aipass.prax import logger
@@ -55,9 +39,7 @@ def show_roots() -> None:
     console.print()
     console.print(f"[bold cyan]{roots_file.ROOTS_FILE}[/bold cyan]")
     for row in rows:
-        # UNREACHABLE is the reason this verb exists: in the file a dead row
-        # looks exactly like a live one, and the only other place it shows up
-        # is a log line nobody reads.
+        # A dead row looks like a live one in the file; this mark is the only visible signal.
         mark = "[green]reachable[/green]" if row["reachable"] else "[yellow]UNREACHABLE[/yellow]"
         console.print(f"  {row['path']:<24} {row['label']:<18} {row['status']:<10} {mark}")
         if not row["reachable"]:
@@ -95,9 +77,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Help anywhere, not only in first position: `roots add --help` is what a
-    # person actually types when they cannot remember the argument order, and a
-    # gate that reads args[0] alone would treat it as a path and refuse.
+        # Help anywhere: `roots add --help` must not be read as a path.
     if any(token in ("--help", "-h", "help") for token in args):
         print_introspection()
         return True
@@ -132,10 +112,8 @@ def handle_command(command: str, args: list) -> bool:
         if salvaged:
             from aipass.cli.apps.modules import console, warning
 
-            # Printed, never written back. A salvaged path is a guess about
-            # intent, and a guess that installs itself is a declaration. The
-            # heading goes to stderr because it is a warning; the commands go to
-            # stdout so they can be piped straight into a shell.
+            # Printed, never written back: a salvaged path that installs itself is a declaration.
+            # Heading to stderr, commands to stdout so they pipe into a shell.
             warning("declarations NOT restored — re-add them yourself:")
             for path in salvaged:
                 console.print(f"  drone @memory roots add {path}")

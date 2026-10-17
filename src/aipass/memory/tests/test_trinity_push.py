@@ -3,26 +3,13 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
 
-# Trinity push — the pins that make the prune lane safe to run.
-#
-# THE ONE LAW under test
-# ----------------------
-# ``vectorize -> verify -> prune`` is an ORDER, and every step of it can fail.
-# The tests in :class:`TestNothingIsPrunedWithoutProof` exist because the cheap
-# implementation of this lane — store, assume, delete — is exactly the shape
-# that deleted four months of @ai_mail's mail into a collection that had never
-# been created.  A store call's own success flag is the writer's opinion; the
-# read-back is the evidence.  If the evidence is missing, mismatched, or simply
-# never arrives, NOTHING may leave the live file.
-#
-# Every test here was written against the behaviour required, not the behaviour
-# found: the whole module is new, so "red first" means each pin fails against a
-# push that skips its step (see the mutation notes in the class docstrings).
+# vectorize -> verify -> prune is an ORDER: a store's success flag is the writer's
+# opinion, the read-back is the evidence; without it NOTHING leaves the live file.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
@@ -61,11 +48,6 @@ def _backlogs_stay_in_tmp(tmp_path, monkeypatch):
         return real(branch_dir, tmp_path / ".backup" if backup_root is None else backup_root)
 
     monkeypatch.setattr(todo_roll, "backlog_path_for", scratch)
-
-
-# =============================================================================
-# DOUBLES
-# =============================================================================
 
 
 class FakeStore:
@@ -143,11 +125,8 @@ def _fields(**text: dict) -> dict:
 def _config(max_chars: int = 300, todos_count: int = 10) -> dict:
     """Minimal config with the four entry types the standard names and the todo pad size.
 
-    Each type carries its closed ``fields`` map, because that map is the only
-    source of an entry's shape since 1.2.0 of the push: without it the push
-    falls back to the module-level rules cache, and a test then passes or fails
-    on whether an earlier test on the same xdist worker happened to warm that
-    cache from the real config (macOS run 35050261305, class-scoped worker).
+    Each type carries its closed ``fields`` map; without it the push falls back to a
+    module-level cache and the result depends on which test warmed it first.
     """
     return {
         "rollover": {
@@ -237,11 +216,6 @@ def _branch(tmp_path: Path, name: str, local: dict, observations: dict | None = 
         json.dumps(observations if observations is not None else {"observations": []}), encoding="utf-8"
     )
     return root
-
-
-# =============================================================================
-# THE LAW
-# =============================================================================
 
 
 class TestNothingIsPrunedWithoutProof:
@@ -344,11 +318,7 @@ class TestNothingIsPrunedWithoutProof:
     def test_an_absent_vector_and_a_corrupted_one_get_different_reasons(self, tmp_path):
         """Both refuse — but the repair differs, so the reason must too.
 
-        "read back with different content" sends someone hunting for an
-        encoding bug; "absent on read-back" says the write never landed. This
-        branch learned the cost of one message for two faults the hard way:
-        `unmeasurable` covering a MISSING field read as a shape problem for
-        two months while 42 renamed keys measured as zero.
+        "different content" points at encoding; "absent on read-back" says it never landed.
         """
         plan, _ = self._plan(tmp_path)
 
@@ -423,11 +393,6 @@ class TestArchivedContentIsTheEntry:
         assert all(isinstance(value, (str, int, float, bool)) for value in meta.values())
 
 
-# =============================================================================
-# WHAT COUNTS AS CANONICAL
-# =============================================================================
-
-
 class TestTheShapeGate:
     """An entry carries over untouched only if it is canonical in shape AND size."""
 
@@ -472,11 +437,6 @@ class TestTheShapeGate:
         """Same resolver as the write gate — the push cannot prune on a number the gate does not enforce."""
         caps = tp.resolve_caps(_config(max_chars=123), "guinea")
         assert caps["sessions"]["max_chars"] == 123
-
-
-# =============================================================================
-# THE FRAME
-# =============================================================================
 
 
 class TestTheMachineFrame:
@@ -554,11 +514,6 @@ class TestTheMachineFrame:
             assert not [tag for tag in tags if "{{" in tag], path.name
 
 
-# =============================================================================
-# THE NOTE
-# =============================================================================
-
-
 class TestTheNote:
     """One canonical session entry, or none at all."""
 
@@ -619,11 +574,6 @@ class TestTheNote:
         assert sessions[0]["number"] == 3
 
 
-# =============================================================================
-# SCOPE AND REFUSAL
-# =============================================================================
-
-
 class TestScope:
     """Fleet mode covers a named list, and an unknown branch is an error."""
 
@@ -652,18 +602,7 @@ class TestScope:
         assert "marketstand" not in names
 
     def test_this_lane_owns_no_resident_resolution_of_its_own(self):
-        """INVERTED 2026-08-28, deliberately, and worth saying why.
-
-        This test used to assert the opposite ruling: that the resident list
-        was explicit and `glob("projects` appeared nowhere. DPLAN-0319 replaced
-        the named list with a glob made safe by passport classification, so the
-        old assertion now pins a design that was retired on purpose — the
-        dangerous kind of green.
-
-        What survives is the part that was really being protected: this lane
-        must not resolve residents itself. It asks registry_scope, which globs
-        AND classifies, instead of carrying a second answer.
-        """
+        """This lane asks registry_scope (glob + classify), never resolves residents itself."""
         source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
         assert 'glob("projects' not in source, "the push lane grew its own discovery"
         assert "registry_scope.fleet_branches(" in source
@@ -745,12 +684,7 @@ class TestStraysAreReportedNeverDeleted:
     def test_a_known_migration_backup_is_not_a_stray(self, tmp_path):
         """An accounted-for artifact of a NAMED migration is not unexplained.
 
-        54 of these across 22 branches made every branch report strays on every
-        run forever, which is a line that can never be cleared: the push may not
-        delete them and does not need them gone. @spawn and @devpulse both read
-        that permanent line as "this branch is out of push scope" on 2026-09-07
-        and held the first real bump back on it. `.pre_v2_backup` is @spawn's
-        migrate-passports, `.pre_v3_backup` is this branch's own v3 rollover.
+        The push may not delete them, so reporting them would be a line that never clears.
         """
         root = _branch(tmp_path, "migrated", {"sessions": []})
         trinity = root / ".trinity"
@@ -771,11 +705,6 @@ class TestStraysAreReportedNeverDeleted:
         tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
         assert backup.is_file()
-
-
-# =============================================================================
-# DRY RUN
-# =============================================================================
 
 
 class TestDryRunWritesNothing:
@@ -825,11 +754,6 @@ class TestDryRunWritesNothing:
         assert "findings" in prune["reason"]
 
 
-# =============================================================================
-# WHAT THE PUSH PRODUCES
-# =============================================================================
-
-
 class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
@@ -857,10 +781,8 @@ class TestThePushedFileIsCanonical:
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
         messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
         if failing == ["Meta lines & _usage"] and _seedgo_renders_the_retired_todos_tab():
-            # DPLAN-0345 landing order: memory rows 3-4 and seedgo row 6 go in ONE
-            # commit. Until seedgo's mirror renders the pad tab, the ONLY allowed
-            # miss is the todos_meta byte-match; anything else stays red, and the
-            # moment the mirror lands this pin runs strict again on its own.
+            # Until seedgo's mirror renders the pad tab, the ONLY allowed miss is the
+            # todos_meta byte-match; once it lands this pin runs strict on its own.
             assert all("todos_meta" in message and "_usage does not" not in message for message in messages), messages
             pytest.xfail("seedgo's todos tab mirror (DPLAN-0345 row 6) not landed - docs/todos_v2_shape_contract.md")
         assert failing == [], f"{failing}: {messages}"
@@ -883,11 +805,6 @@ class TestThePushedFileIsCanonical:
 
         stamped = json.loads((root / ".trinity" / ".template_version.json").read_text(encoding="utf-8"))
         assert stamped["stamped_by"] == "memory push"
-
-
-# =============================================================================
-# THE SCOPED TAB REFRESH
-# =============================================================================
 
 
 class TestRefreshIsScopable:
@@ -930,11 +847,6 @@ class TestRefreshIsScopable:
         """Without this field the caller cannot scope anything."""
         source = (_MEMORY_ROOT / "apps" / "handlers" / "rollover" / "orchestrator.py").read_text(encoding="utf-8")
         assert '"branch": branch_str,' in source
-
-
-# =============================================================================
-# THE CLI GATE
-# =============================================================================
 
 
 class TestTheFleetGate:
@@ -989,11 +901,6 @@ class TestTheFleetGate:
         """`push` fired a fleet-wide per_branch reset from a bare word. It must not again."""
         source = (_MEMORY_ROOT / "apps" / "memory.py").read_text(encoding="utf-8")
         assert 'route_command("rollover", ["push"], modules)' not in source
-
-
-# =============================================================================
-# TODOS GO TO THE BACKLOG FILE, NEVER TO VECTORS (DPLAN-0345)
-# =============================================================================
 
 
 class TestTodosMoveToTheBacklog:
@@ -1052,10 +959,7 @@ class TestTodosMoveToTheBacklog:
     # -- the shape ---------------------------------------------------------------
 
     def test_the_canonical_todo_shape_has_no_status(self):
-        # Read from the config now, not from a literal in trinity_push
-        # (FPLAN-0593): the shape has one home and this is where the push
-        # picks it up. A `status` key reappearing in memory.config.json would
-        # fail here, which is the point.
+        # The shape's one home is memory.config.json; a `status` key there fails this.
         assert tp.entry_rules("todos") == {
             "required": {"number": "int", "date": "str", "task": "str"},
             "optional": {"priority": "str"},
@@ -1381,19 +1285,10 @@ class TestTodosMoveToTheBacklog:
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
 
 
-# =============================================================================
-# THE PUSH LOOP OVER A REGISTRY THAT TURNS UNREADABLE (DPLAN-0354 leg 4)
-# =============================================================================
-
-
 class TestThePushLoopOverARegistryThatTurnsUnreadable:
     """The loop with the real local-store lookup over a registry under tmp_path.
 
-    Every other push pin replaces the destinations whole, so the None the
-    lookup answers on an unreadable registry (leg 3b) never reached the loop.
-    Here it does: the entries go to the global store, are verified there and
-    pruned; the lookup logs the registry it could not read. Green from its
-    first run; its proof is the mutants of the lookup's catch, which die here.
+    An unreadable registry sends entries to the global store, verified and pruned there.
     """
 
     def test_the_entries_reach_the_global_store_when_the_registry_cannot_be_read(self, monkeypatch, tmp_path):
@@ -1423,12 +1318,7 @@ class TestThePushLoopOverARegistryThatTurnsUnreadable:
 
 
 class TestThePushReportSaysWhyThereIsNoLocalStore:
-    """The report tells an unreadable registry from a branch with no local store (leg 6 of DPLAN-0354).
-
-    Until leg 6 both answered None from the lookup and the report said nothing:
-    a push that reached the global store only read the same either way. The
-    lookup is the real one over a registry under tmp_path; the store is a fake.
-    """
+    """The report tells an unreadable registry from a branch with no local store."""
 
     def _push_over(self, monkeypatch, tmp_path, registry_text: str) -> tuple:
         repo = tmp_path / "repo"
@@ -1466,11 +1356,6 @@ class TestThePushReportSaysWhyThereIsNoLocalStore:
         assert [entry["local_store"] for entry in result["branches"]] == [None]
         assert not [line for line in rendered if line.startswith("   local store")]
         assert sorted(store.shelves) == sorted([str(root / ".chroma"), str(None)])
-
-
-# =============================================================================
-# THE SHAPE COMES FROM THE CONFIG (FPLAN-0593)
-# =============================================================================
 
 
 class TestEntryRulesReadTheConfig:
@@ -1531,9 +1416,7 @@ class TestEntryRulesReadTheConfig:
     def test_the_global_fallback_is_cached_not_re_read_per_entry(self, monkeypatch):
         """734 entries must not be 734 config reads; the push path never touches it.
 
-        Counted at the config read itself: eight answers over the four sections
-        cost one read. The clear stays on the private cache, since no public reset
-        exists and one for this test alone would be a door for the test (leg 7).
+        Clears the private cache: a public reset for this test alone would be a test door.
         """
         reads = []
         real_load = entry_limits.load_entry_limits

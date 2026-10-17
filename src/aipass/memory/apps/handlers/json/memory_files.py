@@ -3,27 +3,11 @@
 # Description: Memory File Safe I/O Handler
 # Version: 1.6.0
 # Created: 2026-03-17
-# Modified: 2026-09-18
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory File I/O Handler
-
-Safe read/write operations for branch memory files (*.local.json, *.observations.json).
-Handles atomic writes and proper error handling for .trinity/ file management.
-
-Purpose:
-    Prevent corruption of critical memory files during read/write operations.
-    All memory file access should use these functions instead of direct json.load/dump.
-
-Features:
-    - Atomic writes (temp file + rename)
-    - Safe error handling
-    - Metadata helpers
-    - Preserves formatting (indent=2, ensure_ascii=False)
-
-Usage:
-    from aipass.memory.apps.handlers.json.memory_files import read_memory_file, write_memory_file
 """
 
 import json
@@ -41,39 +25,17 @@ from aipass.memory.apps.handlers.write_fence import fence_write
 
 logger = get_system_logger()
 
-# Resolve paths relative to handler location
 _MEMORY_ROOT = module_file(__file__).parents[3]
 _CONFIG_DIR = _MEMORY_ROOT / "config"
 _TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 
-# No service imports - handlers are pure workers (3-tier architecture)
-# No module imports (handler independence)
-
-# Files tracked by entry-limits validation
 _TRACKED_TRINITY_FILES = {"local.json", "observations.json"}
 
 
-# =============================================================================
-# ENTRY-LIMITS VALIDATION (rollover-safe)
-# =============================================================================
-
-
 def violation_line(violation: Dict[str, Any]) -> str:
-    """Render one violation the way the agent who must fix it needs to read it.
+    """Render one violation as a line naming the container, the entry, and what is wrong.
 
-    The over-cap line — ``sessions[0] 312/300 (+12 over)`` — was the only
-    species this text ever had to carry, so it was written inline three times.
-    The closed field shape (FPLAN-0593) added species where those numbers are
-    meaningless: an ``unknown_field`` has no cap to be over, and printing
-    "todos[0] 0/0 (+0 over)" tells the agent a todo is zero characters over a
-    zero-character cap. That is worse than silence — it reads as a bug in the
-    gate rather than a field that may not exist.
-
-    Args:
-        violation: One record from ``classify_entries``.
-
-    Returns:
-        A single line naming the container, the entry, and what is wrong.
+    Each species gets its own words: "0/0 (+0 over)" for an unknown field reads as a gate bug.
     """
     where = f"{violation['container']}[{violation['key']}]"
     reason = violation.get("reason")
@@ -97,27 +59,11 @@ def _validate_entry_limits(
     file_path: Path,
     data: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Check entry limits for a .trinity/ write and return a rejection or None.
+    """Check entry limits for a tracked .trinity/ write and return a rejection or None.
 
-    Only validates files inside a ``.trinity/`` directory whose name is
-    in :data:`_TRACKED_TRINITY_FILES`.  For all other paths this function
-    returns ``None`` immediately (no validation).
-
-    A write is judged by what it AUTHORS. Entries byte-identical to what is
-    already on disk are reported as carried debt and never refused, so
-    rollover and other maintenance writes cannot be blocked by an entry they
-    are not allowed to shrink.
-
-    Args:
-        file_path: Target path for the write.
-        data: The dict about to be written.
-
-    Returns:
-        ``None`` when the write should proceed normally.
-        A ``{"success": False, "error": ...}`` dict when enforce mode is
-        on and new/changed entries exceed their caps.
+    A write is judged by what it AUTHORS: entries byte-identical to disk are carried
+    debt, never refused, so rollover cannot be blocked by an entry it may not shrink.
     """
-    # --- Gate: only tracked .trinity files ------------------------------------
     if file_path.parent.name != ".trinity":
         return None
     if file_path.name not in _TRACKED_TRINITY_FILES:
@@ -129,7 +75,6 @@ def _validate_entry_limits(
     if not limits.get("enabled", True):
         return None
 
-    # Filter limits to entry_types that belong to THIS file
     filtered_types = {
         name: tdef for name, tdef in limits.get("entry_types", {}).items() if tdef.get("file") == file_path.name
     }
@@ -142,7 +87,6 @@ def _validate_entry_limits(
         "entry_types": filtered_types,
     }
 
-    # Read current on-disk content (before)
     before: Dict[str, Any] = {}
     if file_path.exists():
         try:
@@ -154,16 +98,8 @@ def _validate_entry_limits(
     split = classify_entries(before, data, filtered_limits)
     over = split["authored"]
 
-    # --- Carried debt: report, never refuse -----------------------------------
-    # An over-cap entry byte-identical to the one on disk was not written by
-    # this write, so refusing the write cannot cure it and only stops the write.
-    # For rollover that refusal is a deadlock — the document it hands back is
-    # the SMALLER one, and it may not shrink an entry it is merely moving past.
-    # Passing it in silence is the other half of the defect, and the half the
-    # 2026-08-27 narrowing was right about: the old clause skipped these
-    # without a word, so a fat entry that arrived through an ungated lane never
-    # surfaced here again. It gets a line now, naming the branch, the entry and
-    # the numbers — `drone @memory lint` remains the lane that reads disk.
+    # Carried debt is logged, not passed in silence: an entry that arrived through
+    # an ungated lane would otherwise never surface again.
     for debt in split["carried"]:
         logger.warning(
             f"[entry_limits] CARRIED {branch} {file_path.name} "
@@ -171,13 +107,8 @@ def _validate_entry_limits(
             f"not written by this write, not refused; only @{branch} can cure it"
         )
 
-    # --- Near the cap: the line that arrives while there is still room --------
-    # @ai_mail's ask, and their evidence was the argument: they wrote over the
-    # cap FOUR HOURS after being burned by it, knowing the number. "Nothing in
-    # the act of writing shows you the limit — the only instrument is
-    # downstream." A refusal teaches at the moment it is too late; this teaches
-    # one entry early. Authored only: warning about carried near-cap text on
-    # every write is how a channel becomes noise nobody reads.
+    # Near-cap warns one entry early, authored only: carried near-cap text on every
+    # write would turn the channel into noise.
     for close in split["near"]:
         logger.warning(
             f"[entry_limits] NEAR {branch} {file_path.name} "
@@ -189,7 +120,6 @@ def _validate_entry_limits(
     if not over:
         return None
 
-    # --- Violations found -----------------------------------------------------
     enforce = limits.get("enforce", False)
 
     if not enforce:
@@ -197,18 +127,12 @@ def _validate_entry_limits(
             logger.warning(f"[entry_limits] WARN {branch} {file_path.name} {violation_line(violation)}")
         return None  # Write through in warn mode
 
-    # Enforce mode — block the write
     details = "; ".join(violation_line(v) for v in over)
     return {"success": False, "error": f"Entry limit exceeded: {details}"}
 
 
 def _is_auto_compact(entry: Any) -> bool:
-    """True for auto-compact snapshot entries.
-
-    Must match rollover/extractor.py exactly — a guard that classified
-    entries differently from the extractor is how the false ENTRY COUNT
-    spam started in the first place.
-    """
+    """True for auto-compact snapshot entries; must match rollover/extractor.py exactly."""
     return isinstance(entry, dict) and entry.get("status") == "auto-compact"
 
 
@@ -222,14 +146,7 @@ def _warn_entry_count(branch: str, file_name: str, label: str, count: int, cap: 
 
 
 def _check_session_counts(branch: str, file_name: str, entries: list, section_cfg: Dict[str, Any]) -> None:
-    """Warn on the sessions section, budgeting snapshots separately.
-
-    Auto-compact snapshots carry their own small cap in the extractor and
-    never count against the regular session budget.  Checking the combined
-    array against the regular cap made this guard permanently unsatisfiable:
-    rollover correctly archived nothing while the warning fired on every
-    .trinity write, fleet-wide.
-    """
+    """Warn on the sessions section, budgeting snapshots separately, as the extractor does."""
     auto_cap = section_cfg.get("auto_compact_cap")
     if auto_cap is not None:
         snapshots = [e for e in entries if _is_auto_compact(e)]
@@ -244,11 +161,7 @@ def _check_session_counts(branch: str, file_name: str, entries: list, section_cf
 
 
 def _check_entry_counts(file_path: Path, data: Dict[str, Any]) -> None:
-    """Soft guard: warn when list entry counts exceed rollover limits.
-
-    Does NOT block writes — only logs warnings so over-limit growth
-    between rollovers is visible in prax logs.
-    """
+    """Soft guard: warn (never block) when list entry counts exceed rollover limits."""
     if file_path.parent.name != ".trinity":
         return
     if file_path.name not in _TRACKED_TRINITY_FILES:
@@ -285,29 +198,8 @@ def _check_entry_counts(file_path: Path, data: Dict[str, Any]) -> None:
             _warn_entry_count(branch, file_path.name, section_name, len(entries), max_count)
 
 
-# =============================================================================
-# CORE READ/WRITE OPERATIONS
-# =============================================================================
-
-
 def read_memory_file(file_path: Path) -> Dict[str, Any]:
-    """
-    Safe read of memory JSON file
-
-    Handles file not found, corrupt JSON, and other read errors gracefully.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Dict with success status and data: {'success': True, 'data': {...}} or {'success': False, 'error': '...'}
-
-    Example:
-        result = read_memory_file(Path("path/to/BRANCH.local.json"))
-        if result['success']:
-            data = result['data']
-            sessions = data.get('sessions', [])
-    """
+    """Safe read of memory JSON file: ``{'success': True, 'data': ...}`` or ``{'success': False, 'error': ...}``."""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
@@ -331,32 +223,7 @@ def read_memory_file(file_path: Path) -> Dict[str, Any]:
 
 
 def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Atomic write of memory JSON file
-
-    Uses temp file + rename strategy to prevent corruption on write failures.
-    Preserves formatting (indent=2, ensure_ascii=False) for readability.
-
-    Args:
-        file_path: Path to memory JSON file
-        data: JSON data to write (must be dict)
-
-    Returns:
-        Dict with success status: {'success': True, 'file': '...'} or {'success': False, 'error': '...'}
-
-    Example:
-        result = read_memory_file(path)
-        if result['success']:
-            data = result['data']
-            data['sessions'].append(new_session)
-            write_result = write_memory_file(path, data)
-
-    Safety:
-        - Writes to temp file first
-        - Only renames if write succeeds
-        - Original file unchanged if write fails
-        - Refused outright outside the AIPass root (write_fence)
-    """
+    """Atomic write (temp file + rename) of memory JSON; refused outside the AIPass root."""
     refusal = fence_write(file_path, lane="write_memory_file")
     if refusal is not None:
         return {"success": False, "error": refusal}
@@ -364,9 +231,6 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {"success": False, "error": f"Data must be dict, got {type(data).__name__}"}
 
-    # --- Entry-limits validation (rollover-safe) ------------------------------
-    # Only validate .trinity/ files that are tracked (local.json, observations.json).
-    # Refuses what this write authored; reports what it carries.
     try:
         rejection = _validate_entry_limits(file_path, data)
         if rejection is not None:
@@ -374,23 +238,21 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:
         logger.warning(f"[memory_files] Entry-limits validation error (writing anyway): {exc}")
 
-    # --- Soft entry-count guard (warn-only, never blocks) --------------------
     try:
         _check_entry_counts(file_path, data)
     except Exception as exc:
         logger.warning(f"[memory_files] Entry-count check error (writing anyway): {exc}")
 
     try:
-        # Create temp file in same directory (for atomic rename)
+        # Same directory: the rename is only atomic within one filesystem.
         temp_fd, temp_path = tempfile.mkstemp(dir=file_path.parent, prefix=f".{file_path.name}.", suffix=".tmp")
 
         try:
-            # Write to temp file
             with open(temp_fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write("\n")  # Add final newline
 
-            # Atomic replace (os.replace overwrites on both Linux and Windows)
+            # os.replace, not rename: it overwrites on Windows too.
             os.replace(temp_path, file_path)
 
             json_handler.log_operation("write_memory_file", {"file": file_path.name, "success": True})
@@ -398,7 +260,6 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             return {"success": True, "file": str(file_path)}
 
         except Exception as e:
-            # Clean up temp file on failure
             logger.error(f"[memory_files] Write failed for {file_path.name}, cleaning up temp file: {e}")
             Path(temp_path).unlink(missing_ok=True)
             raise e
@@ -412,29 +273,8 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "error": f"Failed to write {file_path.name}: {e}"}
 
 
-# =============================================================================
-# METADATA HELPERS
-# =============================================================================
-
-
 def read_memory_file_data(file_path: Path) -> Optional[Dict[str, Any]]:
-    """
-    Read memory file and return data directly (no dict wrapper)
-
-    Convenience function for simple reads where you just need the data.
-    Returns None on any error.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Parsed JSON data dict, or None on error
-
-    Example:
-        data = read_memory_file_data(path)
-        if data:
-            sessions = data.get('sessions', [])
-    """
+    """Read memory file and return data directly, or None on any error."""
     result = read_memory_file(file_path)
     if result["success"]:
         return result.get("data")
@@ -442,50 +282,13 @@ def read_memory_file_data(file_path: Path) -> Optional[Dict[str, Any]]:
 
 
 def write_memory_file_simple(file_path: Path, data: Dict[str, Any]) -> bool:
-    """
-    Write memory file and return simple success/failure boolean
-
-    Convenience function for simple writes where you just need success flag.
-
-    Args:
-        file_path: Path to memory JSON file
-        data: JSON data to write
-
-    Returns:
-        True if successful, False otherwise
-
-    Example:
-        data['sessions'].append(new_session)
-        if write_memory_file_simple(path, data):
-            print("Success!")
-    """
+    """Write memory file and return a success boolean."""
     result = write_memory_file(file_path, data)
     return result["success"]
 
 
-# =============================================================================
-# VALIDATION HELPERS
-# =============================================================================
-
-
 def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
-    """
-    Validate memory file has required structure
-
-    Checks for document_metadata presence and basic structure.
-
-    Args:
-        data: Parsed JSON data
-
-    Returns:
-        Tuple of (is_valid, error_message)
-
-    Example:
-        data = read_memory_file_data(path)
-        valid, error = validate_memory_file_structure(data)
-        if not valid:
-            logger.warning(f"Invalid structure: {error}")
-    """
+    """Validate memory file has document_metadata and its expected fields: (is_valid, error)."""
     if not isinstance(data, dict):
         return False, "Data is not a dictionary"
 
@@ -497,7 +300,6 @@ def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
     if not isinstance(metadata, dict):
         return False, "'document_metadata' is not a dictionary"
 
-    # Check for expected fields
     expected = ["document_type", "document_name", "version"]
     missing = [field for field in expected if field not in metadata]
 
@@ -507,16 +309,11 @@ def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
     return True, ""
 
 
-# =============================================================================
-# TESTING
-# =============================================================================
-
 if __name__ == "__main__":
     import sys as _sys
 
     print("\n=== MEMORY FILE I/O HANDLER - Safe Operations Test ===\n")
 
-    # Test with a file passed as argument, or show usage
     if len(_sys.argv) > 1:
         test_file = Path(_sys.argv[1])
     else:
@@ -535,7 +332,6 @@ if __name__ == "__main__":
             entry_counts = {k: len(v) for k, v in file_data.items() if isinstance(v, list)}
             print(f"   Entries: {entry_counts}")
 
-            # Validate structure
             valid, error = validate_memory_file_structure(file_data)
             if valid:
                 print("+ Structure validation passed")

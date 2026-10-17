@@ -3,23 +3,12 @@
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/rollover/todo_roll.py — the pad's roll to its backlog, the trim and the restore."""
 
-# Split from test_rollover_pipeline.py on 2026-10-08 (oversize_test_file): the
-# pad's roll lane, one subject - how the pad's oldest todos roll to a backlog
-# FILE, which branch a roll targets, how a long backlog trims to its archive,
-# and how a rolled todo is restored to the pad.
-#
-# Covers:
-#   from aipass.memory.apps.handlers.rollover.todo_roll import roll_todos
-#   from aipass.memory.apps.handlers.rollover.todo_roll import resolve_target
-#   from aipass.memory.apps.handlers.rollover.todo_roll import trim_backlog
-#   from aipass.memory.apps.handlers.rollover.todo_roll import restore_todo
-#
 # All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -34,13 +23,7 @@ import pytest
 from aipass.memory.apps.handlers import write_fence
 
 
-# ===========================================================================
-# Tests: rollover/todo_roll -- the todo pad rolls to a FILE (DPLAN-0345 row 1)
-# ===========================================================================
-#
-# Behavioural, on tmp_path copies: a minted pad, a throwaway config naming the
-# count, and a .backup root under tmp_path. The live tree's pads and the real
-# .backup/todo/ are never reachable from here.
+# The live tree's pads and the real .backup/todo/ are never reachable from here.
 
 
 def _todo_roll():
@@ -65,9 +48,7 @@ def _todo(number, task=None, **extra) -> dict:
 def _todo_cap(module) -> int:
     """The live cap on a todo's task, read from the config the gate reads.
 
-    Never a literal: the number moved once already (150 -> 100) and a test
-    carrying its own copy would pin the cap that WAS, then pass while the
-    refusal it claims to measure stopped matching.
+    Never a literal: a copied cap would pass on after the real one moved.
     """
     limits = module.load_entry_limits("guinea")
     return int(limits["entry_types"]["todos"]["max_chars"])
@@ -156,10 +137,7 @@ class TestTodoRoll:
     def test_a_backlog_outside_the_aipass_root_is_refused_and_the_pad_kept(self, tr, tmp_path, monkeypatch):
         """The backlog's directory is made BEFORE the gated write, so it needs its own fence.
 
-        Without it the gate still refuses the file — and leaves an empty
-        ``.backup/todo/<branch>/`` behind in the other project, which is a
-        write. The pad is untouched either way: nothing is pruned until the
-        backlog reads back.
+        Without it the gate refuses the file but leaves an empty directory behind in the other project.
         """
 
         home = tmp_path / "aipass"
@@ -406,11 +384,7 @@ class TestTodoTarget:
 def _point_backlog_ceiling(monkeypatch, tmp_path: Path, tr, ceiling) -> None:
     """Rewrite the throwaway config's ``rollover.backlog.max_records`` in place.
 
-    Layered on top of :func:`_point_todos_count`, which already repointed the
-    loader at this file. Written rather than monkeypatched onto the accessor so
-    the pins measure the CONFIG READ too — a ceiling the loader would not serve
-    is a ceiling the fleet does not have. ``config_loader.load`` reads from disk
-    on every call, so rewriting the file is the whole update.
+    Written, not monkeypatched onto the accessor, so the pins measure the config read too.
     """
     del tr  # the loader is repointed by _point_todos_count; kept for call-site symmetry
     path = tmp_path / "custom_config" / "memory.config.json"
@@ -425,12 +399,7 @@ def _point_backlog_ceiling(monkeypatch, tmp_path: Path, tr, ceiling) -> None:
 class TestTheBacklogTrim:
     """A backlog past its ceiling moves its oldest records to a SIBLING archive.
 
-    The trim exists because nothing bounded the file: @seedgo sat at 72 records
-    and would have crossed 100 on its own. What it may not do is drop anything.
-    A backlog is the only copy of a rolled todo — never vectorised, by this
-    branch's own ruling — so "trim" here means move deeper, never delete, and
-    these pins are mostly about the records that leave the working file still
-    existing afterwards.
+    A backlog is the only copy of a rolled todo (never vectorised): trim moves deeper, never deletes.
     """
 
     @pytest.fixture(autouse=True)
@@ -482,8 +451,6 @@ class TestTheBacklogTrim:
         assert len(self._numbers(backlog)) == 10
 
     def test_the_oldest_records_move_to_the_sibling_archive_and_none_is_lost(self, tr, tmp_path):
-        # The whole contract in one measurement: what left the backlog is in
-        # the archive, in order, and the two files together still hold all 14.
         backlog = self._backlog_of(tmp_path, 14)
 
         result = tr.trim_backlog(backlog, "guinea", ceiling=10)
@@ -503,8 +470,7 @@ class TestTheBacklogTrim:
         assert archived == original, "the archive rewrote the record on its way in"
 
     def test_the_archive_is_verified_before_the_backlog_is_shortened(self, tr, tmp_path, monkeypatch):
-        # Same order as the roll, for the same reason: a record may sit in both
-        # files for an instant, and must never sit in neither.
+        # A record may sit in both files for an instant, and must never sit in neither.
         backlog = self._backlog_of(tmp_path, 12)
         writes = []
         real_write = tr._write_document
@@ -533,8 +499,7 @@ class TestTheBacklogTrim:
         assert backlog.read_bytes() == before, "records left the backlog with nowhere to go"
 
     def test_high_water_survives_a_trim_so_a_number_is_never_re_issued(self, tr, tmp_path):
-        # The archive is unreachable from `todo restore`, so the floor that
-        # stops #1 being minted twice has to outlive the record itself.
+        # The archive is unreachable from `todo restore`, so the floor must outlive the record.
         backlog = self._backlog_of(tmp_path, 12)
 
         tr.trim_backlog(backlog, "guinea", ceiling=10)
@@ -566,10 +531,7 @@ class TestTheBacklogTrim:
         assert len(self._numbers(backlog)) == 12
 
     def test_the_ceiling_is_read_from_the_config_when_none_is_passed(self, tr, tmp_path, monkeypatch):
-        # The CONTROL for the parametrized guard below. Without it those cases
-        # would pass vacuously: 12 records sit under the shipped ceiling of
-        # 100, so "no trim happened" proves nothing unless a good value in the
-        # same file is first shown to trim.
+        # The CONTROL for the parametrized guard below, which would otherwise pass vacuously.
         backlog = self._backlog_of(tmp_path, 12)
         _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
 
@@ -580,9 +542,6 @@ class TestTheBacklogTrim:
 
     @pytest.mark.parametrize("ceiling", [None, 0, -3, "100", True])
     def test_an_unusable_ceiling_means_no_trim_never_a_trim_to_zero(self, tr, tmp_path, monkeypatch, ceiling):
-        # The failure mode of this number is "the file stays long", never
-        # "the last copy is gone". A config that lost the key must not be read
-        # as a ceiling of nothing.
         backlog = self._backlog_of(tmp_path, 12)
         _point_backlog_ceiling(monkeypatch, tmp_path, tr, ceiling)
 
@@ -599,9 +558,7 @@ class TestTheBacklogTrim:
         assert result["archived"] == 0
 
     def test_the_roll_trims_on_its_way_past(self, tr, tmp_path, monkeypatch):
-        # The trim hangs off append_to_backlog, the one choke point both the
-        # roll and the push go through, so it fires at the moment the file
-        # grows rather than on a sweep nobody runs.
+        # The trim hangs off append_to_backlog, the one choke point the roll and the push share.
         _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
         self._backlog_of(tmp_path, 10)
         local = _mint_pad(tmp_path, [_todo(n) for n in range(20, 33)])
@@ -613,9 +570,7 @@ class TestTheBacklogTrim:
         assert self._numbers(tr.archive_path_for(_backlog_file(tmp_path))) == [1, 2, 3]
 
     def test_a_failed_trim_never_fails_the_append(self, tr, tmp_path, monkeypatch):
-        # By the time the trim runs the records are safely on disk and the
-        # caller is about to prune the pad on the strength of that. A trim
-        # that could veto the append would strand open work on a full pad.
+        # A trim that could veto the append would strand open work on a full pad.
         _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
         self._backlog_of(tmp_path, 10)
         monkeypatch.setattr(tr, "trim_backlog", lambda *a, **k: {"success": False, "archived": 0, "error": "boom"})
@@ -657,10 +612,6 @@ class TestTodoRestore:
         return tr.restore_todo("guinea", number, local_path=local, backup_root=tmp_path / ".backup")
 
     def test_restore_reissues_the_next_number_and_carries_every_other_field(self, tr, tmp_path):
-        # `tags` used to stand in for "every other field" here. The closed
-        # field shape (FPLAN-0593) made that a field a todo may not carry, so
-        # the pin now rides on `priority` — a field the shape allows — and the
-        # tags case is pinned below for what it actually does now.
         original = _todo(2, task="bring it back", priority="high")
         local = _mint_pad(tmp_path, [_todo(n) for n in (5, 9, 3)])
         backlog = self._backlog_with(
@@ -676,18 +627,8 @@ class TestTodoRestore:
         assert [record["entry"]["number"] for record in remaining] == [1, 14]
 
     def test_restoring_a_non_canonical_todo_is_refused_and_the_field_is_named(self, tr, tmp_path):
-        # THE DEAD END, pinned rather than hidden (FPLAN-0593). A todo reaches
-        # the backlog BECAUSE it is non-canonical, and the closed field shape
-        # means putting it back on the pad is a refused write. Restore must not
-        # reshape it to get past the gate — that is the one thing the backlog
-        # contract forbids — so the honest outcome is a refusal.
-        #
-        # Phase 5 changed what that refusal SAYS, not whether it happens. The
-        # field is named now: two seats hit the bare version the same night and
-        # reshaped five records by hand because the only way to learn which
-        # field was wrong was to attempt the write and read one refusal at a
-        # time. The substring is asserted exactly, not with an `or` over two
-        # words — the loose version passed on a refusal that named nothing.
+        # Restore must never reshape a record to pass the gate, so the honest outcome is a refusal.
+        # The field substring is asserted exactly: a loose `or` passed on a refusal that named nothing.
         original = _todo(2, task="bring it back", tags=["x"])
         local = _mint_pad(tmp_path, [_todo(5)])
         backlog = self._backlog_with(tmp_path, [self._record(original)])
@@ -697,16 +638,10 @@ class TestTodoRestore:
         assert result["success"] is False
         assert "field 'tags' is not part of the entry shape" in result["error"], result["error"]
         assert "NOTHING RESTORED" in result["error"]
-        # The pad and the backlog are both left exactly as found.
         assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == [5]
         assert [r["entry"]["number"] for r in json.loads(backlog.read_text(encoding="utf-8"))["entries"]] == [2]
 
     def test_every_broken_rule_is_named_in_one_refusal_not_one_per_attempt(self, tr, tmp_path):
-        # The whole point of the pre-write check: a seat fixes the record in
-        # one pass instead of bisecting it. @flow's five refused restores
-        # carried both species at once — a `status` field the shape does not
-        # allow, and a `task` past its cap — and the gate reported whichever it
-        # reached first.
         cap = _todo_cap(tr)
         original = _todo(2, task="x" * (cap + 17), status="open")
         local = _mint_pad(tmp_path, [_todo(5)])
@@ -718,11 +653,6 @@ class TestTodoRestore:
         assert f"'task' is {cap + 17}/{cap} chars (+17 over)" in error, error
 
     def test_the_refusal_lands_before_anything_is_written(self, tr, tmp_path, monkeypatch):
-        # "Pre-write" is the claim; this measures it. The old path built the
-        # pad, called the writer and let the gate refuse — correct, but it
-        # spent a write to learn what the shape already knew, and the pad file
-        # was rewritten and rolled back on a lane whose whole contract is that
-        # a todo is never in neither place.
         writes = []
         monkeypatch.setattr(tr, "_write_document", lambda path, document: writes.append(Path(path).name))
         local = _mint_pad(tmp_path, [_todo(5)])
@@ -732,7 +662,6 @@ class TestTodoRestore:
         assert writes == [], f"the shape check ran after a write: {writes}"
 
     def test_a_legal_record_passes_the_shape_check_untouched(self, tr, tmp_path):
-        # The other half: the check must not refuse what the gate would accept.
         # A pre-flight stricter than the gate it predicts is a new dead end.
         local = _mint_pad(tmp_path, [_todo(5)])
         self._backlog_with(tmp_path, [self._record(_todo(2, task="bring it back", priority="high"))])
@@ -742,12 +671,7 @@ class TestTodoRestore:
         assert result["success"] is True, result["error"]
 
     def test_the_check_reports_and_never_repairs(self, tr, tmp_path):
-        # Scope, held deliberately. Whether an over-cap task should be CUT to
-        # fit or carried VERBATIM is open (todo 251, the legacy-pad ruling) and
-        # is not presumed here: under either answer the refusal text above is
-        # the same, so only the reporting half was built. This pins that the
-        # repairing half was NOT — a restore that quietly trimmed a task would
-        # answer the open question by shipping.
+        # Cut-to-fit vs verbatim for an over-cap task is an open ruling; a quiet trim would decide it.
         cap = _todo_cap(tr)
         original = _todo(2, task="x" * (cap + 5))
         local = _mint_pad(tmp_path, [_todo(5)])

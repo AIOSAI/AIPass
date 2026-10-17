@@ -3,17 +3,11 @@
 # Description: Contract tests for the memory entry point and its data handling
 # Version: 1.1.1
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/memory.py."""
-
-# Contract tests for memory branch: the entry point's import shape and exit
-# codes, the modules' script-safe imports, and the passport's identity keys.
-# (2026-09-27: four tests that raised or built their own values and never
-# called @memory code were retired - gold standard case 3, the stdlib or the
-# test's own helper under test.)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — discover_modules() per module, pinned in tests/test_fleet_gateway.py
@@ -25,20 +19,12 @@ from unittest.mock import patch
 
 from aipass.memory.apps import memory as memory_entry
 
-# ---------------------------------------------------------------------------
-# Data Structure Contracts
-# ---------------------------------------------------------------------------
-
 
 class TestDataStructureContracts:
     """Tests verifying expected keys in memory data structures."""
 
     def test_config_keys_present_in_passport(self) -> None:
-        """Passport config must contain module_name equivalent keys.
-
-        Memory branch config_keys include branch identity fields that
-        serve the same purpose as module_name in other branches.
-        """
+        """Passport config must contain module_name equivalent keys."""
         passport = {
             "branch_info": {
                 "branch_name": "memory",
@@ -49,24 +35,12 @@ class TestDataStructureContracts:
             "citizenship": {"registered": True},
         }
 
-        # Verify config_keys contract
         assert "module_name" in passport["branch_info"]
         assert "branch_name" in passport["branch_info"]
 
 
-# ---------------------------------------------------------------------------
-# Import Contracts
-# ---------------------------------------------------------------------------
-
-
 class TestEntryPointImportContract:
-    """The entry point is executed as a SCRIPT by drone, not imported as a package.
-
-    A relative import there raises 'attempted relative import with no known
-    parent package' at call time, not at import time — so it stays invisible
-    until a user runs the command. 'drone @memory watch' was dead this way.
-    The house rule is absolute 'from aipass.<agent>...' imports everywhere.
-    """
+    """The entry point is executed as a SCRIPT by drone, so a relative import fails only at run time."""
 
     def _entry_point_source(self) -> str:
         entry = Path(__file__).resolve().parent.parent / "apps" / "memory.py"
@@ -83,12 +57,7 @@ class TestEntryPointImportContract:
         assert offenders == [], "Relative imports in the entry point script:\n" + "\n".join(offenders)
 
     def test_entry_point_imports_no_handlers_directly(self) -> None:
-        """The entry point routes to modules; only modules may import handlers.
-
-        `watch` used to be a built-in on the entry point, so its two monitor
-        handler imports sat here — the `encapsulation` standard scored this file
-        66% for it. The command now lives in modules/watch.py like every other.
-        """
+        """The entry point routes to modules; only modules may import handlers."""
         source = self._entry_point_source()
         offenders = [
             f"{num}: {line.strip()}"
@@ -99,19 +68,7 @@ class TestEntryPointImportContract:
 
 
 class TestUnknownArgumentExitsNonZero:
-    """An unknown command or argument FAILS — the owner's standing ruling.
-
-    All three shapes printed the correct refusal and then exited 0, because
-    every door in main() returned None and __main__ never passed it to
-    sys.exit. Every caller scripting against the exit code was told success.
-    @devpulse's fleet sweep of 2026-09-07 named this branch as the only one
-    failing all three probes.
-
-    The two codes differ on purpose: 1 = nothing routed, 2 = a module routed
-    and refused. `handle_command` returning True means "I handled this", not
-    "it worked", so a refused sub-argument cannot be told apart from a
-    successful run without the resolve_exit flip.
-    """
+    """An unknown command or argument FAILS: 1 = nothing routed, 2 = a module routed and refused."""
 
     def _run_main(self, argv: list[str]) -> int:
         """Call the entry point's main() with argv, returning its exit code."""
@@ -136,7 +93,7 @@ class TestUnknownArgumentExitsNonZero:
         assert self._run_main([]) == 0
 
     def test_a_todo_subverb_nothing_routes_exits_non_zero(self) -> None:
-        """`todo` is routed by the auto-discovered todo module; an unknown sub-verb is refused, 2 (FPLAN-0590 row 5)."""
+        """`todo` is routed by the auto-discovered todo module; an unknown sub-verb is refused, 2."""
         assert self._run_main(["todo", "not_a_real_subverb_xyz"]) == 2
         assert self._run_main(["todo", "--help"]) == 0
 
@@ -159,14 +116,7 @@ class TestWatchRunnerImportContract:
 
 
 class TestModuleScriptImportContract:
-    """Every file with a __main__ block must survive being run as a script.
-
-    `apps/modules/*.py` all ship one, and a relative import there raises
-    'attempted relative import with no known parent package' the moment anyone
-    runs the file directly — the same defect that left `drone @memory watch`
-    dead. Routing through the entry point hides it, so only this contract and a
-    direct run catch it.
-    """
+    """Every file with a __main__ block must survive being run as a script; the entry point hides it."""
 
     def _module_files(self):
         modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"

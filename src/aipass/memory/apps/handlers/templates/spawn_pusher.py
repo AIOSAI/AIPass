@@ -3,25 +3,11 @@
 # Description: Spawn Template Sync Handler
 # Version: 0.2.0
 # Created: 2026-03-15
-# Modified: 2026-09-18
+# Modified: 2026-10-17
 # =============================================
 
 """
 Spawn Template Sync Handler
-
-Pushes memory's canonical template updates to spawn's template factory
-so that newly created branches always get the latest schema.
-
-Purpose:
-    Memory owns the living templates (LOCAL.template.json, OBSERVATIONS.template.json).
-    Spawn has multiple template sets (birthright, builder, etc.) each containing
-    a .trinity/ directory with local.json and observations.json. This handler
-    auto-discovers spawn's template sets and propagates structural changes from
-    memory's canonical templates, preserving {{BRANCH}} and {{DATE}} placeholders.
-
-Independence:
-    Self-contained handler. Reads/writes JSON files directly with pathlib.
-    No imports from other handlers.
 """
 
 import json
@@ -33,11 +19,6 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# =============================================================================
-# PATH SETUP
-# =============================================================================
-
-# handlers/templates/spawn_pusher.py -> apps/handlers/templates/ (3 levels up = memory/)
 MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
 
 TEMPLATES_DIR = MEMORY_ROOT / "templates"
@@ -46,16 +27,7 @@ OBS_TEMPLATE_PATH = TEMPLATES_DIR / "OBSERVATIONS.template.json"
 
 
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
-    """
+    """Repo root for this lane; a local name because tests patch it, the body lives in ``repo_root.py``."""
     return repo_root.find_repo_root(caller="spawn_pusher")
 
 
@@ -65,20 +37,8 @@ def _find_spawn_templates_dir() -> Path:
     return repo_root / "src" / "aipass" / "spawn" / "templates"
 
 
-# =============================================================================
-# TEMPLATE SET DISCOVERY
-# =============================================================================
-
-
 def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
-    """
-    Auto-discover spawn template sets that contain a .trinity/ directory.
-
-    Skips .archive/ and any hidden directories.
-
-    Returns:
-        List of dicts with 'name' and 'trinity_path' keys.
-    """
+    """Spawn template sets that contain a .trinity/ directory, hidden ones (.archive/) skipped."""
     template_sets = []
 
     if not spawn_templates_dir.is_dir():
@@ -87,7 +47,6 @@ def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
     for child in sorted(spawn_templates_dir.iterdir()):
         if not child.is_dir():
             continue
-        # Skip hidden dirs and .archive
         if child.name.startswith("."):
             continue
         trinity_dir = child / ".trinity"
@@ -100,11 +59,6 @@ def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
             )
 
     return template_sets
-
-
-# =============================================================================
-# JSON COMPARISON
-# =============================================================================
 
 
 def _read_json(path: Path) -> dict | None:
@@ -138,29 +92,10 @@ def _json_equal(a: dict | None, b: dict | None) -> bool:
     return a == b
 
 
-# =============================================================================
-# MAIN PUSH FUNCTION
-# =============================================================================
-
-
 def push_to_spawn_templates(dry_run: bool = False) -> dict:
-    """
-    Push memory's canonical templates to spawn's template directories.
+    """Push memory's canonical templates to every spawn template set that differs.
 
-    Auto-discovers template sets under spawn/templates/ that contain
-    a .trinity/ directory. Compares memory's canonical LOCAL.template.json
-    and OBSERVATIONS.template.json against each set's local.json and
-    observations.json. Writes updates when structural differences are found.
-
-    Placeholders ({{BRANCH}}, {{DATE}}) are preserved as-is since
-    spawn resolves them at branch-creation time.
-
-    Args:
-        dry_run: If True, report what would change without writing files.
-
-    Returns:
-        Result dict with template_sets_found, template_sets_updated,
-        files_modified, changes, and errors.
+    Placeholders ({{BRANCH}}, {{DATE}}) are copied as-is: spawn resolves them at creation.
     """
     result: Dict[str, Any] = {
         "success": True,
@@ -172,7 +107,6 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
         "errors": [],
     }
 
-    # --- Load canonical templates from memory ---
     canonical_local = _read_json(LOCAL_TEMPLATE_PATH)
     if canonical_local is None:
         result["success"] = False
@@ -185,14 +119,12 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
         result["errors"].append(f"Failed to read canonical OBSERVATIONS template: {OBS_TEMPLATE_PATH}")
         return result
 
-    # --- Locate spawn templates directory ---
     spawn_templates_dir = _find_spawn_templates_dir()
     if not spawn_templates_dir.is_dir():
         result["success"] = False
         result["errors"].append(f"Spawn templates directory not found: {spawn_templates_dir}")
         return result
 
-    # --- Discover template sets ---
     template_sets = _discover_template_sets(spawn_templates_dir)
     result["template_sets_found"] = [ts["name"] for ts in template_sets]
 
@@ -200,7 +132,6 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
         logger.info("spawn_pusher: No template sets found with .trinity/ directories")
         return result
 
-    # --- Compare and push each template set ---
     file_map = [
         ("local.json", canonical_local),
         ("observations.json", canonical_obs),
@@ -218,7 +149,6 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
             if _json_equal(existing, canonical):
                 continue  # Already in sync
 
-            # Determine action label
             action = "updated" if spawn_file.exists() else "created"
             set_changed = True
             result["files_modified"] += 1
@@ -237,7 +167,6 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
         if set_changed:
             result["template_sets_updated"] += 1
 
-    # --- Summary logging ---
     mode = "DRY RUN" if dry_run else "PUSH"
     logger.info(
         f"spawn_pusher [{mode}]: "
@@ -257,10 +186,6 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
     )
     return result
 
-
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
 
 if __name__ == "__main__":
     import sys as _sys

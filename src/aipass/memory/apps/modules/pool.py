@@ -3,7 +3,7 @@
 # Description: Pool Module — drone CLI for pool commands
 # Version: 1.0.0
 # Created: 2026-06-06
-# Modified: 2026-06-06
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -31,11 +31,6 @@ from aipass.cli.apps.modules import console, error
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
-
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
 _SUBCOMMANDS = {
     "process": "Process memory pool files (vectorize + archive)",
     "status": "Show memory pool status",
@@ -43,29 +38,13 @@ _SUBCOMMANDS = {
 
 
 def handle_command(command: str, args: List[Any]) -> bool:
-    """
-    Handle pool commands.
-
-    Routing:
-        pool (no args)        -> print_introspection()
-        pool --help/-h/help   -> print_help()
-        pool process          -> run auto_process()
-        pool status           -> show pool status
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle pool commands; True if handled."""
     if command == "pool":
         if not args:
             print_introspection()
             return True
 
-        # A help flag ANYWHERE wins — asking about `process` must never process.
-        # No pool subcommand takes free text, so a bare `help` counts too.
+        # A help flag ANYWHERE wins (asking about `process` must never process); bare `help` too.
         if wants_help(args, allow_bare_word=True):
             print_help()
             return True
@@ -89,11 +68,6 @@ def handle_command(command: str, args: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# CLI DISPLAY
-# =============================================================================
-
-
 def _run_process_command() -> None:
     """Execute pool processing + rollover check and display results."""
     from aipass.memory.apps.handlers.intake.auto_process import auto_process
@@ -109,7 +83,6 @@ def _run_process_command() -> None:
         {"success": result.get("success", False)},
     )
 
-    # Pool results
     pool = result.get("pool", {})
     if pool.get("skipped"):
         console.print(f"[dim]Pool: skipped — {pool.get('reason', 'unknown')}[/dim]")
@@ -123,7 +96,6 @@ def _run_process_command() -> None:
         else:
             console.print("[dim]Pool: no files to process[/dim]")
 
-    # Rollover results
     rollover = result.get("rollover", {})
     if rollover.get("skipped"):
         console.print("[dim]Rollover: no triggers[/dim]")

@@ -3,39 +3,14 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""
 
-# Repos outside this one join the fleet by DECLARATION, never by being nearby.
-#
-# FPLAN-0460 phase 2. The owner's ruling, verbatim: "if .daemon is present anywhere
-# on the machine and an agent exists there, daemon should be available - its really
-# that simple." @devpulse gave the GO on the mechanism @drone and I reached
-# independently: AIPass home declares which repo roots participate.
-#
-# WHAT THE GO CHANGED ABOUT MY OWN EARLIER RULING. I ruled that passport 2.0 needed
-# a third ``citizenship.residency`` value before external citizens could be seen.
-# That ruling made a schema migration and a six-owner declaration campaign into a
-# PRECONDITION for a working feature, and the GO retired it as one. So membership
-# here is PRESENCE, not declaration: a branch in a declared root is a citizen if
-# ``.trinity/passport.json`` exists. None of the six live external citizens has a
-# residency field, and gating on one would have shipped nothing.
-#
-# WHAT DID NOT CHANGE, and it is the law this module was built on: DECLARED roots
-# only, never a walk, at any depth. The reason is measured rather than asserted - a
-# passport walk of our own ``projects/`` returns eight passports for four
-# residents, because @baud carries copies under ``.backup/``. The same walk across
-# a machine would count every snapshot of every repo.
-#
-# The two candidate anchors that were REJECTED, both because they had already
-# failed in production: ``ai_mail``'s contacts.json accretes by last_seen, carries
-# dead April entries and does not contain @wren at all; and my own
-# ``known_registries.json`` persisted a deleted /tmp scratchpad probe while missing
-# Vera-Studio's real registry. An anchor that has to be right cannot be one that
-# accumulates by accident.
-
+# Repos outside this one join the fleet by DECLARATION, never by being nearby. Membership is
+# PRESENCE (a passport in a declared root's registry), never a residency field. Declared roots
+# only, never a walk at any depth: a walk counts every backup copy of every passport.
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — registry_scope.resident_registry_paths(); tests/test_residency_scope.py
 # seedgo: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
@@ -73,19 +48,12 @@ def _root_row(path: str, label: str = "x", status: str = "active") -> dict:
 
 @pytest.fixture
 def machine(tmp_path):
-    """A synthetic machine: one AIPass repo and three siblings beside it.
-
-    Built on disk rather than mocked, for the same reason the residency fixture
-    is: this module's entire job is reading real files in a particular
-    relationship to each other, and a mock of that relationship tests the mock.
-    """
+    """A synthetic machine: one AIPass repo and three siblings beside it, built on disk, never mocked."""
     home = tmp_path / "AIPass"
     _write(home / "AIPASS_REGISTRY.json", _registry(_branch("alpha", "src/aipass/alpha")))
     _write(home / "src/aipass/alpha/.trinity/passport.json", {"citizenship": {"residency": "core"}})
 
-    # A genuine external repo: own sealed registry, two citizens, one of which
-    # opts in to the scheduler. NEITHER declares a residency -- that is the
-    # point of the GO.
+    # A genuine external repo; NEITHER citizen declares a residency.
     wren = tmp_path / "wren"
     _write(wren / "WREN_REGISTRY.json", _registry(_branch("wren", "src/wren"), _branch("quiet", "src/quiet")))
     _write(wren / "src/wren/.trinity/passport.json", {"citizenship": {"registered": True}})
@@ -133,13 +101,7 @@ class TestTheAnchorIsADeclarationNotADiscovery:
         assert [path.name for path in rs.declared_roots(machine)] == ["wren"]
 
     def test_a_root_inside_this_repo_is_refused(self, machine):
-        """The double-count guard, and it is not hypothetical.
-
-        Declaring our own tree as an external root would return every core
-        citizen and every resident a second time under a different tier. @baud
-        would appear three times: once as a resident, once here, and once more
-        through the backup copy the walk law already refuses.
-        """
+        """The double-count guard: our own tree as an external root would return every citizen twice."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("."), _root_row("src"), _root_row("../wren")))
         assert [path.name for path in rs.declared_roots(machine)] == ["wren"]
 
@@ -163,30 +125,13 @@ class TestTheAnchorIsADeclarationNotADiscovery:
         ],
     )
     def test_every_unusable_row_is_skipped_and_the_good_one_survives(self, machine, label, row):
-        """One bad row costs one row. Never the whole file.
-
-        Parametrised with a GOOD row alongside each bad one on purpose: a
-        reader that returned [] on any defect would pass a test that only
-        checked the bad row was absent.
-        """
+        """One bad row costs one row, never the whole file (a GOOD row rides alongside each bad one)."""
         _write(machine / rs.DECLARED_ROOTS, _roots(row, _root_row("../Demo")))
         assert [path.name for path in rs.declared_roots(machine)] == ["Demo"]
 
 
 class TestDeclarationOrderSurvivesToTheDoor:
-    """@ai_mail's abe8141b, answered in code.
-
-    The fleet ruling says an N-root tie is broken by DECLARATION order, but
-    this reader used to hand back ``sorted(found)`` — alphabetical by resolved
-    path. @ai_mail found the gap the honest way: they reported that the order
-    reaching their door could not be the order the ruling names, and refused to
-    guess at it. They were right, and the reader was wrong.
-
-    Alphabetical-by-resolved-path is an accident of what someone named a
-    directory. The row order in the anchor is a statement: a human wrote these
-    rows in this sequence. Both are deterministic — only one carries intent, so
-    only one can break a tie the ruling says intent breaks.
-    """
+    """An N-root tie is broken by DECLARATION order, never alphabetical by resolved path."""
 
     def test_roots_come_back_in_the_order_they_were_declared(self, machine):
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
@@ -217,36 +162,17 @@ class TestDeclarationOrderSurvivesToTheDoor:
         """The order has to survive the caller too, or the fix stops at the reader."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
         visited = [Path(item["path"]) for item in rs.external_branches(machine)]
-        # Path.parts, never a string split. A separator is an OS detail, and
-        # asking "/wren/" of a path spelled with backslashes answers no on
-        # Windows for every root — which read as "no citizens" rather than as
-        # "the test cannot see them".
+        # Path.parts, never a string split: separators are an OS detail (Windows).
         roots = [next((name for name in ("wren", "Demo") if name in path.parts), None) for path in visited]
         assert {"wren", "Demo"} <= set(roots), f"both roots must contribute citizens, got {visited}"
         assert roots.index("wren") < roots.index("Demo")
 
 
 class TestARetiredCitizenStaysRetired:
-    """@spawn's archive hazard, measured on the real machine and pinned here.
-
-    Preparing their external migration, @spawn checked the obvious extension of
-    their resident glob -- ``src/*/*/.trinity/passport.json`` -- against the live
-    fleet and found FIVE archived passports under Vera-Studio's
-    ``src/.archive/``. A passport walk would have "found" 11 external citizens
-    where the fleet has 6, and offered to write into five directories somebody
-    deliberately retired.
-
-    Measured against the live machine at the time of writing: the passport walk
-    returns 9 Vera-Studio branches, the registry-led walk returns 4. That gap is
-    the whole argument. A passport on disk cannot tell you whether its citizen
-    is live -- retiring is a REGISTRY act, so only the registry knows. This is
-    why the walk law is a law and not a preference, and it is pinned
-    synthetically here so the rule survives without depending on anyone's
-    machine still having that .archive directory.
-    """
+    """Retiring is a REGISTRY act: a passport on disk (e.g. under .archive/) cannot say its citizen is live."""
 
     def test_an_archived_passport_is_not_a_citizen(self, machine):
-        """Mutant (2026-09-27, killed): the external walk returning no rows at all."""
+        """An archived passport under a declared root is never a citizen."""
         _write(machine.parent / "wren/src/.archive/ghosttown/.trinity/passport.json", {"citizenship": {}})
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
         names = sorted(item["name"].lower() for item in rs.external_branches(machine))
@@ -309,21 +235,7 @@ class TestMembershipIsPresenceNotDeclaration:
         assert {item["residency"] for item in found} == {rs.RESIDENCY_EXTERNAL}
 
     def test_the_record_carries_no_scheduler_flag(self, machine):
-        """Withdrawn 2026-08-30 at the request of the only branch that asked for it.
-
-        The field reported ONE FILENAME -- whether `.daemon/schedule.json`
-        exists. @daemon reads `.daemon/*.json`, every file in there. So a
-        consumer using this as a pre-filter would silently drop every job
-        living in a differently-named file, and it would read as "this citizen
-        has no jobs" rather than as a bug. @daemon's words: a field that is
-        nearly right is worse than no field.
-
-        It bought nothing either -- their discovery opens what it globs
-        regardless, so a bool cannot save a stat they have to do anyway.
-
-        This pin is the shape, not the absence of one key: a record that grows
-        a field nobody consumes should have to come past a test.
-        """
+        """The external record's shape is pinned: no scheduler flag, and no field nobody consumes."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
         found = rs.external_branches(machine)
         assert found, "nothing was discovered, so the record shape was never exercised"
@@ -337,13 +249,7 @@ class TestMembershipIsPresenceNotDeclaration:
         assert {item["name"] for item in rs.external_branches(machine)} == {"wren", "quiet"}
 
     def test_a_refusal_names_the_tier_it_refused_from(self, machine, caplog):
-        """A log line is the whole product of a refusal, so its words are behaviour.
-
-        Found by mutation: swapping the tier word in the refusal survived every
-        other test here, because nothing read the line. An external citizen
-        logged as a REFUSED resident sends whoever greps for it into
-        ``projects/``, looking for a branch that lives in another repository.
-        """
+        """A refusal's log line names the tier it refused from; its words are behaviour."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
         with caplog.at_level("ERROR"):
             rs.external_branches(machine)
@@ -352,22 +258,7 @@ class TestMembershipIsPresenceNotDeclaration:
         assert any(f"REFUSED {rs.RESIDENCY_EXTERNAL} 'ghost'" in line for line in refusals), refusals
 
     def test_two_registries_in_one_root_is_a_refusal_not_a_pick(self, machine):
-        """Ambiguity is refused by name, never resolved alphabetically.
-
-        Raised by @drone (mail f94e63af) against their own code: their
-        ``_first_registry_in`` does ``sorted(glob)[0]``, which they called a
-        fallback wearing a determinism costume — a second registry in a root
-        would be silently ignored and nobody would ever learn which one lost.
-        They recommended I not copy it.
-
-        Merging the two would be worse than picking: it invents a union nobody
-        declared and makes the root's own fleet a thing only this reader knows.
-        So the ROOT contributes nothing and says so, and the other roots are
-        unaffected — one ambiguous root costs one root.
-
-        Measured before pinning: all three live roots hold exactly one registry,
-        so this is the shape of a future defect, not today's.
-        """
+        """Two registries in one root: the root contributes nothing and says so, never a pick or a merge."""
         _write(machine.parent / "wren" / "EXTRA_REGISTRY.json", _registry(_branch("extra", "src/extra")))
         _write(machine.parent / "wren/src/extra/.trinity/passport.json", {"citizenship": {}})
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
@@ -433,15 +324,7 @@ class TestTheGatewayCarriesTheNewSurface:
 
 
 class TestTheLiveMachineIsReachable:
-    """The acceptance case, driven against the REAL sibling repos on this disk.
-
-    Deliberately does not write ``AIPASS_ROOTS.json`` into the repo: that file is
-    the owner's to bless and populate, and a test that creates it would both
-    pre-empt him and make the anchor look self-installing. So the roots file is
-    written to a throwaway copy of the repo root instead, pointed at the real
-    external repos, which proves the reader against real registries and real
-    passports without putting anything in the tree.
-    """
+    """The acceptance case against the REAL sibling repos; never writes AIPASS_ROOTS.json into the repo."""
 
     def test_wren_and_vera_studio_are_reachable_when_declared(self, tmp_path):
         live_home = rs.find_repo_root()
@@ -471,22 +354,7 @@ class TestTheLiveMachineIsReachable:
         assert all(item["email"] for item in found.values()), "external citizens must be addressable"
 
     def test_no_live_external_citizen_declares_a_residency_it_does_not_hold(self):
-        """The measurement the GO acted on, kept as a live guard — narrowed on evidence.
-
-        It first asserted that NO external citizen declared a residency at all,
-        so that the day one did, the presence rule could be revisited on
-        evidence rather than memory. That day was 2026-09-18 22:13: @vera's own
-        migration stamped ``residency: external`` into her passport. The
-        tripwire did its job, and the evidence says the rule stands — the
-        external tier never reads the declaration (membership is presence), and
-        an honest ``external`` agrees with it.
-
-        What would still matter is a declaration that CONTRADICTS presence: an
-        external citizen claiming ``core`` or ``resident``. Nothing honours that
-        today, and this is the line that goes red before anything does.
-
-        No mutant run (2026-09-27): the oracle is sibling repos' live passports, not a product line.
-        """
+        """Live guard: no external citizen declares a residency that contradicts presence (core/resident)."""
         projects = rs.find_repo_root().parent
         contradicting = []
         for repo in ("wren", "Vera-Studio", "Demo", "feel_good_app"):
@@ -506,44 +374,12 @@ class TestTheLiveMachineIsReachable:
 class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
     """``*_REGISTRY.json`` is a rule about names, and a glob is not that rule.
 
-    @drone hit this on the Windows CI leg: their own tree carries a real
-    lowercase ``..._registry.json``, and Windows globs case-insensitively, so
-    the pattern matched a file the rule excludes. @devpulse routed the question
-    to every walk owner. Both of mine were exposed.
-
-    THE DECOY'S STEM DIFFERS FROM THE REAL REGISTRY'S, and that is a
-    correctness requirement rather than a stylistic choice. A first version used
-    ``wren_registry.json`` beside ``WREN_REGISTRY.json`` — two names differing
-    only by case, which a folding filesystem CANNOT HOLD AT ONCE. On the Windows
-    CI leg the second write did not add a decoy, it OVERWROTE the real
-    registry's content under the original filename, and the test then measured
-    an overwrite while claiming to measure case-globbing. It failed for a reason
-    unrelated to the defect, which is the luckiest possible outcome; it could
-    just as easily have passed.
-
-    Distinct stems (``flow_json_registry.json``, exactly the real bait @drone
-    hit) coexist on every filesystem, so the SAME world is built on a folding
-    host and a case-sensitive one. The emulation is what widens the glob here;
-    on Windows the filesystem does it natively and the emulation is a harmless
-    no-op. Nothing is skipped by platform and nothing needs to probe the host.
-
-    IT IS NOT A COSMETIC WIDENING HERE, which is why it earns pins rather than
-    a note. Both walks read the match COUNT as meaning: zero registries at a
-    declared root is an error, and more than one is a named refusal rather than
-    a ``sorted()[0]`` pick. So a spurious lowercase neighbour does not add a
-    stray citizen — it silently turns a root that works on Linux into a root
-    that refuses on Windows, and every citizen behind it vanishes from the
-    fleet with a message blaming the repo owner for a file they never wrote.
+    A case-folding glob would make a declared root refuse (count is meaning). Decoys use a DIFFERENT
+    stem: a case-only twin cannot coexist on a folding filesystem and overwrites the real registry.
     """
 
     def test_the_injected_world_really_widens(self, machine, case_insensitive_filesystem):
-        """The positive control: prove the fixture has teeth before trusting it.
-
-        A blinded instrument reports green for the same reason a cured defect
-        does. This asserts the raw glob — no filter — genuinely returns the
-        lowercase neighbour, so the pins below are testing a real widening and
-        not an emulation that quietly does nothing.
-        """
+        """Positive control: the emulated raw glob really returns the lowercase neighbour."""
         wren = machine.parent / "wren"
         _write(wren / "flow_json_registry.json", _registry(_branch("mirage", "src/mirage")))
 
@@ -564,13 +400,7 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
         assert "mirage" not in names, "a lowercase registry was read as though it spelled the rule"
 
     def test_a_lowercase_registry_is_not_a_root_s_only_registry(self, machine, case_insensitive_filesystem):
-        """A root carrying ONLY a lowercase name carries none: absence, said out loud.
-
-        The complement of the case above, and the one that would look like a
-        fix if the filter were written as "drop the extras". There is nothing
-        to keep here, and the walk has to reach the no-registry error rather
-        than read the file.
-        """
+        """A root carrying ONLY a lowercase name carries none: absence, said out loud."""
         lonely = machine.parent / "Lonely"
         _write(lonely / "flow_json_registry.json", _registry(_branch("nobody", "src/nobody")))
         _write(lonely / "src/nobody/.trinity/passport.json", {"citizenship": {}})
@@ -580,12 +410,7 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
 
 
 class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
-    """The predicate on its own, on every platform, with no filesystem at all.
-
-    registry_scope's filter delegates to the public repo_root.exactly_named, so
-    the predicate is asked there (leg 7). That both walks still filter is pinned
-    through external_branches by the lowercase-neighbour tests above.
-    """
+    """The predicate on its own (repo_root.exactly_named), on every platform, with no filesystem at all."""
 
     def test_it_keeps_the_exact_case_and_drops_every_other_spelling(self, tmp_path):
         candidates = [
@@ -601,21 +426,9 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json", "WREN_REGISTRY.json"]
 
     def test_the_suffix_has_to_end_the_name_not_merely_appear_in_it(self, tmp_path):
-        """A backup beside the registry is not a registry.
+        """A backup beside the registry is not a registry: the suffix must END the name.
 
-        ``in`` instead of ``endswith`` reads ``AIPASS_REGISTRY.json.bak`` as the
-        fleet and hands a stale document to every lane behind this walk. It is
-        the one substitution in this predicate a test can actually see.
-
-        AN EQUIVALENT MUTANT, recorded because a mutation run that reports it as
-        killed is lying and the next reader deserves the reason. Swapping
-        ``path.name.endswith(suffix)`` for ``str(path).endswith(suffix)``
-        SURVIVES every test in this class, and no test can kill it: the suffix
-        contains no separator, so a full path can only end with it when its last
-        component does. The two are the same function on any input. ``.name`` is
-        written anyway because it says what the rule IS — a rule about
-        filenames — and the equivalence is a property of this suffix rather than
-        a promise the next one will keep.
+        Equivalent mutant: ``str(path).endswith`` survives (the suffix has no separator); ``.name`` states the rule.
         """
         kept = repo_root.exactly_named(
             [tmp_path / "x" / "AIPASS_REGISTRY.json.bak", tmp_path / "x" / "AIPASS_REGISTRY.json"],
@@ -625,13 +438,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json"]
 
     def test_it_narrows_and_never_reorders(self, tmp_path):
-        """The walk sorts before filtering; the filter must not undo that.
-
-        The sample is deliberately one a case-folding re-sort would reverse
-        (``B`` before ``aa`` by ASCII, after it by ``lower()``). A first draft
-        used ``A``/``C`` and a re-sorting mutant survived it — any order-blind
-        sample makes an order claim that cannot fail.
-        """
+        """The walk sorts before filtering; the filter must not undo that (``B``/``aa`` reverse under lower())."""
         candidates = [
             tmp_path / "x" / "B_REGISTRY.json",
             tmp_path / "x" / "skip_registry.json",
@@ -644,18 +451,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
 
 
 class TestWhatTheHostCanActuallyHold:
-    """A probe, not an assumption — the shape @devpulse asked for.
-
-    The tests above are built on the claim that a decoy whose STEM differs
-    coexists with the real registry everywhere, while one differing only by CASE
-    does not. That claim decides how every case-glob pin in this branch is
-    written, so it is measured rather than asserted in a comment, on whatever
-    filesystem is running the suite.
-
-    Both outcomes are legal and both are pinned. What would not be legal is a
-    ``skipif`` here: the host can be asked, and a platform guess is what put an
-    overwrite behind a test that claimed to be about globbing.
-    """
+    """Probe, not assumption: which spellings this host's filesystem can hold at once; never skipif."""
 
     def test_two_names_differing_only_by_case_may_be_one_file(self, tmp_path):
         (tmp_path / "A_REGISTRY.json").write_text("first", encoding="utf-8")
@@ -664,9 +460,7 @@ class TestWhatTheHostCanActuallyHold:
         entries = sorted(path.name for path in tmp_path.iterdir())
 
         if len(entries) == 1:
-            # Folding host: the directory entry keeps the ORIGINAL spelling and
-            # the CONTENT is replaced. That is why a case-only decoy silently
-            # became an overwrite of the real registry on the Windows CI leg.
+            # Folding host: the entry keeps the ORIGINAL spelling and the CONTENT is replaced.
             assert entries == ["A_REGISTRY.json"], entries
             assert (tmp_path / "A_REGISTRY.json").read_text(encoding="utf-8") == "second"
         else:

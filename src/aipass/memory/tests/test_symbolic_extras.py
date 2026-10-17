@@ -3,16 +3,12 @@
 # Description: Tests for symbolic handler recall and surfacing - the hook's context, recall format and session gates
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/symbolic/hook.py — recall and surfacing: context, fragment recall, session gates."""
 
-# Tests for the hook's public functions in the symbolic handler files.
-# Split on 2026-10-08 (oversize_test_file): the storage-and-search half
-# (storage, deduplicator, chroma_client, retriever, the extractor's log) lives
-# in test_symbolic_extras_storage.py; the shared autouse fixtures live in
-# support_symbolic_extras.py.
+# The storage half is test_symbolic_extras_storage.py; shared fixtures, support_symbolic_extras.py.
 #
 # Covers imports required by the seedgo test scanner:
 #     from aipass.memory.apps.handlers.symbolic.hook import save_config
@@ -26,15 +22,6 @@
 #     from aipass.memory.apps.handlers.symbolic.hook import reset_session
 #     from aipass.memory.apps.handlers.symbolic.hook import get_session_state
 #     from aipass.memory.apps.handlers.symbolic.hook import process_hook
-
-# ---------------------------------------------------------------------------
-# PARKED 2026-08-14 — the owner's ruling. The symbolic fragments tier is disabled
-# (unused; the Agent Memory Atlas review flagged the AUDN deduplicator for acting
-# on an LLM Delete verdict with no record of what was removed). These tests are
-# KEPT, not deleted: they document the feature for revival.
-# Active curated-truth piece: Compass — drone @devpulse compass.
-# Revive: tests/parked/symbolic_20260814/README.md
-# ---------------------------------------------------------------------------
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — write_memory_file(), stood in here; tests/test_changed_entries.py
@@ -56,11 +43,7 @@ from aipass.memory.tests.support_symbolic_extras import _reset_chroma_clients as
 from aipass.memory.tests.support_symbolic_extras import _reset_hook_session as _reset_hook_session
 
 
-# ---------------------------------------------------------------------------
-# Import helpers (must be called inside tests, after mocks are installed)
-# ---------------------------------------------------------------------------
-
-
+# Call inside tests, after mocks are installed.
 def _import_hook():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.hook", None)
     from aipass.memory.apps.handlers.symbolic.hook import (
@@ -92,21 +75,11 @@ def _import_hook():
     }
 
 
-# ---------------------------------------------------------------------------
-# Sample data helpers
-# ---------------------------------------------------------------------------
-
-
 def _sample_messages():
     return [
         {"role": "user", "content": "I found an error in the module"},
         {"role": "assistant", "content": "Let me debug that issue for you"},
     ]
-
-
-# ===========================================================================
-# 1. hook.save_config
-# ===========================================================================
 
 
 class TestSaveConfig:
@@ -136,11 +109,6 @@ class TestSaveConfig:
         h["save_config"]({"enabled": True}, config_path=path)
 
         assert path.parent.exists()
-
-
-# ===========================================================================
-# 2. hook.extract_conversation_context
-# ===========================================================================
 
 
 class TestExtractConversationContext:
@@ -191,11 +159,6 @@ class TestExtractConversationContext:
         result = h["extract_conversation_context"](msgs)
 
         assert "debugging" in result["themes"]
-
-
-# ===========================================================================
-# 3. hook.find_relevant_fragments
-# ===========================================================================
 
 
 class TestFindRelevantFragments:
@@ -254,11 +217,6 @@ class TestFindRelevantFragments:
 
         assert result["success"] is True
         assert len(result["fragments"]) == 0
-
-
-# ===========================================================================
-# 4. hook.format_fragment_recall
-# ===========================================================================
 
 
 class TestFormatFragmentRecall:
@@ -340,11 +298,6 @@ class TestFormatFragmentRecall:
         assert "This reminds me of a past conversation" in result
 
 
-# ===========================================================================
-# 5. hook.format_multiple_recalls
-# ===========================================================================
-
-
 class TestFormatMultipleRecalls:
     """Tests for hook.format_multiple_recalls."""
 
@@ -389,11 +342,6 @@ class TestFormatMultipleRecalls:
         assert "---" in result
         assert "[v1]" in result
         assert "[v2]" in result
-
-
-# ===========================================================================
-# 6. hook.should_surface_fragment
-# ===========================================================================
 
 
 class TestShouldSurfaceFragment:
@@ -499,11 +447,6 @@ class TestShouldSurfaceFragment:
         assert "Ready" in reason
 
 
-# ===========================================================================
-# 7. hook.record_surface
-# ===========================================================================
-
-
 class TestRecordSurface:
     """Tests for hook.record_surface."""
 
@@ -532,11 +475,6 @@ class TestRecordSurface:
         assert state["surfaced_count"] == 0
 
 
-# ===========================================================================
-# 8. hook.record_message
-# ===========================================================================
-
-
 class TestRecordMessage:
     """Tests for hook.record_message."""
 
@@ -551,11 +489,6 @@ class TestRecordMessage:
 
         state = h["get_session_state"]()
         assert state["messages_since_last"] == 3
-
-
-# ===========================================================================
-# 9. hook.reset_session
-# ===========================================================================
 
 
 class TestResetSession:
@@ -580,11 +513,6 @@ class TestResetSession:
         assert state["surfaced_count"] == 0
 
 
-# ===========================================================================
-# 10. hook.get_session_state
-# ===========================================================================
-
-
 class TestGetSessionState:
     """Tests for hook.get_session_state."""
 
@@ -599,11 +527,6 @@ class TestGetSessionState:
         assert "messages_since_last" in state
         assert "last_surface_time" in state
         assert "surfaced_count" in state
-
-
-# ===========================================================================
-# 11. hook.process_hook
-# ===========================================================================
 
 
 class TestProcessHook:

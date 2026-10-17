@@ -3,15 +3,11 @@
 # Description: Surfacing governance engine — implementation
 # Version: 1.1.0
 # Created: 2026-07-16
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Surfacing Governance Engine
-
-Pure decision functions for controlling when recalled items should be
-surfaced. Implementation logic — public API re-exported from
-modules/governance.py for cross-branch consumers.
 """
 
 from typing import Any, Dict, Tuple
@@ -20,10 +16,6 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# CONSTANTS — default config values
-# =============================================================================
-
 DEFAULT_CONFIG: Dict[str, Any] = {
     "enabled": True,
     "threshold": 0.3,
@@ -31,11 +23,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "min_messages_between": 10,
     "cooldown_seconds": 300,
 }
-
-
-# =============================================================================
-# STATE FACTORY
-# =============================================================================
 
 
 def new_state() -> Dict[str, Any]:
@@ -48,11 +35,6 @@ def new_state() -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# CORE GOVERNANCE
-# =============================================================================
-
-
 def should_surface(
     item_id: str,
     relevance_score: float,
@@ -62,12 +44,9 @@ def should_surface(
     current_time: float | None = None,
     record: bool = True,
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    """
-    Decide whether an item should be surfaced, given current state.
+    """Decide whether an item should be surfaced; never mutates *state*.
 
-    Does not mutate the input state dict. A surface writes one
-    governance_surface line to memory's operation log; record=False
-    returns the same verdict and writes nothing.
+    record=False returns the same verdict without the governance_surface operation-log line.
     """
     import time
 
@@ -114,11 +93,6 @@ def should_surface(
             {"item_id": item_id, "relevance_score": relevance_score, "surfaces_count": updated["surfaces_count"]},
         )
     return True, "Ready to surface", updated
-
-
-# =============================================================================
-# MESSAGE TRACKING
-# =============================================================================
 
 
 def record_message(state: Dict[str, Any]) -> Dict[str, Any]:

@@ -3,32 +3,11 @@
 # Description: Config-generated state-tabs for .trinity memory files
 # Version: 1.7.0
 # Created: 2026-06-25
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Tab Renderer Handler
-
-Generates per-section state-tab strings (e.g. ``⟦ rollover ON ... ⟧``) from
-``memory.config.json`` and writes them as ``*_meta`` keys into every branch's
-``.trinity/local.json`` and ``.trinity/observations.json``.
-
-Purpose:
-    Make memory files self-documenting.  Each section carries a single-line
-    banner that tells the editing agent whether rollover is ON/OFF, the keep
-    count, the char cap and the draft target — all derived from config so
-    they never drift.
-
-    The todos tab (DPLAN-0345) also names the branch's backlog file and the
-    ``next #N`` a new todo takes, derived at render time from the pad, the
-    backlog, the backlog's ``high_water`` and the N this tab last rendered
-    (``todo_roll.next_number``), so a deletion never walks it backwards. It
-    needs branch context (:func:`todo_context`); a caller without it renders
-    ``<branch>`` and ``next #?`` rather than a number that may be wrong.
-
-Independence:
-    Uses config_loader for config, detector helpers for branch discovery,
-    and memory_files for safe I/O.  No service or module dependencies.
 """
 
 import json
@@ -44,18 +23,7 @@ from aipass.memory.apps.handlers.rollover import todo_roll
 
 logger = get_system_logger()
 
-# =============================================================================
-# TEMPLATE TEXT — the gold source, read never copied
-# =============================================================================
-
-# The templates own every word of prose in a memory file; this module owns the
-# numbers. It used to own both: two `_CORRECTED_USAGE_*` constants held their
-# own copy of the `_usage` sentence and overwrote every live file from them, so
-# editing the gold source changed what new branches were born with and nothing
-# else. A second copy of a text is a second source of truth, which is the exact
-# disease the one-source rule exists to cure — the constants are retired and
-# the text is read from the template at render time.
-
+# Templates own every word of prose; this module owns the numbers. Never copy template text here.
 _TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
 
 _TEMPLATE_FILES = {
@@ -63,8 +31,6 @@ _TEMPLATE_FILES = {
     "observations": "OBSERVATIONS.template.json",
 }
 
-# Which template carries the semantics sentence for each section, and under
-# which key it lives there.
 _SECTION_TEMPLATE = {
     "todos": ("local", "todos_meta", "{{TODOS_META}}"),
     "key_learnings": ("local", "key_learnings_meta", "{{KEY_LEARNINGS_META}}"),
@@ -74,13 +40,7 @@ _SECTION_TEMPLATE = {
 
 
 def _load_template(file_key: str) -> dict:
-    """Read a gold-source template. Raises rather than inventing text.
-
-    There is deliberately no fallback string here. A fallback IS the constant
-    this build retired — it would let a missing or unreadable template pass
-    silently and stamp prose nobody agreed to across the fleet. Refusing to
-    write is the safe failure; writing a guess is not.
-    """
+    """Read a gold-source template. Raises rather than inventing text: a fallback string would stamp unagreed prose fleet-wide."""
     name = _TEMPLATE_FILES.get(file_key)
     if name is None:
         raise ValueError(f"Unknown template key: {file_key}")
@@ -97,12 +57,7 @@ def template_usage(file_key: str) -> str:
 
 
 def template_semantics(section_name: str) -> str:
-    """Return the one-sentence meaning that rides after a section's tab.
-
-    The template stores the line as ``{{SECTION_META}} <sentence>``; the
-    placeholder is the slot the rendered caps tab fills, so the sentence is
-    what remains once it is removed.
-    """
+    """Return the one-sentence meaning that rides after a section's tab (the template line minus its placeholder)."""
     entry = _SECTION_TEMPLATE.get(section_name)
     if entry is None:
         raise ValueError(f"Unknown section: {section_name}")
@@ -120,21 +75,11 @@ def compose_meta(
     branch_name: str,
     todo_ctx: dict | None = None,
 ) -> str:
-    """Render a full ``*_meta`` value: machine tab, then template semantics.
-
-    Numbers from config, prose from the template, joined here and nowhere
-    else — so a refresh can never strip the meaning off a line it re-renders.
-    *todo_ctx* is read only for the todos section (see :func:`todo_context`).
-    """
+    """Render a full ``*_meta`` value: machine tab, then template semantics; joined here and nowhere else."""
     tab = render_tab(section_name, rollover_cfg, entry_limits_cfg, branch_name, todo_ctx)
     return f"{tab} {template_semantics(section_name)}"
 
 
-# =============================================================================
-# TODOS — branch context for the pad tab (DPLAN-0345)
-# =============================================================================
-
-# What a todos tab says when the caller has no branch: an honest unknown, never
 # a guessed directory or a number that might collide with the backlog.
 UNKNOWN_BRANCH_DIR = "<branch>"
 UNKNOWN_NEXT = "?"
@@ -145,19 +90,8 @@ def todo_context(
 ) -> dict[str, Any]:
     """The branch context the todos tab needs, derived now: backlog directory and next number.
 
-    Args:
-        branch_dir: The branch DIRECTORY name, or None when the caller has no branch.
-        pad: The todos list as it sits on the pad.
-        backlog: A ``todo_roll.read_backlog`` result; read from
-            ``todo_roll.backlog_path_for(branch_dir)`` when None.
-        todos_meta: The branch's current ``todos_meta`` line; its ``next #N``
-            is a floor (N - 1) so the rendered number never goes backwards.
-
-    Returns:
-        ``{"branch_dir", "next_number"}``. ``next_number`` is None when the pad
-        is not a list or the backlog is unusable (a missing backlog is not
-        unusable; it holds no numbers). A backlog without ``high_water`` and a
-        ``#?`` or unrecognised tab simply give no floor.
+    The current ``todos_meta`` ``next #N`` is a floor so the number never goes backwards;
+    ``next_number`` is None when the pad is not a list or the backlog is unusable.
     """
     if not branch_dir:
         return {"branch_dir": None, "next_number": None}
@@ -190,11 +124,6 @@ def _todos_tab(rollover_cfg: dict, branch_name: str, max_chars: Any, draft: Any,
     return f"⟦ pad of {count} · oldest roll to {backlog} · {tail} ⟧"
 
 
-# =============================================================================
-# KEY ORDERING
-# =============================================================================
-
-# Canonical key order for local.json
 _LOCAL_KEY_ORDER = [
     "document_metadata",
     "todos_meta",
@@ -205,7 +134,6 @@ _LOCAL_KEY_ORDER = [
     "sessions",
 ]
 
-# Canonical key order for observations.json
 _OBSERVATIONS_KEY_ORDER = [
     "document_metadata",
     "guidelines",
@@ -220,16 +148,10 @@ def _reorder_keys(data: Dict[str, Any], key_order: list[str]) -> Dict[str, Any]:
     for key in key_order:
         if key in data:
             ordered[key] = data[key]
-    # Append any keys not in the canonical order
     for key in data:
         if key not in ordered:
             ordered[key] = data[key]
     return ordered
-
-
-# =============================================================================
-# TAB RENDERING
-# =============================================================================
 
 
 def render_tab(
@@ -239,70 +161,28 @@ def render_tab(
     branch_name: str,
     todo_ctx: dict | None = None,
 ) -> str:
-    """Generate the state-tab string for a section.
-
-    Args:
-        section_name: One of 'key_learnings', 'sessions', 'observations', 'todos'.
-        rollover_cfg: The ``rollover`` section from memory.config.json.
-        entry_limits_cfg: The ``entry_limits`` section from memory.config.json.
-        branch_name: Branch name (lowercase) for per-branch overrides.
-        todo_ctx: :func:`todo_context` for the todos tab; ignored otherwise.
-
-    Returns:
-        The rendered tab string (e.g. ``⟦ rollover ON ... ⟧``) — the ⟦⟧ tab
-        alone, carrying live numbers and no prose. Use :func:`compose_meta`
-        for the full ``*_meta`` value.
-    """
-    # --- Resolve entry-limits for this section --------------------------------
-    # Through the SAME resolver the write gate uses. Reading `entry_types` off
-    # the config directly ignored `entry_limits.per_branch`, so an overridden
-    # cap would have been enforced but never printed — the tab instructing an
-    # agent to break the rule measured against it (@seedgo, 2026-08-26). Note
-    # `rollover.per_branch` was honoured below all along; the asymmetry is what
-    # marked this an oversight rather than a decision.
+    """Generate the ⟦⟧ state-tab string for a section: live numbers, no prose (see :func:`compose_meta`)."""
+    # Through the SAME resolver the write gate uses, so a per_branch cap override is printed too.
     entry_types = entry_limits.resolve_entry_types(entry_limits_cfg, branch_name)
     section_limits = entry_types.get(section_name, {})
     max_chars = section_limits.get("max_chars", 300)
     field = section_limits.get("field", "value")
     draft = entry_limits.draft_target(max_chars)
 
-    # --- Todos: a pad that rolls to a backlog FILE, never to vectors ----------
-    # Numbers only; the prose rides after the placeholder in LOCAL.template.json.
-    # The pad size is rollover.defaults.local.todos.count through the one
-    # resolver, the next number is derived from the pad and backlog right now.
     if section_name == "todos":
         return _todos_tab(rollover_cfg, branch_name, max_chars, draft, todo_ctx)
 
-    # --- Rollover sections: ask the ONE resolver, never re-derive --------------
-    # This banner is written INTO the agent's own memory file, where it reads as
-    # an instruction about that agent's limits. It must therefore state what the
-    # engine actually enforces. The old local lookup did neither: it fell back
-    # per-branch-dict instead of per-file-key (so a per_branch entry missing its
-    # `local` block silently ignored the defaults the engine would have used),
-    # and it hard-defaulted a missing count to 15 — printing a limit that does
-    # not exist. Both are gone: config_loader.resolve_limits is the single
-    # implementation, shared with `config get` and pinned against the detector.
-    #
-    # The entry_limits section goes WITH it (FPLAN-0593): the keep-count is
-    # clamped to what the file budget can actually hold, and the resolver can
-    # only clamp against a budget it was handed. Passing it here is the
-    # difference between printing "keep 15" and printing "keep 40" into a file
-    # that will roll at 16.
+    # This banner reads as an instruction in the agent's own file: it must state what the engine
+    # enforces, so ask the ONE resolver, and hand it entry_limits so the count is budget-clamped.
     count = config_loader.resolve_limits(rollover_cfg, branch_name, entry_limits_cfg).get(section_name, {}).get("count")
 
     if count is None:
-        # No limit anywhere for this section — say so. Naming a number here
-        # would be inventing an instruction nothing will honour.
+        # No limit anywhere: naming a number would invent an instruction nothing honours.
         return f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars · draft to {draft} ⟧"
 
     return (
         f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars · draft to {draft} ⟧"
     )
-
-
-# =============================================================================
-# PER-FILE TAB WRITERS
-# =============================================================================
 
 
 def _refresh_local(branch_name, local_path, rollover_cfg, entry_limits_cfg):
@@ -319,8 +199,7 @@ def _refresh_local(branch_name, local_path, rollover_cfg, entry_limits_cfg):
     meta = data.get("document_metadata", {})
     meta["_usage"] = template_usage("local")
 
-    # The backlog is keyed by the branch DIRECTORY (the registry name's casing
-    # can differ); a file outside a .trinity/ directory has no branch to name.
+    # The backlog is keyed by the branch DIRECTORY (registry casing can differ).
     local = Path(local_path)
     branch_dir = local.parent.parent.name if local.parent.name == ".trinity" else None
     pad = data.get("todos")
@@ -357,32 +236,10 @@ def _refresh_observations(branch_name, obs_path, rollover_cfg, entry_limits_cfg)
     return False, f"{branch_name}/observations.json: write failed"
 
 
-# =============================================================================
-# REFRESH ALL BRANCHES
-# =============================================================================
-
-
 def refresh_all_tabs(branches: list[str] | None = None) -> dict:
     """Render and write state-tabs to branch .trinity files.
 
-    Reads each branch's memory files, computes tab strings from config,
-    injects them as ``*_meta`` keys, and writes back with correct key
-    ordering.
-
-    SCOPE IS AN ARGUMENT, and callers should pass one. Unscoped, this walks
-    the whole registry — which is how one citizen's PreCompact hook rolling
-    ONE overdue file rewrote all 38 memory files fleet-wide at 23:37 on
-    2026-08-25, delivering a just-shipped renderer change to every branch
-    ahead of any gated review. Rollover now names the branch it rolled, so a
-    per-branch maintenance verb has a per-branch tail.
-
-    Args:
-        branches: Branch names to refresh (case-insensitive). None means the
-            whole registry — reserve that for lanes that genuinely are
-            fleet-wide, like the trinity push.
-
-    Returns:
-        Dict with success status and counts.
+    Pass a scope: unscoped (None) walks the whole registry, reserved for fleet-wide lanes like the push.
     """
     from aipass.memory.apps.handlers.json.config_loader import (
         load as load_config,
@@ -455,20 +312,7 @@ def refresh_all_tabs(branches: list[str] | None = None) -> dict:
 def refresh_moved_limits(entry_type: str, before: dict, after: dict) -> dict[str, list] | None:
     """Re-render the meta lines of every registry branch whose enforced *entry_type* count moved.
 
-    A limit write changes the config, and each branch's ``*_meta`` line is its
-    copy, read by the hook and the agent as the cap. Left for the next rollover
-    or push it lied in between (DPLAN-0414 T7). Both configs go through
-    ``config_loader.resolve_limits``, the one resolver, so a branch holding its
-    own count keeps its file untouched.
-
-    Args:
-        entry_type: The type the write changed.
-        before: The whole config as loaded before the write.
-        after: The whole config as loaded after it.
-
-    Returns:
-        ``{"branches": [re-rendered names], "errors": [...]}``, or None, never a
-        dict, when the registry is unreadable: logged here, and no branch named.
+    Returns None, never a dict, when the registry is unreadable.
     """
     from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, _read_registry
 
@@ -491,20 +335,9 @@ def refresh_moved_limits(entry_type: str, before: dict, after: dict) -> dict[str
 
 
 def render_all_meta_tabs(branch_dir: str | None = None) -> dict[str, str]:
-    """Render all four *_meta tab strings from memory.config.json defaults.
+    """Render all four *_meta tab strings from memory.config.json defaults; public API for @spawn.
 
-    Public API for @spawn (and any other consumer) to resolve ``{{*_META}}``
-    placeholders at branch-creation time.
-
-    Args:
-        branch_dir: The new branch's DIRECTORY name. Given, the todos tab names
-            its backlog and derives ``next #N`` from an empty pad plus any
-            backlog already under that name. Omitted, the todos tab renders
-            ``<branch>`` and ``next #?`` — no guessed number.
-
-    Returns:
-        Dict with keys TODOS_META, KEY_LEARNINGS_META, SESSIONS_META,
-        OBSERVATIONS_META — each a rendered state-tab string.
+    Without *branch_dir* the todos tab renders ``<branch>`` and ``next #?``, never a guessed number.
     """
     from aipass.memory.apps.handlers.json.config_loader import (
         load as load_config,
@@ -550,13 +383,7 @@ def _refresh_one_file(branch, branch_name, mem_type, rollover_cfg, entry_limits_
 
 
 def _bump_receipt(file_path) -> None:
-    """Record the re-render on the branch's receipt, if it has one.
-
-    A missing receipt is not an error here and is deliberately not created:
-    this pass knows the NUMBERS it just rendered, not which template version
-    the files were built from. Only a push, a birth, or a reset knows that,
-    and writing a guess into the receipt would defeat its one job.
-    """
+    """Record the re-render on the branch's receipt; a missing one is never created (this pass cannot know the template version)."""
     from aipass.memory.apps.handlers.templates import receipt
 
     trinity_dir = file_path.parent

@@ -3,23 +3,11 @@
 # Description: Rollover Orchestration Module
 # Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rollover Orchestration Module
-
-Coordinates the memory rollover workflow by calling handlers in sequence:
-1. Detect rollover triggers (monitor/detector)
-2. Extract oldest memories (rollover/extractor)
-3. Generate embeddings (vector/embedder)
-4. Store in Chroma (storage/chroma)
-5. Roll ONE branch's todo pad to its backlog file (rollover/todo_roll) - own
-   branch only, never the fleet walk, never vectors
-
-Purpose:
-    Thin orchestration layer - no business logic implementation.
-    All domain logic lives in handlers.
 """
 
 import os
@@ -43,11 +31,7 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
 from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
 
-# Handler imports
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover.orchestrator import (
     execute_rollover as _handler_execute_rollover,
@@ -56,14 +40,7 @@ from aipass.memory.apps.handlers.rollover.orchestrator import (
 from aipass.memory.apps.handlers.rollover import todo_report
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# The `config` verbs moved to modules/rollover_config.py when this module reached
-# the seedgo length standard, and the `--json` emitter moved on again to
-# modules/rollover_json.py when THAT module reached it. Both stayed in the
-# modules tier because they are display code and handlers may not print; each
-# answers `handle_command` for its own name only, so this module keeps owning
-# the `config` word. Every name is re-exported here, unchanged, because the CLI
-# and the tests reach all of them through `rollover.<name>`. The dependency runs
-# one way: neither of those modules imports this one.
+# Re-exported unchanged: the CLI and the tests reach these as `rollover.<name>`. Neither module imports this one.
 from aipass.memory.apps.modules.rollover_config import (
     _CONFIG_SUBCOMMANDS,
     _MAX_COUNT,
@@ -129,10 +106,6 @@ __all__ = [
 ]
 
 
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
 _SUBCOMMANDS = {
     "run": "Execute rollover for files exceeding limits (fleet-wide), plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
@@ -144,67 +117,40 @@ _SUBCOMMANDS = {
 # Public alias — the introspection surface and the tests read this name.
 SUBCOMMANDS = _SUBCOMMANDS
 
-# `rollover check` prints this under its classic file list. That list is the
-# fleet walk (detector.check_all_branches) whatever --branch names; the pad
-# line alone is scoped. The scope is unchanged on purpose - this says it.
 FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pad line below."
 
-# `rollover run` rolls the pad FIRST, so its line sits above the file list. The
-# run is fleet-wide on purpose: @hooks' PreCompact passes --branch for the pad
-# and relies on the same call to drain every branch's files, and a project that
-# never compacts (Vera Studio's residents) only drains through someone else's
-# compaction. Scoping the files to --branch would stop that without a word, so
-# the scope stays and the output says it where it happens.
+# Fleet-wide on purpose: @hooks' PreCompact passes --branch for the pad and relies on the same call
+# to drain every branch's files; a project that never compacts drains only through another's run.
 FLEET_WIDE_RUN_NOTE = (
     "The file list is fleet-wide: --branch scopes only the todo pad line above; every branch's files below are rolled."
 )
 
-# Printed under the files rollover cannot drain. Never the phrase @hooks'
-# PreCompact greps for: another run changes nothing for these files.
+# Never the phrase @hooks' PreCompact greps for: another run changes nothing for these files.
 UNDRAINABLE_NOTE = (
     "Rollover drains lists only. These need their container migrated to the 3.0.0 list shape - "
     "another run changes nothing."
 )
 
-# `sync-lines` stopped writing anything when the health stamp was deleted from
-# the standard on 2026-08-25: its one write was a `status.last_health_check`
-# date, and the line count it "synced" was computed, returned and dropped. The
-# name outlived the behaviour, which is the exact species of lie DPLAN-0318
-# exists to kill — so the verb is renamed, not quietly left alone.
-#
-# The old name still ROUTES rather than 404-ing. A removed verb tells a caller
-# nothing about what replaced it; this one answers, does the same read-only
-# work, and says what changed. It also no longer triggers the unscoped
-# fleet-wide `refresh_all_tabs()` it used to run on the tail — a reporter that
-# rewrites 22 branches' files is the same lie in the other direction.
+# The old name still routes, so a caller learns what replaced it; the new verb writes nothing.
 RENAMED_VERBS = {"sync-lines": "report-lines"}
 
-# Verb names as they appear in the `verb` field of every JSON payload. One
-# constant per name so the payload and the routing cannot drift apart.
+# The `verb` field of every JSON payload; one constant so payload and routing cannot drift.
 _VERB_ROLLOVER = "rollover"
 _VERB_ROLLOVER_PUSH = "rollover push"
 
 
 def _handle_rollover_verb(args: List[str]) -> bool:
-    """Route the `rollover` subcommands. Always returns True — the verb is ours.
-
-    Split out of `handle_command` so each router stays one level deep: the
-    combined version nested subcommand dispatch inside command dispatch, and
-    a reader had to hold both to answer "what does `rollover push` do?".
-    """
-    # No args → introspection (seedgo standard)
+    """Route the `rollover` subcommands. Always returns True — the verb is ours."""
     if not args:
         print_introspection()
         return True
 
     # A help flag ANYWHERE wins — asking about `push` must never push.
-    # No rollover subcommand takes free text, so a bare `help` counts too.
     if wants_help(args, allow_bare_word=True):
         print_help()
         return True
 
-    # Machine output is read and REMOVED before positional parsing, so a
-    # flag in any slot leaves the subcommand where the parser expects it.
+    # --json is removed before positional parsing, whichever slot it rode in.
     json_mode = wants_json(args)
     args = strip_json_flag(args)
     if not args:
@@ -251,41 +197,8 @@ def _handle_rollover_verb(args: List[str]) -> bool:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle rollover commands with seedgo-compliant introspection.
-
-    Routing:
-        rollover (no args)        -> print_introspection()
-        rollover --help/-h/help   -> print_help()
-        rollover run [--branch @b]   -> execute rollover (+ one todo pad)
-        rollover status              -> show rollover status
-        rollover check [--branch @b] -> dry-run check (+ one todo pad)
-        rollover report-lines     -> report line counts (read-only)
-        rollover push [--json]    -> reset every per_branch entry
-
-    Rollover-limit config verbs (top-level command, routed from entry point):
-        config                    -> print_config_introspection()
-        config --help/-h/help     -> print_config_help()
-        config get [@branch]      -> show effective limits
-        config set @b <type> <n>  -> write one per-branch override
-        config set-default <t> <n>-> write one global default
-
-    `--json` rides in any slot on the config verbs and on `rollover push`,
-    and is stripped before positional parsing. A help flag still outranks
-    it — `config set @b sessions 12 --help --json` prints help and writes
-    neither the config nor a payload.
-
-    Backward-compatible top-level commands (routed from entry point):
-        status, check, report-lines -> forwarded directly
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
-    # Top-level help (backward compat — entry point may send these)
+    """Handle rollover and config commands with seedgo-compliant introspection."""
+    # The entry point may still route top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
         return True
@@ -294,20 +207,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         return _handle_config(args)
 
     if command == "rollover":
-        # The no-args gate stays HERE, at the entry seam, even though the verb
-        # handler gates again after the flags are stripped. They answer two
-        # different questions — "no subcommand was typed" versus "the only
-        # arguments were flags" — and a reader (or a checker) looking at the
-        # entry point should not have to follow a delegation to learn that a
-        # bare `rollover` introspects.
+        # Not redundant with the verb handler's gate: that one fires when the only args were flags.
         if not args:
             print_introspection()
             return True
         return _handle_rollover_verb(args)
 
-    # Backward-compatible top-level commands (entry point still routes these).
-    # Flat `if`/return, never an elif chain: each arm is independent, and a
-    # chain of six nests six deep for a reader and for the nesting checker.
+    # Flat `if`/return, never an elif chain: a chain of six nests six deep for the nesting checker.
     if command == "status":
         show_status()
         return True
@@ -388,11 +294,6 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# ROLLOVER ORCHESTRATION
-# =============================================================================
-
-
 def _branch_flag(tokens: List[str], verb: str) -> tuple[str | None, bool]:
     """`--branch @name` for `rollover run` / `rollover check` -> ``(branch, refused)``; a refusal is printed."""
     branch, problem = read_branch_flag(tokens)
@@ -405,9 +306,7 @@ def _branch_flag(tokens: List[str], verb: str) -> tuple[str | None, bool]:
 def _todo_report(report: dict) -> None:
     """Print one todo-pad report from handlers/rollover/todo_report.
 
-    ``soft_wrap`` because the console is 80 wide on a pipe, and a hard wrap
-    inside "ready for rollover" would hide it from @hooks' PreCompact grep;
-    ``markup`` and ``highlight`` off so a path or a number prints as written.
+    soft_wrap: a hard wrap inside "ready for rollover" on an 80-wide pipe hides it from @hooks' PreCompact grep.
     """
     text = str(report.get("text"))
     if report.get("level") == "error":
@@ -429,19 +328,9 @@ def _print_undrainable(items: list) -> None:
 
 
 def run_rollover(branch: str | None = None) -> bool:
-    """
-    Execute rollover: ONE branch's todo pad first, then the fleet vector rollover.
+    """Execute rollover: ONE branch's todo pad first, then the fleet vector rollover.
 
-    The todo roll is file-only and takes milliseconds, so it runs before the
-    model load a vector rollover may wait on. Delegates to handlers and
-    renders results with Rich.
-
-    Args:
-        branch: `@name` from --branch, or None to resolve the caller's branch
-            from its working directory (nothing is rolled at the repo root).
-
-    Returns:
-        The vector rollover's outcome, exactly as before the todo roll existed.
+    Returns the vector rollover's outcome only; the todo roll never changes it.
     """
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
@@ -473,7 +362,6 @@ def run_rollover(branch: str | None = None) -> bool:
     console.print(f"[dim]{FLEET_WIDE_RUN_NOTE}[/dim]", soft_wrap=True)
     console.print()
 
-    # Display individual results
     for item in result.get("results", []):
         local_status = "> local" if item.get("local_stored") else "x local"
         console.print(
@@ -482,22 +370,15 @@ def run_rollover(branch: str | None = None) -> bool:
             f"global: {item['global_total']} vectors, {local_status})"
         )
 
-    # Report results
     success_count = result.get("success_count", 0)
     failed = result.get("failed", [])
 
     console.print()
-    # 0/N is a result, not a reason to say nothing. Gated on success_count > 0,
-    # a run where every trigger failed ended on a blank line under "Found N
-    # files ready for rollover" — the same shape on screen as a run with
-    # nothing to do. The per-failure detail below says what broke; this says
-    # what the run achieved.
+    # 0/N is a result, not a reason to say nothing: it must not look like a run with nothing to do.
     marker = "[green]>[/green]" if success_count else "[yellow]>[/yellow]"
     console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
 
-    # A trigger the extractor declined is neither a win nor a break, and printing
-    # neither left "0/1 successful" above an empty failure list — a count saying
-    # something went wrong beside a list saying nothing did.
+    # A declined trigger is neither win nor break; unprinted, "0/1 successful" sat above an empty failure list.
     for item in result.get("skipped", []):
         console.print(f"  [yellow]-[/yellow] {item['trigger']} skipped: {item['reason']}")
 
@@ -510,10 +391,7 @@ def run_rollover(branch: str | None = None) -> bool:
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
-    # Refresh state-tabs for the branches THIS run actually rolled (counts may
-    # have changed). Scoped deliberately: unscoped, one citizen's overdue file
-    # rewrote all 38 memory files fleet-wide on 2026-08-25, shipping a renderer
-    # change to every branch from a PreCompact hook nobody was watching.
+    # Scoped to the branches THIS run rolled: unscoped, one overdue file rewrote every memory file in the fleet.
     rolled = sorted({item["branch"] for item in result.get("results", []) if item.get("branch")})
     if rolled:
         try:
@@ -521,7 +399,7 @@ def run_rollover(branch: str | None = None) -> bool:
 
             refresh_all_tabs(branches=rolled)
         except Exception as e:
-            # The rollover landed, so the run stands; a failed refresh is a fault, not a degradation (leg 4).
+            # The rollover landed, so the run stands; a failed refresh is a fault, not a degradation.
             logger.error(f"[rollover] Tab refresh failed: {e}")
 
         _normalize_rolled(rolled)
@@ -532,14 +410,7 @@ def run_rollover(branch: str | None = None) -> bool:
 def _normalize_rolled(rolled: List[str]) -> None:
     """Re-render the machine frame of each branch THIS run actually rolled.
 
-    Self-healing on touch, the marker-7 shape: a branch that rolls heals its
-    own frame in the same breath — nothing watches, nothing polls, and a
-    branch that never rolls is never touched.
-
-    Scoped to `rolled` for the reason the tab refresh above is: an unscoped
-    version of this rewrote all 38 memory files in the fleet on 2026-08-25.
-    Failures are logged, never raised — the rollover already succeeded and
-    reported, and a cosmetic re-render must not retract that.
+    Failures are logged, never raised: a cosmetic re-render must not retract a rollover that succeeded.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
     from aipass.memory.apps.handlers.rollover import normalizer
@@ -548,13 +419,8 @@ def _normalize_rolled(rolled: List[str]) -> None:
     wanted = {name.lower() for name in rolled}
     try:
         config = config_loader.load()
-        # STOPS AT THE REPO EDGE, like the push and the rollover detector.
-        # normalize_branch WRITES — it re-renders the machine frame in place —
-        # and this lane matches rolled branches BY NAME across whatever scope it
-        # is given. Handed the whole fleet it would, the day any external
-        # project names a branch `api` or `flow`, rewrite a file in a sibling
-        # repository because one of ours happened to roll. There is no collision
-        # today; that is luck, and luck is not a scope.
+        # Stops at the repo edge: normalize_branch WRITES and matches by name, so an external
+        # project's branch sharing a name with one of ours would be rewritten.
         targets = [
             item
             for item in registry_scope.fleet_branches()
@@ -567,11 +433,7 @@ def _normalize_rolled(rolled: List[str]) -> None:
     healed = 0
     for item in targets:
         try:
-            # The normalizer reports failure by RETURN VALUE and promises never
-            # to raise, so this `except` cannot be the thing that catches a
-            # failed write — reading only ["success"] dropped the error string
-            # it hands back. A branch whose frame could not be written was
-            # invisible, while an out-of-scope branch below is named by name.
+            # The normalizer reports failure by RETURN VALUE, never raising: read its error string.
             outcome = normalizer.normalize_branch(item["name"], item["path"], config)
             if outcome["success"]:
                 healed += 1
@@ -585,24 +447,14 @@ def _normalize_rolled(rolled: List[str]) -> None:
 
     missing = wanted - {item["name"].lower() for item in targets}
     if missing:
-        # Named, never silent: a rolled branch the fleet scope cannot see is
-        # exactly the invisibility item 7 closed, and it would come back here.
+        # Named, never silent: a rolled branch the fleet scope cannot see.
         logger.warning(f"[rollover] Rolled but not in fleet scope, frame NOT normalized: {sorted(missing)}")
     if healed:
         logger.info(f"[rollover] Machine frame re-rendered for {healed} rolled branch(es)")
 
 
-# =============================================================================
-# PLAN VECTORIZATION
-# =============================================================================
-
-
 def process_plans_command() -> None:
-    """
-    Process pending plan files into vector storage.
-
-    Batches all chunks from all files into a single embed + store call.
-    """
+    """Process pending plan files into vector storage in one embed + store call."""
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
@@ -648,11 +500,6 @@ def process_plans_command() -> None:
     )
 
 
-# =============================================================================
-# LINE COUNT SYNC
-# =============================================================================
-
-
 def _announce_rename(old_verb: str) -> None:
     """Tell a caller of a renamed verb what it is running and why."""
     new_verb = RENAMED_VERBS[old_verb]
@@ -664,15 +511,7 @@ def _announce_rename(old_verb: str) -> None:
 
 
 def report_line_counts() -> None:
-    """Report physical line counts for every branch memory file. Read-only.
-
-    Writes nothing — not the files, not the tabs. The rename exists because
-    the old name promised a sync; re-rendering the fleet's meta lines from a
-    reporter would have kept the promise in the worst possible way.
-
-    Meta lines are re-rendered by the lanes that have a reason to: the trinity
-    push (per branch, gated), and a rollover's own scoped normalize.
-    """
+    """Report physical line counts for every branch memory file. Read-only: not the files, not the tabs."""
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Line Count Report[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
@@ -695,17 +534,8 @@ def report_line_counts() -> None:
     console.print()
 
 
-# =============================================================================
-# PUSH DEFAULTS
-# =============================================================================
-
-
 def push_defaults(json_mode: bool = False) -> None:
-    """Overwrite every per_branch entry in memory.config.json with defaults.
-
-    Args:
-        json_mode: Emit one machine payload instead of the rendered report.
-    """
+    """Overwrite every per_branch entry in memory.config.json with defaults."""
     from aipass.memory.apps.handlers.json import config_loader
 
     ctx = _Json(_VERB_ROLLOVER_PUSH, json_mode)
@@ -734,25 +564,12 @@ def push_defaults(json_mode: bool = False) -> None:
     json_handler.log_operation("push_defaults", {"branches": count, "json": ctx.on})
 
 
-# =============================================================================
-# STATUS & CHECKING
-# =============================================================================
-
-
 def show_status() -> None:
-    """
-    Show rollover statistics for all branches
-
-    Displays:
-    - Files checked
-    - Files ready for rollover
-    - Per-branch status (current/max lines)
-    """
+    """Show rollover statistics for all branches."""
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
-    # Get stats from detector
     stats_result = detector.get_rollover_stats()
 
     if not stats_result["success"]:
@@ -762,14 +579,12 @@ def show_status() -> None:
 
     stats = stats_result
 
-    # Summary
     console.print(f"[cyan]Branches:[/cyan] {stats['total_branches']}")
     console.print(f"[cyan]Files checked:[/cyan] {stats['files_checked']}")
     console.print(f"[cyan]Ready for rollover:[/cyan] {stats['files_ready']}")
     console.print(f"[cyan]Over, and rollover cannot drain them:[/cyan] {stats.get('files_undrainable', 0)}")
     console.print()
 
-    # Per-branch details
     if stats["branches"]:
         console.print("[bold cyan]Branch Details:[/bold cyan]")
         console.print()
@@ -797,15 +612,7 @@ def show_status() -> None:
 
 
 def check_triggers(branch: str | None = None) -> None:
-    """
-    Check which branches need rollover (without executing), then ONE branch's todo pad.
-
-    Displays list of files that hit rollover threshold
-
-    Args:
-        branch: `@name` from --branch, or None to resolve the caller's branch
-            from its working directory (no pad is checked at the repo root).
-    """
+    """Check which branches need rollover (without executing), then ONE branch's todo pad."""
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
@@ -832,9 +639,7 @@ def _check_fleet_triggers() -> None:
         json_handler.log_operation("rollover_check", {"files_needing_rollover": 0, "undrainable": len(undrainable)})
         return
 
-    # The file list is the fleet walk's, whatever --branch named: --branch scopes
-    # only the todo pad line. "ready for rollover" stays literal and unwrapped on
-    # the first line - @hooks' PreCompact greps this output for it.
+    # "ready for rollover" stays literal and unwrapped: @hooks' PreCompact greps this output for it.
     header = f"Found {len(triggers)} files ready for rollover (fleet-wide):"
     console.print(f"[bold cyan]{header}[/bold cyan]", soft_wrap=True)
     console.print(f"[dim]{FLEET_WIDE_NOTE}[/dim]", soft_wrap=True)
@@ -852,20 +657,8 @@ def _check_fleet_triggers() -> None:
     )
 
 
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
-
-
 def _discover_handlers() -> dict[str, list[str]]:
-    """Auto-discover handler directories and their Python files.
-
-    Scans the handlers/ directory relative to this module.
-
-    Returns:
-        Dict mapping handler directory name to list of .py filenames
-        (excluding __init__.py and __pycache__).
-    """
+    """Map each handlers/ subdirectory to its .py files, __init__.py excluded."""
     handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
@@ -880,18 +673,12 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard).
-
-    Called when 'rollover' is invoked with no arguments.
-    Shows module identity, connected handlers, available subcommands,
-    and next-step hints.
-    """
+    """Display module introspection info (seedgo standard)."""
     console.print()
     console.print("[bold cyan]rollover Module[/bold cyan]")
     console.print("Orchestrates memory rollover workflow: trigger detection, extraction, embedding, and vector storage")
     console.print()
 
-    # Connected handlers (auto-discovered)
     handlers = _discover_handlers()
     console.print("[yellow]Connected Handlers:[/yellow]")
     if handlers:
@@ -902,13 +689,11 @@ def print_introspection() -> None:
         console.print("  [dim]No handlers found[/dim]")
     console.print()
 
-    # Available subcommands
     console.print("[yellow]Subcommands:[/yellow]")
     for sub, desc in _SUBCOMMANDS.items():
         console.print(f"  [green]{sub:<14}[/green] {desc}")
     console.print()
 
-    # Next-step hints
     console.print("[yellow]Next:[/yellow]")
     console.print("  [green]drone @memory rollover run[/green]          [dim]# Execute rollover[/dim]")
     console.print("  [green]drone @memory rollover status[/green]       [dim]# View rollover stats[/dim]")
@@ -918,24 +703,17 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
 if __name__ == "__main__":
     import sys
 
-    # No args → introspection (seedgo standard)
     if len(sys.argv) < 2:
         handle_command("rollover", [])
         sys.exit(0)
 
-    # --help → full help
     if sys.argv[1] in ("--help", "-h", "help"):
         handle_command("rollover", ["--help"])
         sys.exit(0)
 
-    # Execute command via handle_command
     command = sys.argv[1]
     if not handle_command(command, sys.argv[2:]):
         error(f"Unknown command: {command}", suggestion="Run 'drone @memory rollover --help' for available commands")

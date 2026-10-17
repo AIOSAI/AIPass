@@ -3,23 +3,13 @@
 # Description: Memory File System Watcher
 # Version: 1.2.3
 # Created: 2025-11-26
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory File System Watcher
 
-Watches memory files (*.local.json, *.observations.json) for modifications.
-On change, updates line counts and triggers rollover if needed.
-
-Purpose:
-    Automatic memory file monitoring without polling. Responds to filesystem
-    events in real-time, keeping metadata accurate and triggering rollover
-    when thresholds are exceeded.
-
-Independence:
-    Uses watchdog library for events. Delegates to line_counter and rollover
-    handlers for processing. No direct service dependencies.
+Uses watchdog when present; delegates to line_counter, detector and the rollover orchestrator.
 """
 
 import logging
@@ -43,7 +33,6 @@ except ImportError:
     FileSystemEventHandler = object  # type: ignore[assignment,misc]
     logger.info("Optional dependency 'watchdog' not available")
 
-# Handler imports (relative within package — after conditional watchdog block)
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
@@ -55,30 +44,16 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
-# Memory root resolved relative to handler location
 _MEMORY_ROOT = module_file(__file__).parents[3]
 
-# Global observer instance
 _observer: Any = None
 
-
-# =============================================================================
-# STARTUP CHECK (runs once per command, no daemon needed)
-# =============================================================================
 
 _startup_check_done = False
 
 
 def _check_vector_deps() -> bool:
-    """
-    Check whether the memory venv has chromadb and numpy available.
-
-    Runs a quick subprocess check using the memory venv Python.
-    Logs a warning if deps are missing so the self-report is honest.
-
-    Returns:
-        True if both chromadb and numpy are importable, False otherwise
-    """
+    """Check whether the memory venv has chromadb and numpy available."""
     import subprocess
     import sys
 
@@ -105,21 +80,9 @@ def _check_vector_deps() -> bool:
 
 
 def check_and_rollover() -> Dict[str, Any]:
-    """
-    Check all memory files and trigger rollover if any exceed their threshold.
-    Also processes any new files in memory_pool.
-
-    Threshold is determined per-branch from v2 entry-count limits in config.
-
-    This is a startup check - runs once per command, synchronous.
-    No daemon or file watcher needed.
-
-    Returns:
-        Dict with check results and any rollover actions taken
-    """
+    """Check all memory files and trigger rollover if any exceed their threshold; once per process."""
     global _startup_check_done
 
-    # Only run once per process
     if _startup_check_done:
         return {"success": True, "skipped": True, "reason": "Already checked this session"}
 
@@ -136,7 +99,6 @@ def check_and_rollover() -> Dict[str, Any]:
         "vector_storage": "healthy" if vector_deps_ok else "degraded — chromadb/numpy not installed",
     }
 
-    # Get all branch paths
     try:
         branch_paths = _get_branch_paths()
     except RegistryUnreadable as e:
@@ -149,17 +111,13 @@ def check_and_rollover() -> Dict[str, Any]:
         results["error"] = "No branch paths found"
         return results
 
-    # Check each branch for memory files over limit
     for branch_path in branch_paths:
         branch = Path(branch_path)
-        # Find memory files in .trinity/ subdirectory
         trinity_dir = branch / ".trinity"
         if not trinity_dir.exists():
             continue
         for pattern in ["local.json", "observations.json"]:
-            # Not glob(): the pattern has no wildcard, and a folding filesystem
-            # would serve Local.json here. Rollover REWRITES what this matches,
-            # so a near-miss is damage rather than a miscount.
+            # Not glob(): a folding filesystem would serve Local.json, and rollover rewrites what matches.
             for memory_file in [trinity_dir / pattern] if exists_exactly(trinity_dir / pattern) else []:
                 results["files_checked"] += 1
 
@@ -169,7 +127,6 @@ def check_and_rollover() -> Dict[str, Any]:
 
                     normalize_memory_file(memory_file)
 
-                    # Use detector for trigger decision (v2 entry-count based)
                     from aipass.memory.apps.handlers.monitor.detector import _should_rollover
 
                     triggered, current_lines, _, _ = _should_rollover(memory_file)
@@ -182,7 +139,6 @@ def check_and_rollover() -> Dict[str, Any]:
 
     results["lines_synced"] = 0
 
-    # Trigger rollover if any files are over limit
     if results["files_over_limit"]:
         results["rollover_triggered"] = True
 
@@ -197,13 +153,10 @@ def check_and_rollover() -> Dict[str, Any]:
             results["rollover_error"] = str(e)
             results["success"] = False
 
-    # Check memory_pool for new files to process
     results["memory_pool"] = _check_memory_pool()
 
-    # Check plans for new files to vectorize
     results["plans"] = _check_plans()
 
-    # Check code_archive for new files to index
     results["code_archive"] = _check_code_archive()
 
     json_handler.log_operation(
@@ -218,23 +171,13 @@ def check_and_rollover() -> Dict[str, Any]:
 
 
 def _check_memory_pool() -> Dict[str, Any]:
-    """
-    Check memory_pool for new files and process if needed.
-
-    Compares files in pool against configured keep_recent limit.
-    If more files exist, runs processor to vectorize and archive.
-
-    Returns:
-        Dict with processing status
-    """
+    """Process memory_pool when it holds more files than keep_recent."""
     pool_config = config_loader.section("memory_pool")
     pool_path = _MEMORY_ROOT / "memory_pool"
 
-    # Check if enabled
     if not pool_config.get("enabled", False):
         return {"success": True, "skipped": True, "reason": "memory_pool disabled"}
 
-    # Count files in pool (excluding .archive)
     extensions = pool_config.get("supported_extensions", [".md", ".txt"])
     keep_recent = pool_config.get("keep_recent", 0)
 
@@ -244,13 +187,10 @@ def _check_memory_pool() -> Dict[str, Any]:
 
     file_count = len(files)
 
-    # If under limit, nothing to do
     if file_count <= keep_recent:
         return {"success": True, "files_in_pool": file_count, "keep_recent": keep_recent, "action": "none"}
 
-    # Files exceed limit - run processor
     try:
-        # NOTE: intake module not yet ported to aipass.memory package
         from aipass.memory.apps.handlers.intake.pool_processor import process_memory_pool  # type: ignore[import-not-found]
 
         result = process_memory_pool()
@@ -266,25 +206,14 @@ def _check_memory_pool() -> Dict[str, Any]:
 
 
 def _check_plans() -> Dict[str, Any]:
-    """
-    Check plans directory for unprocessed files (count only).
-
-    Does NOT call process_plans() — that spawns heavy ML subprocesses.
-    Only counts pending files and reports. Use 'drone @memory process-plans'
-    to trigger actual vectorization.
-
-    Returns:
-        Dict with pending file count
-    """
+    """Count unprocessed plans only: process_plans() spawns heavy ML subprocesses."""
     import json
 
     plans_config = config_loader.section("plans")
 
-    # Check if enabled
     if not plans_config.get("enabled", False):
         return {"success": True, "skipped": True, "reason": "plans disabled"}
 
-    # Get plans path and count files (supports absolute paths)
     plans_dir = plans_config.get("path", ".backup/processed_plans")
     repo_root = _find_repo_root()
     plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else repo_root / plans_dir
@@ -302,7 +231,6 @@ def _check_plans() -> Dict[str, Any]:
     if file_count == 0:
         return {"success": True, "pending_files": 0, "action": "count_only"}
 
-    # Load manifest to count unprocessed files
     manifest_path = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
     manifest: Dict[str, str] = {}
     if manifest_path.exists():
@@ -321,12 +249,7 @@ def _check_plans() -> Dict[str, Any]:
 
 
 def _check_code_archive() -> Dict[str, Any]:
-    """
-    Check code_archive for new files and index them.
-
-    Returns:
-        Dict with indexing status
-    """
+    """Check code_archive for new files and index them."""
     try:
         from aipass.memory.apps.handlers.archive.indexer import check_for_new_files
 
@@ -336,40 +259,13 @@ def _check_code_archive() -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
-
-
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
-    """
+    """Repo root for this lane, by ``handlers/repo_root.py``; a local name because tests patch it here."""
     return repo_root.find_repo_root(caller="memory_watcher")
 
 
 def _get_branch_paths() -> list[Path]:
-    """
-    Branch paths the watcher may roll over: the rollover scope, nothing else.
-
-    Delegates to ``detector._read_registry()`` (2026-09-18) — one fleet, one
-    definition. This lane used to keep its own walk: the core registry, every
-    registry persisted in known_registries.json, then the caller's cwd, which
-    it persisted in turn. That is how a caller standing in another repository
-    widened a lane that rewrites files, and why residents reached it only if
-    somebody's cwd had once named them. The detector's scope names residents
-    by declaration, fences callers to the AIPass root, and remembers nothing.
-
-    Returns:
-        Existing branch directories, deduplicated, in registry order
-    """
+    """Branch paths the watcher may roll over: ``detector._read_registry()``, one fleet, nothing else."""
     from aipass.memory.apps.handlers.monitor import detector
 
     paths: list[Path] = []
@@ -387,17 +283,7 @@ def _is_memory_file(file_path: Path, roots: frozenset[Path]) -> bool:
     """
     Check if file is a memory file of a watched root: ``<root>/.trinity/<name>``
 
-    Nothing deeper. A root is scheduled recursively, so a copy of a memory file
-    inside ``<root>/dropbox/...`` or ``<root>/.archive/`` is heard too; it is a
-    sandbox and is never rewritten, measured or checked (the owner's ruling of
-    2026-09-27; this gate is memory's cure, fleet green leg 4).
-
-    Args:
-        file_path: Path to check
-        roots: The branch roots the watcher was handed
-
-    Returns:
-        True if memory file of a watched root, False otherwise
+    Nothing deeper: copies under a recursive root's dropbox/ or .archive/ are sandboxes, never rewritten.
     """
     trinity = file_path.parent
     return (
@@ -405,37 +291,26 @@ def _is_memory_file(file_path: Path, roots: frozenset[Path]) -> bool:
     )
 
 
-# =============================================================================
-# FILE SYSTEM EVENT HANDLER
-# =============================================================================
-
-
 class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
     """Watch for memory file modifications of the roots it is handed"""
 
     def __init__(self, roots: Iterable[Path]):
         super().__init__()
-        # Each root in both spellings: an observer may report the real path
-        # behind a symlinked root, and that must not turn its own files away
-        # (memory's cure, fleet green leg 5).
+        # Each root in both spellings: an observer may report the real path behind a symlinked root.
         given = [Path(root) for root in roots]
         self._roots = frozenset(given) | frozenset(root.resolve() for root in given)
-        # Track recent modifications to avoid duplicate processing
         self._recent_modifications = set()
 
     def on_modified(self, event):
         """Handle file modification events"""
-        # Ignore directory events
         if event.is_directory:
             return
 
         file_path = Path(event.src_path)
 
-        # Only process memory files
         if not _is_memory_file(file_path, self._roots):
             return
 
-        # Skip if we just processed this file
         file_key = str(file_path)
         if file_key in self._recent_modifications:
             self._recent_modifications.discard(file_key)
@@ -443,14 +318,12 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
 
         logger.info(f"[memory_watcher] Detected modification: {file_path.name}")
 
-        # Step 1: Auto-heal schema drift (strips orphan keys)
         from aipass.memory.apps.handlers.schema.normalize import normalize_memory_file
 
         norm_result = normalize_memory_file(file_path)
         if norm_result.get("changes"):
             self._recent_modifications.add(file_key)
 
-        # Step 2: Update health check metadata
         update_result = update_line_count(file_path)
 
         if not update_result["success"]:
@@ -459,7 +332,6 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
             )
             return
 
-        # Step 3: Check if rollover needed
         check_result = check_single_file(file_path)
 
         if not check_result["success"]:
@@ -470,43 +342,27 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
             trigger = check_result.get("trigger")
             logger.warning(f"[memory_watcher] ROLLOVER TRIGGERED: {trigger}")
 
-            # Import rollover handler here to avoid circular imports
+            # Imported here to avoid a circular import.
             from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
 
-            # Trigger rollover
             logger.info(f"[memory_watcher] Triggering rollover for {file_path.name}")
 
-            # Mark file as recently modified to avoid re-processing after rollover
+            # Marked before the rollover so its own write is not re-processed.
             self._recent_modifications.add(file_key)
 
-            # Execute rollover
             try:
                 execute_rollover()
             except Exception as e:
                 logger.error(f"[memory_watcher] Rollover failed: {e}")
 
 
-# =============================================================================
-# WATCHER CONTROL FUNCTIONS
-# =============================================================================
-
-
 def start_memory_watcher() -> Dict[str, Any]:
-    """
-    Start watching memory files for modifications
-
-    Starts watchdog observer to monitor all branch directories for memory
-    file changes. Updates line counts and triggers rollover automatically.
-
-    Returns:
-        Dict with success status and watched paths
-    """
+    """Start the watchdog observer over every branch directory."""
     global _observer
 
     if _observer and _observer.is_alive():
         return {"success": False, "error": "Watcher already running"}
 
-    # Get all branch paths
     try:
         branch_paths = _get_branch_paths()
     except RegistryUnreadable as e:
@@ -516,13 +372,11 @@ def start_memory_watcher() -> Dict[str, Any]:
     if not branch_paths:
         return {"success": False, "error": "No branch paths found in AIPASS_REGISTRY.json"}
 
-    # Create watcher instance
     watcher = MemoryFileWatcher(branch_paths)
 
-    # Create observer
     new_observer = Observer()  # type: ignore[misc]
 
-    # Schedule watcher for each branch path (silent - no logging during startup)
+    # Silent: no logging during startup.
     watched_paths = []
     for branch_path in branch_paths:
         try:
@@ -531,7 +385,6 @@ def start_memory_watcher() -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"[memory_watcher] Failed to schedule watcher for {branch_path}: {e}")
 
-    # Start observer
     new_observer.start()
     _observer = new_observer
 
@@ -539,12 +392,7 @@ def start_memory_watcher() -> Dict[str, Any]:
 
 
 def stop_memory_watcher() -> Dict[str, Any]:
-    """
-    Stop the memory file watcher
-
-    Returns:
-        Dict with success status
-    """
+    """Stop the memory file watcher"""
     global _observer
 
     if not _observer or not _observer.is_alive():
@@ -560,28 +408,17 @@ def stop_memory_watcher() -> Dict[str, Any]:
 
 
 def is_memory_watcher_active() -> bool:
-    """
-    Check if memory watcher is currently active
-
-    Returns:
-        True if watcher is running, False otherwise
-    """
+    """Check if memory watcher is currently active"""
     return _observer is not None and _observer.is_alive()
 
 
 def get_watcher_status() -> Dict[str, Any]:
-    """
-    Get current watcher status
-
-    Returns:
-        Dict with watcher status and details
-    """
+    """Get current watcher status"""
     active = is_memory_watcher_active()
 
     if not active:
         return {"active": False, "message": "Watcher not running"}
 
-    # Get watched paths
     try:
         branch_paths = _get_branch_paths()
     except RegistryUnreadable as e:
@@ -591,10 +428,6 @@ def get_watcher_status() -> Dict[str, Any]:
 
     return {"active": True, "watched_directories": len(branch_paths), "paths": [str(p) for p in branch_paths]}
 
-
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
 
 if __name__ == "__main__":
     import argparse

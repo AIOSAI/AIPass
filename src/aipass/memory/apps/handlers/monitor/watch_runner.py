@@ -3,23 +3,13 @@
 # Description: Watch Mode Runner Handler
 # Version: 0.2.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Watch Mode Runner Handler
 
-Lifecycle for the auto-rollover watcher session: start, sample, block, stop.
-
-Purpose:
-    Implementation half of the `watch` command. Wraps the two monitor handlers
-    the session spans -- memory_watcher (the observer) and detector (the
-    over-cap count) -- so the module stays thin CLI routing.
-
-Design:
-    - Returns data, never prints: display belongs to the module (cli standard)
-    - wait_forever() is isolated so the startup path can be tested without
-      hanging a test run
+wait_forever() is split out so the startup path is testable without hanging.
 """
 
 import time
@@ -35,12 +25,7 @@ from aipass.memory.apps.handlers.monitor.detector import get_rollover_stats
 
 
 def start_watching() -> Dict[str, Any]:
-    """
-    Start the file watcher over every registered branch.
-
-    Returns:
-        Dict with success, count (branch directories watched), and error on failure.
-    """
+    """Start the file watcher over every registered branch."""
     result = start_memory_watcher()
 
     if not result.get("success"):
@@ -53,12 +38,7 @@ def start_watching() -> Dict[str, Any]:
 
 
 def current_stats() -> Dict[str, Any]:
-    """
-    Sample how many watched files are currently over their limits.
-
-    Returns:
-        Dict with success, files_checked, files_ready.
-    """
+    """Sample how many watched files are currently over their limits."""
     return get_rollover_stats()
 
 

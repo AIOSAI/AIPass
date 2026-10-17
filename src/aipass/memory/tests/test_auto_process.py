@@ -3,25 +3,11 @@
 # Description: Tests for the intake auto_process handler and the pool module
 # Version: 1.1.1
 # Created: 2026-06-06
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/intake/auto_process.py and apps/modules/pool.py."""
-
-# Tests for the intake/auto_process handler and modules/pool module.
-#
-# Covers:
-#   - auto_process.auto_process (full orchestration entry point)
-#   - auto_process.run_pool_processing (pool-only path)
-#   - auto_process._load_pool_enabled (config loading)
-#   - auto_process._run_rollover_check (rollover path)
-#   - pool.handle_command (CLI routing)
-#
-# Tests: empty-pool no-op, new-drop processed+vectorized, re-run idempotent,
-# enabled=false respected, rollover-trigger path.
-#
-# All tests use mocks/tmp_path — no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — spawn_background and run_once, in tests/test_auto_process_background.py
@@ -63,11 +49,6 @@ def _pool_enabled(monkeypatch, enabled):
     monkeypatch.setattr(
         auto_process.config_loader, "section", lambda name: {"enabled": enabled} if name == "memory_pool" else {}
     )
-
-
-# ===========================================================================
-# Tests: _load_pool_enabled
-# ===========================================================================
 
 
 class TestLoadPoolEnabled:
@@ -116,11 +97,6 @@ class TestLoadPoolEnabled:
         # Config exists but has no memory_pool key; deep_merge with DEFAULT_CONFIG
         # fills it in, so enabled comes from DEFAULT_CONFIG (True)
         assert mod._load_pool_enabled() is True
-
-
-# ===========================================================================
-# Tests: run_pool_processing
-# ===========================================================================
 
 
 class TestRunPoolProcessing:
@@ -176,11 +152,6 @@ class TestRunPoolProcessing:
 
         assert result["success"] is False
         assert "chroma down" in result["error"]
-
-
-# ===========================================================================
-# Tests: auto_process (full entry point)
-# ===========================================================================
 
 
 class TestAutoProcess:
@@ -344,11 +315,6 @@ class TestAutoProcess:
         assert call_count["n"] == 2
 
 
-# ===========================================================================
-# Tests: _run_rollover_check
-# ===========================================================================
-
-
 class TestRunRolloverCheck:
     """Test _run_rollover_check function."""
 
@@ -429,11 +395,6 @@ class TestTodosNeverRideTheFleetWalk:
         assert result == {"skipped": True, "reason": "no rollover triggers"}
         execute.assert_not_called()
         assert (trinity / "local.json").read_bytes() == before
-
-
-# ===========================================================================
-# Tests: pool module handle_command
-# ===========================================================================
 
 
 class TestPoolHandleCommand:

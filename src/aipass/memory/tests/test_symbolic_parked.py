@@ -3,22 +3,10 @@
 # Description: Pins the park of the symbolic fragments tier (the owner's ruling, 2026-08-14)
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/symbolic.py and the parked handlers/symbolic package."""
-
-# Tests for parking the symbolic fragments tier (the owner's ruling, 2026-08-14).
-#
-# The Agent Memory Atlas review of AIPass memory (revision 0d27e5ef) flagged the
-# AUDN deduplicator: an LLM returns a Delete verdict and nothing records what was
-# removed or why — an unauditable deletion. The tier was never wired into any live
-# lane, and Compass became the curated-truth piece, so the owner ruled: park it,
-# revivable, and say where the active piece is.
-#
-# A park is only honest if it is loud. These tests pin the two halves:
-#   - every disabled surface names the ruling, its date, and Compass
-#   - nothing that runs today lost anything (the live lane never touched it)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 
@@ -32,14 +20,9 @@ import pytest
 from aipass.memory.apps.modules import symbolic
 from aipass.memory.apps.modules.governance import new_state, should_surface
 
-# The park's TRACKED home. It lived under .archive/ until 2026-08-18, when
-# The owner ruled .archive/ always-ignored and named it his disposal zone -- at
-# which point these preservation pins started failing on every fresh clone,
-# because the files they pin no longer shipped. A park that CI cannot see is
-# not a park; see tests/parked/README.md.
+# The park's TRACKED home: .archive/ is never shipped, so a park there is invisible to CI.
 _PARK = Path(__file__).resolve().parent / "parked" / "symbolic_20260814"
 
-# Every subcommand the tier used to answer. All of them must now refuse.
 _SUBCOMMANDS = ["demo", "analyze", "extract", "bootstrap", "fragments", "hook-test"]
 
 
@@ -47,11 +30,6 @@ def _names_the_ruling(text: str) -> bool:
     """A parked surface must say what happened, when, and where to go instead."""
     lowered = text.lower()
     return "parked" in lowered and "2026-08-14" in text and "compass" in lowered
-
-
-# ---------------------------------------------------------------------------
-# The CLI surface
-# ---------------------------------------------------------------------------
 
 
 class TestModuleSurfaceParked:
@@ -99,11 +77,6 @@ class TestModuleSurfaceParked:
         assert _names_the_ruling(str(exc.value)), str(exc.value)
 
 
-# ---------------------------------------------------------------------------
-# The programmatic surface
-# ---------------------------------------------------------------------------
-
-
 class TestHandlerPackageParked:
     """Importing the tier is the other way in. It must hit the same wall."""
 
@@ -120,11 +93,6 @@ class TestHandlerPackageParked:
             importlib.import_module(f"aipass.memory.apps.handlers.symbolic.{submodule}")
 
         assert _names_the_ruling(str(exc.value)), str(exc.value)
-
-
-# ---------------------------------------------------------------------------
-# The live lane
-# ---------------------------------------------------------------------------
 
 
 class TestLiveLaneUntouched:
@@ -155,11 +123,6 @@ class TestLiveLaneUntouched:
         assert surfaced is True, reason
 
 
-# ---------------------------------------------------------------------------
-# Revivability — a park, not a demolition
-# ---------------------------------------------------------------------------
-
-
 class TestRevivable:
     """The owner may want this back. Everything must still be here."""
 
@@ -181,15 +144,7 @@ class TestRevivable:
         assert (_PARK / relative).is_file(), f"missing from the park: {relative}"
 
     def test_the_park_is_not_in_the_disposal_zone(self):
-        """The failure this test class could not see, made visible.
-
-        These pins were green for four days while pointing into `.archive/` --
-        green on every dev machine and red on every runner, because the files
-        were there and untracked. Asserting a file EXISTS cannot tell a tracked
-        home from a local one. This asserts the home instead: no component of
-        the path may be `.archive`, which is the one directory the owner's ruling
-        says is cleaned without warning.
-        """
+        """No path component may be `.archive`: existence alone cannot tell a tracked home from a local one."""
         assert ".archive" not in _PARK.parts, f"the park is back in the disposal zone: {_PARK}"
 
     @pytest.mark.parametrize(
@@ -200,12 +155,7 @@ class TestRevivable:
         ],
     )
     def test_parked_code_is_not_importable_by_dotted_path(self, relative):
-        """The `(disabled)` suffix is not decoration -- it is the disabling.
-
-        Parked code sitting under tests/ with its real name would be importable
-        and, for the four archived TEST files in the sibling park, collectable.
-        The suffix makes the stem an invalid identifier, so neither can happen.
-        """
+        """The `(disabled)` suffix is the disabling: an invalid identifier can be neither imported nor collected."""
         stem = (_PARK / relative).stem
         assert not stem.isidentifier(), f"{stem} is still a valid module name"
 
@@ -223,24 +173,8 @@ class TestRevivable:
         assert "revive" in text.lower()
 
 
-# ---------------------------------------------------------------------------
-# The park must be kept, and must never run
-# ---------------------------------------------------------------------------
-
-
 class TestParkIsNeverCollected:
-    """Kept is not the same as run, and the second half needs its own pin.
-
-    Four files in the sibling `unwired_handlers_20260813/` park are the TESTS
-    that covered handlers which left the tree. `test_storage(disabled).py`
-    still matches pytest's default `test_*.py` glob, so the first landing of
-    this park collected all of it and produced 66 failures and 39 errors
-    against code that is no longer there.
-
-    A real collection, in a subprocess, because that is the only thing that
-    answers the question. Asserting the conftest merely EXISTS would pass on a
-    conftest that had been emptied.
-    """
+    """Kept is not run: parked test files still match `test_*.py`, so pin a real subprocess collection."""
 
     def test_collecting_the_park_finds_nothing(self):
         result = subprocess.run(

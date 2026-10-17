@@ -3,31 +3,13 @@
 # Description: Per-branch .template_version.json receipt writer
 # Version: 1.2.0
 # Created: 2026-08-25
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Template Version Receipt
 
-Writes the per-branch ``.trinity/.template_version.json`` receipt defined by
-the trinity standard: which gold-source template version each memory file's
-structure carries, when the templates last touched this branch, by which lane,
-and when the caps/meta lines were last re-rendered.
-
-Its entire job is to make *"who actually carries the current standard"* a
-lookup instead of an audit.
-
-Honesty rules baked in here:
-
-- A branch a push **skipped** shows its OLD stamp, never the fleet's intent.
-  Nothing in this module writes a stamp on behalf of a lane that did not run.
-- ``bump_config_rendered`` refuses to create a receipt. The renderer re-renders
-  numbers; it has no idea which template version the files were built from, so
-  claiming one would be a guess written down as a fact.
-- Only the three sanctioned lanes may stamp. A free-text ``stamped_by`` would
-  turn the receipt into a rumour.
-
-Not to be confused with ``memory/templates/.template_version.json`` — a
-different, template-side push log with its own shape and its own role.
+Only a lane that actually ran may stamp, so a skipped branch keeps its OLD stamp. Not the
+template-side push log at ``memory/templates/.template_version.json``.
 """
 
 import json
@@ -61,11 +43,7 @@ def _now() -> str:
 
 
 def template_versions() -> dict[str, str]:
-    """Read the structural version each gold-source template carries.
-
-    Raises rather than defaulting: a receipt naming a version nobody can read
-    off the templates is worse than no receipt at all.
-    """
+    """Read the structural version each gold-source template carries; raises rather than defaulting."""
     versions: dict[str, str] = {}
     for key, name in _GOLD_SOURCE.items():
         data = json.loads((_TEMPLATES_DIR / name).read_text(encoding="utf-8"))
@@ -83,12 +61,7 @@ class ReceiptUnreadable(ValueError):
 def read_receipt(trinity_dir: Path) -> dict[str, Any] | None:
     """Return a branch's receipt, or ``None`` when it has none.
 
-    Raises:
-        ReceiptUnreadable: the file is there and is not a readable object. It
-            used to read as ``None``, the answer for no receipt, so the
-            renderer's bump reported a broken receipt as a missing one
-            (DPLAN-0354 leg 3). The caller's next move (write a fresh one, or
-            refuse) is theirs to choose; this function does not repair a file.
+    A present but unreadable file raises ReceiptUnreadable, never None: broken is not missing.
     """
     path = Path(trinity_dir) / RECEIPT_NAME
     if not path.is_file():
@@ -123,19 +96,7 @@ def write_receipt(
     stamped_by: str,
     config_rendered: str | None = None,
 ) -> dict[str, Any]:
-    """Stamp a branch's receipt after a lane has actually touched its templates.
-
-    Args:
-        trinity_dir: The branch's ``.trinity/`` directory.
-        stamped_by: One of ``STAMPED_BY_PUSH``, ``STAMPED_BY_BIRTH``,
-            ``STAMPED_BY_RESET``. Anything else is refused.
-        config_rendered: Optional explicit render timestamp. When omitted, an
-            existing value is preserved and a new receipt gets the stamp time.
-
-    Returns:
-        ``{"success": True, "path": str, "receipt": dict}`` or
-        ``{"success": False, "error": str}``.
-    """
+    """Stamp a branch's receipt after a lane has actually touched its templates (sanctioned lanes only)."""
     if stamped_by not in _SANCTIONED_LANES:
         error = f"Unknown lane '{stamped_by}' — receipts may be stamped by: {', '.join(_SANCTIONED_LANES)}"
         logger.error(f"[receipt] {error}")
@@ -185,12 +146,7 @@ def write_receipt(
 def bump_config_rendered(trinity_dir: Path) -> dict[str, Any]:
     """Record that caps and meta lines were just re-rendered for this branch.
 
-    Touches ``config_rendered`` and nothing else — ``stamped``/``stamped_by``
-    belong to the lane that delivered the templates and must survive a render.
-
-    Refuses when there is no receipt yet. The renderer knows the numbers, not
-    which template version the files were built from; creating one here would
-    put a guess where the standard expects a fact.
+    Touches only ``config_rendered``, and refuses to create a receipt: the renderer cannot know the version.
     """
     trinity_dir = Path(trinity_dir)
     try:

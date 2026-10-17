@@ -3,18 +3,11 @@
 # Description: Entry point CLI for drone @memory
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory System - Central Memory Archive & Rollover System
-
-PURPOSE: Manages memory rollover, archival, and retrieval across all AIPass branches.
-
-ARCHITECTURE:
-- Entry point auto-discovers modules
-- Modules orchestrate workflow by calling handlers
-- Handlers implement domain-specific business logic
 """
 
 import os
@@ -38,17 +31,7 @@ from rich.table import Table
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# Package name for module discovery (relative imports within this package)
 _PACKAGE_BASE = "aipass.memory.apps.modules"
-
-
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
 
 
 def print_introspection():
@@ -59,7 +42,6 @@ def print_introspection():
     console.print("[dim]Manages memory rollover and archival across AIPass branches[/dim]")
     console.print()
 
-    # Discover modules
     modules = discover_modules()
 
     console.print(f"[bold cyan]Discovered Modules:[/bold cyan] {len(modules)}")
@@ -77,11 +59,6 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# HELP SYSTEM
-# =============================================================================
-
-
 def print_help():
     """Display Rich-formatted help"""
 
@@ -96,7 +73,6 @@ def print_help():
     )
     console.print()
 
-    # What is Memory section
     what_content = (
         "Memory is the [bold]central memory archive[/bold] that:\n\n"
         "  [green]>[/green] Provides semantic search across all branch memories\n"
@@ -110,12 +86,10 @@ def print_help():
     console.print("[bold cyan]AVAILABLE COMMANDS:[/bold cyan]")
     console.print()
 
-    # Commands table showing actual drone commands
     table = Table(show_header=True, header_style="bold cyan", border_style="dim")
     table.add_column("Command", style="green")
     table.add_column("Description", style="dim")
 
-    # Core commands — only those with backing modules
     table.add_row("rollover", "Show rollover module introspection")
     table.add_row("rollover run", "Execute memory rollover")
     table.add_row("rollover status", "Show rollover statistics")
@@ -126,9 +100,7 @@ def print_help():
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
     table.add_row("config set-default <type> <n> [--json]", "Set a global default rollover limit")
     table.add_row("search <query>", "Semantic search across all branch memories")
-    # PARKED 2026-08-14 (the owner's ruling) — row kept so the command still explains
-    # itself instead of reading as an unknown command. Active curated-truth piece:
-    # Compass, @devpulse-owned — drone @devpulse compass.
+    # Parked row stays so the verb explains itself instead of reading as unknown.
     table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
     table.add_row("push [--branch @b] [--confirm]", "Trinity push — rebuild frames, archive drift, gated")
     table.add_row("templates <subcommand>", "Gold templates: spawn-templates, template-status, bump")
@@ -137,10 +109,7 @@ def print_help():
     table.add_row("verify <plan_label>", "Check if a plan is vectorized in ChromaDB")
     table.add_row("lint [@branch]", "Audit .trinity entries for over-limit violations (read-only)")
     table.add_row("lint fields [@branch]", "Every string field by chars, flagging what is outside the shape")
-    # Four modules answered `drone @memory <verb>` and were named nowhere in this
-    # table, so the README's hand-typed command list was the only place they
-    # appeared — and the README is the layer that goes away (DPLAN-0347). A verb
-    # that exists and is not in --help is a verb nobody finds.
+    # A verb that exists and is not in --help is a verb nobody finds.
     table.add_row("health @branch", "Read-only branch health: rollover state + cap violations")
     table.add_row("roots", "Declared repo roots on this machine: list, init, add, remove, heal")
     table.add_row("fleet", "The fleet definition — who counts as a citizen, answered once")
@@ -207,23 +176,11 @@ def print_help():
     console.print()
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
 def discover_modules() -> List[Any]:
-    """
-    Auto-discover modules in modules/ directory
-
-    Pattern: Any .py file in modules/ that implements handle_command()
-    gets automatically discovered and registered.
-
-    Returns:
-        List of module objects with handle_command() method
-    """
+    """Auto-discover modules in modules/ that implement handle_command()."""
     modules = []
 
     if not MODULES_DIR.exists():
@@ -238,7 +195,6 @@ def discover_modules() -> List[Any]:
         try:
             module = importlib.import_module(module_name)
 
-            # Duck typing: If it has handle_command(), it's a module
             if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"[memory] Discovered module: {module_name}")
@@ -249,25 +205,8 @@ def discover_modules() -> List[Any]:
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """
-    Route command to appropriate module
-
-    Pattern: Each module's handle_command() returns True if it handled the command
-
-    Args:
-        command: Command name (e.g., 'rollover', 'search', 'status')
-        args: Additional arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
-    """
-    # `push` used to alias `rollover push` here, firing the fleet-wide
-    # per_branch CONFIG reset from a bare unprompted word — demonstrated by
-    # accident on 18 branches. It is now the trinity push (modules/push.py),
-    # which gates a fleet write behind --confirm; the config reset keeps its
-    # own explicit `rollover push` verb.
-
+    """Route command to the first module whose handle_command() returns True."""
+    # Bare `push` is the gated trinity push, never an alias of the fleet-wide `rollover push` reset.
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -278,50 +217,24 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def main() -> int:
-    """Main entry point - routes commands or shows help.
-
-    Exit codes: 0 success, 1 unroutable command, 2 routed but refused.
-
-    Every door here used to `return` None and the ``__main__`` block never
-    passed it to ``sys.exit``, so the process exited 0 on all three shapes of
-    an unknown argument — an unknown verb, an unknown flag, and a known verb
-    given a bogus sub-argument. The refusal was printed correctly and then
-    contradicted by the exit code, which is the half a script reads (the owner's
-    standing ruling; @devpulse's fleet sweep 2026-09-07 named this branch as
-    the only one failing all three probes).
-
-    A refused sub-argument exits 2 rather than 1 because the command WAS
-    routed: ``handle_command`` returning True means "I handled this", not "it
-    worked". The modules already call ``error()``, which marks the failure —
-    only the flip at this seam was missing.
-    """
+    """Main entry point; exit 0 success, 1 unroutable, 2 routed but refused (handle_command True means handled, not worked)."""
     reset_command_state()
 
-    # Parse arguments
     args = sys.argv[1:]
 
-    # Show introspection when run without arguments
     if len(args) == 0:
         print_introspection()
         return 0
 
-    # Version flag
     if args[0] in ["--version", "-V"]:
         console.print("memory v1.0.0")
         return 0
 
-    # Show help only for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return 0
 
-    # Command provided - try to route to modules
     modules = discover_modules()
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []

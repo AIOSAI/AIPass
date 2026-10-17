@@ -3,34 +3,15 @@
 # Description: Todo-pad reports for rollover run/check and the todo verbs (count, backlog, restore)
 # Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Todo-Pad Report Handler (DPLAN-0345)
 
-Resolves the ONE branch a todo operation acts on, runs the roll, the count,
-the backlog read or the restore, and returns what to say as
-``{"level", "text"}`` - the rollover and todo modules print it. Never the
-fleet: the branch is ``--branch @name`` or the branch the caller's working
-directory sits in, and at the repo root nothing resolves, so nothing is
-rolled, checked, counted or listed and one line says so.
-
-The over-count check line carries the literal phrase ``ready for rollover``:
-@hooks' PreCompact hook runs ``rollover run`` only when ``rollover check``
-stdout contains it (hooks handlers/lifecycle/rollover.py).
-
-``todo restore`` writes a ``.trinity/local.json``, so it acts on the CALLER's
-own branch only: a ``--branch`` naming any other branch is refused, and so is
-a caller who stands in no branch at all (a flag alone proves nothing about
-whose pad it is).
-
-Levels:
-    ``line``    - a plain line, printed as written
-    ``warning`` - no usable todos count, or (rollover check) a pad that could not be counted
-    ``error``   - a refusal: unknown branch, name collision, a roll or restore
-                  that did not land, an unusable backlog. Printed through
-                  ``error()``, so the command exits non-zero.
+ONE branch, never the fleet: ``--branch @name`` or the caller's cwd branch.
+``error`` reports print through ``error()``, so the command exits non-zero.
+Reference: docs/todos_and_backlog.md
 """
 
 from typing import Any
@@ -76,15 +57,7 @@ def _stop(
 
 
 def check_pad(branch: str | None = None) -> dict[str, str]:
-    """
-    Count ONE branch's todo pad against its configured count. Writes nothing.
-
-    Args:
-        branch: ``@name``, or None for the branch the caller's cwd sits in
-
-    Returns:
-        ``{"level", "text"}`` - over the count, the text says ``ready for rollover``
-    """
+    """Count ONE branch's todo pad against its configured count. Writes nothing."""
     target = todo_roll.resolve_target(branch)
     stop = _stop(target, "checked")
     if stop is not None:
@@ -114,15 +87,7 @@ def check_pad(branch: str | None = None) -> dict[str, str]:
 
 
 def roll_pad(branch: str | None = None) -> dict[str, str]:
-    """
-    Roll ONE branch's todo pad to its backlog file (todo_roll.roll_todos).
-
-    Args:
-        branch: ``@name``, or None for the branch the caller's cwd sits in
-
-    Returns:
-        ``{"level", "text"}`` - what rolled and where, or why nothing did
-    """
+    """Roll ONE branch's todo pad to its backlog file (todo_roll.roll_todos)."""
     target = todo_roll.resolve_target(branch)
     stop = _stop(target, "rolled")
     if stop is not None:
@@ -144,21 +109,8 @@ def roll_pad(branch: str | None = None) -> dict[str, str]:
     )
 
 
-# =============================================================================
-# THE TODO VERBS (FPLAN-0590 row 5)
-# =============================================================================
-
-
 def pad_summary(branch: str | None = None) -> dict[str, str]:
-    """
-    ONE line for bare ``todo``: the pad against its configured count, and the backlog. Writes nothing.
-
-    Args:
-        branch: ``@name``, or None for the branch the caller's cwd sits in
-
-    Returns:
-        ``{"level", "text"}`` - e.g. ``memory: pad 6 of 10 · backlog 0 (no backlog yet: <path>)``
-    """
+    """ONE line for bare ``todo``: the pad against its configured count, and the backlog. Writes nothing."""
     target = todo_roll.resolve_target(branch)
     stop = _stop(target, "counted")
     if stop is not None:
@@ -200,15 +152,7 @@ def record_line(index: int, record: Any) -> str:
     """
     One backlog record as one line: original number, date, priority when set, rolled, reason, task.
 
-    ``status`` is never printed. Records rolled off before DPLAN-0345 can carry
-    tens of thousands of characters there; the task is what the note says.
-
-    Args:
-        index: The record's position in ``entries`` (0-based)
-        record: One ``entries`` record, as read
-
-    Returns:
-        The line, indented two spaces
+    ``status`` is never printed: old records can carry tens of thousands of characters there.
     """
     entry = record.get("entry") if isinstance(record, dict) else None
     if not isinstance(entry, dict):
@@ -231,14 +175,7 @@ def backlog_listing(branch: str | None = None) -> list[dict[str, str]]:
     """
     List ONE branch's backlog, one report per line. Writes nothing.
 
-    A missing file is a state, not a failure: ``.backup/`` is gitignored, so a
-    fresh clone has no backlog. An unusable file is an error.
-
-    Args:
-        branch: ``@name``, or None for the branch the caller's cwd sits in
-
-    Returns:
-        ``[{"level", "text"}, ...]`` - a header line, then one line per record
+    A missing file is a state, not a failure: ``.backup/`` is gitignored.
     """
     target = todo_roll.resolve_target(branch)
     stop = _stop(target, "listed", what="backlog", hint="pass @name")
@@ -298,15 +235,7 @@ def restore_pad(number_token: str, branch: str | None = None) -> dict[str, str]:
     """
     Move ONE backlog todo back onto the CALLER's own pad (todo_roll.restore_todo).
 
-    Every refusal is an ``error`` report: a restore that did not happen must
-    not exit 0. "Full" is the configured count, read inside ``restore_todo``.
-
-    Args:
-        number_token: The todo's ORIGINAL number as typed (``7`` or ``#7``)
-        branch: ``@name`` from ``--branch``; refused unless it is the caller's own branch
-
-    Returns:
-        ``{"level", "text"}`` - old number -> new number and the task, or why nothing moved
+    Every refusal is an ``error`` report: a restore that did not happen must not exit 0.
     """
     number = parse_todo_number(number_token)
     if number is None:

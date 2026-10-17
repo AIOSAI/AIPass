@@ -3,19 +3,11 @@
 # Description: Memory Pool Processor
 # Version: 0.1.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory Pool Intake Handler
-
-Processes markdown/text files from memory_pool directory:
-1. Reads files and extracts content
-2. Chunks large files for embedding
-3. Vectorizes via ChromaDB
-4. Archives old files based on retention config
-
-All settings read from memory.config.json
 """
 
 import json
@@ -30,7 +22,6 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# Paths
 _MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent  # handlers/intake/ → handlers/ → apps/ → memory/
 MEMORY_POOL_PATH = _MEMORY_ROOT / "memory_pool"
 CHROMA_PATH = _MEMORY_ROOT / ".chroma"
@@ -54,15 +45,9 @@ def _notify_failure(subject: str, message: str) -> None:
 
 
 def _update_central_and_dashboard() -> None:
-    """
-    Update memory central stats after vector writes.
-
-    Uses subprocess to call central_writer to maintain handler independence.
-    Failures are silent.
-    """
+    """Update memory central stats in a subprocess (handler independence); failures only log."""
     import sys
 
-    # Update central stats
     try:
         subprocess.run(
             [
@@ -79,23 +64,11 @@ def _update_central_and_dashboard() -> None:
 
 
 def find_source_file(filename: str) -> Path | None:
-    """
-    Find full source file from search result metadata.
-
-    Checks active pool first, then archive.
-
-    Args:
-        filename: Source filename from search metadata
-
-    Returns:
-        Path to file if found, None otherwise
-    """
-    # Check active pool first
+    """Find a search hit's source file: the active pool first, then the archive."""
     active = MEMORY_POOL_PATH / filename
     if active.exists():
         return active
 
-    # Check archive
     archived = MEMORY_POOL_PATH / ".archive" / filename
     if archived.exists():
         return archived
@@ -109,15 +82,7 @@ def load_config() -> dict:
 
 
 def get_pool_files(extensions: List[str] | None = None) -> List[Path]:
-    """
-    Get all files from memory_pool sorted by modification time (newest first).
-
-    Args:
-        extensions: List of extensions to include (e.g., ['.md', '.txt'])
-
-    Returns:
-        List of Path objects sorted newest to oldest
-    """
+    """Get all files from memory_pool sorted by modification time (newest first)."""
     if extensions is None:
         extensions = [".md", ".txt"]
 
@@ -128,18 +93,12 @@ def get_pool_files(extensions: List[str] | None = None) -> List[Path]:
     for ext in extensions:
         files.extend(MEMORY_POOL_PATH.glob(f"*{ext}"))
 
-    # Sort by modification time, newest first
     files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     return files
 
 
 def read_file_content(file_path: Path) -> dict:
-    """
-    Read content from a file.
-
-    Returns:
-        dict with 'success', 'content', 'metadata'
-    """
+    """Read content from a file."""
     try:
         content = file_path.read_text(encoding="utf-8")
         stat = file_path.stat()
@@ -161,17 +120,7 @@ def read_file_content(file_path: Path) -> dict:
 
 
 def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> List[Dict[str, Any]]:
-    """
-    Split content into overlapping chunks for embedding.
-
-    Args:
-        content: Full text content
-        chunk_size: Target size per chunk (characters)
-        overlap: Overlap between chunks
-
-    Returns:
-        List of dicts with 'text' and 'chunk_index'
-    """
+    """Split content into overlapping chunks for embedding."""
     if len(content) <= chunk_size:
         return [{"text": content, "chunk_index": 0}]
 
@@ -182,14 +131,11 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
     while start < len(content):
         end = start + chunk_size
 
-        # Try to break at paragraph or sentence
         if end < len(content):
-            # Look for paragraph break
             para_break = content.rfind("\n\n", start, end)
             if para_break > start + chunk_size // 2:
                 end = para_break + 2
             else:
-                # Look for sentence break
                 sentence_break = content.rfind(". ", start, end)
                 if sentence_break > start + chunk_size // 2:
                     end = sentence_break + 2
@@ -207,19 +153,7 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
 def process_file_to_vectors(
     file_path: Path, collection_name: str, chunk_size: int = 1000, chunk_overlap: int = 100
 ) -> dict:
-    """
-    Process a single file: read, chunk, and store vectors.
-
-    Args:
-        file_path: Path to the file
-        collection_name: ChromaDB collection name
-        chunk_size: Characters per chunk
-        chunk_overlap: Overlap between chunks
-
-    Returns:
-        dict with 'success', 'chunks_stored', 'error'
-    """
-    # Read file
+    """Process a single file: read, chunk, and store vectors."""
     read_result = read_file_content(file_path)
     if not read_result["success"]:
         return read_result
@@ -227,10 +161,9 @@ def process_file_to_vectors(
     content = read_result["content"]
     metadata = read_result["metadata"]
 
-    # Chunk content
     chunks = chunk_content(content, chunk_size, chunk_overlap)
 
-    # Import ChromaDB and fastembed (late import for venv compatibility)
+    # Late import: chromadb/fastembed are not importable from every venv.
     try:
         import chromadb
         from fastembed import TextEmbedding
@@ -239,7 +172,6 @@ def process_file_to_vectors(
         collection = client.get_or_create_collection(name=collection_name)
         model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
-        # Generate embeddings and store
         documents = []
         ids = []
         metadatas = []
@@ -258,10 +190,8 @@ def process_file_to_vectors(
                 }
             )
 
-        # Batch encode
         embeddings = [e.tolist() for e in model.embed(documents)]
 
-        # Upsert (update if exists, insert if not)
         collection.upsert(documents=documents, embeddings=embeddings, ids=ids, metadatas=metadatas)
 
         return {
@@ -277,16 +207,7 @@ def process_file_to_vectors(
 
 
 def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive") -> dict:
-    """
-    Archive files beyond the keep_recent limit.
-
-    Args:
-        keep_recent: Number of files to keep in memory_pool
-        archive_path: Subdirectory name for archived files
-
-    Returns:
-        dict with 'success', 'archived_count', 'kept_count'
-    """
+    """Archive files beyond the keep_recent limit."""
     config = load_config()
     extensions = config.get("supported_extensions", [".md", ".txt"])
 
@@ -295,11 +216,9 @@ def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive
     if len(files) <= keep_recent:
         return {"success": True, "archived_count": 0, "kept_count": len(files), "message": "No files need archiving"}
 
-    # Files to keep (most recent)
     keep_files = files[:keep_recent]
     archive_files = files[keep_recent:]
 
-    # Create archive directory
     archive_dir = _MEMORY_ROOT / archive_path
     archive_dir.mkdir(exist_ok=True)
 
@@ -309,7 +228,6 @@ def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive
     for file_path in archive_files:
         try:
             dest = archive_dir / file_path.name
-            # If file exists in archive, add timestamp
             if dest.exists():
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 dest = archive_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"
@@ -337,15 +255,7 @@ def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive
 
 
 def process_memory_pool() -> dict:
-    """
-    Main entry point: Process all memory_pool files.
-
-    Reads config, processes files to vectors, archives old files.
-
-    Returns:
-        dict with full processing results
-    """
-    # Ensure memory_pool directory exists for file drops
+    """Main entry point: Process all memory_pool files."""
     MEMORY_POOL_PATH.mkdir(parents=True, exist_ok=True)
 
     config = load_config()
@@ -360,7 +270,6 @@ def process_memory_pool() -> dict:
     extensions = config.get("supported_extensions", [".md", ".txt"])
     archive_path = config.get("archive_path", "memory_pool_archive")
 
-    # Get all files
     files = get_pool_files(extensions)
 
     if not files:
@@ -375,7 +284,6 @@ def process_memory_pool() -> dict:
         "processed_files": [],
     }
 
-    # Process each file
     for file_path in files:
         result = process_file_to_vectors(file_path, collection_name, chunk_size, chunk_overlap)
 
@@ -386,14 +294,12 @@ def process_memory_pool() -> dict:
         else:
             results["errors"].append(f"{file_path.name}: {result.get('error')}")
 
-    # Archive old files
     archive_result = archive_old_files(keep_recent, archive_path)
     results["archive"] = archive_result
 
     if results["errors"]:
         results["success"] = False
 
-        # Notify @devpulse about processing failures
         error_count = len(results["errors"])
         total_files = results["files_found"]
         error_summary = "\n".join(results["errors"][:10])  # Cap at 10 for readability
@@ -408,7 +314,6 @@ def process_memory_pool() -> dict:
             f"Successfully processed: {results['files_processed']}/{total_files}",
         )
 
-    # Update central stats and push dashboard after processing vectors
     if results["files_processed"] > 0:
         _update_central_and_dashboard()
 
@@ -425,17 +330,11 @@ def process_memory_pool() -> dict:
 
 
 def get_pool_status() -> dict:
-    """
-    Get current status of memory_pool.
-
-    Returns:
-        dict with file counts, config, and collection info
-    """
+    """Get current status of memory_pool."""
     config = load_config()
     extensions = config.get("supported_extensions", [".md", ".txt"])
     files = get_pool_files(extensions)
 
-    # Get collection count
     collection_count = 0
     try:
         import chromadb
@@ -459,7 +358,6 @@ def get_pool_status() -> dict:
     }
 
 
-# Standalone execution for testing
 if __name__ == "__main__":
     import sys
 

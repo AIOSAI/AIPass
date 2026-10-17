@@ -3,25 +3,11 @@
 # Description: Memory Extraction Handler
 # Version: 0.8.0
 # Created: 2025-11-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory Extraction Handler
-
-Surgically extracts oldest items from memory files during rollover.
-Understands real JSON structure (sessions, observations, key_learnings arrays).
-
-Purpose:
-    v2 entry-count based extraction: When entry counts exceed limits
-    (sessions, key_learnings, observations), extract oldest entries by count.
-    Limits are read from config per_branch with defaults fallback.
-
-Strategy:
-    - v2: entry-count based extraction (sessions + key_learnings + observations arrays)
-    - Extract oldest items (FIFO)
-    - Update document_metadata.status
-    - No line-count fallbacks — errors over silent fallbacks
 """
 
 import shutil
@@ -38,35 +24,14 @@ from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
 
-# No module imports (handler independence)
-
-
-# =============================================================================
-# BACKUP OPERATIONS
-# =============================================================================
-
 
 def create_rollover_backup(file_path: Path) -> Dict[str, Any]:
-    """
-    Create backup before rollover (safety net)
-
-    Creates backup in branch's .backup/ directory with timestamp.
-    Only keeps ONE backup - overwrites previous rollover backup.
-
-    Args:
-        file_path: Path to memory file to backup
-
-    Returns:
-        Dict with backup path and success status
-    """
+    """Create the single rollover backup in the branch's .backup/ (overwrites the previous one)."""
     try:
-        # Create .backup directory in branch root
-        # For .trinity/ files, go up to branch root; otherwise use file's parent
         if file_path.parent.name == ".trinity":
             backup_dir = file_path.parent.parent / ".backup"
         else:
             backup_dir = file_path.parent / ".backup"
-        # Backup filename: rollover_backup.json (always overwrites)
         backup_name = f"rollover_backup_{file_path.name}"
         backup_path = backup_dir / backup_name
         # A refused backup stops the rollover: the caller already reads a failed backup as "do not proceed"
@@ -75,7 +40,6 @@ def create_rollover_backup(file_path: Path) -> Dict[str, Any]:
             return {"success": False, "error": f"Backup failed: {refusal}"}
         backup_dir.mkdir(exist_ok=True)
 
-        # Copy file
         shutil.copy2(file_path, backup_path)
 
         return {"success": True, "backup_path": str(backup_path), "message": f"Backup created: {backup_path.name}"}
@@ -86,19 +50,9 @@ def create_rollover_backup(file_path: Path) -> Dict[str, Any]:
 
 
 def restore_from_backup(file_path: Path) -> Dict[str, Any]:
-    """
-    Restore file from rollover backup
-
-    Called when rollover fails to restore original state.
-
-    Args:
-        file_path: Path to memory file to restore
-
-    Returns:
-        Dict with restore status
-    """
+    """Restore file from rollover backup (called when a rollover fails)."""
     try:
-        # Match backup location from create_rollover_backup
+        # Must match create_rollover_backup's location.
         if file_path.parent.name == ".trinity":
             backup_dir = file_path.parent.parent / ".backup"
         else:
@@ -113,7 +67,6 @@ def restore_from_backup(file_path: Path) -> Dict[str, Any]:
         if refusal is not None:
             return {"success": False, "error": f"Restore failed: {refusal}"}
 
-        # Restore from backup
         shutil.copy2(backup_path, file_path)
 
         return {"success": True, "message": f"Restored from backup: {backup_path.name}"}
@@ -121,11 +74,6 @@ def restore_from_backup(file_path: Path) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[extractor] Restore from backup failed for {file_path}: {e}")
         return {"success": False, "error": f"Restore failed: {e}"}
-
-
-# =============================================================================
-# FILE OPERATIONS
-# =============================================================================
 
 
 def _read_memory_file(file_path: Path) -> Dict[str, Any] | None:
@@ -136,28 +84,8 @@ def _read_memory_file(file_path: Path) -> Dict[str, Any] | None:
 def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
     """Write memory JSON file, RAISING when the write is refused.
 
-    `write_memory_file_simple` reports failure by returning False — it does not
-    raise. This function used to discard that boolean, which made every caller's
-    try/except decorative and turned a refusal into a silent no-op.
-
-    That is the worst possible failure mode for an archiver, and it was live:
-    ONE 343-character session summary in @seedgo's file refused every rollover
-    write to it. The extraction still reported the 12 key_learnings it had
-    removed in memory, the orchestrator saw success with old_lines == new_lines,
-    vectorized them, stored them — and the file kept all 27. The next run
-    extracted the same 12 and stored them again. The archive was accepting,
-    permanently and in duplicate, what the source never gave up.
-
-    Making the False loud then exposed the defect BEHIND it: the refusal itself
-    was wrong. The cap gate judged the whole document, so a shrink write was
-    refused for an entry in the head it is not allowed to touch, and the lane
-    re-failed identically every 20 minutes for three hours. Since 2026-08-30 a
-    write is judged by what it AUTHORS (entry_limits 1.6.0), and rollover
-    authors nothing — it removes and reorders. A cap refusal can no longer
-    reach this function; what remains here is real I/O failure.
-
-    Fail to errors, never fall back silently: a False here becomes an OSError so
-    the caller's existing restore-from-backup path can do its job.
+    `write_memory_file_simple` returns False instead of raising; swallowing it lets the
+    archive store entries the file never gave up. The OSError routes to restore-from-backup.
     """
     if not write_memory_file_simple(file_path, data):
         raise OSError(
@@ -173,22 +101,8 @@ def _count_file_lines(file_path: Path) -> int:
         return len(f.readlines())
 
 
-# =============================================================================
-# PATH HELPERS
-# =============================================================================
-
-
 def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
-    """
-    Derive branch name and memory type from file path.
-
-    Handles both naming conventions:
-    - .trinity/local.json → branch from parent.parent.name, type from stem
-    - BRANCH.type.json (legacy) → parsed from stem
-
-    Returns:
-        Tuple of (branch_name, memory_type) e.g. ("DEVPULSE", "local")
-    """
+    """Derive (BRANCH, type) from .trinity/<type>.json or legacy BRANCH.type.json."""
     if file_path.parent.name == ".trinity":
         branch_name = file_path.parent.parent.name.upper()
         memory_type = file_path.stem  # "local" or "observations"
@@ -199,51 +113,14 @@ def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
     return branch_name, memory_type
 
 
-# =============================================================================
-# EXTRACTION CALCULATION
-# =============================================================================
-
-
-# =============================================================================
-# V2 EXTRACTION (ENTRY-COUNT BASED)
-# =============================================================================
-
-
 def _is_misplaced_entry(
     entry: Any, head_number: int | None, date_guard: bool = True, head_date: str | None = None
 ) -> bool:
-    """
-    An entry in the tail (about to be archived as "oldest") that is dated
-    today or numbered above the array's head is not oldest history — it's a
-    fresh write landed at the wrong end (post-compact convention loss).
+    """A tail entry numbered above the head, or dated today, is a fresh write at the wrong end.
 
-    `date_guard=False` drops the "dated today" half for lanes where entries are
-    machine-written many times a day, so today's date says nothing about whether
-    an entry is fresh (see the auto-compact lane in _extract_items_v2). Ordering
-    still decides, and when ordering CANNOT decide — no usable number on the
-    entry or the head — the date rule stays on, whatever the caller asked for.
-
-    "DATED TODAY" IS ONLY EVIDENCE IF THE HEAD IS NOT (2026-08-30). The date
-    rule catches a fresh write that landed at the wrong end, and it works by
-    contrast: the tail is dated today while the entries above it are not. In an
-    array whose NEWEST entry is also dated today, "dated today" separates
-    nothing — every entry in it could be, and on 2026-08-30 every entry in
-    @memory's key_learnings was, because they were all written on that one very
-    long day. All 12 archivable candidates were refused as fresh writes, the
-    file sat at 27/15, and the detector re-fired on it every run. Three branches
-    were in that state at once.
-
-    So the rule now needs both halves to be uninformative before it steps
-    aside: the candidate must be numbered strictly BELOW `head_date`'s entry
-    (ordering says it is at the correct end) AND the head must itself be dated
-    today (the date says nothing about which end anything is at). Either signal
-    alone still refuses.
-
-    Deliberately unchanged: numbered ABOVE the head is refused, because that is
-    the real convention-loss shape — a prepend became an append, so numbers
-    ascend into the tail. A candidate with no usable number is refused on its
-    date, because ordering genuinely cannot decide there. And an unknown
-    `head_date` is treated as "not today", the conservative reading.
+    `date_guard=False` drops the date half when the number can decide. "Dated today" is
+    only evidence when the head is not also dated today; with no usable number the date
+    rule always applies, and an unknown `head_date` reads as "not today".
     """
     if not isinstance(entry, dict):
         return False
@@ -260,23 +137,13 @@ def _is_misplaced_entry(
     if entry.get("date") != datetime.now().strftime("%Y-%m-%d"):
         return False
 
-    # Dated today. That is evidence of a misplaced fresh write only when it
-    # DISTINGUISHES this entry from the array's newest one.
     return not (ordering_says_correct_end and head_date == datetime.now().strftime("%Y-%m-%d"))
 
 
 def _ensure_newest_first(entries: list, array_name: str, branch_key: str) -> tuple[list, bool]:
-    """
-    Guarantee an array is newest-first before the tail is treated as oldest.
+    """Guarantee an array is newest-first before the tail is treated as oldest; returns (entries, repaired).
 
-    Rollover's whole contract is "the tail is the oldest history". A branch
-    storing its entries oldest-first inverts that, so the tail is the NEWEST
-    entry and rollover eats fresh memories one run at a time. The safety valve
-    alone cannot catch this: once a correctly-prepended entry sits at the head,
-    the misordered legacy block below it looks perfectly plausible.
-
-    Returns (entries_newest_first, repaired) — `repaired` is True when the
-    stored order was wrong and had to be corrected.
+    The safety valve cannot catch an oldest-first legacy block once a correct entry sits at the head.
     """
     if not isinstance(entries, list) or len(entries) < 2:
         return entries, False
@@ -305,24 +172,10 @@ def _extract_tail_excess(
     date_guard: bool = True,
     head_date: str | None = None,
 ) -> list:
-    """
-    Select the oldest entries beyond `limit` for archival, holding back any
-    that look like misplaced fresh writes (safety valve).
-
-    `date_guard=False` is for lanes whose entries are written many times a day
-    — see _is_misplaced_entry.
-
-    Returns the list of entries safe to archive; may be empty.
-    """
+    """Select the oldest entries beyond `limit` for archival, holding back misplaced fresh writes."""
     if limit is None or not isinstance(entries, list) or len(entries) <= limit:
         return []
-    # keep-N keeps N. The old floor — max(len - limit, 1) behind a `< limit`
-    # guard — archived ONE entry when the array sat at exactly the limit, so
-    # every branch that reached keep-15 settled permanently at 14 and rolled
-    # again on the very next write. The detector's threshold moves with this
-    # line (monitor/detector.py `_should_rollover`): if it still fired at the
-    # limit while nothing here drained, the file would re-trigger forever —
-    # the NOTHING DRAINED skip loop, which this branch has already met twice.
+    # keep-N keeps N. Moves with monitor/detector.py `_should_rollover`, or the file re-fires forever.
     excess = len(entries) - limit
     candidate_tail = entries[-excess:]  # oldest from end
 
@@ -332,19 +185,13 @@ def _extract_tail_excess(
     for entry in candidate_tail:
         if _is_misplaced_entry(entry, head_number, date_guard=date_guard, head_date=head_date):
             refused.append(entry)
-            # Per-entry detail at DEBUG: recoverable when someone is actually
-            # debugging, without a wall of it on every routine run.
             logger.debug(
                 f"[extractor] {branch_key}/{array_name}: refused misplaced entry ({reason} #{head_number}): {entry}"
             )
         else:
             archivable.append(entry)
 
-    # ONE line per array per run, not one per entry. The valve refusing is
-    # normal and can be routine at scale; a warning PER refusal turns a healthy
-    # refusal into a runaway log (2026-08-16: 97 lines in a single second, each
-    # carrying a full ~800-byte entry, for one external branch writing its
-    # entries at the wrong end). The count is the signal; the entries are DEBUG.
+    # One warning per array per run: a warning per refusal floods the log at scale.
     if refused:
         drained = len(archivable)
         summary = (
@@ -355,11 +202,6 @@ def _extract_tail_excess(
         if drained:
             logger.warning(summary)
         else:
-            # Nothing drained and something was refused: the array is over its
-            # limit, so the detector will re-fire on this same file forever and
-            # refuse the same entries again. That is a skip loop, and it is the
-            # one thing in here worth alarming on — it used to be invisible,
-            # buried inside the per-entry wall it caused.
             logger.warning(
                 f"{summary}. NOTHING DRAINED — this file is over its limit and no "
                 f"candidate is archivable, so rollover will re-fire and refuse the same "
@@ -370,22 +212,9 @@ def _extract_tail_excess(
 
 
 def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract items from v2 format file (entry-count based).
-
-    Handles sessions, key_learnings, and observations (arrays, newest-first, oldest at end).
-    Trims to max_sessions / max_key_learnings limits defined in document_metadata.
-
-    Args:
-        file_path: Path to memory JSON file
-        data: Already-parsed JSON data
-
-    Returns:
-        Dict with extracted items and metadata
-    """
+    """Extract items from v2 format file (entry-count based)."""
     old_lines = _count_file_lines(file_path)
 
-    # Read limits from config per_branch instead of file metadata
     if file_path.parent.name == ".trinity":
         branch_key = file_path.parents[1].name.lower()
         file_type = file_path.stem  # "local" or "observations"
@@ -396,16 +225,12 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     cfg = config_loader.section("rollover")
     file_limits = cfg.get("per_branch", {}).get(branch_key, {}).get(file_type, {})
     if not file_limits:
-        # Same defaults fallback the extract_items gate uses. Without it a
-        # branch with no per_branch entry passes the gate on defaults and
-        # then archives NOTHING here — a silent no-op rollover.
+        # Must match extract_items' gate, or a defaults-only branch passes it and archives nothing.
         file_limits = cfg.get("defaults", {}).get(file_type, {})
 
     all_extracted = []
 
-    # Extract from sessions array (newest first, oldest at end). AUTO-COMPACT
-    # SNAPSHOT entries (status == "auto-compact") get their own small cap and
-    # never count against the regular session budget.
+    # auto-compact snapshots get their own cap and never count against the regular session budget.
     order_repaired = False
 
     sessions = data.get("sessions", [])
@@ -415,21 +240,12 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             data["sessions"] = sessions
             order_repaired = True
         session_limits = file_limits.get("sessions", {})
-        # Each LANE gets its own head, taken from its own entries. `sessions` is
-        # a mixed array and a snapshot usually outranks every regular entry after
-        # the newest-first re-sort, so sharing one head handed the regular lane a
-        # machine-written snapshot as its reference point — dated today several
-        # times a day, which is precisely the noise date_guard=False exists to
-        # keep out of the other lane. The head must come from the population the
-        # candidates come from.
+        # Each lane takes its head from its own entries: a shared head lets a snapshot judge regulars.
 
         auto_compact_cap = session_limits.get("auto_compact_cap")
         if auto_compact_cap is not None:
             auto_entries = [e for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact"]
-            # Snapshots are machine-written several times a day, so at cap the oldest
-            # one is nearly always dated today. Keeping the date rule here refused every
-            # candidate and the detector re-fired on the same file forever (DPLAN-0290
-            # item 3): the lane's order is what says which snapshot is oldest, not its date.
+            # Snapshots are written many times a day, so date_guard=False: only order says which is oldest.
             auto_head = auto_entries[0] if auto_entries and isinstance(auto_entries[0], dict) else {}
             archived_auto = _extract_tail_excess(
                 auto_entries,
@@ -464,7 +280,6 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
         data["sessions"] = sessions
 
-    # Extract from key_learnings list (sorted newest-first; oldest at end)
     key_learnings = data.get("key_learnings", [])
     if isinstance(key_learnings, list) and key_learnings:
         key_learnings, repaired = _ensure_newest_first(key_learnings, "key_learnings", branch_key)
@@ -487,7 +302,6 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             data["key_learnings"] = [e for e in key_learnings if id(e) not in archived_ids]
             all_extracted.extend(archived_kl)
 
-    # Extract from observations array (if v2 observations file)
     observations = data.get("observations", [])
     if isinstance(observations, list) and observations:
         observations, repaired = _ensure_newest_first(observations, "observations", branch_key)
@@ -511,8 +325,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             all_extracted.extend(archived_obs)
 
     if not all_extracted:
-        # An order repair with nothing to archive must still be persisted, or the
-        # file stays misordered and the next run re-detects the same fault.
+        # An order repair with nothing to archive must still persist, or the next run re-detects it.
         if order_repaired:
             try:
                 _write_memory_file(file_path, data)
@@ -520,9 +333,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"[extractor] Failed to persist order repair: {e}")
                 return {"success": False, "error": f"Failed to write file: {e}"}
-        # "No entries exceed v2 limits" is a claim about the file, and for a
-        # container held as a dict it was false on every run: 250 over, zero
-        # drainable. Say which it is.
+        # A dict-held container can be over limit yet undrainable; say so rather than "nothing exceeds".
         undrainable = undrainable_in(data, file_limits)
         if undrainable:
             return {
@@ -532,12 +343,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             }
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
-    # No metadata stamping here. Rollover used to write a
-    # status.last_health_check date on its way past; that field is deleted from
-    # the standard (2026-08-25) and rollover has no business editing metadata
-    # it does not own. It moves entries — that is the whole job.
-
-    # Write back
+    # No metadata stamping: rollover moves entries and does not own the metadata.
     try:
         _write_memory_file(file_path, data)
         new_lines = _count_file_lines(file_path)
@@ -545,8 +351,6 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"[extractor] Failed to write file after v2 extraction: {e}")
         return {"success": False, "error": f"Failed to write file: {e}"}
 
-    # Derive branch and type from path
-    # .trinity/local.json → branch = parent.parent.name, type = stem
     branch_name, memory_type = _derive_branch_and_type(file_path)
 
     return {
@@ -563,28 +367,11 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# EXTRACTION OPERATIONS
-# =============================================================================
-
-
 def extract_items(file_path: Path) -> Dict[str, Any]:
-    """
-    Extract items from memory file (WITH BACKUP SAFETY)
-
-    Now includes automatic backup before modification.
-    File is modified immediately, but backup exists for recovery.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Dict with extracted items and metadata
-    """
+    """Extract items from memory file (WITH BACKUP SAFETY)"""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
-    # Read file
     try:
         data = _read_memory_file(file_path)
         if data is None:
@@ -593,7 +380,6 @@ def extract_items(file_path: Path) -> Dict[str, Any]:
         logger.warning(f"[extractor] Failed to read file {file_path}: {e}")
         return {"success": False, "error": f"Failed to read file: {e}"}
 
-    # v2: entry-count based extraction — triggered when config has per_branch counts
     if file_path.parent.name == ".trinity":
         _ext_branch = file_path.parents[1].name.lower()
         _ext_ftype = file_path.stem
@@ -603,13 +389,12 @@ def extract_items(file_path: Path) -> Dict[str, Any]:
     _ext_cfg = config_loader.section("rollover")
     _ext_file_limits = _ext_cfg.get("per_branch", {}).get(_ext_branch, {}).get(_ext_ftype, {})
     if not _ext_file_limits:
-        # Also check defaults fallback
         _ext_file_limits = _ext_cfg.get("defaults", {}).get(_ext_ftype, {})
 
     if _ext_file_limits:
         return _extract_items_v2(file_path, data)
 
-    # No v2 limits found — fail loud, never fall back to v1 line-count
+    # Fail loud; never fall back to v1 line-count.
     logger.warning(
         f"[extractor] NO V2 LIMITS for branch={_ext_branch} file_type={_ext_ftype} "
         f"— cannot extract without config. Check per_branch and defaults in memory.config.json"
@@ -624,24 +409,8 @@ def extract_items(file_path: Path) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# METADATA OPERATIONS
-# =============================================================================
-
-
 def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
-    """
-    Extract items with enriched metadata for vectorization
-
-    Same as extract_items but adds metadata needed for vector storage.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Dict with extracted items + vectorization metadata
-    """
-    # Do standard extraction
+    """Extract items with enriched metadata for vectorization"""
     result = extract_items(file_path)
 
     if not result["success"]:
@@ -658,7 +427,6 @@ def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
             "type": result.get("type"),
         }
 
-    # Enrich extracted items with metadata
     extracted = result.get("extracted", [])
     branch = result.get("branch")
     memory_type = result.get("type")
@@ -676,11 +444,8 @@ def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
             "source_file": file_path.name,
         }
 
-        # Carry the entry's OWN identity into vector metadata. Without it an
-        # archived entry can only be matched on exact text, which silently
-        # stops working the moment two entries share wording — and a recovered
-        # entry cannot be renumbered without guessing. ChromaDB metadata takes
-        # scalars only, so skip anything missing or of an unexpected type.
+        # Entry identity lets an archived entry be matched and renumbered without text-guessing.
+        # ChromaDB metadata takes scalars only.
         if isinstance(item, dict):
             entry_number = item.get("number")
             if isinstance(entry_number, int) and not isinstance(entry_number, bool):
@@ -690,12 +455,11 @@ def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
                 item_metadata["entry_date"] = entry_date
 
         enriched_item = {
-            **item,  # Preserve original item data
+            **item,
             "_metadata": item_metadata,
         }
         enriched.append(enriched_item)
 
-    # Return enriched version
     return {
         "success": True,
         "file": str(file_path),

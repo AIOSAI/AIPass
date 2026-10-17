@@ -3,21 +3,12 @@
 # Description: Text-in vectorize_and_store — the store owns the embedding model choice
 # Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
 
-# Tests for the text-in vectorize_and_store operation.
-#
-# Covers: _vectorize_and_store
-#
-# The gap this closes: callers had to pre-encode their own texts, which meant each
-# caller picked an embedding model. Two callers picking differently put vectors
-# from two models in one collection, which is silently unsearchable. The model
-# choice belongs to the branch that owns the store.
-#
-# All tests stub the embedder subprocess -- no live model load or ChromaDB.
+# The store owns the embedding model: two callers' models in one collection are silently unsearchable.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the embed subprocess's fastembed model load; stubbed at subprocess.run here
@@ -28,11 +19,6 @@ import io
 import json
 
 from aipass.memory.apps.handlers.storage import chroma_subprocess
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 class _FakeCompleted:
@@ -83,11 +69,6 @@ def _vectorize(monkeypatch, capsys, branch, memory_type, texts, metadatas):
     return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
-# ---------------------------------------------------------------------------
-# 1. The happy path
-# ---------------------------------------------------------------------------
-
-
 class TestVectorizeAndStore:
     def test_encodes_then_stores(self, monkeypatch, capsys):
         embed = _stub_embedder(monkeypatch, {"success": True, "embeddings": [[0.1, 0.2], [0.3, 0.4]]})
@@ -121,11 +102,6 @@ class TestVectorizeAndStore:
         _vectorize(monkeypatch, capsys, "AI_MAIL", "email_sent", ["t"] * 50, [{}] * 50)
 
         assert embed["timeout"] >= 50
-
-
-# ---------------------------------------------------------------------------
-# 2. Failing loud -- the whole point of the operation
-# ---------------------------------------------------------------------------
 
 
 class TestVectorizeFailsLoud:
@@ -186,16 +162,8 @@ class TestVectorizeFailsLoud:
         assert result["success"] is False
 
 
-# ---------------------------------------------------------------------------
-# 2b. ai_mail's sent folder (trigger digest 15638146, leg 9 of DPLAN-0354)
-# ---------------------------------------------------------------------------
-
-# A stand-in for fastembed, put first on the embed subprocess's path. The real
-# all-MiniLM tokenizer pads to a fixed 128 tokens but truncates at 256, so one
-# batch holding a text over 128 tokens beside a shorter one hands numpy rows of
-# different lengths and the whole batch fails (reproduced 2026-10-03 on a copy of
-# devpulse's 229 sent mails: exit 1, "inhomogeneous shape"; each text alone fine).
-# The stand-in is stricter than the model: any two lengths in one batch refuse.
+# Stand-in fastembed, stricter than the real one: any two text lengths in one batch refuse
+# (the real tokenizer pads to 128 but truncates at 256, so mixed batches fail "inhomogeneous shape").
 _STAND_IN_FASTEMBED = """
 class _Vector(list):
     def tolist(self):
@@ -239,22 +207,13 @@ class TestTheSentFolderVectorizes:
         assert store["embeddings"] == [[10.0, 0.5], [23.0, 0.5]]
 
     def test_an_embedder_refusal_names_its_cause(self, monkeypatch, capsys):
-        """The real refusal shape: exit 1, the reason as JSON on stdout, stderr empty.
-
-        Before leg 9 only stderr was read, so 194 refusals reached ai_mail as the
-        bare "Embedding failed" while the reason sat unread on stdout.
-        """
+        """The real refusal shape: exit 1, the reason as JSON on stdout, stderr empty — stdout must be read."""
         _stub_embedder(monkeypatch, {"success": False, "error": "inhomogeneous shape"}, returncode=1)
         _stub_store(monkeypatch)
 
         result = _vectorize(monkeypatch, capsys, "AI_MAIL", "email_sent", ["x"], [{}])
 
         assert result == {"success": False, "error": "Embedding failed (exit 1): inhomogeneous shape"}
-
-
-# ---------------------------------------------------------------------------
-# 3. Reachable as an operation -- the wire ai_mail actually calls
-# ---------------------------------------------------------------------------
 
 
 class TestOperationIsRouted:

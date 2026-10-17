@@ -3,17 +3,10 @@
 # Description: Tests for the search orchestration module
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/search.py."""
-
-# Tests for the search orchestration module.
-#
-# Covers: from aipass.memory.apps.modules.search import handle_command
-#
-# Tests command routing, handler discovery, argument parsing, and help flags.
-# All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — the wording of the print_help() panel
@@ -23,18 +16,8 @@ from unittest.mock import MagicMock
 from aipass.memory.apps.modules import search
 
 
-# ---------------------------------------------------------------------------
-# Helpers: patch the real search module's collaborators at the edge
-# ---------------------------------------------------------------------------
-
-
 def _prepare_search_mocks(monkeypatch):
-    """Patch, on the real search module, the collaborators the tests assert against.
-
-    The console stays real (a test reads it with capsys); Panel, error, warning
-    and the query executor are replaced on the module and restored at teardown.
-    Returns a dict of key mock objects so tests can assert against them.
-    """
+    """Patch Panel, error, warning and the query executor on the real search module; the console stays real."""
     mock_panel = MagicMock()
     mock_error = MagicMock()
     mock_warning = MagicMock()
@@ -42,7 +25,7 @@ def _prepare_search_mocks(monkeypatch):
     monkeypatch.setattr(search, "error", mock_error)
     monkeypatch.setattr(search, "warning", mock_warning)
 
-    # the query executor: never a live vector search
+    # Never a live vector search.
     mock_execute_search = MagicMock(
         return_value={
             "success": True,
@@ -69,16 +52,8 @@ def _prepare_search_mocks(monkeypatch):
 
 
 def _import_search(monkeypatch):
-    """Patch the real search module's edges and return it.
-
-    Returns (search_module, mocks_dict).
-    """
+    """Patch the real search module's edges and return (search_module, mocks_dict)."""
     return search, _prepare_search_mocks(monkeypatch)
-
-
-# ---------------------------------------------------------------------------
-# handle_command: routing
-# ---------------------------------------------------------------------------
 
 
 class TestHandleCommandRouting:
@@ -123,11 +98,6 @@ class TestHandleCommandRouting:
         assert result is True
         mocks["execute_search"].assert_called_once_with(query="some query", branch=None, memory_type=None, n_results=5)
         mocks["error"].assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# handle_command: help flags
-# ---------------------------------------------------------------------------
 
 
 class TestHandleCommandHelp:
@@ -200,11 +170,6 @@ class TestHandleCommandHelp:
         mock_help.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# handle_command: argument parsing
-# ---------------------------------------------------------------------------
-
-
 class TestHandleCommandArgParsing:
     """Verify argument parsing: --branch, --type, --n, and edge cases."""
 
@@ -270,11 +235,7 @@ class TestHandleCommandArgParsing:
         mocks["error"].assert_called_once_with("Search query required")
 
     def test_empty_args_calls_introspection(self, monkeypatch, capsys):
-        """Empty args list runs the REAL introspection to the terminal, not crash, and searches nothing.
-
-        Widened from its twin above, which mocks print_introspection: this one
-        reads what reached stdout, so a crash inside the introspection body reddens it.
-        """
+        """Empty args runs the REAL introspection to the terminal (a crash in its body reddens this), searching nothing."""
         search_mod, mocks = _import_search(monkeypatch)
 
         result = search_mod.handle_command("search", [])
@@ -286,11 +247,6 @@ class TestHandleCommandArgParsing:
         mocks["execute_search"].assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# _discover_handlers: handler directory scanning
-# ---------------------------------------------------------------------------
-
-
 class TestDiscoverHandlers:
     """Verify handler auto-discovery logic with synthetic directory trees."""
 
@@ -298,7 +254,6 @@ class TestDiscoverHandlers:
         """Should return a dict mapping dir name to list of .py filenames."""
         search_mod, _mocks = _import_search(monkeypatch)
 
-        # Build a synthetic handlers/ directory tree
         handlers_dir = tmp_path / "handlers"
         search_dir = handlers_dir / "search"
         search_dir.mkdir(parents=True)
@@ -310,9 +265,7 @@ class TestDiscoverHandlers:
         intake_dir.mkdir(parents=True)
         (intake_dir / "plans_processor.py").write_text("", encoding="utf-8")
 
-        # Patch __file__ so _discover_handlers resolves to our tmp_path
-        # _discover_handlers computes: Path(__file__).resolve().parent.parent / "handlers"
-        # So __file__ needs to be at tmp_path / modules / search.py
+        # _discover_handlers reads Path(__file__).parent.parent / "handlers".
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir(parents=True)
         fake_file = modules_dir / "search.py"
@@ -379,7 +332,6 @@ class TestDiscoverHandlers:
         """If handlers/ directory does not exist, return empty dict."""
         search_mod, _mocks = _import_search(monkeypatch)
 
-        # Point __file__ at a location with no handlers/ sibling
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir(parents=True)
         fake_file = modules_dir / "search.py"
@@ -409,11 +361,6 @@ class TestDiscoverHandlers:
         result = search_mod._discover_handlers()
 
         assert result == {}
-
-
-# ---------------------------------------------------------------------------
-# show_search_results: display path
-# ---------------------------------------------------------------------------
 
 
 class TestShowSearchResults:
@@ -529,11 +476,7 @@ class TestResultMetadataDisplay:
         }
 
     def test_entry_number_and_date_are_rendered(self, monkeypatch):
-        """An archived entry's own number and date must be visible in the result.
-
-        Without them a citizen can only identify a recovered entry by matching
-        its text, which stops working as soon as two entries share wording.
-        """
+        """An archived entry's own number and date must be visible: text matching fails once wording repeats."""
         search_mod, mocks = _import_search(monkeypatch)
         mocks["execute_search"].return_value = self._search_returning(
             {
