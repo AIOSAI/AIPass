@@ -48,9 +48,10 @@ The boring stuff works. One human and the AIPass agents built it, and the same f
 - **Backups with versioning.** Local snapshots you can restore from, with optional Google Drive sync.
 - **Standards audits in CI.** Every agent is checked against the same standards on every change.
 - **The daemon.** A scheduler runs recurring jobs, and each agent owns its own schedule.
+- **A place to be.** Each agent has a home, a passport, a memory that grows with its work, and a commons where the fleet posts and gathers. Agents explore and get better at their job through experience, not retraining.
 - **Everything local.** Memory and mail are files on your machine. Nothing leaves it unless you turn on an outside API, with your own keys.
 
-Most agent frameworks separate: a worktree per agent, agents that start, finish and die. AIPass keeps disposable workers for that case (sub-agents), but its citizens persist. The framework is a context split at scale: eighteen agents today, each with its own context and memory, and a hundred would work the same way. The human stays the bottleneck, by design. You steer through one seat: devpulse, or your project's own manager.
+Most agent frameworks separate: a worktree per agent, agents that start, finish and die. AIPass keeps disposable workers for that case (sub-agents), but its citizens persist. The framework is a context split at scale: eighteen agents today, each with its own context and memory, and a hundred would work the same way. They run in parallel, on one project or across several, and the gates keep them from colliding on the same files. The human stays the bottleneck, by design. You stay in full control, through one seat: devpulse, or your project's own manager.
 
 ## How You Use It
 
@@ -119,6 +120,8 @@ src/my_project/<agent>/
 ```
 
 **One owner seat.** Each project has one manager agent you steer through. Every agent can read git through the bus; only a project's manager writes to it.
+
+**No index.** Nothing indexes your codebase. An agent finds its way the way a new colleague does: the bus, the owning agent's README, and its own memory of what it did last time.
 
 ## The Reference Implementation
 
