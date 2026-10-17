@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.1.8
+# Version: 1.1.9
 # Created: 2026-07-17
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -352,6 +352,31 @@ def test_create_project_no_host(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(RuntimeError, match="Not inside an AIPass"):
         create_project("foo", no_agent=True)
+
+
+def test_create_project_explicit_host_ignores_cwd(host_env, tmp_path, monkeypatch):
+    # The host API creates projects from a server process whose cwd is not
+    # the installation; it names the root instead of chdir-ing per request.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("hosted", template="empty", no_agent=True, host=host_env)
+
+    assert Path(result["target"]) == host_env / "projects" / "hosted"
+    assert Path(result["host"]) == host_env
+    assert not (elsewhere / "projects").exists()
+
+
+def test_create_project_explicit_host_must_be_a_root(tmp_path):
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    with pytest.raises(RuntimeError, match="Not an AIPass installation root"):
+        create_project("foo", no_agent=True, host=bare)
 
 
 def test_create_project_cleans_up_on_failure(host_env, monkeypatch):

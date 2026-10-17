@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-17
-# Modified: 2026-09-28
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -318,8 +318,14 @@ def create_project(
     name: str,
     template: str = "empty",
     no_agent: bool = False,
+    host: Path | None = None,
 ) -> dict:
     """Create a new project inside the AIPass host installation.
+
+    Args:
+        host: The installation root. The CLI leaves it None and the root is
+            found from the working directory; a long-running caller such as
+            the host API names it, because a server cannot chdir per request.
 
     Returns:
         dict with name, template, target, host, registry_id, registry_file,
@@ -333,7 +339,10 @@ def create_project(
     if template not in TEMPLATES:
         raise ValueError(f"Unknown template '{template}'. Choose from: {', '.join(TEMPLATES)}")
 
-    host = find_host_root(Path.cwd())
+    if host is None:
+        host = find_host_root(Path.cwd())
+    elif find_host_root(host) != host:
+        raise RuntimeError(f"Not an AIPass installation root: {host}")
     if host is None:
         raise RuntimeError(
             "Not inside an AIPass installation (no *_REGISTRY.json found). "
