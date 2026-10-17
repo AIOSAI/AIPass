@@ -166,7 +166,7 @@ it deliberately does not judge.
 
 - `json_structure` lists the operator files in `{branch}_json/custom_config/` — names only;
   the content is operator-owned and never judged.
-- `readme` carries the docs-index, named-path and rot-bait lane of DPLAN-0347. Each line is
+- `readme` carries the docs-index, named-path and rot-bait lane of the layer contract (`context_standards.md`). Each line is
   prefixed `(advisory)` because info lines are stored and re-rendered one at a time: a line
   quoted on its own must still arrive marked as advice.
 

@@ -125,7 +125,7 @@ name **`ruff`** — that is what the audit and the checklist display. Its conten
 are `ruff_check_content.py` / `ruff_check.md`, so the query surface lists and accepts
 **`ruff_check`**: `drone @seedgo standard ruff` answers "Unknown standard". The name the audit
 shows you is not the name the query takes, and the `triplet` proof reports the pair as two
-half-standards. Tracked in APLAN-0005.
+half-standards.
 
 `drone @seedgo standard` is pack-agnostic and lists the union of all four packs;
 `drone @seedgo standards_query aipass_standards` lists this one. Both read names from
@@ -136,7 +136,7 @@ half-standards. Tracked in APLAN-0005.
 ## One json handler, fleet-wide
 
 Every citizen in the package ships a byte-identical `apps/handlers/json/json_handler.py`
-(DPLAN-0325) — a shim that binds the prax-owned service and resolves nothing of its own. The
+— a shim that binds the prax-owned service and resolves nothing of its own. The
 `json_handler` standard accepts a handler **only** if its sha256 matches that pinned shim; no
 substring and no marker path is left in the checker. A registered resident outside the
 package can still carry a pre-migration handler; the contract tests name each one in a skip.
@@ -150,8 +150,8 @@ execution over every shim in `tests/test_json_handler_contract.py`.
 ## `test_quality` (v4) is retired
 
 `test_quality` was a per-branch TEXT scan that awarded an item for finding a substring
-anywhere under `tests/`; a substring scan manufactures tests instead of measuring them
-(DPLAN-0323). Its checker, content module and `.md` are in
+anywhere under `tests/`; a substring scan manufactures tests instead of measuring them.
+Its checker, content module and `.md` are in
 `apps/handlers/aipass_standards/.archive/`, and it is not discovered.
 
 Test files are judged by AST rules instead: this pack's `APPLIES_TO = tests` rows (the two

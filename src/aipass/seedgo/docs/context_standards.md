@@ -38,7 +38,7 @@ chars are easy to confuse.
 
 ## The layer contract it instruments
 
-Settled in `drone @commons thread 16`, recorded in DPLAN-0347. One job, one cap, one owner
+One job, one cap, one owner
 per layer, and nothing is said twice:
 
 | Layer | Its one job |
@@ -72,7 +72,7 @@ fleet-wide measurement would make the table's columns mean a different thing in 
 ## The ratchet
 
 `apps/handlers/context_standards/startup_ratchet.py`, run from
-`.github/scripts/seedgo_audit.py` in the **seedgo-audit** CI job (DPLAN-0347).
+`.github/scripts/seedgo_audit.py` in the **seedgo-audit** CI job.
 
 The advisory row says how big things are. The ratchet is the part that holds: once a branch
 is under its cap, the commit that pushes it back over turns the job red in the same run.

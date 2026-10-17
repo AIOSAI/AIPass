@@ -70,8 +70,8 @@ business-logic module per verb — audit_tests, bypass, checklist, diagnostics_a
 ratchet (the weekly execution ratchet), readme_update, seedgo_proof, shadow_cycle, standards_audit, standards_query, test_map and
 tests_lane — and two doors, door_audit (the audit, bypass rules and context ratchets, for the
 CI audit script) and door_trinity (the .trinity/ check, for @memory). A door is the one modules
-file another branch may import: a re-export of this branch's handlers and nothing else
-(DPLAN-0404). `apps/handlers/` holds the implementation,
+file another branch may import: a re-export of this branch's handlers and nothing else.
+`apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch
 shares.

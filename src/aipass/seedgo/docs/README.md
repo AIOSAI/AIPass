@@ -2,8 +2,8 @@
 
 # Docs
 
-Tracked public reference for the `seedgo` branch — the **depth** layer of the DPLAN-0347
-contract: one file per module or handler group, each small enough for one read, each linked
+Tracked public reference for the `seedgo` branch — the **depth** layer of the startup
+layer contract (`context_standards.md`): one file per module or handler group, each small enough for one read, each linked
 from the branch README, opened when something breaks.
 
 Work in progress, research and dated one-offs belong in `docs.local/`, not here. Anything on
