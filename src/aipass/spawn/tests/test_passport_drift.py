@@ -3,7 +3,7 @@
 # Description: DPLAN-0262 — live passport drift vs template contract (permanent canary)
 # Version: 2.0.2
 # Created: 2026-07-27
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and apps/handlers/registry.py — the passport drift canary (DPLAN-0262)."""
@@ -26,27 +26,12 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.registry import branches_as_list, find_registry, load_registry
 
-# Context kept from the file's original docstring — passport drift detection,
-# DPLAN-0262, 2.0-only since the DPLAN-0319 fleet run:
-#
-# Templates guarantee certain branch_info/identity fields via placeholder
-# substitution. `spawn update` auto-heals .trinity/passport.json against a narrow
-# allowlist (branch_info.email, branch_info.git_branch, identity.traits — see
-# update_ops._heal_passport); the live scan below is the permanent canary that
-# says when a real passport has fallen behind what its template promises.
-#
-# This file was schema-tolerant during the DPLAN-0319 window (2.0 template on
-# disk, 1.x fleet awaiting the migration GO). The fleet migration ran 2026-08-28
-# (22/22, the owner's GO), the marker test went red on cue, and the schema-1 lane
-# (frozen contract, class allowlist, drift helper, marker class and the 1.x-lane
-# hermetic test) was removed in the same working set — the canary now judges
-# every live passport against the live template's contract, and any passport
-# declaring a pre-2.0 schema is reported as drift.
+# `spawn update` heals only a narrow passport allowlist (update_ops._heal_passport); this live
+# scan is the canary for any other template-guaranteed key a real passport lacks.
 
 _CONTRACT_SECTIONS = ("branch_info", "identity")
 
-# --- SCHEMA 2.0 FLIP SWITCH — flipped 2026-08-28 with the fleet migration.
-# True = every live passport must declare schema 2.0.0; anything else is drift.
+# True: every live passport must declare schema 2.0.0; anything else is drift.
 REQUIRE_SCHEMA_2 = True
 
 SCHEMA_2 = "2.0.0"
@@ -75,11 +60,6 @@ def _passport_drift(passport: dict, contract: dict) -> dict:
         if missing:
             drift[section] = sorted(missing)
     return drift
-
-
-# =============================================================================
-# HERMETIC — detector logic against synthetic data, no real filesystem/registry
-# =============================================================================
 
 
 class TestDriftDetectorHermetic:
@@ -111,11 +91,7 @@ class TestDriftDetectorHermetic:
     def test_the_class_table_under_the_contract_canary_holds_both_classes(self):
         """The floor under the parametrized canary below, derived from the raw source.
 
-        ``sorted(get_available_classes())`` is computed at collection time. A
-        collector that came back empty would make the contract canary SKIPPED
-        and the summary green, so the count is pinned from the AST of
-        ``class_registry.py`` — the declaration, not the function under
-        judgement.
+        An empty collector would SKIP the canary and read green, so the count comes from the source AST.
         """
         import ast
 
@@ -141,20 +117,16 @@ class TestDriftDetectorHermetic:
         assert "traits" in contract["identity"]
 
     def test_template_contract_is_the_2_0_shape(self):
-        """R1/R7: principles moved INSIDE identity, and path replaced cwd."""
+        """Principles moved INSIDE identity, and path replaced cwd."""
         contract = _template_contract_keys("specialist")
         assert "principles" in contract["identity"]
         assert "path" in contract["branch_info"]
         assert "cwd" not in contract["branch_info"]
 
     def test_the_seed_stamp_is_not_drift(self):
-        """TDPLAN-0017: citizenship.seed is an ADDITIVE optional field.
+        """citizenship.seed is an ADDITIVE optional field.
 
-        This canary asks one question — "are the template's guaranteed keys
-        PRESENT" — so an extra key cannot make it fire. That tolerance is by
-        design (see test_ignores_extra_live_keys_not_in_contract), but a passport
-        minted from a seed is the first thing the fleet carries that relies on
-        it, so the property gets a pin of its own rather than an assumption.
+        The canary checks presence only, so an extra key cannot fire it; seeded passports rely on that.
         """
         contract = _template_contract_keys("specialist")
         passport = json.loads(
@@ -171,12 +143,7 @@ class TestDriftDetectorHermetic:
         assert _is_schema_2({}) is False
 
 
-# =============================================================================
-# LIVE — real AIPASS_REGISTRY.json + real .trinity/passport.json files.
-#
-# Both are gitignored (never shipped to a clone/CI checkout — see .gitignore
-# lines 26-27), so this section skips where they don't exist.
-# =============================================================================
+# LIVE: the registry and passports are gitignored, so this section skips where they don't exist.
 
 
 def _live_registry_path() -> Path | None:
@@ -187,8 +154,7 @@ def _live_registry_path() -> Path | None:
 def _live_passports() -> list[tuple[str, dict]]:
     """(name, passport) for every registered branch with a readable passport.
 
-    Raises nothing and skips nothing — the callers decide what a missing file
-    means for them.
+    Raises nothing and skips nothing — the callers decide what a missing file means.
     """
     reg_path = _live_registry_path()
     if reg_path is None:
@@ -235,18 +201,13 @@ class TestLivePassportDrift:
                 try:
                     citizen_class = resolve_template_class(passport.get("identity", {}))
                 except ValueError as exc:
-                    # Scanning, not asserting-per-item: every refusal is collected
-                    # so one bad passport does not hide the next nine. It goes on
-                    # the record as well as into the report — this canary reads the
-                    # LIVE fleet, so "spawn could not resolve X's class" is a fact
-                    # about the running system, not just a test detail.
+                    # Collect every refusal so one bad passport cannot hide the next; log it, this is the live fleet.
                     logger.warning("[drift-canary] %s: %s", name, exc)
                     report[name] = {"error": str(exc)}
                     continue
                 drift = _passport_drift(passport, _template_contract_keys(citizen_class))
             else:
-                # REQUIRE_SCHEMA_2: the fleet migrated 2026-08-28 — a passport
-                # declaring anything older is drift, reported not excused.
+                # A passport declaring anything older than 2.0 is drift, reported not excused.
                 report[name] = {"error": f"schema_version {_schema_version(passport)} — expected {SCHEMA_2}"}
                 continue
 
@@ -260,11 +221,7 @@ class TestLivePassportDrift:
         )
 
     def test_no_live_passport_leaks_an_absolute_path(self):
-        """R1/{{PATH}}: a passport is tracked and public — branch_info.path is RELATIVE.
-
-        Holds on both schemas: 1.x passports already store a relative path, and
-        {{CWD}} (which rendered absolute) is gone from the 2.0 engine.
-        """
+        """R1/{{PATH}}: a passport is tracked and public — branch_info.path is RELATIVE."""
         passports = _live_passports()
         if not passports:
             pytest.skip("No live registry/passports on this machine (gitignored — expected in CI)")
@@ -278,11 +235,7 @@ class TestLivePassportDrift:
 
 
 class TestSchema2Only:
-    """The fleet is 2.0-only as of the 2026-08-28 migration run.
-
-    Any passport declaring an older schema is reported as drift by the live
-    scan above — there is no accepted pre-2.0 lane any more.
-    """
+    """The fleet is 2.0-only as of the 2026-08-28 migration run."""
 
     def test_every_live_passport_declares_schema_2(self):
         passports = _live_passports()

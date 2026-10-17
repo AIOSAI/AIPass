@@ -3,24 +3,18 @@
 # Description: Passport 2.0 fleet migration — thin CLI layer over passport_migration
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-10-17
 # =============================================
 
 """One-shot fleet passport migration to schema 2.0 (DPLAN-0319).
 
-Thin CLI module that parses arguments and delegates to the migration handler.
-All implementation logic lives in apps/handlers/passport_migration.py.
-
-DRY RUN IS THE DEFAULT. ``--confirm`` is the only thing that writes, and the
-live fleet run is the owner's own GO — this module makes the safe direction the
-one you get by typing less.
+Dry run is the default; ``--confirm`` is the only thing that writes.
 """
 
 import argparse
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, err_console, error, header, warning
 
 from aipass.spawn.apps.handlers.passport_migration import migrate_fleet
@@ -43,29 +37,13 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "migrate-passports").
-        args: List of arguments for the command.
-
-    Returns:
-        True if the command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "migrate-passports":
         return False
 
     if not args:
-        # No args → introspection, matching sync_registry.py: this is the
-        # plugin/dispatch door, not the CLI one. spawn.py routes the CLI
-        # straight to handle_migrate_passports, where no args is the (safe,
-        # read-only) dry run.
+        # Dispatch door only; the CLI goes straight to handle_migrate_passports (no args = dry run).
         print_introspection()
         return True
 
@@ -76,35 +54,19 @@ def handle_command(command: str, args: list) -> bool:
     return handle_migrate_passports(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_migrate_passports(args: list[str]) -> int:
     """Parse args and execute the passport 2.0 migration.
 
-    Args patterns:
-        []                          -> dry run over the live fleet (writes nothing)
-        ["--dry-run"]               -> the same dry run, stated explicitly
-        ["--confirm"]               -> execute (backs up, then writes)
-        ["--root", "<path>"]        -> scan a different repo root
-        ["--only", "@branch"]       -> restrict to one branch
-
     Returns exit code (0=clean, 1=one or more passports could not be migrated).
     """
-    # --help is intercepted BEFORE parse_args: the parser runs with
-    # add_help=False (house shape), so argparse would otherwise treat --help
-    # as an unknown option and exit(2) with its own usage line.
+    # Before parse_args: with add_help=False argparse would reject --help and exit(2).
     if "--help" in args or "-h" in args:
         print_help()
         return 0
 
     parser = argparse.ArgumentParser(prog="spawn migrate-passports", add_help=False)
     parser.add_argument("--confirm", action="store_true")
-    # --dry-run is the DEFAULT behaviour, so the flag changes nothing on its
-    # own. It exists to be typed: it is how a caller asks for the measurement
-    # now that a bare command prints introspection instead.
+    # A no-op flag on purpose: the way to ask for the dry run by name.
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--root", default=None)
     parser.add_argument("--only", default=None)
@@ -127,8 +89,7 @@ def handle_migrate_passports(args: list[str]) -> int:
         error(str(exc))
         return 1
 
-    # Every invocation is recorded, dry runs included — a dry run is the
-    # measurement that precedes the owner's GO, and it leaves no other trace.
+    # Dry runs are logged too: they leave no other trace.
     json_handler.log_operation(
         "migrate_passports",
         data={
@@ -140,17 +101,8 @@ def handle_migrate_passports(args: list[str]) -> int:
     )
 
     _print_receipt(receipt)
-    # A REFUSAL EXITS NON-ZERO (the owner's standing ruling, fleet refusal sweep
-    # 2026-09-07). Zero scanned is the same refusal the receipt already prints in
-    # words: discovery matched nothing, so nothing was judged. It used to exit 0,
-    # which made "I searched the wrong root" indistinguishable from "your fleet is
-    # already 2.0" to anything reading the exit code.
+    # Zero scanned is a refusal and exits 1, so a wrong --root never reads as "already 2.0".
     return 1 if receipt["errors"] or not receipt["scanned"] else 0
-
-
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
 
 
 def print_help():
@@ -215,12 +167,7 @@ def _print_receipt(receipt: dict) -> None:
     if not receipt["confirm"] and receipt["changed"]:
         console.print("  [dim]No files were written. Add --confirm to execute.[/dim]")
     elif not receipt["scanned"]:
-        # Zero scanned is not an all-clear. discover_passports globs
-        # src/aipass/*/ and projects/*/src/*/*/ — both shaped like THIS
-        # repository — so any root that is not an AIPass checkout yields no
-        # targets, and the green line below would call that success. Measured
-        # against a real sibling repo (@wren, schema 1.0, untouched): the
-        # command reported "every scanned passport is already 2.0".
+        # Not an all-clear: discovery only matches an AIPass checkout's layout.
         error(
             f"No passports found under {receipt['root']} — nothing was scanned.",
             suggestion="Point --root at an AIPass checkout, or drop --root to scan this repository.",

@@ -3,7 +3,7 @@
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
 # Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -39,17 +39,8 @@ from aipass.spawn.apps.handlers.seed_ops import (
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport
 
-# Four properties carry the whole feature, and each is pinned on its own below because
-# each could be lost alone (TDPLAN-0017):
-#
-# * the export STRIPS EXACTLY the four machine-local facts — no more (an identity
-#   silently thinned) and no less (a credential leaked into a tracked file);
-# * the export is IDEMPOTENT — a second run writes nothing at all, which is what
-#   makes a generated tracked file safe to regenerate in anger;
-# * a mint from a seed produces a VALID 2.0 passport with FRESH local ids and a
-#   stamp naming the exact seed file bytes it came from;
-# * an INVALID seed refuses loudly and writes NOTHING — a citizen never lands on
-#   disk holding a malformed identity.
+# Pinned separately because each can be lost alone: exact strip, idempotent export,
+# valid mint with fresh ids and a byte stamp, invalid seed refuses with nothing written.
 
 
 def write_repo(root: Path, branches=("wanderer",), residents=()) -> Path:
@@ -67,11 +58,6 @@ def write_repo(root: Path, branches=("wanderer",), residents=()) -> Path:
 
 def branch_dir(root: Path, branch: str = "wanderer") -> Path:
     return root / "src" / "aipass" / branch
-
-
-# =============================================================================
-# BUILD — the pure transform
-# =============================================================================
 
 
 class TestBuildSeed:
@@ -95,12 +81,7 @@ class TestBuildSeed:
         assert seed["document_metadata"]["created"] == "2026-03-05"
 
     def test_strips_an_existing_stamp_too(self):
-        """A seed exported from a seed-minted passport must not carry its stamp.
-
-        Lane B's leak-guard goes RED on a seed carrying citizenship.seed, so the
-        second export cycle — the one that reads an already-stamped passport — is
-        the cycle that would publish it and turn CI red.
-        """
+        """A seed exported from a seed-minted passport must not carry its stamp (the leak-guard is red on it)."""
         passport = make_passport()
         passport["citizenship"][STAMP_KEY] = {"version": "2.0.0", "sha256": "deadbeef"}
 
@@ -140,24 +121,13 @@ class TestBuildSeed:
             build_seed(json.loads('["not", "a", "passport"]'))
 
 
-# =============================================================================
-# VALIDATION — the closed 2.0 shape, two lanes
-# =============================================================================
-
-
 class TestSeedValidation:
     """A seed is a passport minus machine-local. Both lanes, one schema."""
 
     def test_the_leak_guard_table_carries_all_four_machine_local_fields(self):
         """The floor under the parametrized leak guard below, read from the raw source.
 
-        ``MACHINE_LOCAL_CITIZENSHIP`` is imported, so an edit that emptied or
-        shortened it would silently shrink the table the leak guard runs over —
-        an empty one is reported SKIPPED and the summary reads green. The count
-        is derived here from the AST of ``seed_ops.py`` rather than from the
-        imported tuple, so a tuple that lost a field fails HERE instead of
-        quietly dropping a case.
-        """
+        From the AST, not the import: a shortened tuple would shrink the guard to a green SKIP."""
         import ast
 
         source = Path(seed_ops.__file__).read_text(encoding="utf-8")
@@ -262,11 +232,6 @@ class TestSeedValidation:
         assert validate_seed("just a string") == ["document root is not a JSON object (found str)"]
 
 
-# =============================================================================
-# FINGERPRINT + LOAD
-# =============================================================================
-
-
 class TestFingerprintAndLoad:
     """The stamp hashes the FILE, and a seed is validated before it is trusted."""
 
@@ -315,11 +280,6 @@ class TestFingerprintAndLoad:
         seed_path_for(tmp_path).parent.mkdir()
         seed_path_for(tmp_path).write_text("{}", encoding="utf-8")
         assert find_seed(tmp_path) == seed_path_for(tmp_path)
-
-
-# =============================================================================
-# MINT — seed -> live passport
-# =============================================================================
 
 
 class TestMintFromSeed:
@@ -376,15 +336,8 @@ class TestMintFromSeed:
     def test_the_validator_accepts_the_very_field_the_mint_writes(self, seeded):
         """The one way this module could poison the fleet on its own.
 
-        The mint writes citizenship.seed, and the same module's validator is what
-        gates the write. KEY_ORDER["citizenship"] does not list "seed", so an
-        allowlist taken from it UNEXTENDED would make this the only thing in the
-        fleet that rejects the stamp it just minted — every seed birth refusing
-        itself. Two pins, because the property can be lost two ways: the
-        behaviour, and the extension of the allowlist that produces it.
-
-        Mutant: the stamp prepended to the citizenship key order instead of appended -> red.
-        """
+        KEY_ORDER lacks "seed": an unextended allowlist would refuse every seed birth.
+        Mutant: the stamp prepended to the citizenship key order instead of appended -> red."""
         seed, seed_file = seeded
         passport = mint_from_seed(seed, seed_file, branch_name="wanderer", registry_id="r", citizen_id="c")
 
@@ -408,11 +361,6 @@ class TestMintFromSeed:
         before = json.dumps(seed, sort_keys=True)
         mint_from_seed(seed, seed_file, branch_name="wanderer", registry_id="r", citizen_id="c")
         assert json.dumps(seed, sort_keys=True) == before
-
-
-# =============================================================================
-# EXPORT — the fleet sweep, dry run by default
-# =============================================================================
 
 
 class TestExportSeeds:
@@ -474,12 +422,7 @@ class TestExportSeeds:
     def test_the_second_cycle_never_publishes_the_stamp(self, tmp_path):
         """export -> mint -> export. The cycle CI will actually live through.
 
-        Once a citizen is reborn from its seed, its live passport carries the
-        stamp and fresh local ids. Re-exporting that passport must strip all four
-        back off and land on the SAME BYTES — otherwise the second cycle both
-        publishes the stamp (red in Lane B's leak-guard) and reports a spurious
-        change on every branch, which is idempotency lost where it matters most.
-        """
+        Re-export must strip the stamp and fresh ids and land on the same bytes."""
         root = write_repo(tmp_path)
         export_seeds(root, confirm=True)
         seed_file = seed_path_for(branch_dir(root))
@@ -550,11 +493,7 @@ class TestExportSeeds:
     def test_a_passport_broken_only_where_the_strip_hides_it_still_refuses(self, tmp_path):
         """The LIVE passport is validated, not just the seed built from it.
 
-        Found by mutation: a passport whose only defect sits in the machine-local
-        region is silently cured by the strip, so the seed validates and a seed
-        would ship from a passport spawn cannot vouch for. Exporting an identity
-        from a half-registered citizen is exactly what the first guard is for.
-        """
+        A defect only in the machine-local region is cured by the strip, so the seed alone validates."""
         root = write_repo(tmp_path)
         passport = make_passport()
         del passport["citizenship"]["citizen_id"]
@@ -580,11 +519,6 @@ class TestExportSeeds:
         baseline = export_seeds(root)["baseline"]
         assert baseline["matches"] is False
         assert baseline["discovered_core"] == 1
-
-
-# =============================================================================
-# THE MINT PATH — end to end through spawn create
-# =============================================================================
 
 
 def _registry(tmp_path: Path) -> Path:

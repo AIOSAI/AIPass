@@ -20,13 +20,7 @@
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 
-"""Shared pytest fixtures for {{BRANCH}} tests.
-
-The autouse fixture here is the load-bearing one: this branch's json_handler
-binds the fleet's one json service, which writes into {{BRANCH}}_json/ unless
-AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that variable per
-test, so every test lands in its own tmp_path without knowing it.
-"""
+"""Shared pytest fixtures for {{BRANCH}} tests."""
 
 from pathlib import Path
 from typing import List, Tuple
@@ -38,24 +32,8 @@ from aipass.{{BRANCH}}.apps.handlers.json import json_handler
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect this branch's json writes into a temp dir.
-
-    autouse=True on purpose: the shim's names write into the real
-    {{BRANCH}}_json/ unless the seam is set, so a test that forgets to redirect
-    pollutes the branch. The guard belongs on every test, not on the ones that
-    remember.
-
-    The service recomputes its directory on every call, so setting the variable
-    here - after import - still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/<branch>/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    """Redirect this branch's json writes into a temp dir; autouse, since unset they hit {{BRANCH}}_json/."""
+    # A subdirectory: a seam AT tmp_path makes tmp_path/<branch>/, colliding with a test's own branch dir.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -64,11 +42,7 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture
 def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
-    """Capture calls made to the entry point's logger.
-
-    Returns:
-        A list that fills with (level, args) tuples as the code under test logs.
-    """
+    """Capture calls made to the entry point's logger as (level, args) tuples."""
     captured: List[Tuple[str, tuple]] = []
 
     class _CapturingLogger:

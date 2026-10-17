@@ -3,7 +3,7 @@
 # Description: Tests that spawn's shim is wired to the fleet json service
 # Version: 2.0.1
 # Created: 2026-03-25
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py — spawn's shim onto the fleet json service."""
@@ -17,19 +17,7 @@ from pathlib import Path
 
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Only the WIRING is tested here: that spawn's shim binds the fleet's one json
-# service (DPLAN-0325), that it lands in spawn_json/, and that it adds nothing of
-# its own. The service's BEHAVIOUR is pinned once for all eighteen branches by
-# seedgo's contract test above, and is deliberately not re-tested here.
-#
-# What this file used to be is in tests/.archive/: the DPLAN-0059 universal
-# template stamp, discovering a ``_JSON_DIR`` attribute by name and patching it.
-# The service computes its directory per call and the shim has no attributes at
-# all, so the stamp SKIPPED itself module-wide the moment the shim landed - a file
-# that reports "1 skipped" and tests nothing. It is not rewritten; seedgo's
-# contract already carries every claim it made.
-#
-# Redirection here is the ``AIPASS_TEST_LOG_DIR`` seam the conftest sets per test.
+# Only the WIRING is tested here; the service's behaviour is pinned once, fleet-wide, by seedgo's contract test.
 
 
 BOUND_NAMES = (
@@ -45,11 +33,6 @@ BOUND_NAMES = (
 )
 
 
-# =============================================================================
-# THE SEAM — where spawn's json actually lands
-# =============================================================================
-
-
 class TestTheSeamRedirectsSpawnsJson:
     """The conftest's autouse fixture is the only redirect there is."""
 
@@ -62,13 +45,7 @@ class TestTheSeamRedirectsSpawnsJson:
         assert result == tmp_path / "spawn" / "spawn_json" / "probe_config.json"
 
     def test_the_directory_is_recomputed_on_every_call(self, tmp_path, monkeypatch):
-        """No captured directory: a redirect that arrives late still takes effect.
-
-        This is what replaced the patched ``_JSON_DIR`` — there is no attribute
-        to patch, so a test that forgets the seam writes into the real
-        spawn_json/ rather than failing loudly. The autouse fixture in
-        tests/conftest.py is what keeps that from happening.
-        """
+        """No captured directory: a redirect that arrives late still takes effect."""
         first = json_handler.get_json_path("probe", "config").parent
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "moved"))
         second = json_handler.get_json_path("probe", "config").parent
@@ -100,11 +77,6 @@ class TestTheSeamRedirectsSpawnsJson:
         assert json_handler.validate_json_structure({"missing": "keys"}, "data") is False
 
 
-# =============================================================================
-# THE SHIM — it binds, it never wraps
-# =============================================================================
-
-
 class TestTheShimBindsAndNeverWraps:
     """spawn's names ARE the service's callables, not calls into it."""
 
@@ -120,8 +92,7 @@ class TestTheShimBindsAndNeverWraps:
         assert json_handler.get_json_path.__self__.branch_root.name == "spawn"
 
     def test_the_shim_is_byte_identical_to_the_template_spawn_ships(self):
-        """spawn mints every citizen from that file; if the two ever differ, a
-        newborn is born off-fleet and nothing else in the suite would say so."""
+        """spawn mints every citizen from that file; if the two differ, a newborn is born off-fleet."""
         shim = Path(json_handler.__file__).read_bytes()
         template = (
             Path(__file__).resolve().parents[1]
@@ -136,20 +107,8 @@ class TestTheShimBindsAndNeverWraps:
         assert shim == template
 
 
-# =============================================================================
-# THE CONSUMERS — the return contract spawn's own code depends on
-# =============================================================================
-
-
 class TestTheBoolPrimitiveSpawnDependsOn:
-    """write_json is the bool primitive four spawn call sites branch on.
-
-    core.py:401, registry.py:277 and :454 and repair_ops.py:165 all read the
-    return value. save_json now RAISES WriteFailed instead of answering False,
-    so a future migration of these call sites to save_json would silently turn
-    a handled failure into an escaping exception. These pin the contract they
-    were written against.
-    """
+    """write_json is the bool primitive spawn's call sites branch on; save_json raises WriteFailed instead."""
 
     def test_write_json_reports_true_and_the_document_parses_from_disk(self, tmp_path):
         target = tmp_path / "out.json"

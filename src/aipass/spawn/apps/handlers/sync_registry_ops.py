@@ -3,17 +3,12 @@
 # Description: Registry sync handler — implementation logic for registry repair
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
 
-Contains the core sync logic: scanning the filesystem, comparing with
-*_REGISTRY.json, detecting stale/unregistered branches, and
-optionally repairing mismatches.
-
-CWD-aware: finds the local project registry from CWD (walks up parents
-looking for *_REGISTRY.json) so it works for both AIPass and external projects.
+Reference: docs/registry_and_repair.md
 """
 
 import json
@@ -51,24 +46,8 @@ from aipass.spawn.apps.handlers.json import json_handler
 def resolve_sync_template_class(citizen_class: str, branch_name: str) -> Path:
     """Resolve a passport's citizen_class to a template dir for a sync rebuild.
 
-    NO FALLBACK (DPLAN-0319). This used to guess ``aipass_framework`` for any
-    unrecognised class on the reasoning that a stale name should not block a
-    repair — but a guess writes .branch_meta.json against a template the
-    passport never claimed, so the branch reads as "repaired" while tracking the
-    wrong contract. It also guessed a value that is now a DEAD name. House law
-    is fail-loud: an unknown, retired or forbidden class raises, and the caller
-    skips that branch with the reason on the record.
-
-    Args:
-        citizen_class: The value read from the branch's passport.
-        branch_name: Branch name, for the refusal message.
-
-    Returns:
-        Path to the template directory to rebuild against.
-
-    Raises:
-        ValueError: The class is forbidden, retired, or unknown — caller must
-            skip this branch and say why.
+    No fallback: a guessed class would write .branch_meta.json against a template the passport
+    never claimed. Raises ValueError for a forbidden, retired or unknown class; the caller skips.
     """
     refusal = refuse_retired_or_forbidden(citizen_class)
     if refusal:
@@ -114,16 +93,7 @@ def _derive_description(branch_path: Path) -> str:
 def _scan_for_branches(project_root: Path) -> dict[str, Path]:
     """Scan a project directory tree for branches with .trinity/passport.json.
 
-    Searches both the root level and common subdirectories (src/, src/*/):
-    - project_root/*/.trinity/passport.json  (root-level agents)
-    - project_root/src/*/.trinity/passport.json  (src/ agents)
-    - project_root/src/*/*/.trinity/passport.json  (nested src, e.g. src/aipass/*)
-
-    Args:
-        project_root: The project root directory (registry parent).
-
-    Returns:
-        Dict mapping lowercase branch name to its directory Path.
+    Looks at project_root/*, src/* and src/*/* (e.g. src/aipass/*). Keys are lowercase names.
     """
     found: dict[str, Path] = {}
 
@@ -136,14 +106,11 @@ def _scan_for_branches(project_root: Path) -> dict[str, Path]:
                 if passport.exists():
                     found[child.name.lower()] = child
 
-    # Level 1: project_root/*/
     _check_dir(project_root)
 
-    # Level 2: project_root/src/*/
     src_dir = project_root / "src"
     if src_dir.is_dir():
         _check_dir(src_dir)
-        # Level 3: project_root/src/*/*/  (e.g. src/aipass/*)
         for sub in sorted(src_dir.iterdir()):
             if sub.is_dir() and not sub.name.startswith(".") and not sub.name.startswith("__"):
                 _check_dir(sub)
@@ -151,39 +118,14 @@ def _scan_for_branches(project_root: Path) -> dict[str, Path]:
     return found
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def sync_registry(fix: bool = False) -> dict:
     """Synchronize *_REGISTRY.json with filesystem.
 
-    CWD-aware: uses find_registry() which walks up from CWD to find the
-    project's registry. Works for both AIPass and external projects.
-
-    Workflow:
-    1. Find and load *_REGISTRY.json (CWD-aware)
-    2. Scan project directories for .trinity/passport.json (branch marker)
-    3. Compare:
-       - Stale entries: registered in JSON but directory missing or no passport
-       - Unregistered: directory exists with passport but not in JSON
-    4. Report findings
-    5. If fix=True:
-       - Remove stale entries
-       - Add unregistered branches with basic metadata
-       - Save updated registry
-
-    Returns:
-        Dict with sync results.
+    Stale: registered but directory or passport missing. Unregistered: passport on disk, no entry.
     """
-    # 1. Load registry — CWD-aware discovery
     registry_path = find_registry()
     if registry_path is None:
-        # find_registry answers absence with None now (@aipass, 2026-08-31) —
-        # a path for an absence was a lie with a type signature. There is
-        # nothing to synchronise against, and inventing a project root here is
-        # how a registry gets written somewhere nobody asked for.
+        # Inventing a project root here is how a registry gets written somewhere nobody asked for.
         logger.error("[sync-registry] No *_REGISTRY.json found above the current directory — nothing to sync")
         return {
             "error": "no registry found above the current directory",
@@ -198,13 +140,8 @@ def sync_registry(fix: bool = False) -> dict:
         }
     project_root = registry_path.parent
 
-    # Sync REPAIRS a registry against the filesystem; it cannot repair a file it
-    # cannot read. With --fix that path is destructive, not merely wrong:
-    # load_registry answers an unreadable file with an empty document, every
-    # branch on disk then looks unregistered, and the rebuild writes fresh
-    # uppercase entries with new registry_ids and NO metadata.id — measured
-    # 2026-09-07, a 3-branch project came back credential-less and every
-    # passport carrying the real credential orphaned. Rebuilding is re-minting.
+    # load_registry answers an unreadable file with an empty document; --fix would then re-register
+    # every branch with new ids and no metadata.id, orphaning every passport. Refuse instead.
     if not registry_is_writable_document(registry_path):
         logger.error(
             "[sync-registry] %s exists but could not be read as a registry document — refusing to sync. "
@@ -226,22 +163,18 @@ def sync_registry(fix: bool = False) -> dict:
     registry = load_registry(registry_path)
     branches = branches_as_list(registry.get("branches", []))
 
-    # Build lookup of registered branch names (lowercase) -> entry
     registered: dict[str, dict] = {}
     for entry in branches:
         name = entry.get("name", "").lower()
         if name:
             registered[name] = entry
 
-    # 2. Scan filesystem for branch directories with .trinity/passport.json
     filesystem_branches = _scan_for_branches(project_root)
 
-    # 3. Compare
     stale: list[str] = []
     unregistered_list: list[str] = []
     healthy: list[str] = []
 
-    # Check registered branches against filesystem
     resolved_root = project_root.resolve()
     for name, entry in registered.items():
         rel_path = entry.get("path", "")
@@ -259,12 +192,10 @@ def sync_registry(fix: bool = False) -> dict:
             if passport.exists():
                 healthy.append(name)
             else:
-                # Directory exists but no passport — treat as stale
                 stale.append(name)
         else:
             stale.append(name)
 
-    # Check filesystem branches against registry
     for name, _path in filesystem_branches.items():
         if name not in registered:
             unregistered_list.append(name)
@@ -274,11 +205,9 @@ def sync_registry(fix: bool = False) -> dict:
         f"healthy={len(healthy)}, stale={len(stale)}, unregistered={len(unregistered_list)}"
     )
 
-    # 4/5. Fix if requested
     fixed = False
     needs_save = False
     if fix and (stale or unregistered_list):
-        # Remove stale entries
         raw_branches = registry.get("branches", [])
         if stale:
             if isinstance(raw_branches, dict):
@@ -296,7 +225,6 @@ def sync_registry(fix: bool = False) -> dict:
             for s in stale:
                 logger.info(f"[sync-registry] Removed stale entry: {s}")
 
-        # Add unregistered branches
         today = datetime.now().strftime("%Y-%m-%d")
         for name in unregistered_list:
             branch_path = filesystem_branches[name]
@@ -322,7 +250,6 @@ def sync_registry(fix: bool = False) -> dict:
         registry["metadata"]["total_branches"] = len(branches_as_list(registry["branches"]))
         needs_save = True
 
-    # Backfill placeholder descriptions on existing entries
     descriptions_backfilled = []
     if fix:
         for entry in branches_as_list(registry.get("branches", [])):
@@ -346,7 +273,6 @@ def sync_registry(fix: bool = False) -> dict:
         else:
             logger.error("[sync-registry] Failed to save updated registry")
 
-    # Rebuild .spawn/ tracking for branches missing metadata
     spawn_rebuilt = []
     if fix:
         for name in healthy + unregistered_list:
@@ -354,20 +280,15 @@ def sync_registry(fix: bool = False) -> dict:
             if not branch_path:
                 continue
 
-            # Check/rebuild .spawn/.template_registry.json
             spawn_dir = branch_path / ".spawn"
             spawn_dir.mkdir(exist_ok=True)
             template_reg_path = spawn_dir / ".template_registry.json"
             if not template_reg_path.exists():
                 regenerate_template_registry(branch_path)
 
-            # Check/rebuild .spawn/.branch_meta.json
             branch_meta_path = spawn_dir / ".branch_meta.json"
             if not branch_meta_path.exists():
-                # Determine citizen class from the passport — no default. A
-                # branch whose passport is missing, unreadable, or silent about
-                # its class gets SKIPPED with the reason named, never scaffolded
-                # against a guessed class (DPLAN-0319, house law: fail loud).
+                # No default class: a passport that cannot name one skips the branch, never a guess.
                 passport_path = branch_path / ".trinity" / "passport.json"
                 if not passport_path.exists():
                     logger.error(
@@ -391,8 +312,6 @@ def sync_registry(fix: bool = False) -> dict:
                     )
                     continue
 
-                # Resolve the template for that class — forbidden, retired and
-                # unknown classes refuse loudly and skip the branch.
                 try:
                     template_dir = resolve_sync_template_class(citizen_class, name)
                 except ValueError as e:
@@ -405,9 +324,7 @@ def sync_registry(fix: bool = False) -> dict:
                     spawn_rebuilt.append(name)
                     logger.info(f"[sync-registry] Rebuilt .spawn/ for: {name}")
 
-    # Fix registry_id mismatches in passports for all known branches
-    # None is the fixer's failure answer, named here and never read as "already
-    # correct" (spawn's decision, DPLAN-0354 leg 5).
+    # None is the fixer's failure answer, never read as "already correct".
     ids_fixed = []
     ids_failed = []
     if fix:
@@ -435,28 +352,10 @@ def sync_registry(fix: bool = False) -> dict:
     }
 
 
-# =============================================================================
-# OWNER / IDENTITY CHECK + FIX  (DPLAN-0239 P4, frozen contract)
-# =============================================================================
-
-
 def check_owner_identity(registry_path=None):
     """Read-only owner/identity health check — 7 flags.
 
-    Flags:
-      no_owner            — no branch entry has owner:true
-      multi_owner         — more than one branch has owner:true
-      owner_missing_branch — owner entry's path doesn't exist on disk
-      owner_wrong_branch  — owner is not the manager and not the first agent
-      metadata_id_missing — registry metadata.id absent
-      passport_mismatch   — passport citizenship.registry_id != metadata.id
-      entry_rid_stale     — entry registry_id missing, duplicate, or == metadata.id
-
-    Returns:
-        dict with pinned schema:
-          ``clean`` (bool), ``owner`` (name str or None),
-          ``owner_uid`` (entry registry_id str, empty if none),
-          ``issues`` (list of flag/detail/branch dicts).
+    Returns the pinned schema: ``clean``, ``owner``, ``owner_uid``, ``issues`` (flag/detail/branch dicts).
     """
     if registry_path is None:
         registry_path = find_registry()
@@ -472,17 +371,14 @@ def check_owner_identity(registry_path=None):
 
     issues: list[dict] = []
 
-    # --- flag 1: no_owner ---
     owners = [b for b in branches if b.get("owner") is True]
     if not owners:
         issues.append({"flag": "no_owner", "detail": "No branch entry has owner:true"})
 
-    # --- flag 2: multi_owner ---
     if len(owners) > 1:
         names = [b.get("name", "?") for b in owners]
         issues.append({"flag": "multi_owner", "detail": f"Multiple owners: {', '.join(names)}"})
 
-    # --- flag 3: owner_missing_branch ---
     for owner in owners:
         owner_path = (project_root / owner.get("path", "")).resolve()
         if not owner_path.is_dir():
@@ -493,7 +389,6 @@ def check_owner_identity(registry_path=None):
                 }
             )
 
-    # --- flag 4: owner_wrong_branch ---
     for owner in owners:
         owner_dir = project_root / owner.get("path", "")
         passport_path = owner_dir / ".trinity" / "passport.json"
@@ -514,11 +409,9 @@ def check_owner_identity(registry_path=None):
                     }
                 )
 
-    # --- flag 5: metadata_id_missing ---
     if not metadata_id:
         issues.append({"flag": "metadata_id_missing", "detail": "Registry metadata.id is absent"})
 
-    # --- flag 6: passport_mismatch ---
     if metadata_id:
         for branch in branches:
             branch_dir = project_root / branch.get("path", "")
@@ -543,7 +436,6 @@ def check_owner_identity(registry_path=None):
                     }
                 )
 
-    # --- flag 7: entry_rid_stale ---
     rid_counts: dict[str, int] = {}
     for branch in branches:
         rid = branch.get("registry_id", "")
@@ -589,22 +481,7 @@ def check_owner_identity(registry_path=None):
 def fix_owner_identity(registry_path=None, dry_run=False):
     """Reconcile owner + identity in the sealed registry.
 
-    Actions (each idempotent, refuses to alter correct state):
-      - Seat missing owner (first agent)
-      - Restore missing metadata.id (consensus from passports, else mint)
-      - Align passports to metadata.id
-      - Mint per-citizen entry registry_id where missing or stale-duplicate
-      - Resolve multi-owner (keep first-created, unseat others)
-
-    Deliberately NEVER moves a seated owner — ``owner_wrong_branch`` is a
-    flag-only diagnostic for human decision.
-
-    Args:
-        registry_path: Path to registry (None = auto-discover from CWD).
-        dry_run: If True, print planned changes but don't write.
-
-    Returns:
-        dict with ``actions`` (list of change descriptions) and ``applied`` (bool).
+    Each action is idempotent. Never moves a seated owner: ``owner_wrong_branch`` is for a human.
     """
     if registry_path is None:
         registry_path = find_registry()
@@ -621,7 +498,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
     actions: list[str] = []
     registry_changed = False
 
-    # --- restore missing metadata.id (majority-restore or mint) ---
+    # Restore metadata.id from a strict passport majority, else mint.
     if not metadata_id:
         passport_id_counts: dict[str, int] = {}
         for branch in branches:
@@ -656,7 +533,6 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         reg_data.setdefault("metadata", {})["id"] = metadata_id
         registry_changed = True
 
-    # --- resolve multi-owner: keep earliest-created, unseat the rest ---
     owners = [b for b in branches if b.get("owner") is True]
     if len(owners) > 1:
         owners_sorted = sorted(owners, key=lambda b: b.get("created", "9999-99-99"))
@@ -665,7 +541,6 @@ def fix_owner_identity(registry_path=None, dry_run=False):
             actions.append(f"Unseat extra owner: {extra.get('name', '?')}")
             registry_changed = True
 
-    # --- seat missing owner (canonical heuristic) ---
     current_owners = [b for b in branches if b.get("owner") is True]
     if not current_owners and branches:
         chosen = pick_owner_branch(branches, project_root)
@@ -674,7 +549,6 @@ def fix_owner_identity(registry_path=None, dry_run=False):
             actions.append(f"Seat owner: {chosen.get('name', '?')}")
             registry_changed = True
 
-    # --- mint per-citizen entry registry_id where missing or stale ---
     rid_counts: dict[str, int] = {}
     for branch in branches:
         rid = branch.get("registry_id", "")
@@ -698,7 +572,6 @@ def fix_owner_identity(registry_path=None, dry_run=False):
             actions.append(f"Mint citizen UID for {branch.get('name', '?')}: {old_display} → {new_rid[:8]}…")
             registry_changed = True
 
-    # --- align passports to metadata.id ---
     passport_actions: list[str] = []
     for branch in branches:
         branch_dir = project_root / branch.get("path", "")
@@ -724,14 +597,8 @@ def fix_owner_identity(registry_path=None, dry_run=False):
 
     actions.extend(passport_actions)
 
-    # --- migrate retired citizen_class values → the live class names ---
-    #
-    # This block used to rewrite "builder" → "aipass_framework". That target is
-    # now itself a DEAD name (DPLAN-0319 R4), so the migration was writing one
-    # retired value over another. Both retired values now land on "specialist";
-    # "manager" is a live class and is left alone. LEGACY_CLASSES is the single
-    # source of the old→new map — the same table refuse_legacy_class() quotes,
-    # so a rename can never be applied here and refused there.
+    # LEGACY_CLASSES is the same table refuse_legacy_class() quotes, so a rename is never applied
+    # here and refused there.
     for branch in branches:
         branch_dir = project_root / branch.get("path", "")
         passport_path = branch_dir / ".trinity" / "passport.json"
@@ -749,13 +616,8 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         passport.setdefault("identity", {})["citizen_class"] = new_class
         if not dry_run:
             try:
-                # `sync-registry --fix` is a SECOND fleet-write path onto live
-                # passports (sync_registry.py:174 calls this with dry_run=False),
-                # and it lands the same rename the 2.0 migration does. Back the
-                # file up first, through the migration's own helper: same
-                # .pre_v2_backup name, and it never overwrites an existing one,
-                # so whichever path touches a passport first owns the true
-                # pre-migration original and the other cannot destroy it.
+                # Same backup helper as the 2.0 migration: it never overwrites, so whichever path
+                # touches a passport first keeps the true pre-migration original.
                 backup_passport(passport_path)
                 atomic_write_text(passport_path, json.dumps(passport, indent=2, ensure_ascii=False))
             except (IOError, OSError) as e:

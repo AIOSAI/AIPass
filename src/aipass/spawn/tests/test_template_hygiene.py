@@ -3,7 +3,7 @@
 # Description: Canaries for what the shipped templates are allowed to contain
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
@@ -26,21 +26,13 @@ from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.spawn import handle_create
 
-# A template is a blueprint: every file in it is copied into every new citizen,
-# forever. Build artifacts that drift in are invisible — they cost nothing to
-# create and never fail anything — so they need a standing test rather than a
-# review pass.
-#
-# `.pytest_cache/` drifted in this way (flagged 2026-08-07, still shipping on
-# 2026-08-13): the copy engine skips `__pycache__` but not `.pytest_cache`, so
-# every branch was born carrying spawn's own cached test node IDs
-# (DPLAN-0291 audit).
+# Every file in a template is copied into every new citizen, and a stray build artifact never fails
+# anything on its own, so it needs a standing test.
 
 ARTIFACT_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 
-# __pycache__ reappears in the template tree whenever anything imports its .py files.
-# It is gitignored and never copied, so its presence on disk proves nothing — the tree
-# canaries below check only the artifacts that persist and get committed.
+# __pycache__ reappears whenever the template's .py files are imported, and is gitignored and never
+# copied, so the tree canaries check only the artifacts that persist and get committed.
 TRANSIENT_DIRS = {"__pycache__"}
 PERSISTENT_ARTIFACTS = ARTIFACT_DIRS - TRANSIENT_DIRS
 
@@ -50,13 +42,7 @@ TEMPLATE_CLASSES = sorted(get_available_classes())
 def test_the_class_registry_declares_two_classes_and_the_collector_finds_both():
     """The floor under every ``TEMPLATE_CLASSES`` parametrize in this file, derived twice.
 
-    ``TEMPLATE_CLASSES`` is computed at collection time by
-    ``get_available_classes()``. A collector that came back empty would turn the
-    four parametrized canaries below into SKIPPED, and the summary would read
-    green — so the count is pinned here from the RAW SOURCE of
-    ``class_registry``, read as an AST rather than by calling the collector that
-    is under judgement. A collector blinded to one class fails this, not the
-    canaries it silently emptied.
+    An empty collector would turn the canaries into SKIPPED and read green, so the count comes from the source AST.
     """
     import ast
 
@@ -114,12 +100,7 @@ def test_no_build_artifacts_tracked_in_registry(class_name):
 
 
 def test_copy_engine_skips_artifact_dirs():
-    """``SKIP_NAMES`` contains every name in ``ARTIFACT_DIRS``, so no cache dir is ever copied.
-
-    The copy engine decides what a newborn is born with by name, and this is
-    the one place that decision is written down. A cache dir missing from
-    ``SKIP_NAMES`` is copied into every citizen minted after it.
-    """
+    """``SKIP_NAMES`` contains every name in ``ARTIFACT_DIRS``, so no cache dir is ever copied."""
 
     assert ARTIFACT_DIRS <= set(SKIP_NAMES)
 
@@ -132,19 +113,7 @@ RETIRED_TEMPLATE_TESTS = ("test_json_handler.py",)
 def test_retired_starter_tests_are_not_reintroduced(class_name, filename):
     """A retired starter suite must not come back — the template stamps every newborn.
 
-    test_json_handler.py shipped six shim-pin tests into every citizen until
-    2026-09-07. The fleet folded all 89 instances of those six identities into
-    two parametrised tests in @seedgo's json handler contract suite (FPLAN-0491),
-    and this template was the last place the stamp still lived, so it went to
-    spawn's tests/.archive/ under FPLAN-0492. Coverage did not go with it: that
-    suite discovers shims by globbing the installed package for
-    apps/handlers/json/json_handler.py, and a newborn's shim is byte-identical to
-    the pinned canonical at mint (measured 2026-09-07 on a throwaway citizen:
-    sha256 3456b766, the pinned value), so it is picked up by the next contract
-    run without shipping a copy of the tests.
-
-    This pins the ABSENCE. Re-adding the file here would regrow the twins one
-    citizen at a time, which is exactly the shape the fold was undoing.
+    @seedgo's json handler contract suite covers every shim by globbing the installed package.
     """
     template = get_template_dir(class_name)
 
@@ -165,16 +134,8 @@ def test_spawn_package_ships_no_artifact_dirs():
     assert found == []
 
 
-# ---------------------------------------------------------------------------
-# Mint completeness — a truncated template must refuse, never mint quietly
-# ---------------------------------------------------------------------------
-
-# The exact files the repo-root .gitignore swallowed out of the (then) project_agent
-# template until 2026-08-17: blanket rules for .ai_mail.local/, DASHBOARD.local.json,
-# logs/ and artifacts/ with no negation for that template. A fresh clone got 12 of 18
-# files, and the mint copied what it found without a word of complaint. That template
-# retired to templates/.archive/ with DPLAN-0319 R3; the casualty LIST did not, because
-# the gitignore rules that caused it still apply to the one template that replaced it.
+# The files the repo-root .gitignore swallows from a template (blanket rules for .ai_mail.local/,
+# DASHBOARD.local.json, logs/, artifacts/): a fresh clone lacks them, and the mint must refuse.
 FRESH_CLONE_CASUALTIES = (
     ".ai_mail.local/inbox.json",
     ".ai_mail.local/README.md",
@@ -188,10 +149,7 @@ FRESH_CLONE_CASUALTIES = (
 def _truncated_template(tmp_path, class_name=None, casualties=FRESH_CLONE_CASUALTIES):
     """Copy a real template, then remove files the way a fresh clone would.
 
-    The manifest (.spawn/.template_registry.json) is deliberately KEPT — it is
-    tracked, so a truncated clone still carries the template's own declaration
-    of what it should contain. That declaration is the only evidence left that
-    the missing files ever existed.
+    The manifest is KEPT: it is tracked, so it is the only evidence the missing files existed.
     """
     import shutil
 
@@ -204,15 +162,7 @@ def _truncated_template(tmp_path, class_name=None, casualties=FRESH_CLONE_CASUAL
 
 
 class TestMintCompleteness:
-    """A mint that cannot deliver the template's own contract must fail out loud.
-
-    Found the hard way: with those six files gitignored, `create` against the
-    truncated template exited 0, printed "Agent created", registered the citizen
-    — and produced an empty artifacts/ (no birth certificate) and an empty
-    .ai_mail.local/ (no
-    inbox.json, so the citizen could not receive mail at all). Silent success on
-    a broken citizen is the opposite of "code is truth — fail honestly".
-    """
+    """A mint that cannot deliver the template's own contract must fail out loud."""
 
     def test_truncated_template_refuses_and_names_what_is_missing(self, tmp_path):
         """The refusal must name every file that never landed."""
@@ -289,11 +239,7 @@ class TestMintCompleteness:
         assert (target / ".ai_mail.local" / "inbox.json").is_file()
 
     def test_custom_template_without_manifest_still_mints(self, tmp_path):
-        """A bare `--template <dir>` carries no manifest — that is not a defect.
-
-        Nothing declares a contract, so the only honest check is that everything
-        the directory does contain arrived. It does, so this must succeed.
-        """
+        """A bare `--template <dir>` carries no manifest — that is not a defect."""
 
         template = tmp_path / "bare_template"
         (template / "apps").mkdir(parents=True)
@@ -354,12 +300,9 @@ class TestExpectedMintPaths:
         assert verify_mint(template, target, {}, "minted") == ["artifacts/birth_certificate.json"]
 
     def test_the_docs_page_skeleton_is_never_stamped_into_a_newborn(self, tmp_path):
-        """The skeleton @seedgo renders lives beside the citizen tree, never in it (DPLAN-0351).
+        """The skeleton @seedgo renders lives beside the citizen tree, never in it.
 
-        Everything under templates/citizen/ is copied into every newborn, and a
-        skeleton stamped as a docs/ page would be a placeholder page scored in
-        every branch. Beside the tree, no walk reaches it: not the copy, not the
-        manifest a mint is verified against, not the update engine that walks it.
+        Inside templates/citizen/ it would be copied, claimed by the manifest, and scored as a page in every branch.
         """
         import json
 
@@ -379,7 +322,7 @@ class TestExpectedMintPaths:
         assert not list(target.rglob(skeleton.name)), "a newborn carries the skeleton"
 
     def test_a_newborns_docs_index_has_the_index_shape(self, tmp_path):
-        """docs/README.md is born as back-link, title, one line - and no pages yet (DPLAN-0351)."""
+        """docs/README.md is born as back-link, title, one line - and no pages yet."""
 
         target = tmp_path / "indexed"
         result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
@@ -396,8 +339,7 @@ class TestExpectedMintPaths:
     def test_a_newborns_readme_has_the_fleet_shape(self, tmp_path):
         """H1 the branch in capitals, seedgo's eight sections in order, a dated foot between rules.
 
-        The section list is read from seedgo's readme_check at assert time, never
-        copied here: when seedgo moves the shape, this pin moves with it.
+        The section list is read from seedgo's readme_check at assert time, never copied here.
         """
         import datetime
 
@@ -431,10 +373,6 @@ class TestExpectedMintPaths:
         dangling = [link for link in links if not (target / link).exists()]
         assert dangling == [], f"links that dangle in a newborn: {dangling}"
 
-
-# =============================================================================
-# The docs page skeleton - the one source @seedgo's docs_page standard renders
-# =============================================================================
 
 README_BACK_LINK = "[<- Back to the README](../README.md)"
 

@@ -3,7 +3,7 @@
 # Description: Tests for the apps.modules package gateway re-exports
 # Version: 1.1.3
 # Created: 2026-08-28
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
@@ -27,31 +27,12 @@ from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as _cl
 from aipass.spawn.apps.handlers.docs_page import docs_page_template as _docs_page_module_docs_page_template
 from aipass.spawn.apps.modules import docs_page_template, get_template_dir, refuse_legacy_class
 
-# ``apps/handlers/__init__.py`` refuses cross-branch handler imports at import
-# time, and its own refusal message points the caller at
-# ``aipass.spawn.apps.modules``. Until this gateway existed there was nothing to
-# point at for the class registry, so @seedgo's architecture check carried a
-# drift-pinned MIRROR of the class table (their commit 5ffc468b) — which makes
-# the auditor a fleet-wide single point of failure the moment spawn renames a
-# class.
-#
-# These pins guard the contract that lets that mirror die:
-#
-#     from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-#
-# The gateway is a re-export, never a reimplementation. The identity pins below
-# (``is`` the handler's own callable) exist so that a second copy of the logic
-# cannot be introduced here without a test going red — a gateway that drifts from
-# its handler is the same failure the mirror was, one layer closer in.
+# @seedgo imports the class registry through this gateway instead of keeping a mirror; the
+# ``is`` pins fail if a second copy of the logic appears here and drifts from the handler.
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SPAWN_BRANCH = Path(__file__).resolve().parents[1]
-
-
-# =============================================================================
-# The import path @seedgo is told to use
-# =============================================================================
 
 
 class TestGatewayImportPath:
@@ -72,10 +53,7 @@ class TestGatewayImportPath:
     def test_gateway_import_works_from_outside_the_spawn_branch(self, tmp_path):
         """The whole point: a caller outside this branch must get through.
 
-        Run as its own process from a file that is NOT under src/aipass/spawn/
-        — the same position seedgo's auditor imports from — so the pin measures
-        a real outside caller rather than an in-suite import that is already
-        inside the branch.
+        A separate process from a file outside src/aipass/spawn/, where seedgo's auditor imports from.
         """
         probe = tmp_path / "probe_gateway_from_outside.py"
         probe.write_text(
@@ -102,7 +80,7 @@ class TestGatewayImportPath:
         assert result.stdout.split() == ["citizen", "True"]
 
     def test_the_docs_page_door_is_public_and_answers_an_outside_caller(self, tmp_path):
-        """@seedgo's docs_page render reads the skeleton through this door (DPLAN-0351)."""
+        """@seedgo's docs_page render reads the skeleton through this door."""
 
         assert "docs_page_template" in modules.__all__
 
@@ -128,11 +106,6 @@ class TestGatewayImportPath:
 
         assert result.returncode == 0, f"the docs page door refused an outside caller:\n{result.stderr}"
         assert result.stdout.strip() == "[<- Back to the README](../README.md)"
-
-
-# =============================================================================
-# Re-export, never a reimplementation
-# =============================================================================
 
 
 class TestGatewayIsTheHandlerItself:
@@ -201,11 +174,6 @@ class TestSignaturesAreStable:
         assert sig.return_annotation is str
 
 
-# =============================================================================
-# Behaviour through the gateway
-# =============================================================================
-
-
 class TestGetTemplateDirThroughGateway:
     """What the auditor actually asks it."""
 
@@ -262,10 +230,7 @@ class TestRefuseLegacyClassThroughGateway:
     def test_every_retired_name_names_both_values(self, retired, replacement):
         """The refusal ties THIS retired name to THIS replacement.
 
-        A bare ``replacement in message`` could not fail: the sentence names both
-        'manager' and 'specialist' for every retired name. The pairing is the claim.
-
-        Mutant: now means '{replacement}' -> now means 'specialist' -> red.
+        A bare ``replacement in message`` cannot fail: every refusal names both classes.
         """
 
         message = refuse_legacy_class(retired)
@@ -293,27 +258,16 @@ class TestRefuseLegacyClassThroughGateway:
         assert refuse_legacy_class("AIPASS_Framework")
 
 
-# =============================================================================
-# The guard the gateway exists to answer
-# =============================================================================
-
-
 class TestHandlerGuard:
     """The fence the gateway exists to answer, pinned through the real import.
 
-    The 2026-08-28 pin here recorded a hole: ``apps/__init__.py`` imported the
-    handlers eagerly, so the fence never saw a foreign caller and a direct
-    handler import from outside spawn succeeded. Spawn's fence leg (DPLAN-0404)
-    removed that line and installed fence v2.1; the private-name case that
-    called ``_guard_branch_access`` directly is gone, and the hole pin is turned
-    to the closed state. The full shape table is tests/test_handlers_fence.py.
+    The full shape table is tests/test_handlers_fence.py.
     """
 
     def test_a_direct_handler_import_from_outside_spawn_is_refused(self, tmp_path):
         """A script outside any aipass tree imports a handler and is refused, by name.
 
-        The probe lives in tmp_path and runs there, in a fresh interpreter, so the
-        fence's first import in that process is this one.
+        A fresh interpreter in tmp_path, so the fence's first import in that process is this one.
         """
         probe = tmp_path / "probe_handler_from_outside.py"
         probe.write_text(

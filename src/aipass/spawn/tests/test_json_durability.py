@@ -3,7 +3,7 @@
 # Description: Torn-write durability tests for spawn's JSON/text write paths
 # Version: 1.1.3
 # Created: 2026-08-16
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
@@ -40,58 +40,30 @@ logger = logging.getLogger(__name__)
 
 
 def _update_merge(world) -> str:
-    """Run the public update once over merge_world; answer what it did to config.json.
-
-    "updated", "unchanged" or "error", read off update_branch's own report (fleet
-    green leg 7: these pins used to call the private update_ops._merge_json).
-    """
+    """Run the public update once over merge_world; answer what it did to config.json."""
     result = update_ops.update_branch("branch", dry_run=False, registry_path=world["registry"])
     if result["errors"]:
         return "error"
     return "updated" if "config.json" in [d["branch_path"] for d in result["_updates_detail"]] else "unchanged"
 
 
-# The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
-# target in place, so a concurrent reader can land between the truncate and the
-# write and read an empty or half-written file. Measured on spawn's passport write
-# path before the fix: 38.17% of concurrent reads came back unusable.
-#
-# The required shape is stage-to-temp (``tempfile.mkstemp(dir=target.parent)``),
-# write, ``fsync``, close, then ``os.replace`` — an atomic same-filesystem rename.
-# A reader either sees the whole old file or the whole new file, never a gap.
-#
-# Each test class states which sites were genuinely RED before the fix; the sites
-# that were already safe (``meta_ops`` / ``regenerate_registry_ops`` staged through
-# a temp already) say so rather than pretending.
+# ``open(path, 'w')`` / ``write_text`` truncate in place, so a concurrent reader can read an empty or
+# half-written file. Required shape: mkstemp(dir=target.parent), write, fsync, close, os.replace.
 
-
-# =============================================================================
-# HELPERS
-# =============================================================================
 
 RACE_SECONDS = 0.6
 
-# How long run() will wait for BOTH sides to prove they are live before it opens
-# the timed window. On an idle machine the first read and write land inside a few
-# milliseconds and this costs nothing; on a loaded one it converts "the scheduler
-# was busy" from a red into a little latency. Generous on purpose — the deadline
-# exists to bound a hang, not to tune a race.
+# Bounds the wait for both sides to go live; generous on purpose, it bounds a hang, not a race.
 RACE_WARMUP_SECONDS = 20.0
 
-# Marker embedded in the payload a test wants to fail. Both fault injectors below
-# fire only when they see it, so pytest's own I/O is never disturbed.
+# The fault injectors fire only on this marker, so pytest's own I/O is never disturbed.
 SENTINEL = "SPAWN-DURABILITY-FAULT-a1b2c3"
 
 
 class _ModuleView:
     """atomic_write's OWN binding of a stdlib module, with named functions swapped.
 
-    Every fault and spy in this file is installed as ``monkeypatch.setattr(aw,
-    "os", _ModuleView(os, replace=...))`` — the consuming module's name, never an
-    attribute on the shared ``os`` / ``tempfile`` module, which would reach every
-    thread in the process (same rule as the ``aw.time`` stub below). Every write
-    site under test routes through atomic_write_text, so this one binding is the
-    whole surface. Anything not overridden falls through to the real module.
+    Patch the consuming module's binding, never the shared ``os`` / ``tempfile``: that reaches every thread.
     """
 
     def __init__(self, real, **overrides):
@@ -105,9 +77,7 @@ class _ModuleView:
 class _Racer:
     """Runs writer threads against reader threads over one target file.
 
-    Readers classify every read as OK / EMPTY / UNPARSEABLE. A durable write path
-    yields zero EMPTY and zero UNPARSEABLE reads no matter how the threads
-    interleave.
+    A durable write path yields zero EMPTY and zero UNPARSEABLE reads however the threads interleave.
     """
 
     def __init__(self, target: Path, write_once, writers: int = 1, readers: int = 2):
@@ -124,10 +94,7 @@ class _Racer:
         self.warmed_up = False
         self._stop = False
         self._lock = threading.Lock()
-        # One-way flags, set by the threads the instant they first succeed, so
-        # run() can watch the race come alive. The per-thread counters above are
-        # only merged at join time, which is far too late to wait on. Events, so
-        # run() blocks on the real condition and wakes the instant it holds.
+        # Set on first success so run() can wait for a live race; the counters merge only at join.
         self._saw_read = threading.Event()
         self._saw_write = threading.Event()
 
@@ -135,15 +102,9 @@ class _Racer:
         n = 0
         effective = 0
         while not self._stop:
-            # Same 1ms yield as the reader, same reason: a zero-delay write loop
-            # keeps an os.replace nearly always in flight, and Windows share-mode
-            # semantics then refuse every reader open — a slow CI runner can end
-            # the whole race with reads == 0 (Windows CI, 2026-08-28). No fleet
-            # workload rewrites a config file in a hot loop either.
+            # A zero-delay loop keeps a replace in flight and Windows then refuses every reader open.
             time.sleep(0.001)
-            # write_once returns True only when it actually rewrote the target.
-            # Counting loop turns instead would let a race pass vacuously when
-            # the call under test decided there was nothing to write.
+            # Count real rewrites, not loop turns, or a race passes vacuously.
             if self.write_once(n) is True:
                 effective += 1
                 self._saw_write.set()
@@ -154,33 +115,17 @@ class _Racer:
     def _reader(self):
         reads = empty = unparseable = missing = refused = 0
         while not self._stop:
-            # Yield between polls — Windows share-mode semantics, not tuning.
-            # A zero-delay spin-reader holds the target open at near-100% duty
-            # cycle, and Python opens files without FILE_SHARE_DELETE, so on
-            # Windows an os.replace onto a handle a reader holds fails with
-            # WinError 5. Two spinning readers can then collide with every one
-            # of the writer's bounded retry attempts and starve a correct retry
-            # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
-            # models a real reader — no fleet workload spin-reads a config file
-            # — and weakens no content check below. At the top of the pass so
-            # the `continue` paths yield too: a refused open means a replace is
-            # in flight, exactly when re-spinning hurts most.
+            # Windows share-mode: a spinning reader starves os.replace's bounded retry (WinError 5).
             time.sleep(0.001)
             try:
                 raw = self.target.read_text(encoding="utf-8")
             except FileNotFoundError:
-                # Counted, not swallowed. "The file was not there yet" and "the
-                # reader never got a turn" both end with reads == 0, and the
-                # skip reason has to be able to tell them apart — that is the
-                # difference between a slow starter and a starved scheduler.
+                # Counted so the skip reason can tell a slow starter from a starved scheduler.
                 missing += 1
                 logger.debug("racer: target absent: %s", self.target)
                 continue
             except PermissionError as exc:
-                # Windows refuses the open while a concurrent os.replace is in
-                # flight. A refused open is share-mode semantics — not a torn
-                # document, and not counted as a read. Counted separately so a
-                # run starved by share-mode collisions says so out loud.
+                # Share-mode refusal during a replace: not a torn read, counted apart.
                 refused += 1
                 logger.debug("racer: open refused: %s (%s)", self.target, exc)
                 continue
@@ -192,8 +137,6 @@ class _Racer:
             try:
                 json.loads(raw)
             except json.JSONDecodeError as exc:
-                # The defect this whole file exists to catch: a half-written
-                # document. Recorded, and assert_clean fails on it.
                 unparseable += 1
                 logger.warning("racer: torn read of %s: %s", self.target, exc)
         with self._lock:
@@ -206,20 +149,14 @@ class _Racer:
     def run(self, seconds: float = RACE_SECONDS, warmup: float = RACE_WARMUP_SECONDS):
         """Start the threads, wait until both sides are live, then race.
 
-        The timed window used to open the instant the threads were started, so
-        on a loaded machine a 0.6s race could end with the reader never having
-        been scheduled at all — reads == 0, and assert_clean called that a
-        defect (@prax, whole-tree batch run 2026-08-30). Waiting for first
-        contact first turns that from a red into a few milliseconds of latency
-        on an idle box and a bounded wait on a busy one.
+        Without the wait a loaded machine can end the window before the reader is ever scheduled.
         """
         threads = [threading.Thread(target=self._writer) for _ in range(self.writers)]
         threads += [threading.Thread(target=self._reader) for _ in range(self.readers)]
         for t in threads:
             t.start()
 
-        # Block on the real condition, bounded by ONE shared deadline: the two
-        # waits together never exceed ``warmup``.
+        # One shared deadline: the two waits together never exceed ``warmup``.
         deadline = time.monotonic() + warmup
         self._saw_read.wait(timeout=warmup)
         self._saw_write.wait(timeout=max(0.0, deadline - time.monotonic()))
@@ -234,10 +171,7 @@ class _Racer:
     def final_state(self) -> str:
         """One direct read of the target, after the threads have stopped.
 
-        Returns exactly one of: ``absent`` (never created — not a tear),
-        ``empty`` / ``unparseable`` (torn, right now, on disk), ``unreadable``
-        (the open itself was refused — share-mode or permissions, which is not
-        evidence of tearing and must not be convicted as such), or ``whole``.
+        One of absent, empty, unparseable, unreadable (refused open, not a tear), or whole.
         """
         try:
             raw = self.target.read_text(encoding="utf-8")
@@ -256,21 +190,8 @@ class _Racer:
     def assert_clean(self):
         """Fail on a torn file; SKIP when the race never happened.
 
-        Order matters and is the whole safety argument: the tear check runs
-        FIRST, so an observed tear fails loudly no matter how few reads or
-        writes the run managed. Only once the file is known clean does an
-        unexercised race downgrade to a skip — a test may say "I could not
-        measure this", but it may never say "this is broken" when that is what
-        it means.
-
-        The tear check reads the target DIRECTLY here as well as through the
-        reader threads' samples. @prax asked for exactly this when reviewing
-        the skip ordering (2026-08-31), and it was a real gap rather than a
-        formality: the readers poll on a 1ms yield, so a file left torn by the
-        final write can go unsampled entirely — and a run ending with reads == 0
-        would then take the skip branch while the target sits torn on disk. One
-        open at assert time cannot be starved by the scheduler. A missing target
-        is still not a tear; never-created is the case the skip exists for.
+        The tear check runs first, and reads the target directly too (sampling readers can miss the
+        final write), so a skip can never mask a tear.
         """
         final = self.final_state()
         bad = self.empty + self.unparseable
@@ -303,17 +224,7 @@ class _Racer:
 def write_fails_midway(monkeypatch):
     """Make the write syscall fail for any payload carrying SENTINEL.
 
-    Models a disk filling up between the open and the write — the exact failure
-    the atomic shape exists to survive. The fault is installed on atomic_write's
-    own ``os`` binding (``_ModuleView``), which is the staged temp write every
-    site under test reaches. A durable path loses the temp file and keeps the
-    target.
-
-    This used to also swap ``pathlib.Path.write_text`` process-wide, to be honest
-    against the pre-fix raw sites. Those sites are gone, and
-    TestNoRawTruncatingWritesInSource reds the day one grows back; a site that
-    regressed past atomic_write would also escape this fault entirely, so the
-    "failed write" tests below would see a write that SUCCEEDED and go red.
+    Models a disk filling up mid-write; a durable path loses the temp file and keeps the target.
 
     Mutant: os.unlink(tmp_path) -> pass (temp orphaned on failure) -> red (2 tests).
     """
@@ -332,8 +243,6 @@ def write_fails_midway(monkeypatch):
 @pytest.fixture
 def mkstemp_spy(monkeypatch):
     """Record every ``tempfile.mkstemp`` call's staging directory.
-
-    Installed on atomic_write's own ``tempfile`` binding, not the shared module.
 
     Mutant: mkstemp(dir=path.parent) -> mkstemp(dir=path.parent.parent) -> red (7 tests).
     """
@@ -357,9 +266,6 @@ def _stray_temps(directory: Path):
     return sorted(
         p.name for p in directory.iterdir() if p.is_file() and (p.suffix == ".tmp" or p.name.startswith("tmp"))
     )
-
-
-# ----- fixtures building each real call site's on-disk world -----------------
 
 
 def _make_registry(tmp_path: Path, metadata_id: str, branches: list) -> Path:
@@ -423,12 +329,7 @@ def passport_world(tmp_path):
 
 @pytest.fixture
 def merge_world(tmp_path, monkeypatch):
-    """A one-branch project the public update merges ONE JSON file into.
-
-    The template holds config.json; the branch holds its copy and a passport for
-    its class; the registry is handed in by registry_path, and get_template_dir
-    answers the tmp template. Nothing here reaches a living branch.
-    """
+    """A one-branch project the public update merges ONE JSON file into; no living branch is reached."""
     tpl = tmp_path / "template"
     tpl.mkdir()
     template = tpl / "config.json"
@@ -463,20 +364,8 @@ def spawned_branch(tmp_path):
     return branch
 
 
-# =============================================================================
-# 1. CONCURRENT READERS NEVER SEE A TORN FILE
-# =============================================================================
-
-
 class TestConcurrentReaderNeverSeesTornFile:
-    """The core property, driven through the real call sites.
-
-    RED before the fix: passport (sync_registry_ops), template registry
-    (file_ops), JSON merge (update_ops) — all three raw ``write_text``.
-    Already GREEN before the fix: branch meta (meta_ops) and template registry
-    regeneration (regenerate_registry_ops), which staged through a temp and
-    renamed. Those two are kept as regression pins, not as red-first evidence.
-    """
+    """The core property, driven through the real call sites."""
 
     def test_passport_write_is_never_read_torn(self, passport_world):
         """sync_registry_ops.fix_owner_identity — another citizen's identity file."""
@@ -484,8 +373,7 @@ class TestConcurrentReaderNeverSeesTornFile:
         reg = passport_world["registry"]
 
         def write_once(n):
-            # Rotate metadata.id so every pass finds the passport out of sync
-            # and actually rewrites it.
+            # Rotate metadata.id so every pass actually rewrites the passport.
             data = json.loads(reg.read_text(encoding="utf-8"))
             data["metadata"]["id"] = f"metadata-id-{n:06d}"
             reg.write_text(json.dumps(data), encoding="utf-8")
@@ -511,11 +399,7 @@ class TestConcurrentReaderNeverSeesTornFile:
         dest = merge_world["dest"]
 
         def write_once(n):
-            # deep_merge lets existing values win, so a merge only rewrites dest
-            # when the template carries a key dest lacks. Reset dest through the
-            # already-atomic shared handler each round: that reset can never be
-            # the source of a torn read, so any torn read the readers see came
-            # from _merge_json's own write.
+            # Reset through the already-atomic handler, so any torn read comes from the merge's own write.
             json_handler.write_json(dest, {"section": {"existing": "value"}, "pad": ["x" * 40] * 20})
             template = merge_world["template"]
             template.write_text(json.dumps({"section": {"from_template": True, f"round_{n}": n}}), encoding="utf-8")
@@ -552,20 +436,8 @@ class TestConcurrentReaderNeverSeesTornFile:
         _Racer(target, write_once).run().assert_clean()
 
 
-# =============================================================================
-# 2. NO STAGED TEMP FILE SURVIVES
-# =============================================================================
-
-
 class TestNoTempLitterSurvives:
-    """A landed write leaves the target and nothing else.
-
-    RED before the fix: the failed-regeneration case — regenerate_registry_ops
-    had no cleanup in its except arm, so a failed write orphaned
-    ``.template_registry.tmp`` in the template's .spawn/ directory forever.
-    The success cases were green before (raw write_text stages nothing) and are
-    kept so the fix cannot introduce litter of its own.
-    """
+    """A landed write leaves the target and nothing else."""
 
     def test_successful_passport_write_leaves_no_temp(self, passport_world):
 
@@ -586,7 +458,7 @@ class TestNoTempLitterSurvives:
         assert _stray_temps(spawned_branch / ".spawn") == []
 
     def test_failed_registry_regeneration_leaves_no_temp(self, tmp_path, monkeypatch):
-        """RED before the fix: orphaned .template_registry.tmp after a failure."""
+        """A failed regeneration must not orphan .template_registry.tmp."""
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
@@ -607,21 +479,11 @@ class TestNoTempLitterSurvives:
         assert _stray_temps(spawned_branch / ".spawn") == []
 
 
-# =============================================================================
-# 3. A FAILED WRITE DOES NOT DESTROY THE EXISTING TARGET
-# =============================================================================
-
-
 class TestFailedWriteKeepsOldContent:
-    """When the write dies midway the previous file must survive intact.
-
-    RED before the fix: passport and JSON merge — raw ``write_text`` had already
-    truncated the target to zero bytes before the failure surfaced.
-    Already GREEN before: branch meta (the failure hit the temp, not the target).
-    """
+    """When the write dies midway the previous file must survive intact."""
 
     def test_helper_raises_on_write_failure(self, tmp_path, monkeypatch):
-        """The shared helper must RAISE, never swallow. RED by absence pre-fix."""
+        """The shared helper must RAISE, never swallow."""
 
         target = tmp_path / "thing.json"
         target.write_text('{"old": true}\n', encoding="utf-8")
@@ -634,26 +496,10 @@ class TestFailedWriteKeepsOldContent:
         assert _stray_temps(tmp_path) == []
 
     def test_failed_passport_write_keeps_old_passport(self, passport_world, monkeypatch):
-        """RED before the fix: the citizen's identity file was left empty.
+        """The failed write must leave the citizen's identity file intact, never empty.
 
-        The durability property is unchanged and still the whole point: the write
-        that FAILS must leave the previous file intact, never a truncated husk.
-
-        What changed is the snapshot this used to compare against. ``fix_owner_identity``
-        makes TWO independent writes to this passport, and only the first one carries
-        SENTINEL:
-
-          1. align citizenship.registry_id to the registry's metadata.id — the
-             registry id IS the sentinel here, so this write is the one that dies;
-          2. migrate a retired identity.citizen_class to its live replacement
-             (DPLAN-0319 extended this from builder→aipass_framework to
-             aipass_framework→specialist). The fixture passport says
-             "aipass_framework", so this write legitimately fires and legitimately
-             SUCCEEDS — it carries no sentinel and nothing is failing it.
-
-        A flat ``== before`` therefore asserted the second write never happened,
-        which is a claim about the migration, not about durability. The fields are
-        pinned separately instead, so a regression in either one is named.
+        fix_owner_identity writes this passport twice: the registry_id align carries SENTINEL and dies;
+        the retired-class migration carries none and succeeds. Fields are pinned separately.
         """
 
         passport = passport_world["passport"]
@@ -669,11 +515,9 @@ class TestFailedWriteKeepsOldContent:
 
         after = json.loads(passport.read_text(encoding="utf-8"))
 
-        # DURABILITY — the failed write neither truncated the file nor landed.
         assert passport.read_text(encoding="utf-8") != ""
         assert after["citizenship"] == before["citizenship"]
         assert after["citizenship"]["registry_id"] != SENTINEL
-        # The bulky payload the truncation used to destroy survives byte for byte.
         assert after["identity"]["traits"] == before["identity"]["traits"]
 
         # The one legitimate difference: the separate, successful class migration.
@@ -681,7 +525,7 @@ class TestFailedWriteKeepsOldContent:
         assert after == {**before, "identity": {**before["identity"], "citizen_class": "specialist"}}
 
     def test_failed_json_merge_keeps_old_file(self, merge_world, monkeypatch):
-        """RED before the fix: the branch's live JSON was left empty."""
+        """The branch's live JSON must survive a failed merge write."""
 
         dest = merge_world["dest"]
         merge_world["template"].write_text(json.dumps({"section": {"marker": SENTINEL}}), encoding="utf-8")
@@ -706,18 +550,10 @@ class TestFailedWriteKeepsOldContent:
         assert json.loads(target.read_text(encoding="utf-8")) == before
 
 
-# =============================================================================
-# 4. THE TEMP FILE IS STAGED IN THE TARGET'S OWN DIRECTORY
-# =============================================================================
-
-
 class TestTempStagedBesideTarget:
     """os.replace is only atomic within one filesystem.
 
-    Staging in /tmp (a different mount on most Linux boxes) would turn the final
-    swap into an EXDEV failure, so every site must pass ``dir=target.parent`` to
-    mkstemp. All of these are RED before the fix — the raw sites never called
-    mkstemp at all, and the temp-staging sites used a hand-built ``.tmp`` name.
+    Staging in /tmp (often another mount) turns the swap into EXDEV, so every site passes dir=target.parent.
     """
 
     @staticmethod
@@ -776,9 +612,7 @@ class TestTempStagedBesideTarget:
     def test_update_addition_stages_beside_target(self, tmp_path, mkstemp_spy):
         """update_ops' ADDITION arm — a missing template file written into a branch."""
 
-        # Driven through the helper directly: the ADDITION arm needs a whole
-        # branch + registry world, and the property under test is the staging
-        # directory, which the helper alone decides.
+        # The helper alone decides the staging directory, so it is driven directly.
         dest_dir = tmp_path / "branch" / "docs"
         dest_dir.mkdir(parents=True)
         atomic_write_text(dest_dir / "new.md", "# added\n")
@@ -786,20 +620,8 @@ class TestTempStagedBesideTarget:
         self._assert_staged_in(mkstemp_spy, dest_dir)
 
 
-# =============================================================================
-# 5. STAGING NAMES DO NOT COLLIDE BETWEEN CONCURRENT WRITERS
-# =============================================================================
-
-
 class TestStagingNameIsUnique:
-    """A fixed ``.tmp`` name makes two concurrent writers stomp each other.
-
-    Both of these are RED before the fix: meta_ops used
-    ``meta_path.with_suffix('.tmp')`` and regenerate_registry_ops used
-    ``registry_path.with_suffix('.tmp')`` — the same path on every call, so two
-    writers interleaving would each write half of one temp file and then both
-    rename it over the target.
-    """
+    """A fixed ``.tmp`` name makes two concurrent writers stomp each other."""
 
     def test_branch_meta_staging_names_are_unique(self, spawned_branch, mkstemp_spy):
 
@@ -822,11 +644,6 @@ class TestStagingNameIsUnique:
         names = [c["path"].name for c in mkstemp_spy if Path(c["dir"]) == template_dir / ".spawn"]
         assert len(names) == 5, f"expected 5 staged temps, recorded {len(names)}: {names}"
         assert len(set(names)) == 5, f"staging name collided across writes: {names}"
-
-
-# =============================================================================
-# 6. THE HELPER'S OWN CONTRACT
-# =============================================================================
 
 
 class TestAtomicWriteHelper:
@@ -904,34 +721,17 @@ class TestAtomicWriteHelper:
         assert _stray_temps(tmp_path) == []
 
 
-# =============================================================================
-# 6b. THE WINDOWS SHARING-VIOLATION RETRY
-# =============================================================================
-
-
 class TestReplaceRetriesThroughSharingViolations:
     """os.replace is atomic, but on Windows it is not always *available*.
 
-    Windows gives no FILE_SHARE_DELETE on Python's open, so os.replace raises
-    PermissionError for as long as ANY reader holds the target open. Readers
-    hold those handles for microseconds, so a short bounded retry converges —
-    but an unretried swap simply dies, and on 2026-08-18 one stuck swap starved
-    a whole CI run into 45-minute cancels.
-
-    Linux never produces that error on an open file, so every test here injects
-    it. The injection is the only cross-platform proof the retry path exists —
-    and a standards audit found _replace_with_retry had ZERO tests fleet-wide
-    before this sweep, so these are the first eyes on it.
+    Python opens without FILE_SHARE_DELETE, so on Windows os.replace raises PermissionError while any
+    reader holds the target; a short bounded retry converges. Linux never raises it, so tests inject it.
     """
 
     def test_helper_exists_and_is_bounded(self, tmp_path, monkeypatch):
         """The SHIPPED bound and backoff, measured through the public write.
 
-        Read off what atomic_write_text actually does against a swap that never
-        unblocks, rather than off the private constants: more than one attempt
-        (a single attempt is not a retry), and every wait between them is a real,
-        non-zero wait (a zero backoff spins instead of waiting). aw's own ``time``
-        binding is stubbed, so the ~200ms of shipped backoff is recorded, not slept.
+        More than one attempt, every wait non-zero; aw's own ``time`` is stubbed so nothing sleeps.
 
         Mutant: _REPLACE_ATTEMPTS = 40 -> _REPLACE_ATTEMPTS = 1 -> red.
         """
@@ -976,9 +776,6 @@ class TestReplaceRetriesThroughSharingViolations:
     def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
         """A swap that never unblocks raises instead of retrying forever.
 
-        The bound is set by the test (3), so the count is compared to a number
-        this test chose, not read back off the product.
-
         Mutant: attempt == _REPLACE_ATTEMPTS - 1 -> attempt == _REPLACE_ATTEMPTS - 2 -> red.
         """
 
@@ -1004,25 +801,8 @@ class TestReplaceRetriesThroughSharingViolations:
     def test_retry_waits_between_attempts(self, tmp_path, monkeypatch):
         """The backoff is used, not just declared.
 
-        Deleting the sleep leaves a busy spin that passes every other pin in
-        this class: it still retries, still bounds, still raises. But 40
-        immediate attempts finish inside a microsecond and never outlast the
-        reader handle the retry exists to wait out — the retry stops being a fix
-        and becomes decoration. It survived a mutation run on 2026-08-18.
-        Counting the sleeps pins the wait without asserting on wall-clock time,
-        which would be flaky on a loaded runner.
-
-        The patch replaces atomic_write's OWN ``time`` name, not the attribute
-        on the shared time module. ``setattr(aw.time, "sleep", ...)`` reached
-        every thread in the process, so this list collected foreign sleeps too
-        and the test failed intermittently in a full-suite run (seen
-        2026-08-30). Same rule as the logger fixture: patch the consuming
-        module's binding, not something upstream of it. atomic_write uses
-        nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
-        carrying only ``sleep`` is the whole surface.
-
-        Bound and backoff are set by the test (4 attempts, 0.25s), so the
-        expected list is built from numbers this test chose.
+        A busy spin passes every other pin here but never outlasts the reader handle. Patches aw's own
+        ``time`` binding: patching the shared module collects other threads' sleeps.
 
         Mutant: time.sleep(_REPLACE_BACKOFF_SECONDS) -> time.sleep(0) -> red.
         """
@@ -1045,7 +825,6 @@ class TestReplaceRetriesThroughSharingViolations:
         with pytest.raises(PermissionError):
             aw.atomic_write_text(target, "new\n")
 
-        # One wait between each pair of attempts — never after the last, which raises.
         assert sleeps == [0.25, 0.25, 0.25]
 
     def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
@@ -1068,17 +847,8 @@ class TestReplaceRetriesThroughSharingViolations:
         assert _stray_temps(tmp_path) == []
 
 
-# =============================================================================
-# 7. save_registry ALREADY ROUTES THROUGH THE ATOMIC SHARED HANDLER
-# =============================================================================
-
-
 class TestSaveRegistryStaysAtomic:
-    """registry.save_registry delegates to json_handler.write_json (already atomic).
-
-    GREEN before and after — this pins that it is not quietly rewritten into a
-    raw write later.
-    """
+    """registry.save_registry delegates to json_handler.write_json (already atomic)."""
 
     def test_save_registry_delegates_to_json_handler(self, tmp_path, monkeypatch):
 
@@ -1106,20 +876,9 @@ class TestSaveRegistryStaysAtomic:
         _Racer(reg, write_once).run().assert_clean()
 
 
-# =============================================================================
-# 8. SOURCE GUARD — the raw truncating shape must not grow back
-# =============================================================================
-
-# Directories under apps/ the guard does not scan. Parked code does not run, so
-# a revivable file carrying an old shape is not a live defect; flagging it would
-# only pressure someone into weakening the guard. Both are clean today. dropbox
-# joins them under the owner of the project's rule of 09-27 20:42, in
-# paraphrase: a dropbox is ignored by all, nothing looks into it and no process
-# runs out of it, a sandbox like .archive. That this walk skips it, and by these
-# three literal names, is spawn's decision (DPLAN-0354 leg 3).
+# Parked code does not run, and nothing looks into a dropbox; flagging them would only weaken the guard.
 _UNSCANNED_DIRS = {"__pycache__", ".archive", "dropbox"}
 
-# A mode string with 'w' or 'a' truncates or appends the target in place.
 _TRUNCATING_MODE_CHARS = ("w", "a")
 
 
@@ -1130,12 +889,7 @@ def _apps_dir() -> Path:
 def _is_lock_target(call: "ast.Call", source: str) -> bool:
     """True when the opened path is a lock file rather than a data file.
 
-    Lock files are exactly what a truncating open is FOR: flock needs a real fd
-    on a file it owns, and the file's contents are never read. Keying the
-    exemption on the opened path (``lock_path``) rather than on the variable the
-    fd lands in is what makes it precise — a lock opened into a differently
-    named variable stays exempt, and a data write that happens to land in a
-    variable named ``*_fd`` does not.
+    Keyed on the opened path, not the variable the fd lands in, so the exemption stays precise.
     """
     if not call.args:
         return False
@@ -1146,11 +900,7 @@ def _is_lock_target(call: "ast.Call", source: str) -> bool:
 class _RawWriteFinder(ast.NodeVisitor):
     """Collects truncating write calls from one module's AST.
 
-    AST rather than a regex because it sees calls, not text: ``os.fdopen(...)``
-    is an attribute named ``fdopen`` and can never be mistaken for the builtin
-    ``open``, which is what the ``(?<!fd)`` negative lookbehind exists to prevent
-    in a regex-based guard. Comments, docstrings, and this file's own prose
-    describing the bad shape are likewise invisible to it.
+    AST, not regex: it sees calls, so ``os.fdopen`` and prose about the bad shape never match.
     """
 
     def __init__(self, source: str, rel_path: str):
@@ -1210,12 +960,7 @@ class TestNoRawTruncatingWritesInSource:
     """Guard: the shape that caused this whole defect cannot reappear in apps/."""
 
     def test_guard_never_walks_into_a_dropbox(self, tmp_path):
-        """The walk skips a dropbox; the same write beside it is still reported.
-
-        The owner of the project's rule (09-27 20:42, paraphrase): nothing looks
-        into a dropbox. The skip by name is spawn's decision, DPLAN-0354 leg 3.
-        Ran red before _UNSCANNED_DIRS named dropbox: the planted write was reported.
-        """
+        """The walk skips a dropbox; the same write beside it is still reported."""
         raw_write = "def save(path, text):\n    with open(path, 'w', encoding='utf-8') as f:\n        f.write(text)\n"
         dropbox = tmp_path / "apps" / "dropbox"
         dropbox.mkdir(parents=True)
@@ -1314,17 +1059,10 @@ class TestNoRawTruncatingWritesInSource:
         )
 
 
-# =============================================================================
-# THE HARNESS ITSELF — a race that never raced must not read as a defect
-# =============================================================================
-
-
 class _Turns:
     """A write_once stand-in that records the turn numbers the racer hands it.
 
-    The verdict is fixed (wrote / did not write) because the test is about the
-    racer's report, not a write; what the test can assert is that the racer
-    consulted it, turn after turn, from 0 (fleet green leg 7, spawn's decision).
+    The verdict is fixed; the test asserts the racer consulted it turn after turn, from 0.
     """
 
     def __init__(self, wrote: bool):
@@ -1344,24 +1082,8 @@ def _never_called(n: int) -> bool:
 class TestRacerReportsWeatherHonestly:
     """The guard "the race proves nothing" is right; failing for it is not.
 
-    MEASURED by @prax 2026-08-30, running every json/log test file in the tree
-    as one batch from the repo root: 1380 passed, 1 failed — ours, and it failed
-    on its OWN guard (``reads == 0``), not on a torn read. It passes 3/3 alone.
-    Under a loaded machine the reader thread simply never gets scheduled inside
-    a 0.6s window, so the harness genuinely never read; the guard correctly
-    refuses to claim the race was exercised, and then reports that refusal as a
-    defect in the code under test. That reds a whole-repo run for weather.
-
-    A test may say "I could not measure this". It may not say "this is broken"
-    when what it means is "I could not measure this" — the same species as
-    tonight's migrate-passports empty scan reporting an all-clear.
-
-    So the harness now does two things: it WAITS for evidence that both sides
-    are live before the timed window opens (weather becomes latency, not
-    failure), and if even that deadline expires it SKIPS with the counters in
-    the reason. What it never does is let a skip mask a torn read — the tear
-    check runs first, so an observed tear fails loudly no matter how few reads
-    or writes the run managed.
+    Under load the reader may never be scheduled; reads == 0 is "could not measure", not "broken".
+    The harness waits for both sides, then skips with counters; the tear check still runs first.
     """
 
     def test_a_race_that_never_read_skips_rather_than_fails(self, tmp_path):
@@ -1408,12 +1130,7 @@ class TestRacerReportsWeatherHonestly:
         assert f"writes={len(turns.seen)}" in reason
 
     def test_an_observed_tear_still_fails_even_with_one_read(self, tmp_path):
-        """ORDERING PIN — the tear check must run BEFORE the skip.
-
-        Without this, a run unlucky enough to be short would skip past a real
-        torn read and call the day green. This is the pin that makes the skip
-        safe to add.
-        """
+        """ORDERING PIN — the tear check must run BEFORE the skip."""
         racer = _Racer(tmp_path / "irrelevant.json", _never_called)
         racer.reads = 1
         racer.empty = 1
@@ -1439,11 +1156,7 @@ class TestRacerReportsWeatherHonestly:
         assert racer.reads > 0 and racer.writes > 0
 
     def test_warmup_waits_for_a_slow_starter(self, tmp_path):
-        """A target that appears late still gets a real race, not a skip.
-
-        This is the half that turns weather into latency: the timed window does
-        not open until both sides have proven they are live.
-        """
+        """A target that appears late still gets a real race, not a skip."""
 
         target = tmp_path / "slow.json"
 
@@ -1463,10 +1176,7 @@ class TestRacerReportsWeatherHonestly:
 def _target(tmp_path: Path, content):
     """A _Racer over a throwaway file with a known final state, zero samples.
 
-    ``content=None`` leaves the target absent. The counters start at zero on
-    purpose: these pins measure what the DIRECT read contributes, so the
-    sampling readers must have contributed nothing. Lives in the test's own
-    tmp_path, never a bare system temp dir.
+    ``content=None`` leaves it absent; zero counters isolate what the direct read contributes.
     """
     target = tmp_path / "final_state.json"
     if content is not None:
@@ -1480,12 +1190,7 @@ def _target(tmp_path: Path, content):
 def _verdict(racer):
     """Classify what assert_clean DID: FAILED / SKIPPED / PASSED.
 
-    The pins below must be able to tell a red apart from a skip, and
-    ``pytest.raises(AssertionError)`` cannot: ``pytest.skip`` raises its own
-    exception, which sails straight past the raises block and reports the whole
-    test as SKIPPED — a defeat wearing a pass's clothes. That is the same
-    species @memory killed in their own guard tests on 2026-08-30. Catching
-    both here makes the verdict a value the test asserts on.
+    ``pytest.raises(AssertionError)`` lets a skip sail past and report SKIPPED; this makes it a value.
     """
     try:
         racer.assert_clean()
@@ -1497,20 +1202,9 @@ def _verdict(racer):
 
 
 class TestTheFinalStateIsCheckedDirectly:
-    """@prax's review question, answered by closing it rather than agreeing.
+    """A target torn on disk must fail even when no reader thread sampled it.
 
-    Reviewing the skip ordering, @prax wrote: "If your tear check reads the file
-    directly at the end rather than only through the reader thread's samples,
-    that closes the last thing I would have asked about."
-
-    It did not, and the honest answer was to build it. ``assert_clean`` judged
-    only what the reader THREADS happened to sample, so a target left torn on
-    disk was invisible whenever no sample landed on the write that tore it —
-    and the run then SKIPPED, with the very reasonable-sounding explanation that
-    nothing had been observed. The ordering was already right; the evidence set
-    was too small. A direct read costs one open and cannot be starved by the
-    scheduler, which is the exact condition under which the sampling reader
-    fails.
+    A direct read costs one open and cannot be starved by the scheduler.
     """
 
     def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self, tmp_path):
@@ -1552,18 +1246,8 @@ class TestTheFinalStateIsCheckedDirectly:
     def test_an_unreadable_target_is_not_convicted_as_torn(self, tmp_path):
         """Share-mode / permission refusal is not evidence of tearing.
 
-        The world here is built by chmod, and chmod does not build it
-        everywhere: Windows ignores POSIX mode bits (it wants an ACL), and root
-        reads through them on POSIX. Both were guesses in the first version of
-        this test — it inferred "running as root" from a PASSED verdict, which
-        is a cause read off a symptom, and on the Windows gate the verdict was
-        SKIPPED for a different reason entirely and the assertion below failed
-        (@devpulse, ebb8075d windows-setup).
-
-        So the world is PROBED, not assumed: after the chmod, actually try to
-        read the file. If it still reads, this host cannot build the state and
-        the test says so with what it measured. @memory's ruling, applied —
-        probe the host, do not skipif what a probe can measure.
+        chmod cannot build the state everywhere (Windows ignores mode bits, root reads through), so the
+        host is probed, not assumed.
         """
         with _target(tmp_path, '{"whole": true}') as racer:
             racer.target.chmod(0o000)

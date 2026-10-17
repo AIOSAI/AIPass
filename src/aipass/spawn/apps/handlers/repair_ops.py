@@ -3,14 +3,11 @@
 # Description: Repair handler — move branches, update registry paths, clean pollution
 # Version: 1.0.2
 # Created: 2026-05-15
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Repair handler implementation for project structure fixes.
-
-Contains core logic for moving branches to correct locations, updating
-registry paths without re-creating entries, and detecting/cleaning init
-pollution (duplicate nested directories).
+Reference: docs/registry_and_repair.md
 """
 
 import shutil
@@ -38,43 +35,20 @@ from aipass.spawn.apps.handlers.json import json_handler
 ARCHIVE_EXCLUDE = {".venv", ".git", "__pycache__", ".chroma", "node_modules", ".pytest_cache"}
 
 
-# =============================================================================
-# REGISTRY DISCOVERY
-# =============================================================================
-
 REGISTRY_SUFFIX = "_REGISTRY.json"
 
 
 def _list_registry_candidates(root):
-    """Return what the filesystem lists for ``*_REGISTRY.json`` inside ``root``.
-
-    The body is exactly the glob ``_registry_in`` made inline, same arguments.
-    It exists for the tests: they stand in for a case-insensitive volume's
-    listing here, instead of replacing ``pathlib.Path.glob`` process-wide
-    (spawn's decision, DPLAN-0354 leg 3).
-    """
+    """Return what the filesystem lists for ``*_REGISTRY.json`` inside ``root`` — a test seam for the glob."""
     return root.glob("*" + REGISTRY_SUFFIX)
 
 
 def _registry_in(root):
     """Return the fleet registry directly inside ``root``, or None.
 
-    Filters the glob's results by a case-SENSITIVE suffix check, because the
-    glob alone is not a filter everywhere it runs. On Windows (and on macOS's
-    default case-insensitive volumes) ``glob("*_REGISTRY.json")`` also returns
-    lowercase ``*_registry.json`` files — and ``pathlib``'s ``*`` matches dotted
-    names, unlike a shell glob. Every branch in the fleet carries
-    ``.spawn/.template_registry.json`` and ten ``flow_json`` plan counters, and
-    a dotted name sorts FIRST, so on a case-insensitive volume this lane could
-    hand a template's file-hash counter to the code that repairs registries.
-    Reported by @drone via @devpulse from the round-2 Windows gate, 2026-08-31.
-
-    The check is on the SUFFIX only, never the stem: external projects name
-    their registry after themselves and nothing promises an uppercase stem.
-
-    Picking the first of the sorted matches is inherited behaviour, restated
-    here rather than decided here — one implementation for both call sites so
-    they cannot drift apart, which is the only claim this extraction makes.
+    The suffix is re-checked case-SENSITIVELY: on case-insensitive volumes the glob also returns dotted
+    lowercase ``*_registry.json`` files (``.template_registry.json``), which sort first. Never check the
+    stem: external projects name their registry after themselves.
     """
     root = Path(root)
     for candidate in sorted(_list_registry_candidates(root)):
@@ -83,24 +57,10 @@ def _registry_in(root):
     return None
 
 
-# =============================================================================
-# REGISTRY PATH UPDATE
-# =============================================================================
-
-
 def update_registry_path(registry_path, branch_name, new_path):
     """Update a branch's path in the registry without re-creating the entry.
 
-    Preserves creation date, citizen_number, status, and all other fields.
-    Uses file locking to prevent concurrent corruption.
-
-    Args:
-        registry_path: Path to *_REGISTRY.json
-        branch_name: Branch name (case-insensitive match)
-        new_path: New relative path for the branch
-
-    Returns:
-        True if updated, False if branch not found or error.
+    Returns False if the branch is not found; every other field is preserved.
     """
     registry_path = Path(registry_path)
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
@@ -142,27 +102,11 @@ def update_registry_path(registry_path, branch_name, new_path):
             lock_fd.close()
 
 
-# =============================================================================
-# PASSPORT PATH UPDATE
-# =============================================================================
-
-
 def _update_passport_paths(branch_dir, new_relative_path, project_name=None):
     """Update passport.json branch_info paths after a move.
 
-    Args:
-        branch_dir: New branch directory location
-        new_relative_path: New path relative to project root
-        project_name: Project package name (for module path)
-
-    Returns:
-        True if updated, False only when there is no passport to update (a skip).
-
-    Raises:
-        ValueError: the passport exists but cannot be read as JSON.
-        OSError: the updated passport could not be written.
-        Failure raises rather than answering False, so a skip and a failure
-        can never read the same (spawn's decision, DPLAN-0354 leg 3).
+    Returns False only when there is no passport (a skip); an unreadable passport raises ValueError and
+    a failed write raises OSError, so a skip and a failure never read the same.
     """
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
@@ -196,41 +140,16 @@ def _detect_project_package(branch_rel_path):
     return None
 
 
-# =============================================================================
-# ARTIFACT RELOCATION
-# =============================================================================
-
-
 def _move_chroma(src, dst):
-    """Move the project-root .chroma/ to ``dst``.
-
-    The body is exactly the ``shutil.move`` call ``_relocate_chroma`` made
-    inline, same arguments. It exists for the tests: a pin makes this one move
-    fail here, instead of replacing ``shutil.move`` process-wide (spawn's
-    decision, DPLAN-0354 leg 3).
-    """
+    """Move the project-root .chroma/ to ``dst`` — a test seam, so a pin can fail this one move."""
     return shutil.move(src, dst)
 
 
 def _relocate_chroma(project_root, branch_dir, branches):
     """Move project-root .chroma/ into a branch when only one branch exists.
 
-    Only relocates when .chroma/ exists at project root AND the registry
-    has exactly one branch (the one being moved).
-
-    Args:
-        project_root: Project root directory
-        branch_dir: Target branch directory (already moved)
-        branches: List of branch entries from registry
-
-    Returns:
-        True if relocated, False only when the relocation was skipped (no
-        .chroma/, not exactly one branch, or one already in the branch).
-
-    Raises:
-        OSError: the move itself failed. A failure raises rather than
-        answering False, so it never reads as a skip (spawn's decision,
-        DPLAN-0354 leg 3).
+    Returns False only for a skip (no .chroma/, not exactly one branch, or one already there); a failed
+    move raises OSError, never reads as a skip.
     """
     chroma_src = project_root / ".chroma"
     if not chroma_src.is_dir():
@@ -250,25 +169,10 @@ def _relocate_chroma(project_root, branch_dir, branches):
     return True
 
 
-# =============================================================================
-# BRANCH MOVE
-# =============================================================================
-
-
 def move_branch(branch_name, new_path, registry_path=None, dry_run=False, relocate_artifacts=False):
     """Move a branch to a new location, updating registry and passport.
 
     Archive-first: creates backup before any destructive operation.
-
-    Args:
-        branch_name: Branch name (looked up in registry)
-        new_path: New absolute or relative-to-project-root path
-        registry_path: Path to registry (auto-discovered if None)
-        dry_run: If True, report what would happen without changes
-        relocate_artifacts: If True and project has only 1 branch, move .chroma/ into branch
-
-    Returns:
-        Dict with move results.
     """
     if registry_path is None:
         registry_path = find_registry()
@@ -328,7 +232,6 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
             ],
         }
 
-    # Archive first
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = project_root / ".archive" / "repair_moves" / f"{branch_name}_{timestamp}"
     archive_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -344,7 +247,6 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         logger.error("[repair] Archive failed for %s: %s", branch_name, e)
         return {"success": False, "error": f"Archive failed: {e}"}
 
-    # Move directory
     new_abs_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         shutil.move(str(old_abs_path), str(new_abs_path))
@@ -353,12 +255,9 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         logger.error("[repair] Move failed for %s: %s", branch_name, e)
         return {"success": False, "error": f"Move failed: {e}", "archive_path": str(archive_dir)}
 
-    # Update registry
     reg_updated = update_registry_path(registry_path, branch_name, new_rel_path)
 
-    # Update passport
-    # A helper's False is a skip; its failure raises and is named here, so the
-    # result never reads a failure as a skip (spawn's decision, DPLAN-0354 leg 3).
+    # A helper's False is a skip; its failure raises and is named here, never read as a skip.
     project_name = _detect_project_package(new_rel_path)
     passport_updated = False
     passport_error = None
@@ -368,7 +267,6 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         logger.error("[repair] Failed to update passport paths: %s", e)
         passport_error = str(e)
 
-    # Relocate .chroma into branch if requested and conditions met
     chroma_relocated = False
     chroma_error = None
     if relocate_artifacts:
@@ -397,16 +295,10 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
     }
 
 
-# =============================================================================
-# POLLUTION DETECTION & CLEANUP
-# =============================================================================
-
-
 def _check_nested_pollution(nested_dir, label, project_root, registry_path):
     """Check if a nested duplicate directory is real pollution.
 
-    Returns an issue dict if pollution, or None if the directory is a
-    protected branch (active passport, registry owner, infrastructure floor).
+    None when the directory is a protected branch (active passport, registry owner, infrastructure floor).
     """
     protected, _reason = is_protected(
         nested_dir.name,
@@ -425,18 +317,7 @@ def _check_nested_pollution(nested_dir, label, project_root, registry_path):
 
 
 def detect_pollution(project_root):
-    """Detect init pollution — duplicate nested directories.
-
-    Init pollution: project_name/project_name/ exists (e.g., compass/compass/).
-    Skips directories that are protected branches (active passport, registry
-    owner, or infrastructure floor).
-
-    Args:
-        project_root: Path to the project root directory
-
-    Returns:
-        List of dicts describing pollution issues.
-    """
+    """Detect init pollution — duplicate nested directories (e.g. compass/compass/), skipping protected branches."""
     project_root = Path(project_root)
     issues = []
     project_name = project_root.name
@@ -475,15 +356,7 @@ def detect_pollution(project_root):
 
 
 def cleanup_pollution(project_root, dry_run=False):
-    """Archive and remove detected pollution directories.
-
-    Args:
-        project_root: Path to the project root directory
-        dry_run: If True, report without changes
-
-    Returns:
-        Dict with cleanup results.
-    """
+    """Archive and remove detected pollution directories."""
     project_root = Path(project_root)
     issues = detect_pollution(project_root)
 
@@ -536,24 +409,10 @@ def cleanup_pollution(project_root, dry_run=False):
     }
 
 
-# =============================================================================
-# PROJECT SCAN
-# =============================================================================
-
-
 def repair_project(project_path, dry_run=False):
     """Scan a project for structural issues and report findings.
 
-    Checks:
-    1. Init pollution (duplicate nested dirs)
-    2. Registry path mismatches (registered path doesn't exist on disk)
-
-    Args:
-        project_path: Path to the project root
-        dry_run: If True, report only (same as default — scan is always read-only)
-
-    Returns:
-        Dict with scan results.
+    Read-only either way: init pollution and registered paths missing on disk.
     """
     project_path = Path(project_path).resolve()
     if not project_path.is_dir():

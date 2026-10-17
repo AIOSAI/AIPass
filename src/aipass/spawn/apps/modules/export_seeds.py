@@ -3,25 +3,18 @@
 # Description: Passport seed export — thin CLI layer over seed_ops
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-10-17
 # =============================================
 
 """Export every core citizen's passport seed (TDPLAN-0017).
 
-Thin CLI module that parses arguments and delegates to the seed handler.
-All implementation logic lives in apps/handlers/seed_ops.py.
-
-DRY RUN IS THE DEFAULT, for the same reason ``migrate-passports`` has one: this
-command writes a TRACKED file into eighteen branches at once. ``--confirm`` is
-the only thing that writes, and re-running it is a measured no-op — every seed
-that already matches its live passport reports "current" and is not touched.
+Dry run is the default: this writes a tracked file into every core branch at once.
 """
 
 import argparse
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, err_console, error, header, warning
 
 from aipass.spawn.apps.handlers.json import json_handler
@@ -42,29 +35,13 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "export-seeds").
-        args: List of arguments for the command.
-
-    Returns:
-        True if the command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "export-seeds":
         return False
 
     if not args:
-        # No args → introspection, matching migrate_passports.py: this is the
-        # plugin/dispatch door, not the CLI one. spawn.py routes the CLI
-        # straight to handle_export_seeds, where no args is the (safe,
-        # read-only) dry run.
+        # The dispatch door; spawn.py routes the CLI to handle_export_seeds, where no args is the dry run.
         print_introspection()
         return True
 
@@ -75,34 +52,16 @@ def handle_command(command: str, args: list) -> bool:
     return handle_export_seeds(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_export_seeds(args: list[str]) -> int:
-    """Parse args and export the fleet's passport seeds.
-
-    Args patterns:
-        []                          -> dry run over the live fleet (writes nothing)
-        ["--dry-run"]               -> the same dry run, stated explicitly
-        ["--confirm"]               -> execute (writes/updates each seed)
-        ["--root", "<path>"]        -> scan a different repo root
-        ["--only", "@branch"]       -> restrict to one branch
-
-    Returns exit code (0=clean, 1=one or more seeds could not be exported).
-    """
-    # --help is intercepted BEFORE parse_args: the parser runs with
-    # add_help=False (house shape), so argparse would otherwise treat --help
-    # as an unknown option and exit(2) with its own usage line.
+    """Parse args and export the fleet's passport seeds. Returns 1 if any seed could not be exported."""
+    # Before parse_args: with add_help=False argparse would reject --help as unknown.
     if "--help" in args or "-h" in args:
         print_help()
         return 0
 
     parser = argparse.ArgumentParser(prog="spawn export-seeds", add_help=False)
     parser.add_argument("--confirm", action="store_true")
-    # --dry-run is the DEFAULT behaviour, so the flag changes nothing on its
-    # own. It exists to be typed: it is how a caller asks for the measurement.
+    # A no-op flag (dry run is the default); it exists so a caller can ask for it by name.
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--root", default=None)
     parser.add_argument("--only", default=None)
@@ -125,8 +84,7 @@ def handle_export_seeds(args: list[str]) -> int:
         error(str(exc))
         return 1
 
-    # Every invocation is recorded, dry runs included — a dry run is the
-    # measurement that precedes the GO, and it leaves no other trace.
+    # Dry runs are logged too; they leave no other trace.
     json_handler.log_operation(
         "export_seeds",
         data={
@@ -139,11 +97,6 @@ def handle_export_seeds(args: list[str]) -> int:
 
     _print_receipt(receipt)
     return 1 if receipt["errors"] else 0
-
-
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
 
 
 def print_help():

@@ -6,15 +6,7 @@
 # Modified: {{DATE}}
 # =============================================
 
-"""Tests for {{BRANCH}}'s CLI entry point.
-
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
-
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-"""
+"""Tests for {{BRANCH}}'s CLI entry point."""
 
 import importlib
 import os
@@ -54,9 +46,6 @@ def _run(monkeypatch, argv):
     return branch_entry.main()
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
 
 
 def test_print_introspection_renders_identity_and_help_pointer(capsys):
@@ -78,9 +67,6 @@ def test_print_help_has_usage_and_examples(capsys):
     assert "Examples:" in out
 
 
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -110,9 +96,6 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert branch_entry.__version__ in out
 
 
-# =============================================================================
-# COMMAND ROUTING - SUCCESS AND FAILURE PATHS
-# =============================================================================
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
@@ -159,9 +142,6 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
 
 
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
@@ -179,17 +159,10 @@ def test_subcommand_help_on_unknown_command_exits_nonzero(monkeypatch, stub_modu
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# IMPORT-TIME INFRASTRUCTURE
-# =============================================================================
 
 
 def test_branch_name_is_set_at_import_time(monkeypatch):
-    """The entry point stamps AIPASS_BRANCH_NAME before prax resolves a branch.
-
-    Uses importlib.reload so the module body actually re-executes - asserting on
-    the already-imported module would pass even if the line were deleted.
-    """
+    """The entry point stamps AIPASS_BRANCH_NAME before prax resolves a branch (reload re-runs the body)."""
     monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
 
     reloaded = importlib.reload(sys.modules["aipass.{{BRANCH}}.apps.{{BRANCH}}"])
@@ -199,14 +172,7 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
 
 
 def test_failed_module_import_is_reported_by_its_package_name(monkeypatch, tmp_path, mock_logger):
-    """A module that fails to import is logged once, as an error, by its package name.
-
-    discover_modules imports by the package path only (canary's leg 1, ported in
-    spawn's leg 10). The old body tried the package path, logged an info line,
-    then retried as apps.modules.<stem> and logged the error under that name.
-    Red first against that body at the levels assert; its mutants (the local
-    name restored, the error logged at info) each die at the assert aimed at.
-    """
+    """A module that fails to import is logged once, as an error, by its package name."""
     (tmp_path / "ghost.py").write_text("def handle_command(command, args):\n    return False\n", encoding="utf-8")
     monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
 

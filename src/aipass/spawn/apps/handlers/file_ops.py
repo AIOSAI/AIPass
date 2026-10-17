@@ -3,7 +3,7 @@
 # Description: Template copy and file operations
 # Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Template copy and file rename operations."""
@@ -18,10 +18,7 @@ from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Patterns to skip during template copy.
-# Cache directories belong to whoever ran the tools, never to the new branch —
-# .pytest_cache shipped spawn's own cached node IDs into every citizen until
-# it was added here (DPLAN-0291 audit; see tests/test_template_hygiene.py).
+# Tool caches belong to whoever ran the tools, never to the new branch.
 SKIP_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git", ".template_registry.json"}
 
 
@@ -33,17 +30,7 @@ def ensure_directory(path):
 
 
 def copy_template(template_dir, target_dir, replacements):
-    """
-    Recursively copy template to target, replacing placeholders in text files.
-
-    Args:
-        template_dir: Path to template directory
-        target_dir: Path to target directory
-        replacements: Placeholder mapping dict
-
-    Returns:
-        Tuple of (copied_files, skipped_files) lists
-    """
+    """Recursively copy template to target, replacing placeholders in text files."""
     template_dir = Path(template_dir)
     target_dir = Path(target_dir)
     copied = []
@@ -52,15 +39,11 @@ def copy_template(template_dir, target_dir, replacements):
     for item in _walk(template_dir):
         rel_path = item.relative_to(template_dir)
 
-        # Check exclusions
-        # The listing is read by people, so it is spelled one way on every host:
-        # as_posix(), never str(), which joins with a backslash on Windows while
-        # the "/ (dir)" suffix stays a slash (CI windows, 2026-10-10).
+        # as_posix(), never str(): Windows would mix backslashes with the "/ (dir)" suffix.
         if _should_skip(rel_path):
             skipped.append(rel_path.as_posix())
             continue
 
-        # Apply placeholder replacement to path components
         dest_rel = _replace_path_placeholders(rel_path, replacements)
         dest = target_dir / dest_rel
         listed = dest_rel.as_posix()
@@ -93,21 +76,12 @@ def copy_template(template_dir, target_dir, replacements):
 
 
 def rename_placeholder_paths(target_dir, branch_name):
-    """
-    Rename any remaining {{BRANCH}}_json style directories and files.
-
-    Args:
-        target_dir: Path to spawned branch
-        branch_name: Raw branch folder name
-
-    Returns:
-        List of rename operation strings
-    """
+    """Rename any remaining {{BRANCH}}_json style directories and files."""
     target_dir = Path(target_dir)
     lower = branch_name.lower().replace("-", "_")
     renamed = []
 
-    # Rename directories first (bottom-up to avoid path invalidation)
+    # Bottom-up, so renaming a parent does not invalidate a child's path.
     dirs_to_rename = []
     for d in sorted(target_dir.rglob("*"), reverse=True):
         if d.is_dir() and "{{BRANCH}}" in d.name:
@@ -120,7 +94,6 @@ def rename_placeholder_paths(target_dir, branch_name):
             d.rename(new_path)
             renamed.append(f"{d.name} -> {new_name}")
 
-    # Rename files
     for f in target_dir.rglob("*"):
         if f.is_file() and "{{BRANCH}}" in f.name:
             new_name = f.name.replace("{{BRANCH}}", lower)
@@ -160,15 +133,7 @@ def _replace_path_placeholders(rel_path, replacements):
 
 
 def regenerate_template_registry(target_dir):
-    """
-    Regenerate .template_registry.json with fresh SHA-256 hashes.
-
-    Scans all files in the spawn directory and builds a new registry
-    with accurate content hashes.
-
-    Args:
-        target_dir: Path to the spawned branch directory
-    """
+    """Regenerate .template_registry.json with fresh SHA-256 hashes."""
     target_dir = Path(target_dir)
     spawn_dir = target_dir / ".spawn"
     if not spawn_dir.exists():
@@ -184,13 +149,9 @@ def regenerate_template_registry(target_dir):
     for item in sorted(target_dir.rglob("*")):
         rel = item.relative_to(target_dir)
 
-        # Skip .spawn internal files and __pycache__
         if ".spawn" in rel.parts or "__pycache__" in rel.parts:
             continue
-        # A dropbox or an .archive is listed, never entered. The owner of the
-        # project's rule of 09-27 20:42, in paraphrase: nothing looks into a
-        # dropbox, a sandbox like .archive. sync-registry --fix runs this over
-        # living branches (spawn's decision, DPLAN-0354 leg 4).
+        # Owner's rule: a dropbox or an .archive is listed, never looked into.
         if {"dropbox", ".archive"}.intersection(rel.parts[:-1]):
             continue
 

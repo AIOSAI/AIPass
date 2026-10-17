@@ -3,15 +3,10 @@
 # Description: Regenerate .template_registry.json for spawn template directories
 # Version: 1.0.3
 # Created: 2026-03-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""Regenerate template registry — walk template directory, hash files, build registry.
-
-Scans a template directory, computes content hashes for all tracked files,
-and builds a fresh .template_registry.json while preserving existing IDs
-where possible (by content hash match first, then by path match).
-"""
+"""Regenerate template registry — walk template directory, hash files, build registry."""
 
 import json
 from datetime import datetime
@@ -21,10 +16,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.meta_ops import compute_file_hash, load_template_registry
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
 _SPAWN_DIR = ".spawn"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 
@@ -32,61 +23,32 @@ _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 # or the registry tracks artifacts the copy engine refuses to copy.
 _SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
 
-# Files to skip within .spawn/ (tracking files that shouldn't be in the registry)
 _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
 
-# Placeholder patterns to detect in filenames
 _BRANCH_PLACEHOLDERS = ("{{BRANCH}}", "{{BRANCHNAME}}")
 
 
 def _registry_date() -> str:
     """Today's date as the registry stamps it (YYYY-MM-DD) — the clock seam.
 
-    The body is exactly the call it replaced. It exists for the tests, and says
-    so: it closes the midnight window of the last_updated date tests (they
-    compared this clock against their own date.today(), so a run that crossed
-    midnight read two days), and it lets tests/test_regenerate_registry_ops.py
-    stop patching the stdlib datetime process-wide. Spawn's decision,
-    DPLAN-0354 leg 3.
+    Tests patch this rather than the stdlib datetime process-wide.
     """
     return datetime.now().strftime("%Y-%m-%d")
 
 
 def _existing_newline(registry_path: Path) -> str:
-    """The line ending the manifest on disk already uses: CRLF if it has one, else LF.
-
-    Args:
-        registry_path: The .template_registry.json about to be written.
-
-    Returns:
-        "\\r\\n" when the existing file holds a CRLF, "\\n" otherwise or when absent.
-    """
+    """The line ending the manifest on disk already uses: CRLF if it has one, else LF (also when absent)."""
     try:
         return "\r\n" if b"\r\n" in registry_path.read_bytes() else "\n"
     except FileNotFoundError:
         return "\n"
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def regenerate_template_registry(template_dir: Path) -> dict:
     """Walk a template directory, hash files, and build a fresh registry.
 
-    Preserves existing file/directory IDs where possible by matching
-    on content hash first, then path, before assigning new IDs.
-
-    Args:
-        template_dir: Absolute path to the template directory (e.g. templates/citizen/).
-
-    Returns:
-        dict with keys: metadata, files, directories, stats.
-        The stats key is extra (not written to JSON) — used for CLI output.
-        On a refusal, a dict with the single key error: the directory is
-        missing, the existing manifest is there but unreadable (nothing is
-        written), or the write failed.
+    The stats key is not written to JSON. On a refusal, returns only {"error": ...}: the directory is
+    missing, the existing manifest is unreadable (nothing written), or the write failed.
     """
     template_dir = Path(template_dir)
 
@@ -94,10 +56,8 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"Template directory does not exist: {template_dir}")
         return {"error": f"Template directory does not exist: {template_dir}"}
 
-    # Load existing registry for ID preservation. A manifest that is there but
-    # cannot be read is refused, not read as absent: absent mints fresh ids, and
-    # those written over a manifest that exists are a wrong identity (spawn's
-    # finding in leg 5 of DPLAN-0354, cured in leg 6).
+    # A manifest that exists but cannot be read is refused, not read as absent: fresh ids written
+    # over it are a wrong identity.
     registry_path = template_dir / _SPAWN_DIR / _TEMPLATE_REGISTRY_FILE
     existing_registry = load_template_registry(template_dir)
     if existing_registry is None and registry_path.exists():
@@ -105,20 +65,10 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"[regenerate-registry] {msg}")
         return {"error": msg}
 
-    # Scan and build new registry entries
     files, directories = _scan_template_directory(template_dir, existing_registry)
 
-    # last_updated tracks the TEMPLATE, not the calendar. A no-change
-    # regenerate keeps the existing date, so re-running the command on a new day
-    # is a byte-identical no-op instead of a one-line diff that describes
-    # nothing. That churn is not merely cosmetic: it is what hid a real defect
-    # for months — metadata.last_updated was the ONLY field that moved on a
-    # no-change run, so tests/test_regenerate_registry_ops.py's shipped-tree
-    # canary compared bytes that were identical whenever the run happened on the
-    # same UTC day as the committed date, and went red the first time CI crossed
-    # midnight (PR #745). Preserving the date is not a way to keep the canary
-    # quiet — the canary now also watches mtime — it removes the daily diff that
-    # made a real rewrite indistinguishable from noise.
+    # last_updated tracks the TEMPLATE, not the calendar: a no-change run keeps the date, so it is a
+    # byte-identical no-op and a real rewrite never hides in daily churn.
     existing_metadata = (existing_registry or {}).get("metadata", {})
     unchanged = (
         bool(existing_registry)
@@ -140,16 +90,11 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         "directories": directories,
     }
 
-    # Write the registry
     spawn_dir = template_dir / _SPAWN_DIR
     spawn_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Staged under a unique mkstemp name rather than a fixed ".tmp": two
-        # concurrent regenerations used to share one staging path, and a failed
-        # write left that path orphaned beside the registry.
-        # The manifest keeps the line endings it already has: a CRLF checkout
-        # (Windows, autocrlf) rewritten as LF is every line changed on a no-op.
+        # The manifest keeps its line endings: a CRLF checkout rewritten as LF changes every line on a no-op.
         # json.dumps escapes newlines inside strings, so every "\n" is a line end.
         text = json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         atomic_write_text(registry_path, text.replace("\n", _existing_newline(registry_path)))
@@ -157,7 +102,6 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"Failed to write template registry: {exc}")
         return {"error": f"Failed to write registry: {exc}"}
 
-    # Build stats for CLI output (not part of the persisted registry)
     existing_file_count = len(existing_registry.get("files", {})) if existing_registry else 0
     existing_dir_count = len(existing_registry.get("directories", {})) if existing_registry else 0
 
@@ -178,42 +122,18 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     return {**registry, "stats": stats}
 
 
-# =============================================================================
-# INTERNAL — SCANNING
-# =============================================================================
-
-
 def _scan_template_directory(
     template_dir: Path,
     existing_registry: dict | None,
 ) -> tuple[dict, dict]:
     """Walk template directory and build files and directories dicts.
 
-    ID preservation strategy:
-      Files:
-        Priority 1 — content hash match in existing registry -> keep ID
-        Priority 2 — path match in existing registry -> keep ID
-        Priority 3 — new file -> assign next available ID (f001, f002, ...)
-
-      Directories:
-        Priority 1 — path match in existing registry -> keep ID
-        Priority 2 — name match in existing registry -> keep ID
-        Priority 3 — new dir -> assign next available ID (d001, d002, ...)
-
-    Args:
-        template_dir: Absolute path to template root.
-        existing_registry: Previously loaded registry dict, or None.
-
-    Returns:
-        Tuple of (files_dict, directories_dict).
+    Files keep an ID by path, then content hash, else get a new one; directories by path, then name.
     """
-    # Build reverse lookups from existing registry
     existing_files = existing_registry.get("files", {}) if existing_registry else {}
     existing_dirs = existing_registry.get("directories", {}) if existing_registry else {}
 
-    # File lookups: hash -> id, path -> id
-    # Index both the full hash AND the 12-char prefix to handle old registries
-    # that used 16-char hashes (file_ops.py) vs current 12-char (compute_file_hash)
+    # Index the 12-char prefix too: old registries stored 16-char hashes.
     hash_to_id: dict[str, str] = {}
     path_to_file_id: dict[str, str] = {}
     for fid, finfo in existing_files.items():
@@ -221,22 +141,18 @@ def _scan_template_directory(
         content_hash = finfo.get("content_hash", "")
         if content_hash and content_hash != "placeholder":
             hash_to_id[content_hash] = fid
-            # Also index the 12-char prefix for cross-format matching
             if len(content_hash) > 12:
                 hash_to_id[content_hash[:12]] = fid
 
-    # Directory lookups: path -> id, name -> id
     path_to_dir_id: dict[str, str] = {}
     name_to_dir_id: dict[str, str] = {}
     for did, dinfo in existing_dirs.items():
         path_to_dir_id[dinfo.get("path", "")] = did
         name_to_dir_id[dinfo.get("name", "")] = did
 
-    # Track which IDs have been claimed
     claimed_file_ids: set[str] = set()
     claimed_dir_ids: set[str] = set()
 
-    # Collect raw entries before assigning IDs
     raw_files: list[dict] = []
     raw_dirs: list[dict] = []
 
@@ -244,11 +160,9 @@ def _scan_template_directory(
         rel = item.relative_to(template_dir)
         rel_str = rel.as_posix()
 
-        # Skip excluded directories and their contents
         if any(part in _SKIP_DIRS for part in rel.parts):
             continue
 
-        # Skip tracking files within .spawn/ (but allow README.md etc.)
         if ".spawn" in rel.parts and item.is_file() and item.name in _SKIP_SPAWN_FILES:
             continue
 
@@ -274,12 +188,9 @@ def _scan_template_directory(
                 }
             )
 
-    # Assign IDs to files with three-pass global matching.
-    # Path first (stable), then hash (handles renames), then new IDs.
     files: dict[str, dict] = {}
     unmatched_files: list[dict] = []
 
-    # Pass 1: path matching (deterministic — same path keeps same ID)
     for entry in raw_files:
         path = entry.get("path", "")
         if path and path in path_to_file_id:
@@ -290,7 +201,6 @@ def _scan_template_directory(
                 continue
         unmatched_files.append(entry)
 
-    # Pass 2: hash matching for remaining files (catches renames)
     still_unmatched: list[dict] = []
     for entry in unmatched_files:
         content_hash = entry.get("content_hash", "")
@@ -302,17 +212,14 @@ def _scan_template_directory(
                 continue
         still_unmatched.append(entry)
 
-    # Pass 3: new IDs for truly new files
     for entry in still_unmatched:
         fid = _next_id("f", claimed_file_ids)
         claimed_file_ids.add(fid)
         files[fid] = entry
 
-    # Assign IDs to directories with two-pass matching
     directories: dict[str, dict] = {}
     unmatched_dirs: list[dict] = []
 
-    # Pass 1: path matching
     for entry in raw_dirs:
         path = entry.get("path", "")
         if path and path in path_to_dir_id:
@@ -323,7 +230,6 @@ def _scan_template_directory(
                 continue
         unmatched_dirs.append(entry)
 
-    # Pass 2: name matching for remaining dirs
     still_unmatched_dirs: list[dict] = []
     for entry in unmatched_dirs:
         name = entry.get("name", "")
@@ -335,7 +241,6 @@ def _scan_template_directory(
                 continue
         still_unmatched_dirs.append(entry)
 
-    # Pass 3: new IDs for truly new dirs
     for entry in still_unmatched_dirs:
         did = _next_id("d", claimed_dir_ids)
         claimed_dir_ids.add(did)
@@ -345,21 +250,10 @@ def _scan_template_directory(
 
 
 def _next_id(prefix: str, claimed: set[str]) -> str:
-    """Generate the next sequential ID with the given prefix.
-
-    Scans f001..f999 or d001..d999 to find the first unclaimed slot.
-
-    Args:
-        prefix: "f" for files, "d" for directories.
-        claimed: Set of already-claimed IDs.
-
-    Returns:
-        Next available ID string (e.g. "f027").
-    """
+    """Generate the next sequential ID with the given prefix (f001..f999, d001..d999)."""
     for i in range(1, 1000):
         candidate = f"{prefix}{i:03d}"
         if candidate not in claimed:
             return candidate
-    # Fallback — should never happen with < 1000 items
     logger.warning(f"ID space exhausted for prefix '{prefix}'")
     return f"{prefix}999"

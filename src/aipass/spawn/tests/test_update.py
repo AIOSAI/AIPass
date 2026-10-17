@@ -3,7 +3,7 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.2.2
 # Created: 2026-03-07
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -21,16 +21,6 @@ from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, rea
 from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
 from aipass.spawn.apps.modules.update import handle_update
 
-# Context kept from the file's original docstring:
-#
-# Tests update_branch(), update_all(), dry-run mode, .py skip behavior,
-# JSON deep merge, first-time adoption, and self-skip logic.
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def template_dir(tmp_path):
@@ -38,7 +28,6 @@ def template_dir(tmp_path):
     tpl = tmp_path / "template"
     tpl.mkdir()
 
-    # Template files
     (tpl / "README.md").write_text("# {{BRANCHNAME}}\nTemplate readme\n", encoding="utf-8")
     (tpl / "DASHBOARD.local.json").write_text(
         json.dumps({"status": "active", "branch": "{{branchname}}", "version": "1.0"}, indent=2),
@@ -52,7 +41,6 @@ def template_dir(tmp_path):
     (tpl / ".archive").mkdir()
     (tpl / "docs").mkdir()
 
-    # .spawn directory with template registry
     spawn_meta = tpl / ".spawn"
     spawn_meta.mkdir()
 
@@ -131,7 +119,6 @@ def branch_dir(tmp_path):
     branch = tmp_path / "test_branch"
     branch.mkdir()
 
-    # Existing files in branch
     (branch / "README.md").write_text("# TEST_BRANCH\nCustom readme with user edits\n", encoding="utf-8")
     (branch / "DASHBOARD.local.json").write_text(
         json.dumps({"status": "running", "branch": "test_branch", "custom_key": "preserved"}, indent=2),
@@ -148,9 +135,7 @@ def branch_dir(tmp_path):
     (branch / "docs").mkdir()
     (branch / ".spawn").mkdir()
 
-    # passport.json — _read_citizen_class requires one (no fallback, DPLAN-0262).
-    # Fully allowlist-complete so generic engine tests don't incidentally trigger
-    # a passport heal diff; test_passport_drift.py and TestPassportHeal cover healing.
+    # Update reads the class from the passport (no fallback); allowlist-complete so no heal diff fires.
     (branch / ".trinity").mkdir()
     (branch / ".trinity" / "passport.json").write_text(
         json.dumps(
@@ -174,7 +159,6 @@ def branch_dir(tmp_path):
 @pytest.fixture
 def mock_registry(tmp_path, branch_dir):
     """Create a mock AIPASS_REGISTRY.json pointing to our test branch."""
-    # We need paths relative to some "repo root"
     repo_root = tmp_path
     rel_path = str(branch_dir.relative_to(repo_root))
 
@@ -217,17 +201,11 @@ def _hash_content(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
 class TestUpdateBranch:
     """Tests for update_branch()."""
 
     def test_first_time_adoption_generates_meta(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Branch with no .branch_meta.json should get one generated."""
-        # Ensure no branch_meta exists
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
         assert not meta_path.exists()
 
@@ -239,12 +217,10 @@ class TestUpdateBranch:
 
         assert result["success"] is True
         assert result["branch"] == "test_branch"
-        # After update, branch_meta should exist
         assert meta_path.exists()
 
     def test_dry_run_does_not_modify(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Dry run should report changes without modifying files."""
-        # Record original state
         readme_before = (branch_dir / "README.md").read_text(encoding="utf-8")
         dashboard_before = (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
 
@@ -257,17 +233,14 @@ class TestUpdateBranch:
         assert result["success"] is True
         assert result["dry_run"] is True
 
-        # Files should be unchanged
         assert (branch_dir / "README.md").read_text(encoding="utf-8") == readme_before
         assert (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8") == dashboard_before
 
-        # No branch_meta created in dry-run on first adoption
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
         assert not meta_path.exists()
 
     def test_py_files_never_overwritten(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Python files should be skipped even when template hash differs."""
-        # Create initial branch_meta with a matching .py file that has a different hash
         spawn_dir = branch_dir / ".spawn"
         spawn_dir.mkdir(exist_ok=True)
 
@@ -280,17 +253,14 @@ class TestUpdateBranch:
         ):
             result = update_branch("test_branch")
 
-        # .py file should still have original content
         assert (branch_dir / "apps" / "branch.py").read_text(encoding="utf-8") == original_content
         assert result["success"] is True
 
     def test_json_deep_merge_preserves_existing(self, tmp_path, template_dir, branch_dir, mock_registry):
         """JSON merge should add new template keys while preserving existing values."""
-        # Set up branch_meta so DASHBOARD.local.json shows as needing update
         spawn_dir = branch_dir / ".spawn"
         spawn_dir.mkdir(exist_ok=True)
 
-        # Write template with a new key
         (template_dir / "DASHBOARD.local.json").write_text(
             json.dumps(
                 {
@@ -304,7 +274,6 @@ class TestUpdateBranch:
             encoding="utf-8",
         )
 
-        # Update template registry hash to differ from branch
         reg_path = template_dir / ".spawn" / ".template_registry.json"
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
         reg["files"]["f002"]["content_hash"] = "different_hash"
@@ -318,10 +287,8 @@ class TestUpdateBranch:
 
         assert result["success"] is True
 
-        # Read merged dashboard
         merged = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
 
-        # Existing values preserved
         assert merged["custom_key"] == "preserved"
         assert merged["status"] == "running"  # existing value kept over template
         assert merged["branch"] == "test_branch"  # existing value kept
@@ -339,10 +306,8 @@ class TestUpdateBranch:
 
     def test_additions_from_template(self, tmp_path, template_dir, branch_dir, mock_registry):
         """New template files not in branch should be added."""
-        # Add a new file to template that doesn't exist in branch
         (template_dir / "docs" / "new_doc.md").write_text("# New doc for {{branchname}}", encoding="utf-8")
 
-        # Add it to template registry
         reg_path = template_dir / ".spawn" / ".template_registry.json"
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
         reg["files"]["f099"] = {
@@ -362,7 +327,6 @@ class TestUpdateBranch:
         assert result["success"] is True
         assert result["additions"] >= 1
 
-        # The new file should exist with placeholders replaced
         new_file = branch_dir / "docs" / "new_doc.md"
         assert new_file.exists()
         content = new_file.read_text(encoding="utf-8")
@@ -409,9 +373,7 @@ class TestNeverUpdateGuard:
 
     def test_passport_identity_content_never_touched_by_heal(self, tmp_path, template_dir, branch_dir, mock_registry):
         """passport.json heals allowlisted fields only — role/purpose/etc. stay create-only,
-        even when the branch_dir fixture's passport is already allowlist-complete and the
-        template disagrees on a non-allowlisted field (role) and on allowlisted ones (email,
-        git_branch, traits) — existing always wins, template's differing values never land."""
+        and on a complete passport existing always wins, even on allowlisted fields."""
         trinity_tpl = template_dir / ".trinity"
         trinity_tpl.mkdir(exist_ok=True)
         (trinity_tpl / "passport.json").write_text(
@@ -453,12 +415,7 @@ class TestNeverUpdateGuard:
 
     def test_ai_mail_local_inbox_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Update must never merge into .ai_mail.local/inbox.json — it is a branch's
-        live mailbox, runtime state in the same category as DASHBOARD.local.json
-        (APLAN-0007 open item 2, devpulse ruling: add .ai_mail.local/ to
-        _NEVER_UPDATE_PREFIXES). The template's inbox.json gains a new key the
-        live branch inbox doesn't have (a plausible real-world template schema
-        change) so a plain deep-merge would detectably touch the file even though
-        no message is ever lost — that touch itself is the thing being refused."""
+        live mailbox; the template's new key makes any deep-merge touch detectable."""
         mail_tpl = template_dir / ".ai_mail.local"
         mail_tpl.mkdir(exist_ok=True)
         (mail_tpl / "inbox.json").write_text(
@@ -498,10 +455,7 @@ class TestNeverUpdateGuard:
     def test_scaffold_test_never_re_added(self, tmp_path, template_dir, branch_dir, mock_registry):
         """tests/test_scaffold.py is create-only — a branch that deleted it never gets it back.
 
-        The .py skip only guards files that already exist; a missing .py still lands via
-        the addition branch. Once a branch has a real suite the scaffold smoke test can
-        only ever skip, so re-adding it re-creates a permanently-inert test (@seedgo
-        ruling, DPLAN-0291 wave 2).
+        The .py skip only guards existing files; a re-added scaffold would be a permanently inert test.
         """
         tests_tpl = template_dir / "tests"
         tests_tpl.mkdir(exist_ok=True)
@@ -572,12 +526,7 @@ class TestNeverUpdateGuard:
 class TestMarkdownIsReportedAndNeverWritten:
     """`.md` drift: update says what it sees and writes nothing (DPLAN-0347).
 
-    Until now an existing `.md` hit no arm at all — not the `.py` skip, not the
-    `.json` merge — so a branch could drift from the template for months with no
-    line anywhere to read it in. The cure is a REPORT, not a write: the fleet
-    README diet is owner judgment by ruling, and an unguarded overwrite here is
-    what DPLAN-0199 (issue #636) was.
-    """
+    A report, not a write: README content is the owner's judgment, and an unguarded overwrite is a known bug."""
 
     def _update(self, template_dir, mock_registry, dry_run=True):
         with (
@@ -650,14 +599,7 @@ class TestMarkdownIsReportedAndNeverWritten:
 class TestUpdateIgnoreIsTheOwnersDecision:
     """`.updateignore` at a branch root — the owner decides what update skips.
 
-    The owner's ruling 2026-09-09: "project owners decide what update skips."
-    @vera's todo 25 is the case: a preview proposed merging template boilerplate
-    into her passport and she did not apply, because the tool could not tell her
-    passport from a template.
-
-    The contract is identical to `aipass init update`'s at project roots, so an
-    owner learns it once. These pins are on THIS door.
-    """
+    Same contract as `aipass init update` at project roots, so an owner learns it once."""
 
     def _ignore(self, branch_dir, text):
         (branch_dir / ".updateignore").write_text(text, encoding="utf-8")
@@ -683,10 +625,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
     ):
         """The whole point, measured as a MOVE: the same file, both worlds.
 
-        Asserting only the protected world would pass against a template that
-        never offered the file in the first place, so the unprotected run is the
-        control and the two are compared.
-        """
+        The unprotected run is the control: the template must be offering the file at all."""
         (branch_dir / "README.md").unlink()
         before = self._update(template_dir, mock_registry)
         offered = [a["template_path"] for a in before["_additions_detail"]]
@@ -714,11 +653,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
     def test_a_protected_json_is_never_merged_and_never_backed_up(
         self, tmp_path, template_dir, branch_dir, mock_registry
     ):
-        """Never written, never merged, never backed up — the third clause has its own pin.
-
-        A merge that was skipped but still left a `.recovery` copy would mean the
-        tool touched a file the owner put out of reach.
-        """
+        """Never written, never merged, never backed up — the third clause has its own pin."""
         dashboard = branch_dir / "DASHBOARD.local.json"
         before = dashboard.read_text(encoding="utf-8")
         self._ignore(branch_dir, "DASHBOARD.local.json\n")
@@ -783,11 +718,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
     def test_comments_and_blank_lines_are_not_patterns(self, tmp_path, template_dir, branch_dir, mock_registry):
         """The parsed PATTERN LIST, not just its downstream effect.
 
-        Asserting only that a commented-out name is still written is a test that
-        passes for the wrong reason, and a mutation proved it: a `#` is a literal
-        to fnmatch, so a comment kept as a pattern can never match a filename and
-        the defect is invisible one layer down. The clause under test is "# comments,
-        blank lines ignored", so the pin reads what the parser returned.
+        A `#` is a literal to fnmatch, so a comment kept as a pattern never matches and hides one layer down.
         """
         self._ignore(
             branch_dir,
@@ -804,11 +735,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
     def test_a_bare_name_matches_at_any_depth(self, tmp_path, template_dir, branch_dir, mock_registry):
         """A pattern with no slash claims that filename wherever it sits.
 
-        This is what an owner writing `passport.json` means; requiring the full
-        `.trinity/` prefix for the common case would make the file a trap. A
-        mutation removing this arm left every other pin in the class green, so it
-        gets one of its own: the target is at DEPTH and the pattern is a bare name.
-        """
+        Removing this arm leaves every other pin in the class green, so the target here sits at depth."""
         nested = template_dir / "docs" / "deep"
         nested.mkdir(parents=True)
         (nested / "notes.md").write_text("# nested\n", encoding="utf-8")
@@ -824,12 +751,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
         assert not any(a["template_path"].endswith("notes.md") for a in result["_additions_detail"])
 
     def test_a_pattern_with_a_slash_claims_only_that_path(self, tmp_path, template_dir, branch_dir, mock_registry):
-        """The other half of the depth rule: naming a path must not widen to a basename.
-
-        Without the "no slash" guard, an owner writing `.trinity/passport.json`
-        would silently also protect any `passport.json` elsewhere in the branch.
-        Over-protection is the safe direction and still not what they asked for.
-        """
+        """The other half of the depth rule: naming a path must not widen to a basename."""
         nested = template_dir / "docs" / "deep"
         nested.mkdir(parents=True)
         (nested / "notes.md").write_text("# nested\n", encoding="utf-8")
@@ -870,11 +792,7 @@ class TestUpdateIgnoreIsTheOwnersDecision:
     def test_an_unreadable_ignore_file_refuses_the_update_and_writes_nothing(
         self, tmp_path, template_dir, branch_dir, mock_registry
     ):
-        """A claim that cannot be read protects nothing, so the update refuses whole.
-
-        Before leg 6 the bad bytes read as an empty list and README.md, named in
-        the file, was handed in (devpulse's ruling on leg 5 of DPLAN-0354).
-        """
+        """A claim that cannot be read protects nothing, so the update refuses whole."""
         (branch_dir / "README.md").unlink()
         (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
         before = self._tree(branch_dir)
@@ -915,13 +833,8 @@ class TestUpdateIgnoreIsTheOwnersDecision:
 class TestUpdateNeverJudgesASandbox:
     """A living branch's dropbox and .archive are never read, compared or merged.
 
-    The rule is the owner of the project's, 09-27 20:42, in paraphrase: a
-    dropbox is ignored by all, a sandbox like .archive. devpulse ruled for
-    update (compass 491, 09-29 00:03): what the template ships there is still
-    handed in when absent, and nothing present there is judged. The skip reads
-    the parts below the branch root, so the whole world stands inside a
-    directory named dropbox (spawn's decision, DPLAN-0354 leg 5).
-    """
+    What the template ships there is still handed in when absent. The world sits under a dir
+    named dropbox because the skip must read only the parts below the branch root."""
 
     _TEMPLATE = {
         "README.md": "# {{BRANCHNAME}}\nTemplate readme\n",
@@ -954,7 +867,7 @@ class TestUpdateNeverJudgesASandbox:
             return update_branch("test_branch", dry_run=False, registry_path=registry)
 
     def test_a_present_dropbox_or_archive_file_is_neither_reported_nor_merged(self, tmp_path):
-        """Ran red before the skip: both READMEs were reported as differs and notes.json merged."""
+        """Both READMEs must not report as differs, nor notes.json merge."""
         tpl, branch, registry = self._world(tmp_path)
         planted = {
             "README.md": "# TEST_BRANCH\nEdited by its owner\n",
@@ -1007,22 +920,18 @@ class TestUpdateAll:
         ):
             results = update_all()
 
-        # Should have results for test_branch but NOT for spawn
         branch_names = [r["branch"] for r in results]
         assert "spawn" not in branch_names
-        # test_branch should be present
         assert "test_branch" in branch_names
 
     def test_update_all_processes_all_branches(self, tmp_path, template_dir, mock_registry):
         """update_all should process each registered branch."""
-        # Create a second branch
         branch2 = tmp_path / "other_branch"
         branch2.mkdir()
         (branch2 / "README.md").write_text("# Other", encoding="utf-8")
         (branch2 / "apps").mkdir()
         (branch2 / "tests").mkdir()
 
-        # Add it to registry
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         rel_path = str(branch2.relative_to(tmp_path))
         reg["branches"].append(
@@ -1060,8 +969,7 @@ class TestHandleUpdate:
     def test_failed_dry_run_prints_no_raw_markup(self, capsys, tmp_path, template_dir, mock_registry):
         """The failure line must not leak literal Rich tags.
 
-        error() writes plain text, so the dry-run mode marker built for console.print()
-        surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
+        error() writes plain text, so a marker built for console.print() would leak its tags.
         """
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -1094,7 +1002,6 @@ class TestHandleUpdate:
         ):
             result = handle_update(["--dry-run", "@test_branch"])
 
-        # dry-run should succeed (exit 0) and not create branch_meta
         assert result == 0
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
         assert not meta_path.exists()
@@ -1118,10 +1025,7 @@ class TestHandleUpdate:
 def _one_file_world(tmp_path, rel, template_text, existing_text):
     """A template holding ONE file at *rel*, and a branch holding its own copy.
 
-    The branch gets a minimal passport when *rel* is not the passport, because
-    update reads its class first. Answers the registry to hand to update_branch
-    and the branch copy (fleet green leg 7: these tests used to call the private
-    _merge_json and _heal_passport; they now go through the public update).
+    Adds a minimal passport when *rel* is not it (update reads the class first). Returns (registry, dest).
     """
     (tmp_path / "template" / rel).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / "template" / rel).write_text(template_text, encoding="utf-8")
@@ -1149,21 +1053,8 @@ def _update_verdict(tmp_path, registry, rel):
 class TestPassportHealIsNotAMigration:
     """FPLAN-0492: the heal repairs three derived fields; it never changes schema.
 
-    The premise handed to spawn was that ``update @vera --dry-run`` half-migrates a
-    schema-1.0.0 passport — adding ``identity.principles`` beside the seven real
-    top-level ones while ``schema_version`` stays 1.0.0. Measured against the real
-    lane on 2026-09-07 it does not: that simulation ran raw ``deep_merge`` over the
-    whole document, and ``.trinity/passport.json`` never reaches ``_merge_json``.
-    ``_heal_passport`` walks _PASSPORT_HEAL_ALLOWLIST one field at a time, and all
-    three of those fields exist in schema 1.0.0 and 2.0.0 alike.
-
-    That is a property of the allowlist's CONTENTS, so it is pinned here: adding a
-    2.0-only field to the allowlist would half-migrate every 1.0 passport it met,
-    and this is the test that says so. Completing a migration — every field the
-    target schema requires, ``schema_version`` bumped in the same write, or a
-    refusal naming the reason — is ``migrate-passports``' job, and
-    ``passport_migration.migrate_document`` raises ``PassportMigrationError``
-    rather than write a partial document.
+    All three allowlisted fields exist in schema 1.0.0 and 2.0.0; a 2.0-only field added to the
+    allowlist would half-migrate every 1.0 passport. Migration is ``migrate-passports``' job.
     """
 
     SCHEMA_1_PASSPORT = {
@@ -1198,8 +1089,7 @@ class TestPassportHealIsNotAMigration:
         assert "citizenship" not in healed
         assert healed == self.SCHEMA_1_PASSPORT
 
-    # A template carrying the three healable fields AND 2.0-only ones, so a heal
-    # that reached past the allowlist would show as an added path.
+    # Carries 2.0-only fields too, so a heal reaching past the allowlist shows as an added path.
     TEMPLATE_2_0 = {
         "document_metadata": {"schema_version": "2.0.0", "version": "2.0.0"},
         "branch_info": {"email": "@template", "git_branch": "dev"},
@@ -1229,9 +1119,7 @@ class TestPassportHealIsNotAMigration:
     def test_a_missing_allowlisted_field_is_healed_and_nothing_else(self, tmp_path, field):
         """Each field the heal allowlist names is one a schema-1.0.0 passport has, and heals alone.
 
-        Pinned through update_branch, the door every user walks (devpulse's ruling,
-        fleet green leg 10), in place of reading the allowlist tuple. A field
-        dropped from the allowlist leaves its passport unchanged and this case red.
+        Pinned through update_branch, not the allowlist tuple: a dropped field leaves this case red.
         """
         existing = self._without({field})
 
@@ -1246,10 +1134,7 @@ class TestPassportHealIsNotAMigration:
     def test_the_heal_adds_exactly_the_three_allowlisted_fields(self, tmp_path):
         """The floor: with all three missing, the heal adds those three paths and no other.
 
-        The template also carries 2.0-only fields (citizenship, identity.principles).
-        An allowlist that grew to one of them adds a 2.0-only path here - a half
-        migration of every 1.0 passport; one that shrank or emptied adds fewer.
-        Either way the set comparison is red.
+        An allowlist that grew adds a 2.0-only path; one that shrank adds fewer. Either way red.
         """
         three = {("branch_info", "email"), ("branch_info", "git_branch"), ("identity", "traits")}
         existing = self._without(three)
@@ -1263,12 +1148,7 @@ class TestPassportHealIsNotAMigration:
     def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
         """An untouched document must not be rewritten because it is SPELLED differently.
 
-        Passports written with ``ensure_ascii=True`` carry ``\\u2014`` where the heal's
-        own serialiser writes ``—``. The old check compared those two texts, so every
-        such passport came back "updated" with a backup and a diff full of dashes and
-        not one changed field (measured on @vera's passport, 2026-09-07: 120 bytes of
-        difference, zero fields). Comparing documents instead of text answers the
-        question that was actually being asked.
+        Compares documents, not text: ``ensure_ascii=True`` output differs in spelling, not in fields.
         """
         rel = ".trinity/passport.json"
         template = {"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}
@@ -1292,11 +1172,7 @@ class TestPassportHealIsNotAMigration:
 class TestTemplateOwnedListsGrow:
     """FPLAN-0492: declared template-owned lists are additive; every other list is not.
 
-    deep_merge keeps a non-empty existing list whole, so a list entry added to a
-    template after a branch was born never reaches that branch. Measured on @vera:
-    the template's ``.registry_ignore.json`` went from two ``ignore_files`` entries
-    to four and an update would have left the branch at two.
-    """
+    deep_merge keeps a non-empty existing list whole, so later template entries would never arrive."""
 
     TEMPLATE_IGNORE = {
         "metadata": {"version": "1.3.0"},
@@ -1347,9 +1223,7 @@ class TestTemplateOwnedListsGrow:
         assert (first, second) == ("updated", "unchanged")
 
     def test_an_undeclared_file_keeps_existing_wins(self, tmp_path):
-        """@devpulse carries 17 fewer deny rules than the template because it is the one
-        citizen allowed to write the repository history. A blanket union would re-deny the
-        fleet's only publishing lane, so permissions are NOT in the declared set."""
+        """Permissions are NOT additive: a blanket union would re-deny @devpulse's publishing lane."""
         template = {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(commit-ish*)"], "allow": []}}
         existing = {"permissions": {"deny": ["Bash(rm -rf*)"], "allow": ["Bash(ls*)"]}}
 

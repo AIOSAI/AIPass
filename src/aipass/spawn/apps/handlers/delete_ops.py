@@ -3,14 +3,10 @@
 # Description: Delete handler — implementation logic for branch deletion
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""Delete handler implementation for branch lifecycle management.
-
-Contains the core deletion logic: resolving branch paths, archiving branch
-directories, removing from registry, and safety checks for protected branches.
-"""
+"""Delete handler implementation for branch lifecycle management."""
 
 import shutil
 from datetime import datetime
@@ -28,17 +24,8 @@ from aipass.spawn.apps.handlers.repair_ops import ARCHIVE_EXCLUDE
 from aipass.spawn.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def _resolve_branch_dir(branch_name, registry_path, registry):
-    """Find branch entry and directory from registry.
-
-    Returns:
-        Tuple of (branch_entry, branch_dir) or (None, None) if not found.
-    """
+    """Find branch entry and directory from registry; (None, None) if not found."""
     project_root = registry_path.parent
     for entry in branches_as_list(registry.get("branches", [])):
         if entry.get("name", "").lower() == branch_name.lower():
@@ -49,11 +36,7 @@ def _resolve_branch_dir(branch_name, registry_path, registry):
 
 
 def _archive_branch(branch_dir, archive_dir):
-    """Copy branch to archive directory. Cleans up on failure.
-
-    Returns:
-        Error message string, or None on success.
-    """
+    """Copy branch to archive directory, cleaning up on failure. Returns error text, None on success."""
     archive_dir.parent.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copytree(str(branch_dir), str(archive_dir), ignore=shutil.ignore_patterns(*ARCHIVE_EXCLUDE))
@@ -77,11 +60,7 @@ def _cleanup_partial_archive(archive_dir):
 
 
 def _remove_from_registry(registry, branch_name, registry_path):
-    """Remove branch from registry and save.
-
-    Returns:
-        True if registry was updated successfully.
-    """
+    """Remove branch from registry and save; True if the save succeeded."""
     branches = registry.get("branches", [])
     if isinstance(branches, dict):
         for key in list(branches.keys()):
@@ -110,25 +89,14 @@ def delete_branch(
     confirm: bool = True,
     dry_run: bool = False,
 ) -> dict:
-    """Archive and deregister a branch.
-
-    SAFETY: Cannot delete spawn, devpulse, or drone (protected).
-    Archive ALWAYS created before deletion.
-
-    Returns:
-        Dict with deletion results.
-    """
-    # 1. Resolve registry (needed for protection check and branch resolution)
+    """Archive and deregister a branch; the archive is always written before removal."""
     registry_path = find_registry()
     if registry_path is None:
-        # No registry means no protection check and no entry to resolve. Refuse
-        # rather than proceed — a delete that cannot consult the protection
-        # layer is exactly the delete that must not run.
+        # Without a registry the protection check cannot run, so the delete must not.
         msg = "Cannot delete: no *_REGISTRY.json found above the current directory"
         logger.error("[delete] %s", msg)
         return _error_result(branch_name, msg)
 
-    # Safety: check protected branches (hardcoded floor + registry owner + active passport)
     protected, reason = is_protected(branch_name, registry_path=registry_path)
     if protected:
         msg = f"Cannot delete '{branch_name}' — protected ({reason})"
@@ -148,16 +116,13 @@ def delete_branch(
         logger.warning(f"[delete] {msg}")
         return _error_result(branch_name, msg)
 
-    # Protection is by NAME; this is the check by LOCATION. A row that resolves
-    # outside the project, or to the project root itself, is refused before the
-    # archive and the rmtree ever see it.
+    # Protection is by name; this guards by location before the archive and removal see the path.
     root = project_root.resolve()
     if branch_dir == root or not branch_dir.is_relative_to(root):
         msg = f"Branch directory {branch_dir} is outside the project {root} - refusing to archive or remove it"
         logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg)
 
-    # 2. Confirmation prompt
     if confirm and not dry_run:
         try:
             answer = input("Are you sure? (y/N): ").strip().lower()
@@ -167,7 +132,6 @@ def delete_branch(
         if answer != "y":
             return _error_result(branch_name, "Cancelled by user")
 
-    # 3. Dry run — report and return
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = project_root / ".archive" / "deleted_branches" / f"{branch_name}_{timestamp}"
 
@@ -181,19 +145,16 @@ def delete_branch(
             "dry_run": True,
         }
 
-    # 4. Create archive
     archive_error = _archive_branch(branch_dir, archive_dir)
     if archive_error:
         return _error_result(branch_name, archive_error)
 
-    # 5. Remove from registry
     registry_updated = _remove_from_registry(registry, branch_name, registry_path)
     if registry_updated:
         logger.info(f"[delete] Removed {branch_name} from registry")
     else:
         logger.error(f"[delete] Failed to update registry after removing {branch_name}")
 
-    # 6. Remove branch directory
     try:
         shutil.rmtree(str(branch_dir))
         logger.info(f"[delete] Removed branch directory: {branch_dir}")
@@ -202,9 +163,7 @@ def delete_branch(
         logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg, str(archive_dir), registry_updated)
 
-    # Retirement is observable, and specifically SAYS whether the citizen's
-    # memory left with it. The archive is the only copy after the rmtree above,
-    # so "trinity carried" is the one fact a later reader cannot re-derive.
+    # The archive is now the only copy, so whether .trinity went with it is logged here.
     archived_trinity = (
         sorted(p.name for p in (archive_dir / ".trinity").glob("*")) if (archive_dir / ".trinity").is_dir() else []
     )

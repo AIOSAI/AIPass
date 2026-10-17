@@ -3,16 +3,12 @@
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
 # Version: 2.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Update handler — path-based template sync engine.
 
-P1 rewrite (TDPLAN-0006, issue #636): replaces the broken ID-based
-change-detection engine with explicit template walking. No renames,
-no pruning, never touches identity/memory files wholesale — the one
-exception is passport.json's narrow allowlist heal (DPLAN-0262), see
-_PASSPORT_HEAL_ALLOWLIST.
+Reference: docs/update_engine.md
 """
 
 import json
@@ -36,27 +32,18 @@ from aipass.spawn.apps.handlers.registry import find_registry, load_registry, br
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
 from aipass.spawn.apps.handlers.json import json_handler
 
-# .ai_mail.local/ is a branch's live mailbox (@ai_mail's data contract, not spawn's) —
-# runtime state in the same category as DASHBOARD.local.json below. update --apply
-# used to deep-merge into another branch's inbox.json; no message was ever lost
-# (deep_merge keeps existing scalars/non-empty lists), but the write itself was the
-# problem: a message arriving between read and write could still be dropped
-# (APLAN-0007 open item 2, devpulse ruling).
+# .ai_mail.local/ is @ai_mail's live mailbox: any write races a message arriving between read and write.
 _NEVER_UPDATE_PREFIXES = (".trinity/", ".ai_mail.local/")
 _NEVER_UPDATE_FILES = frozenset(
     {
         "DASHBOARD.local.json",
         "artifacts/birth_certificate.json",
         ".seedgo/bypass.json",
-        # Scaffold smoke test — ships at create, never re-added. The .py skip below
-        # only covers files that already exist, so a branch that deleted it would
-        # otherwise get it back on every update. Once a branch has a real suite the
-        # scaffold test can only skip, so it cannot inform (@seedgo, DPLAN-0291).
+        # The .py skip only covers existing files; a deleted scaffold test must not come back.
         "tests/test_scaffold.py",
     }
 )
-# A present file below either name is handed in when absent and never judged
-# after (compass 491, DPLAN-0354 leg 5).
+# A file below either name is handed in when absent and never judged after.
 _SANDBOX_DIRS = frozenset({"dropbox", ".archive"})
 _SKIP_TRACKING = frozenset(
     {
@@ -65,44 +52,17 @@ _SKIP_TRACKING = frozenset(
     }
 )
 
-# THE LIST POLICY (FPLAN-0492, 2026-09-07)
-# -----------------------------------------
-# deep_merge is additive for KEYS and existing-wins for VALUES, and a non-empty
-# list counts as a value: an existing list is kept whole, so a list entry ADDED
-# to a template after a branch was born never reaches that branch. Measured on
-# @vera: the template's .registry_ignore.json grew from two ignore_files entries
-# to four, and an update --apply would have left the branch at two while adding
-# the notes block that describes four.
-#
-# Both halves of that behaviour are wanted, for different lists, so the split is
-# declared by name rather than guessed:
-#
-#   TEMPLATE-OWNED lists (below) are additive. They are copy-engine machinery —
-#   spawn writes them, spawn reads them, and a missing entry is a scaffold that
-#   does not work. Template entries the branch lacks are appended; the branch's
-#   own entries and their order are never touched, so a list is only ever grown.
-#
-#   EVERY OTHER LIST stays existing-wins, which is deep_merge's default and
-#   needs no code here. That includes .claude/settings.local.json permissions:
-#   they read like template-owned safety rules, and they are not. Measured
-#   2026-09-07 across 18 branches, 2 differ from the template — @devpulse by 17
-#   deny rules, because it is the one citizen allowed to write the repository
-#   history, and @drone by 3. A union would have re-denied the fleet's only
-#   publishing lane. Permission drift is a branch's own posture; it is reported
-#   by hand, never merged.
+# deep_merge keeps a non-empty existing list whole. Lists named here are spawn's own machinery and
+# grow by the template's new entries; every other list stays existing-wins. Permissions are NOT
+# template-owned: @devpulse deliberately carries fewer deny rules, and a union would re-deny it.
 _TEMPLATE_OWNED_LISTS: dict[str, tuple[str, ...]] = {
     ".spawn/.registry_ignore.json": ("ignore_files", "ignore_patterns", "patterns"),
 }
 
-# passport.json is the one .trinity/ file that heals (DPLAN-0262 fix phase) — every
-# other .trinity/ file (local.json, observations.json, README.md) stays create-only
-# under _NEVER_UPDATE_PREFIXES above.
+# The one .trinity/ file that heals; every other stays create-only under _NEVER_UPDATE_PREFIXES.
 _PASSPORT_HEAL_PATH = ".trinity/passport.json"
 
-# Only these dotted (section, key) pairs are allowed to reach an existing passport.
-# Identity content (role/purpose/what_i_do/what_i_dont_do), citizenship, and
-# document_metadata stay create-only — a passport's voice is its own, not the
-# template's, even when a field the template guarantees is missing.
+# Only these reach an existing passport; a 2.0-only field here would half-migrate every 1.0 passport.
 _PASSPORT_HEAL_ALLOWLIST = (
     ("branch_info", "email"),
     ("branch_info", "git_branch"),
@@ -120,11 +80,6 @@ def _is_never_update(resolved_path: str) -> bool:
     return False
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def update_branch(
     branch_name: str,
     dry_run: bool = False,
@@ -133,23 +88,8 @@ def update_branch(
 ) -> dict:
     """Update a single branch from its class template.
 
-    Path-based engine: walks the template directory, resolves placeholder
-    paths, and for each file decides add/merge/skip. No renames, no pruning.
-    Identity/memory files (DASHBOARD, birth_certificate, bypass.json, and all
-    of .trinity/ except passport.json) are create-only. passport.json heals
-    against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST. Existing
-    .md files are COMPARED and reported (md_matches / md_differs / md_unreadable
-    and _md_detail) and never written — see _md_state.
-
-    registry_path names the registry the branch name is looked up in. None
-    (every CLI caller) keeps the CWD walk through find_registry(). Adoption
-    hands in the registry it just registered into, so the update reaches the
-    branch of THAT project, never a same-named branch of the CWD's project
-    (spawn's decision, DPLAN-0354 leg 3).
-
-    Raises:
-        UpdateIgnoreUnreadable: the branch's .updateignore is there but cannot be
-            read; raised before any write.
+    registry_path None walks up from the CWD; adoption passes its own so a same-named branch elsewhere
+    is never reached. Raises UpdateIgnoreUnreadable before any write.
     """
     errors: list[str] = []
     counts = {
@@ -188,17 +128,11 @@ def update_branch(
 
     replacements = build_replacements_dict(branch_dir, branch_name)
 
-    # THE OWNER'S DECISION, READ FIRST. .updateignore is checked before every other
-    # rule in both walks below — before the create-only set, before the passport
-    # heal, before add/merge — because an owner-protected file is a decision already
-    # made and nothing downstream is entitled to reconsider it. Absent file, empty
-    # list, nothing protected. An unreadable one raises UpdateIgnoreUnreadable
-    # here, before any write (devpulse's ruling on leg 5 of DPLAN-0354).
+    # Checked before every other rule in both walks: nothing downstream may reconsider the owner's call.
     ignore_patterns = read_ignore(branch_dir)
     if ignore_patterns and trace:
         logger.info("[update] %s declares %d owner-protected pattern(s)", IGNORE_NAME, len(ignore_patterns))
 
-    # Walk template directories — create missing ones in branch
     for template_subdir in sorted(template_dir.rglob("*")):
         if not template_subdir.is_dir():
             continue
@@ -223,7 +157,6 @@ def update_branch(
             if trace:
                 logger.info("[update] Added directory: %s", resolved_dir)
 
-    # Walk template files — add/merge/skip per type
     for template_file in sorted(template_dir.rglob("*")):
         if not template_file.is_file():
             continue
@@ -238,9 +171,7 @@ def update_branch(
         resolved_path = replace_placeholders(rel_path, replacements)
 
         if is_ignored(resolved_path, ignore_patterns):
-            # Never written, never merged, never backed up — and reported as a skip
-            # rather than a warning. @vera's passport is the case this exists for: it
-            # reaches here before the heal below can propose a merge into it.
+            # Must run before the passport heal below can propose a merge.
             ignored_detail.append({"branch_path": resolved_path})
             counts["owner_protected"] += 1
             if trace:
@@ -270,7 +201,6 @@ def update_branch(
         dest = branch_dir / resolved_path
 
         if not dest.exists():
-            # ADDITION — missing file from template
             if not dry_run:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 try:
@@ -288,22 +218,12 @@ def update_branch(
                 logger.info("[update] Added: %s", resolved_path)
 
         elif _SANDBOX_DIRS.intersection(PurePosixPath(resolved_path).parts[:-1]):
-            # Present inside a dropbox or .archive: never read, compared or
-            # merged, and no report row. The owner of the project's rule of
-            # 09-27 20:42, in paraphrase: a dropbox is ignored by all, a sandbox
-            # like .archive; devpulse's ruling for update, compass 491. Parts
-            # below the branch root, by the directory's own name (spawn's
-            # decision, DPLAN-0354 leg 5).
+            # Parts below the branch root only: the branch itself may live under a dir named dropbox.
             if trace:
                 logger.info("[update] SKIP (sandbox): %s", resolved_path)
 
         elif dest.suffix == ".md":
-            # READ-ONLY, ALWAYS. update never rewrites a .md: the README diet is
-            # owner judgment by ruling (DPLAN-0199 is what an unguarded overwrite
-            # did, thread 16 re-confirmed it 2026-09-15). What update owes the
-            # owner is the FACT — until now an existing .md fell through every arm
-            # below in silence, so a branch could drift from the template for
-            # months with nothing anywhere to read.
+            # Read-only, always: .md content is the owner's judgment; update reports, never writes.
             state = _md_state(template_file, dest, replacements)
             counts[f"md_{state}"] += 1
             md_detail.append({"branch_path": resolved_path, "state": state})
@@ -332,7 +252,6 @@ def update_branch(
             elif result == "error":
                 errors.append(f"JSON merge failed for {resolved_path}")
 
-    # Refresh branch metadata (informational tracking)
     if not dry_run:
         template_registry = load_template_registry(template_dir)
         if template_registry:
@@ -360,13 +279,7 @@ def update_branch(
 
 
 def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | None = None) -> list[dict]:
-    """Update all branches from AIPASS_REGISTRY.json.
-
-    Iterates through all registered branches, calls update_branch() for each.
-    Skips spawn itself (can't update yourself).
-    When citizen_class is specified, only updates branches of that class.
-    Returns list of result dicts.
-    """
+    """Update all branches from AIPASS_REGISTRY.json, skipping spawn itself, optionally by class."""
     registry_path = find_registry()
     if registry_path is None:
         logger.error("[update] No *_REGISTRY.json found above the current directory — no branches to update")
@@ -422,22 +335,10 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
     return results
 
 
-# =============================================================================
-# INTERNAL HELPERS
-# =============================================================================
-
-
 def _read_citizen_class(branch_dir: Path) -> str:
     """Read a branch's passport.json and resolve it to a template class.
 
-    No fallback (DPLAN-0262, the owner's ruling): a missing passport, corrupt JSON, or
-    unknown citizen_class is a loud hard error naming the passport path and the
-    registered classes — never a silent guess at a default class. Silent defaulting
-    here is exactly what let real passports drift from their template contract
-    undetected for months. A passport still carrying a RETIRED class name
-    ("aipass_framework", "project_agent", "builder") is refused the same way, so
-    it reads as "migrate this passport" rather than updating against a class it
-    no longer claims (DPLAN-0319).
+    No fallback: a missing, corrupt, unknown-class or retired-class passport raises, naming the path.
     """
     from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 
@@ -457,11 +358,7 @@ def _read_citizen_class(branch_dir: Path) -> str:
 
 
 def _resolve_branch_path(branch_name: str, registry_path: Path | str | None = None) -> Path | None:
-    """Resolve a branch name to its absolute directory path via the registry.
-
-    registry_path None walks up from the CWD (find_registry); a given path is
-    used as-is.
-    """
+    """Resolve a branch name to its absolute directory path via the registry (None: CWD walk)."""
     registry_path = Path(registry_path) if registry_path else find_registry()
     if registry_path is None:
         logger.info("[update] No *_REGISTRY.json found — cannot resolve a branch path without one")
@@ -489,22 +386,8 @@ def _heal_passport(
 ) -> str:
     """Heal an existing passport.json against the allowlist only (DPLAN-0262).
 
-    Reuses deep_merge's scalar/list decision (additive, existing-always-wins) but
-    applies it one allowlisted field at a time, mutating the field in place rather
-    than rebuilding the whole dict — every other drifted or missing field (identity
-    content, citizenship, document_metadata) stays exactly as create-only as it was
-    before this fix, and healthy passports that already satisfy the allowlist come
-    out byte-for-byte unchanged (no template-driven key reordering). email/git_branch
-    fill from the template whenever missing or blank — the template always renders a
-    real, derivable value for both, so there's no "custom content" to protect there.
-    identity.traits is different: a hand-written template default is never a fill
-    source (it's a free-text field, not a derived one), so an existing traits value —
-    even "" — is left alone unless there's a legacy value to migrate. A legacy
-    top-level `traits` array (devpulse, aipass — predates the identity.traits schema)
-    is migrated into identity.traits rather than left to duplicate or orphan: it's
-    always stripped from the top level, and only lands in identity.traits if that
-    field doesn't already have real content of its own.
-
+    Field by field in place, so a healthy passport is byte-for-byte unchanged. identity.traits is
+    free text: an existing value (even "") stays; a legacy top-level traits array moves into it.
     Returns "updated", "unchanged", or "error".
     """
     try:
@@ -514,15 +397,7 @@ def _heal_passport(
 
         existing_text = dest.read_text(encoding="utf-8")
         existing_data = json.loads(existing_text)
-        # The document as it was, parsed independently — the "did the heal change
-        # anything" question is about the DOCUMENT, not about how it was spelled on
-        # disk. Comparing serialised text answered a different question and got it
-        # wrong for every passport containing a non-ASCII character: those files
-        # were written with escapes (\u2014) and this heal re-serialises with
-        # ensure_ascii=False, so the texts never matched and an untouched passport
-        # was rewritten (and backed up) on every single update. Measured on
-        # @vera's 1.0.0 passport, 2026-09-07: heal returned "updated" with 120
-        # bytes of diff and not one changed field.
+        # Compare documents, not text: an ensure_ascii=True file never matches this re-serialisation.
         original_document = json.loads(existing_text)
 
         legacy_traits = existing_data.pop("traits", None)
@@ -561,12 +436,7 @@ def _heal_passport(
 def _grow_template_owned_lists(merged: dict, template_data: dict, dotted_keys: tuple[str, ...]) -> None:
     """Append template list entries the branch is missing, in place.
 
-    Only the keys the caller names are touched, and only when both sides really
-    hold lists. Existing entries keep their position and duplicates are never
-    introduced: the branch's list is grown, never reordered and never pruned —
-    an entry a branch deliberately removed does come back, which is exactly what
-    "the template owns this list" means and why the set is declared by name.
-    """
+    Grown, never reordered or pruned; an entry a branch removed does come back — that is template-owned."""
     for dotted in dotted_keys:
         section: Any = merged
         template_section: Any = template_data
@@ -589,16 +459,7 @@ def _grow_template_owned_lists(merged: dict, template_data: dict, dotted_keys: t
 def _md_state(template_file: Path, dest: Path, replacements: dict) -> str:
     """Compare a branch .md against what the template would render, writing nothing.
 
-    Args:
-        template_file: The template's copy, placeholders unresolved.
-        dest: The branch's copy on disk.
-        replacements: The placeholder map for this branch.
-
-    Returns:
-        ``"matches"``, ``"differs"``, or ``"unreadable"`` when either side cannot
-        be read as text. Unreadable is its own answer rather than a guessed
-        "differs": the owner is being told what update saw, not what it assumed.
-    """
+    Returns "matches", "differs", or "unreadable" (its own answer, never a guessed "differs")."""
     try:
         rendered = replace_placeholders(template_file.read_text(encoding="utf-8"), replacements)
         current = dest.read_text(encoding="utf-8")
@@ -619,11 +480,7 @@ def _merge_json(
 ) -> str:
     """Deep-merge a template JSON file into the branch copy.
 
-    ``resolved_path`` is the branch-relative path this file lands on. It selects
-    the template-owned list policy — see _TEMPLATE_OWNED_LISTS. Callers that omit
-    it get deep_merge's plain existing-wins behaviour for every list.
-
-    Returns "updated", "unchanged", or "error".
+    ``resolved_path`` selects the _TEMPLATE_OWNED_LISTS policy. Returns "updated", "unchanged", or "error".
     """
     try:
         template_content = template_file.read_text(encoding="utf-8")
@@ -655,11 +512,6 @@ def _merge_json(
     except (json.JSONDecodeError, IOError) as exc:
         logger.error("[update] JSON merge failed for %s: %s", dest.name, exc)
         return "error"
-
-
-# =============================================================================
-# RESULT HELPERS
-# =============================================================================
 
 
 def _result(

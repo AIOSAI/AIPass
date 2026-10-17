@@ -3,18 +3,16 @@
 # Description: Update orchestrator — thin CLI layer for branch updates
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
 
-Thin CLI module that parses arguments and delegates to the update handler.
-All implementation logic lives in apps/handlers/update_ops.py.
+Reference: docs/update_engine.md
 """
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.update_ops import (
@@ -39,25 +37,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "update")
-        args: List of arguments for the command
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "update":
         return False
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
@@ -69,26 +53,11 @@ def handle_command(command: str, args: list) -> bool:
     return handle_update(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_update(args: list[str]) -> int:
     """Parse args and dispatch to update_branch or update_all.
 
-    Args patterns:
-        ["@branch"]                -> update single branch (uses passport's class)
-        ["specialist", "--all"]    -> update all specialist-class branches
-        ["manager", "--all"]       -> update all manager-class branches
-        ["--all"]                  -> BLOCKED (must specify class)
-        ["--dry-run", "@branch"]   -> preview mode
-        ["--dry-run", "--all"]     -> BLOCKED
-        ["--trace", "@branch"]     -> verbose logging
-
     Returns exit code (0=success, 1=failure).
     """
-    # Intercept --help before processing (argparse has add_help=False)
     if "--help" in args or "-h" in args:
         console.print(
             "[bold cyan]Usage:[/bold cyan] drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]"
@@ -123,11 +92,8 @@ def handle_update(args: list[str]) -> int:
         refuse_retired_or_forbidden,
     )
 
-    # A forbidden class refuses by name before it can be read as a branch
-    # target or reach the update engine (DPLAN-0288). A RETIRED class name
-    # refuses the same way (DPLAN-0319) — otherwise `update aipass_framework
-    # --all` would fall through to "specify a branch name", naming the wrong
-    # problem to someone whose only mistake is an out-of-date habit.
+    # Before branch parsing: a retired class name would otherwise fall through to
+    # "specify a branch name", naming the wrong problem.
     for arg in args:
         refusal = refuse_retired_or_forbidden(arg.lstrip("@"))
         if refusal:
@@ -140,14 +106,12 @@ def handle_update(args: list[str]) -> int:
 
     positional = [a for a in args if not a.startswith("--")]
 
-    # Detect citizen class argument
     citizen_class = None
     targets = positional
     if positional and validate_class(positional[0]):
         citizen_class = positional[0]
         targets = positional[1:]
 
-    # Handle --all
     if "--all" in args:
         if citizen_class is None:
             classes = ", ".join(get_available_classes())
@@ -164,7 +128,6 @@ def handle_update(args: list[str]) -> int:
         error("specify a branch name (e.g. @prax) or use <class> --all")
         return 1
 
-    # Take the first target, strip leading @
     branch_name = targets[0].lstrip("@")
 
     try:
@@ -179,11 +142,6 @@ def handle_update(args: list[str]) -> int:
 
     _print_branch_summary(result, dry_run)
     return 0 if result.get("success") else 1
-
-
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
 
 
 def _print_branch_summary(result: dict, dry_run: bool) -> None:
@@ -224,7 +182,6 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
         for e in errs:
             console.print(f"    - {e}")
 
-    # In dry-run mode, show details of what would change
     if dry_run:
         additions_detail = result.get("_additions_detail", [])
         if isinstance(additions_detail, list) and additions_detail:
@@ -236,9 +193,7 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
 
         ignored_detail = result.get("_ignored_detail", [])
         if isinstance(ignored_detail, list) and ignored_detail:
-            # Its own line and NOT a warning: an owner-protected file is a decision
-            # already made, so the preview reports it the way it reports any other
-            # skip. Nothing here was written, merged or backed up.
+            # Not a warning: an owner-protected file is a decision already made.
             console.print("  [cyan]Owner-protected (.updateignore):[/cyan]")
             for g in ignored_detail:
                 if isinstance(g, dict):
@@ -246,9 +201,7 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
 
         md_detail = result.get("_md_detail", [])
         if isinstance(md_detail, list) and md_detail:
-            # A line per .md, and never a write. "differs" is the owner's cue that
-            # the diet (or any other edit) has moved this file away from the
-            # template — not an instruction, and not something update will act on.
+            # Report only: update never writes a .md; "differs" is the owner's cue.
             console.print("  [cyan]Markdown drift (read-only):[/cyan]")
             for m in md_detail:
                 if isinstance(m, dict):

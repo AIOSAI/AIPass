@@ -3,7 +3,7 @@
 # Description: citizenship.citizen_id — the per-citizen UID stamped at birth
 # Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry.py and apps/handlers/placeholders.py — the citizen_id contract."""
@@ -19,18 +19,8 @@ from aipass.spawn.apps.handlers.class_registry import get_available_classes, get
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
 from aipass.spawn.apps.handlers.registry import add_to_registry
 
-# Context kept from the file's original docstring (the owner's ruling, 2026-08-24):
-#
-# Two ids live near each other and mean different things:
-#   - ``citizenship.registry_id`` — the id of the REGISTRY holding the citizen.
-#     Shared by every citizen in a project. Rendered as "Branch reg no.".
-#   - ``citizenship.citizen_id`` — the citizen's OWN unique id, the same value
-#     the registry keeps in its ``branches[]`` entry. Rendered as "Passport no.".
-#
-# The load-bearing property is that those two copies of the citizen's own id are
-# minted ONCE and therefore always agree. The mint used to happen inside
-# add_to_registry, which runs after the passport is written — so this file pins
-# the ordering, not just the presence of a field.
+# registry_id names the registry (shared); citizen_id is the citizen's own, kept twice
+# (passport and registry entry) and minted once so the copies agree.
 
 
 def _fresh_registry(path):
@@ -40,11 +30,6 @@ def _fresh_registry(path):
         encoding="utf-8",
     )
     return path
-
-
-# =============================================================================
-# PLACEHOLDER SURFACE
-# =============================================================================
 
 
 def test_citizen_id_override_reaches_the_placeholder_map(tmp_path):
@@ -71,11 +56,6 @@ def test_citizen_id_is_not_the_registry_id(tmp_path):
 
     assert result["CITIZEN_ID"] == "aaaa-citizen"
     assert result["REGISTRY_ID"] == "bbbb-registry"
-
-
-# =============================================================================
-# REGISTRY ENTRY
-# =============================================================================
 
 
 def test_add_to_registry_uses_the_supplied_citizen_id(tmp_path):
@@ -116,18 +96,10 @@ def test_supplied_citizen_id_is_not_overwritten_by_a_fresh_mint(tmp_path):
     assert entry["registry_id"] == given
 
 
-# =============================================================================
-# TEMPLATE CONTRACT
-# =============================================================================
-
-
 def test_every_class_declares_citizen_id():
     """Every class must stamp the field, or that class's births render no number.
 
-    There is one template dir now (DPLAN-0319 R3), but the loop stays over the
-    CLASSES rather than the directory: the day a class stops resolving to it,
-    this fails instead of quietly checking the same file twice.
-    """
+    Loops over classes, not the one template dir, so a class that stops resolving to it fails."""
     classes = get_available_classes()
     assert len(classes) == 2, f"the class registry offers {classes} - the loop below would check nothing"
     for citizen_class in classes:

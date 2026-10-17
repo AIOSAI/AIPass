@@ -3,7 +3,7 @@
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
 # Version: 1.0.3
 # Created: 2026-08-12
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry.py and apps/handlers/class_registry.py, the two halves of the admin fence."""
@@ -34,20 +34,7 @@ from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main
 
-# Admin privilege fence (FPLAN-0401 Phase 2, DPLAN-0288). Two halves:
-#
-#   Part A -- ensure_admin() / drone @spawn grant-admin write "admin": true onto
-#             the devpulse entry of the root registry. The branch name is a
-#             constant, not a caller choice: every other name is refused by
-#             name, and the flag alone grants nothing (the lane needs all five
-#             contract legs).
-#
-#   Part B -- "admin" is never a citizen class and never a template. create,
-#             update and sync each refuse it loudly and permanently.
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# Part A: only devpulse's entry can carry "admin": true. Part B: "admin" is never a class or a template.
 
 
 def _entry(name, **extra):
@@ -96,11 +83,6 @@ def _read_entry(registry_path, name) -> dict:
         if branch.get("name", "").lower() == name.lower():
             return branch
     raise AssertionError(f"No {name} entry in {registry_path}")
-
-
-# ---------------------------------------------------------------------------
-# Part A — ensure_admin()
-# ---------------------------------------------------------------------------
 
 
 class TestEnsureAdmin:
@@ -236,11 +218,6 @@ class TestGrantAdminCli:
         mock_handler.assert_called_once_with(["--help"])
 
 
-# ---------------------------------------------------------------------------
-# Part B — "admin" is never a class, never a template
-# ---------------------------------------------------------------------------
-
-
 class TestAdminClassRefusal:
     """spawn refuses to mint, update or sync anything as class 'admin'."""
 
@@ -286,8 +263,7 @@ class TestAdminClassRefusal:
     def test_spawn_agent_refuses_admin_class(self, tmp_path, _isolate_spawn_json):
         """The Python API refuses the class, creates nothing, and logs the refusal.
 
-        Mutant: the mint_refused log_operation in mint_ops.spawn_at removed -> red
-        (it lived in core.spawn_agent until fleet green leg 9 moved the lane).
+        Mutant: the mint_refused log_operation in mint_ops.spawn_at removed -> red.
         """
 
         target = tmp_path / "would_be_admin"
@@ -356,16 +332,7 @@ class TestAdminClassRefusal:
         assert "SOMEBRANCH" in str(exc.value)
 
     def test_sync_template_class_refuses_unknown_instead_of_falling_back(self):
-        """CONTRACT INVERTED (DPLAN-0319): the unknown-class fallback was REMOVED.
-
-        This used to pin ``resolve_sync_template_class("legacy_builder", ...)``
-        guessing the ``aipass_framework`` template. Two things were wrong with the
-        guess: it wrote .branch_meta.json against a template the passport never
-        claimed (the branch then reads as "repaired" while tracking the wrong
-        contract), and the value it guessed is now itself a dead name. House law
-        is fail-loud, so the guess is gone and the refusal must name the branch
-        and the class it could not resolve — that is what the caller skips on.
-        """
+        """An unknown class refuses, naming the branch and the class, never guessing a template."""
 
         with pytest.raises(ValueError) as exc:
             resolve_sync_template_class("legacy_builder", "SOMEBRANCH")

@@ -3,7 +3,7 @@
 # Description: Tests for file_ops handler
 # Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
@@ -26,25 +26,15 @@ from aipass.spawn.apps.handlers.file_ops import (
     rename_placeholder_paths,
 )
 
-# ---------------------------------------------------------------------------
-# Standard replacements dict used across copy_template tests
-# ---------------------------------------------------------------------------
-
 REPLACEMENTS = {
     "BRANCHNAME": "TESTAGENT",
     "branchname": "testagent",
     "BRANCH": "testagent",
     "DATE": "2026-01-01",
     "MODULE": "testagent",
-    # {{PATH}} replaced {{CWD}} in DPLAN-0319 and renders RELATIVE, never an
-    # absolute /home/... path — the value here mirrors that.
+    # {{PATH}} renders relative, never an absolute /home/... path.
     "PATH": "src/aipass/testagent",
 }
-
-
-# ---------------------------------------------------------------------------
-# ensure_directory
-# ---------------------------------------------------------------------------
 
 
 class TestEnsureDirectory:
@@ -66,7 +56,6 @@ class TestEnsureDirectory:
         target.mkdir()
         assert target.exists()
 
-        # Should not raise
         ensure_directory(target)
 
         assert target.exists()
@@ -76,11 +65,6 @@ class TestEnsureDirectory:
         """Passing None raises ValueError with clear message."""
         with pytest.raises(ValueError, match="ensure_directory received None path"):
             ensure_directory(None)
-
-
-# ---------------------------------------------------------------------------
-# copy_template
-# ---------------------------------------------------------------------------
 
 
 class TestCopyTemplate:
@@ -153,7 +137,6 @@ class TestCopyTemplate:
 
         assert (target / "apps" / "handlers").is_dir()
         assert (target / "apps" / "handlers" / "init.py").exists()
-        # Directory entries recorded
         assert any("apps/" in c and "(dir)" in c for c in copied)
 
     def test_copy_template_skips_existing_files(self, tmp_path: Path, mock_json_handler) -> None:
@@ -191,11 +174,6 @@ class TestCopyTemplate:
         assert any("image.bin" in c and "binary" in c for c in copied)
 
 
-# ---------------------------------------------------------------------------
-# rename_placeholder_paths
-# ---------------------------------------------------------------------------
-
-
 class TestRenamePlaceholderPaths:
     """Tests for rename_placeholder_paths()."""
 
@@ -228,22 +206,14 @@ class TestRenamePlaceholderPaths:
         target = tmp_path / "branch"
         target.mkdir(parents=True)
 
-        # Pre-create the destination
         (target / "myagent_data").mkdir()
-        # Create the placeholder source
         (target / "{{BRANCH}}_data").mkdir()
 
         renamed = rename_placeholder_paths(target, "MyAgent")
 
-        # Both dirs still exist since rename was skipped
         assert (target / "myagent_data").is_dir()
         assert (target / "{{BRANCH}}_data").is_dir()
         assert len(renamed) == 0
-
-
-# ---------------------------------------------------------------------------
-# _walk
-# ---------------------------------------------------------------------------
 
 
 class TestWalk:
@@ -262,7 +232,6 @@ class TestWalk:
         sub.mkdir()
         (sub / "b.txt").write_text("b", encoding="utf-8")
 
-        # .git dir should not be recursed into
         git_dir = template / ".git"
         git_dir.mkdir()
         (git_dir / "HEAD").write_text("ref: refs/heads/main", encoding="utf-8")
@@ -277,11 +246,6 @@ class TestWalk:
         # .git itself is walked (and skipped) but never recursed into
         assert skipped == [".git"]
         assert not (target / ".git").exists()
-
-
-# ---------------------------------------------------------------------------
-# _should_skip
-# ---------------------------------------------------------------------------
 
 
 class TestShouldSkip:
@@ -347,11 +311,6 @@ class TestShouldSkip:
             assert not (target / name).exists(), f"{name} should be skipped"
 
 
-# ---------------------------------------------------------------------------
-# _replace_path_placeholders
-# ---------------------------------------------------------------------------
-
-
 class TestReplacePathPlaceholders:
     """Path placeholder replacement, observed through copy_template()."""
 
@@ -378,8 +337,7 @@ class TestReplacePathPlaceholders:
     def test_replace_path_placeholders_no_match(self, tmp_path: Path, mock_json_handler) -> None:
         """Paths without placeholders pass through unchanged, listed one spelling on every host.
 
-        Mutant: a native path joined to the literal "/ (dir)" suffix -> red on Windows
-        ('apps\\handlers/ (dir)', the mixed list CI run 38078052852 showed).
+        Mutant: a native path joined to the literal "/ (dir)" suffix -> red on Windows.
         """
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -406,11 +364,6 @@ class TestReplacePathPlaceholders:
 
         assert copied == ["file.txt"]
         assert (target / "file.txt").is_file()
-
-
-# ---------------------------------------------------------------------------
-# regenerate_template_registry
-# ---------------------------------------------------------------------------
 
 
 class TestRegenerateTemplateRegistry:
@@ -448,7 +401,6 @@ class TestRegenerateTemplateRegistry:
 
         expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
-        # Find the file entry
         files = data["files"]
         assert len(files) == 1
         entry = list(files.values())[0]
@@ -488,17 +440,12 @@ class TestRegenerateTemplateRegistry:
 
         all_paths = [v["path"] for v in data["files"].values()]
         assert "visible.txt" in all_paths
-        # No .spawn/ files should appear
         assert not any(".spawn" in p for p in all_paths)
 
     def test_regenerate_template_registry_never_enters_a_dropbox_or_archive(self, tmp_path: Path) -> None:
         """A living branch's dropbox and every .archive in it are listed, never entered.
 
-        sync-registry --fix runs this over living branches. The rule is the
-        owner of the project's, 09-27 20:42, in paraphrase: nothing looks into
-        a dropbox, a sandbox like .archive. The branch stands inside a directory
-        named dropbox, so a skip read on the whole path would hide everything.
-        Ran red before the walk skipped them (spawn's decision, DPLAN-0354 leg 4).
+        The branch itself sits under a dir named dropbox, so a skip read on the whole path would hide everything.
         """
         branch = tmp_path / "dropbox" / "branch"
         for rel in ("visible.txt", "dropbox/dropped.txt", ".archive/old.txt", "apps/.archive/retired.py"):
@@ -517,7 +464,6 @@ class TestRegenerateTemplateRegistry:
         """If .spawn/ directory does not exist, function returns early."""
         (tmp_path / "file.txt").write_text("content", encoding="utf-8")
 
-        # Should not raise and should not create anything
         regenerate_template_registry(tmp_path)
 
         assert not (tmp_path / ".spawn").exists()

@@ -3,7 +3,7 @@
 # Description: The handler guard's structural pin a citizen is born with
 # Version: 1.3.0
 # Created: 2026-07-04
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the guard pin a citizen is born with: no ``inspect.stack()``."""
@@ -27,12 +27,7 @@ def _bound_names(node: ast.AST, module: str, name: str) -> set:
 
 
 def _inspect_stack_calls(source: str) -> list:
-    """Line numbers of every ``inspect.stack()`` CALL in ``source``.
-
-    An AST matcher, not a string search: a guard's docstring may name
-    ``inspect.stack()`` while explaining what it replaced, and a spelling ban
-    would convict the explanation.
-    """
+    """Line numbers of every ``inspect.stack()`` CALL in ``source`` (AST: a docstring naming it is no call)."""
     tree = ast.parse(source)
 
     module_aliases = {"inspect"}
@@ -64,24 +59,8 @@ def _inspect_stack_calls(source: str) -> list:
 def test_the_handler_guard_never_walks_inspect_stack():
     """This branch's import guard must not call ``inspect.stack()``.
 
-    WHY A NEWBORN IS BORN WITH THIS PIN. ``inspect.stack()`` builds a FrameInfo
-    for every frame, which resolves that frame's source file
-    (getsourcefile -> getmodule -> os.path.realpath), and ``ntpath.realpath``
-    computes ``os.getcwd()`` unconditionally — before it even checks whether the
-    path is absolute. So on Windows, in a process whose working directory is
-    gone or unreadable, importing ANY handler in this branch dies inside the
-    stdlib, one line above the guard's own first statement. Found on the Windows
-    CI gate 2026-08-31; the cure is to walk frames with ``sys._getframe`` and
-    read ``frame.f_code.co_filename``, which asks the filesystem nothing.
-
-    WHY IT IS STRUCTURAL. The regression shows only on Windows with a dead cwd,
-    so this suite has no portable behavioural instrument for it (the fence's own
-    behaviour is pinned in test_handlers_fence.py). A call that must not exist
-    is pinned by reading the source.
-
-    This needs no conftest fixture, so it holds when a branch grows its own
-    suite: the guard is inherited code that a branch rarely edits, which
-    is exactly why nobody would notice it changing.
+    On Windows it reads os.getcwd() per frame, so a dead cwd kills every handler import; only Windows shows it,
+    so the pin reads the source.
     """
     guard = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py"
 
@@ -90,8 +69,7 @@ def test_the_handler_guard_never_walks_inspect_stack():
 
     source = guard.read_text(encoding="utf-8")
 
-    # Control: a matcher that parses nothing reports clean. Prove it read a real
-    # guard before trusting its silence.
+    # Control: a matcher that parses nothing reports clean.
     assert "_guard_branch_access" in source, (
         f"{guard} does not look like a handler guard — this pin is measuring nothing"
     )
@@ -105,10 +83,6 @@ def test_the_handler_guard_never_walks_inspect_stack():
 
 
 def test_the_stack_matcher_can_convict():
-    """Negative control for the pin above — it must be able to say yes.
-
-    A matcher that always returns an empty list passes the pin forever while
-    detecting nothing.
-    """
+    """Negative control for the pin above — it must be able to say yes."""
     assert _inspect_stack_calls("import inspect\nx = inspect.stack()\n") == [2]
     assert _inspect_stack_calls("import inspect\nx = inspect.currentframe()\n") == []
