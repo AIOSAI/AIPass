@@ -47,8 +47,7 @@ drone @flow --version                           # Version string
 `restore`, `registry`, `aggregate`, and — all four owned by `template_manager` —
 `templates`, `scan`, `register`, `unregister`. The module's full name
 (`list_plans`, `close_plan`, …) resolves for `--help` but is rejected by the
-dispatcher — `post`/`post_close_runner` is the sole module accepting both. The
-`--help` screen claimed otherwise until 2026-09-15.
+dispatcher — `post`/`post_close_runner` is the sole module accepting both.
 
 **A bare number is not an identity.** Every per-type registry numbers from
 `0001`, so `0012` names a row in each of them and a bare number resolves against
@@ -69,10 +68,9 @@ intake fired unlabelled between steps 3 and 4:
 
 1. **`[1/5]` Template check** — *reports only, never deletes.* An empty
    template gets the warning "looks like an empty template — closing and
-   archiving normally" and then flows through the identical pipeline. The old
-   fast-delete branch was removed deliberately: `is_template_content()` is a
-   heuristic, and its false positives permanently destroyed FPLAN-0370 and
-   FPLAN-0371.
+   archiving normally" and then flows through the identical pipeline. Nothing
+   is deleted on that guess: `is_template_content()` is a heuristic, and a false
+   positive would permanently destroy a real plan.
 2. **`[2/5]` Mark closed** — sets `status` and the `closed` timestamp, saves the
    type's registry. **Close always succeeds from this point;** every later step
    is non-blocking.

@@ -10,7 +10,7 @@ The flow section contract, why quick_status is merged rather than replaced, the 
 `@prax`'s dashboard refresh contributes `todo_count` (read straight from
 `.trinity/local.json`); Flow's plan push contributes `active_plans` and
 `commons_mentions`. Whole-block replacement means last-writer-wins silently
-deletes the other's fields — a plan close used to zero the todo count on every
+deletes the other's fields: a plan close would zero the todo count on every
 branch card until the next prax refresh.
 
 Flow's push therefore **merges** (`_calculate_quick_status` in
@@ -46,13 +46,10 @@ the renderer** (`_build_open_recent`, `OPEN_RECENT_LIMIT = 5`), not in the
 consumer — a reader that has to remember to slice will eventually forget. The
 full list lives behind `drone @flow list open`, on request.
 
-**`active_plans` is a count, not a list** — ruling of 2026-08-16 (the owner, via
-`@devpulse`). Flow's push used to publish every open-plan row here; on a branch
-with 23 open plans that was 6,096 of the section's 8,552 bytes, and it was the
-unbounded context the ruling exists to kill. The list left the section
-entirely, and `active_count` collapsed into this one name. The int also matches
-what `@prax`'s refresh already writes, so the field means the same thing no
-matter which writer built the section.
+**`active_plans` is a count, not a list.** A list of every open-plan row is
+unbounded context on a busy branch; the rows live behind `drone @flow list open`.
+The int matches what `@prax`'s refresh writes, so the field means the same thing
+no matter which writer built the section.
 
 Card values are written per-branch on plan events, so a change to this contract
 only reaches a branch that files a plan afterwards — a quiet branch keeps the
@@ -61,11 +58,11 @@ branch Flow holds plans for and is how a contract change lands fleet-wide.
 Paths without a dashboard are skipped, never created.
 
 > **Two writers, one section.** `@prax`'s dashboard refresh also builds this
-> section, wholesale (`recently_closed` as `{plan_id, subject}`, and no
-> `open_recent` / `total_plans`). Whichever writer ran last wins the whole
-> section — the per-key merge above protects `quick_status` only, not section
-> level. `active_plans` now agrees across both writers; `open_recent` should
-> still be read as present-or-absent until `@prax`'s side is aligned.
+> section, wholesale, in the same shape: it mirrors `open_recent` and the 7-day
+> `recently_closed` window, and carries `total_plans` through from Flow's last
+> write because it has no honest source for that number. Whichever writer ran
+> last wins the whole section — the per-key merge above protects `quick_status`
+> only, not section level.
 
 ---
 

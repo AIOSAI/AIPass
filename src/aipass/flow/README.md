@@ -115,7 +115,7 @@ Read the one that broke.
 |---|---|
 | [Plan Lifecycle](docs/plan_lifecycle.md) | Verb forms that execute, how a bare number resolves against per-type registries, and what the close pipeline does in the foreground versus the background runner |
 | [Plan Types](docs/plan_types.md) | Registering a type, and the three self-healing behaviours: auto-close of missing files, ignored folders, orphaned locations |
-| [Location Discovery](docs/repo_root.md) | `repo_root.py`, the cross-platform test worlds, and the structural rules earned from reds a single-dimension test could not see |
+| [Location Discovery](docs/repo_root.md) | `repo_root.py`, the cross-platform test worlds, and the rules a cross-platform instrument follows |
 | [Argument Gate](docs/argument_gate.md) | Why an unrecognised argument refuses, the one gate every door routes through, and what "absolute" means in a shared registry |
 | [Dashboard Mirror](docs/dashboard_mirror.md) | The flow section contract, why `quick_status` is merged rather than replaced, and the caps mirrored from the dashboard owner |
 
@@ -147,6 +147,6 @@ status` reports registry health, `drone @flow list all` counts the plans, and
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 [← Back to AIPass](../../../README.md)
