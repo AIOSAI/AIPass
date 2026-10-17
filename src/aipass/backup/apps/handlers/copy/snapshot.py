@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot copy strategy — mirror destination tree with cleanup
-# Version: 3.2.0
+# Version: 3.2.1
 # Created: 2026-04-16
 # Modified: 2026-10-16
 # =============================================
@@ -16,6 +16,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 from ..cleanup.mirror import cleanup_deleted_files
+from ..path.builder import exceeds_max_path
 from ..audit import trail
 from ..report.result import BackupResult
 from ..state.stop_flag import stop_requested
@@ -53,8 +54,8 @@ def _copy_single_file(
     """
     target = str(dest_path / rel_path)
 
-    # Long-path guard
-    if len(target) > 260:
+    # Long-path guard: Windows' MAX_PATH only (path/builder.py)
+    if exceeds_max_path(target):
         logger.warning(f"Path too long (>260 chars), skipping: {rel_path}")
         errors.append(f"{rel_path}: path too long (>260 chars)")
         return -1  # signal: skipped due to error

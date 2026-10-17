@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: builder.py
 # Description: Destination path builders for snapshot, versioned, and drive modes
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-04-16
 # Modified: 2026-10-16
 # =============================================
@@ -13,11 +13,22 @@ target project's .backup/ directory except .backupignore, which sits in the
 project root; build_drive_path names a remote Drive path, not a local one.
 """
 
+import os
 from pathlib import Path
 
 from ..audit import trail
 
 BACKUP_DIR = ".backup"
+
+#: Windows' MAX_PATH. POSIX enforces its own limits (1024 on macOS, 4096 on
+#: Linux): an over-long path there is the OS's OSError, which each lane records,
+#: so a 260 guard on POSIX only kept real files out of the store.
+_MAX_PATH = 260 if os.name == "nt" else None
+
+
+def exceeds_max_path(target: str) -> bool:
+    """True when a store path is longer than this platform lets the lane write."""
+    return _MAX_PATH is not None and len(target) > _MAX_PATH
 
 
 def backup_root(project_root: str) -> Path:

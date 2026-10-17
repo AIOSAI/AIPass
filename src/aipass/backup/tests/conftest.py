@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.3.4
+# Version: 1.3.5
 # Created: 2026-06-12
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -26,6 +26,7 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.state import stop_flag
 from aipass.cli.apps.modules import display
 
 BRANCH_MODULE = "aipass.backup"
@@ -154,6 +155,14 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def clean_stop_state() -> Generator[None, None, None]:
+    """A raised stop flag is process-global: under xdist the next class on the worker inherits it."""
+    stop_flag.reset_stop_state()
+    yield
+    stop_flag.reset_stop_state()
 
 
 def _no_live_google(*args: object, **kwargs: object) -> NoReturn:

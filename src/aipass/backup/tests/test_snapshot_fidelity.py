@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
-# Version: 2.1.4
+# Version: 2.2.0
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
@@ -17,9 +17,12 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
+from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.handlers.report.result import BackupResult
 
 
@@ -229,6 +232,43 @@ class TestCopySnapshotUpgrade:
         result = copy_snapshot(files, str(dest), str(source))
         assert not (dest / "stale.txt").exists()
         assert result["files_deleted"] == 1
+
+
+class TestTheLongPathGuardIsWindowsOnly:
+    """260 is Windows' MAX_PATH; elsewhere the OS enforces its own limit and the file is stored."""
+
+    PARENT = "p" * 200
+
+    def _long_source(self, tmp_path: Path) -> tuple[Path, Path, str]:
+        """A project file whose snapshot copy is over 260 characters: 200 for the folder alone."""
+        source = tmp_path / "project"
+        (source / self.PARENT).mkdir(parents=True)
+        (source / self.PARENT / "a.txt").write_text("deep", encoding="utf-8")
+        dest = tmp_path / "snapshot"
+        assert len(str(dest / self.PARENT / "a.txt")) > 260
+        return source, dest, f"{self.PARENT}/a.txt"
+
+    def test_a_path_over_260_is_stored_where_the_os_allows_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(path_builder, "_MAX_PATH", None)
+        source, dest, rel = self._long_source(tmp_path)
+
+        result = copy_snapshot([(str(source / rel), rel)], str(dest), str(source))
+
+        assert (result["files_copied"], result["errors"]) == (1, [])
+        assert (dest / self.PARENT / "a.txt").read_text(encoding="utf-8") == "deep"
+
+    def test_under_the_windows_limit_a_path_over_260_is_refused_with_an_errors_row(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(path_builder, "_MAX_PATH", 260)
+        source, dest, rel = self._long_source(tmp_path)
+
+        result = copy_snapshot([(str(source / rel), rel)], str(dest), str(source))
+
+        assert (result["files_copied"], result["errors"]) == (0, [f"{rel}: path too long (>260 chars)"])
+        assert not (dest / self.PARENT).exists()
 
 
 # =============================================

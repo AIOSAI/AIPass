@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: versioned.py
 # Description: Versioned copy — per-file baseline + diff engine
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-04-16
 # Modified: 2026-10-16
 # =============================================
@@ -24,7 +24,7 @@ from aipass.prax import logger
 
 from ..diff.generator import generate_diff_content, should_create_diff
 from ..audit import trail
-from ..path.builder import build_versioned_file_path
+from ..path.builder import build_versioned_file_path, exceeds_max_path
 from ..state.stop_flag import stop_requested
 
 
@@ -141,8 +141,8 @@ def copy_versioned(
         copied = -1
         ok = True
 
-        if len(str(target)) > 260:
-            # Long-path guard
+        if exceeds_max_path(str(target)):
+            # Long-path guard: Windows' MAX_PATH only (path/builder.py)
             logger.warning(f"Path too long (>260), skipping: {rel_path}")
             errors.append(f"{rel_path}: path too long (>260 chars)")
             ok = False

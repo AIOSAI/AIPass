@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.0.3
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
@@ -18,7 +18,10 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.handlers.diff.generator import generate_diff_content, is_binary_file, should_create_diff
 from aipass.backup.apps.handlers.diff.restore import list_versions, restore_file
 from aipass.backup.apps.handlers.path.builder import build_versioned_file_path, build_versioned_store
@@ -371,7 +374,8 @@ class TestRestoreModule:
 
         assert out_path.read_text(encoding="utf-8") == "where = 'tools'"
         out, err = capsys.readouterr()
-        assert f"Restored tools/main.py to {out_path}" in out
+        # The file read above proves the destination; a rendered tmp path wraps on macOS.
+        assert "Restored tools/main.py to" in out and out_path.parent.name in out
         assert err == ""
 
     def test_a_file_that_was_never_stored_is_named_back_and_nothing_is_written(self, tmp_path: Path, capsys):
@@ -511,7 +515,7 @@ class TestRestoreModule:
         assert result is True
         assert Path(out).read_text(encoding="utf-8") == "important data"
         stdout, stderr = capsys.readouterr()
-        assert f"Restored data.txt to {out}" in stdout
+        assert "Restored data.txt to" in stdout and Path(out).parent.name in stdout
         assert stderr == ""
 
     def test_list_without_a_filename_is_refused_as_a_usage_error_not_answered_with_the_help_page(
@@ -587,6 +591,43 @@ class TestRestoreModule:
         assert "restore <project> list <file>" in out
         assert "restore <project> file <file> <out>" in out
         assert err == ""
+
+
+class TestTheLongPathGuardIsWindowsOnly:
+    """260 is Windows' MAX_PATH; elsewhere the OS enforces its own limit and the file is stored."""
+
+    PARENT = "p" * 200
+
+    def _long_source(self, tmp_path: Path) -> tuple[Path, str, Path]:
+        """A project file whose versioned copy is over 260 characters: 200 for the folder alone."""
+        project = tmp_path / "project"
+        (project / self.PARENT).mkdir(parents=True)
+        (project / self.PARENT / "a.txt").write_text("deep", encoding="utf-8")
+        stored = project / ".backup" / "versioned" / self.PARENT / "a.txt" / "a.txt"
+        assert len(str(stored)) > 260
+        return project, f"{self.PARENT}/a.txt", stored
+
+    def test_a_path_over_260_is_stored_where_the_os_allows_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(path_builder, "_MAX_PATH", None)
+        project, rel, stored = self._long_source(tmp_path)
+
+        result = copy_versioned([(str(project / rel), rel)], str(project))
+
+        assert (result["files_copied"], result["errors"]) == (1, [])
+        assert stored.read_text(encoding="utf-8") == "deep"
+
+    def test_under_the_windows_limit_a_path_over_260_is_refused_with_an_errors_row(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(path_builder, "_MAX_PATH", 260)
+        project, rel, stored = self._long_source(tmp_path)
+
+        result = copy_versioned([(str(project / rel), rel)], str(project))
+
+        assert (result["files_copied"], result["errors"]) == (0, [f"{rel}: path too long (>260 chars)"])
+        assert not stored.exists()
 
 
 # =============================================
