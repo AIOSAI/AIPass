@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_pair_cli.py
 # Description: Host API Pair Module — a one-use pairing QR in the terminal, for the phone's camera
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -103,16 +103,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     # NO-ARGS GATE and HELP GATE (seedgo standard), as in host_config_cli.py.
+    # The help gate claims only pair: `host-api --help` is host_api.py's,
+    # whatever order the router discovered the modules in.
     if not args:
-        print_introspection()
-        return True
-
-    if any(arg in ("--help", "-h", "help") for arg in args):
         print_introspection()
         return True
 
     if args[0] not in SUBCOMMANDS:
         return False
+
+    if any(arg in ("--help", "-h", "help") for arg in args):
+        print_introspection()
+        return True
 
     _cmd_pair(args[1:])
     return True

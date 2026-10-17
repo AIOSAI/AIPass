@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-14
 # Modified: 2026-10-16
 # =============================================
@@ -55,9 +55,9 @@ one a client can silently read at the wrong one:
                           phone never loads a whole commit at once.
     GET /v1/git-remote  - read scope. The repository's remote, so the face can
                           build link-cards out to the forge with no auth and no
-                          network call. Shells NOTHING: there is no door for it
-                          on drone and the fleet gate refuses both raw readers,
-                          so the configuration is read as the file it is.
+                          network call, through drone's remote door. No remote
+                          answers 200 with remote null; a repository that
+                          cannot be read is refused.
 
 Phase 5 adds the phone face itself, served from this same origin (see face.py):
     GET /             - @baud's bundle. NO auth: a browser navigating to a URL

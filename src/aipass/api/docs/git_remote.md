@@ -44,10 +44,11 @@ several exist, but `remote` travels either way: refusing a repository that named
 its remote otherwise invents a rule that does not exist; choosing silently hides
 the choice from the caller.
 
-**A repository with no remote is refused in words — not hypothetical: two projects
-in the real tree have none.** Verified live against the real Sentinel repo, which
-answers `400 read_refused` with the sentence. An empty string would render as a
-link card pointing nowhere.
+**A repository with no remote answers 200 with `remote: null`** (contract C-D):
+the same shape, with `remote`, `url` and `web` all `null` and `redacted` false.
+Projects in the real tree have none, and the phone reads `remote === null` as "no
+remote configured". A repository the door cannot read stays a refusal, and a named
+remote carrying no URL is refused rather than served as a link card to nowhere.
 
 **Credentials never travel** — not in the ask, and the doctrine outlived the module
 that carried it. drone redacts too; this lane redacts again as the last stop before
@@ -63,7 +64,7 @@ form is one nobody reads. Nor does the URL reach an audit line; the log records
 which remote answered and whether redaction fired, nothing else.
 
 Verified live: the seat and a foreign project (`AIPL`, via @baud's census) both
-return their GitHub URLs; Sentinel refuses; 8 mutations against this lane all bite.
+return their GitHub URLs; Sentinel has no remote; 8 mutations against this lane all bite.
 One seemed to survive: its anchor had not matched, so the mutation never applied
 and the green run proved nothing; re-run properly before counting.
 

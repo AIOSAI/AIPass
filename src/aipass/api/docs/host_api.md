@@ -73,11 +73,11 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/roots` | read | Every place the file lane may stand: `home`, every project in @baud's census, this server's own repo. Rows of `{kind, name, label}`. No census, no roster — 503, never a short list |
 | `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
 | `GET /v1/dir?branch=&dir=&project=&root=` | read | One directory level, the phone's file browser. Same optional `root`; `branch` carries the name WITHIN that kind — and a kind that names nothing may name *itself* (`branch=home&root=home`), any other name refused. Answers carry `floor`, and `floor` + an entry's path is that entry's real location |
-| `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB); `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
+| `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB), branch-local at `branch` grain; one the worktree patch lacks comes from the index (`staged: true`). `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
 | `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repository. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name** |
 | `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |
 | `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
-| `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered |
+| `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered. No remote: 200, all three `null` |
 | `GET /v1/fleet?project=` | read | @baud's snapshot envelope, unchanged. `project` is case-sensitive |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
@@ -133,8 +133,7 @@ exit code is still never the verdict here; and `set-default` **changes only the
 default** — until `push` runs, all 17 branches keep their existing values. That
 surprise is @memory's design and is passed through untouched. It is now also
 *reported* rather than remembered: `pushed` comes from their payload, as does
-the `branches` count a push answers with. This lane used to hardcode
-`pushed: false`, which was a fact about their branch pinned in mine.
+the `branches` count a push answers with.
 
 **What is not one parseable object is `503`, never a verdict.** If `--json` ever
 stops being honoured — an older @memory on a fresh clone, a renamed flag, a

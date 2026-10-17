@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_history.py
 # Description: Tests for the read lane's per-file diff, commit patch, log, commit detail and remote link-cards
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for read_diff, read_git_log, read_commit and read_git_remote in apps/handlers/host/git_reads.py."""
@@ -50,17 +50,18 @@ PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
 
+# What drone's door serves at branch grain: only the blocks under the branch.
+BRANCH_ONLY_DIFF = TWO_FILE_DIFF[: TWO_FILE_DIFF.index("diff --git", 1)]
+
 
 class TestPerFileDiff:
     """
     The owner's words: "git diffs are pretty much useless. we need a real diff
     setup." The fix is tap-a-file, so the lane needs a path.
 
-    MEASURED BLOCKER: drone's _handle_diff recognises exactly --staged and
-    --all. There is no path parameter and no -U passthrough, so a single file's
-    patch can only be reached by generating the diff and splitting it here — on
-    the per-file headers, which is machine structure, the same doctrine that
-    keeps the status parser off drone's prose.
+    One file's patch is cut out of the generated diff here, on the per-file
+    headers, which are machine structure and repo-relative. The header-parsing
+    cases ask at repo grain, where a path is matched exactly as given.
     """
 
     def _completed(self, stdout: str = TWO_FILE_DIFF, returncode: int = 0, stderr: str = "") -> Any:
@@ -84,7 +85,7 @@ class TestPerFileDiff:
         the change kind. Handing it a bare hunk would strip the file's identity.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_git.read_diff("demo", path="src/aipass/other/thing.py")
+            result = host_git.read_diff("demo", path="src/aipass/other/thing.py", grain="repo")
 
         assert result["diff"].startswith("diff --git a/src/aipass/other/thing.py")
         assert "@@" in result["diff"]
@@ -193,7 +194,7 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_git.read_diff("demo", path="doc.md")
+            result = host_git.read_diff("demo", path="doc.md", grain="repo")
 
         assert result["path"] == "doc.md"
         assert "decoy" in result["diff"]
@@ -211,7 +212,7 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_git.read_diff("demo", path="img/logo.png")
+            result = host_git.read_diff("demo", path="img/logo.png", grain="repo")
 
         assert "Binary files" in result["diff"]
 
@@ -226,7 +227,7 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_git.read_diff("demo", path="odd b/name.bin")
+            result = host_git.read_diff("demo", path="odd b/name.bin", grain="repo")
 
         assert "Binary files differ" in result["diff"]
 
@@ -244,6 +245,82 @@ class TestPerFileDiff:
                 host_git.read_diff("demo", grain="sideways")
 
         assert mock_run.call_count == 0
+
+    # C#2: branch-grain change rows are branch-local; the patch headers are repo-relative.
+
+    def test_a_branch_local_path_opens_its_patch_at_branch_grain(self, fake_repo: dict) -> None:
+        """The card's row spelling (README.md, not src/aipass/<b>/README.md) used to be refused."""
+        with patch.object(subprocess, "run", return_value=self._completed(BRANCH_ONLY_DIFF)):
+            result = host_git.read_diff("demo", path="hello.txt")
+
+        assert "hello world" in result["diff"]
+        assert result["path"] == "hello.txt"
+
+    def test_a_repo_relative_path_still_opens_at_repo_grain(self, fake_repo: dict) -> None:
+        path = "/".join(["src", "aipass", "other", "thing.py"])
+
+        with patch.object(subprocess, "run", return_value=self._completed()):
+            result = host_git.read_diff("demo", path=path, grain="repo")
+
+        assert "add one" in result["diff"]
+        assert "hello world" not in result["diff"]
+
+    def test_an_already_prefixed_path_is_not_prefixed_twice(self, fake_repo: dict) -> None:
+        path = "/".join(["src", "aipass", "demo", "hello.txt"])
+
+        with patch.object(subprocess, "run", return_value=self._completed(BRANCH_ONLY_DIFF)) as mock_run:
+            result = host_git.read_diff("demo", path=path)
+
+        assert "hello world" in result["diff"]
+        assert mock_run.call_count == 1
+
+    def test_a_path_outside_the_branch_is_refused_at_branch_grain_as_before(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", return_value=self._completed(BRANCH_ONLY_DIFF)):
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_diff("demo", path="thing.py")
+
+        assert str(caught.value) == "No changes to thing.py in this patch"
+
+    # C#4: the list is git status (index and worktree); the door's patch is worktree against index.
+
+    def _halves(self, unstaged: str, staged: str) -> Any:
+        """drone's diff door: the index's half when --staged is asked, the worktree's otherwise."""
+        return lambda command, **_: self._completed(staged if "--staged" in command else unstaged)
+
+    def test_a_staged_only_file_opens_its_staged_patch(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", side_effect=self._halves("", BRANCH_ONLY_DIFF)) as mock_run:
+            result = host_git.read_diff("demo", path="hello.txt")
+
+        assert "hello world" in result["diff"]
+        assert result["staged"] is True
+        assert "--staged" in mock_run.call_args[0][0]
+
+    def test_an_mm_file_shows_its_unstaged_half_and_asks_the_index_nothing(self, fake_repo: dict) -> None:
+        index_half = BRANCH_ONLY_DIFF.replace("+hello world", "+hello index")
+
+        with patch.object(subprocess, "run", side_effect=self._halves(BRANCH_ONLY_DIFF, index_half)) as mock_run:
+            result = host_git.read_diff("demo", path="hello.txt")
+
+        assert "+hello world" in result["diff"]
+        assert "+hello index" not in result["diff"]
+        assert result["staged"] is False
+        assert mock_run.call_count == 1
+
+    def test_an_unstaged_change_is_answered_from_the_worktree_alone(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", side_effect=self._halves(BRANCH_ONLY_DIFF, "")) as mock_run:
+            result = host_git.read_diff("demo", path="hello.txt")
+
+        assert "hello world" in result["diff"]
+        assert result["staged"] is False
+        assert "--staged" not in mock_run.call_args[0][0]
+
+    def test_a_file_in_neither_half_is_refused_after_both_are_asked(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", side_effect=self._halves(BRANCH_ONLY_DIFF, "")) as mock_run:
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_diff("demo", path="absent.py")
+
+        assert str(caught.value) == "No changes to absent.py in this patch"
+        assert mock_run.call_count == 2
 
 
 class TestCommitPatch:
@@ -757,17 +834,22 @@ class TestGitRemote:
 
         assert host_git.read_git_remote("demo")["web"] == "https://github.com/AIOSAI/AIPass"
 
-    def test_a_repository_with_no_remote_is_refused_in_words(self, remote_repo: dict) -> None:
-        """
-        NOT hypothetical: projects in the real tree have none at all. An empty
-        string would render as a link card pointing nowhere.
-        """
+    def test_a_repository_with_no_remote_answers_the_same_shape_with_null_links(self, remote_repo: dict) -> None:
+        """Contract C-D: no remote is a fact about the repository, never a refusal."""
+        configured = host_git.read_git_remote("demo")
         remote_repo["serve"](remotes_document([]))
 
-        with pytest.raises(host_reads.ReadRefused) as caught:
-            host_git.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
-        assert "remote" in str(caught.value)
+        assert set(answer) == set(configured)
+        assert answer == {
+            "branch": "demo",
+            "grain": "repo",
+            "remote": None,
+            "url": None,
+            "web": None,
+            "redacted": False,
+        }
 
     def test_a_remote_carrying_no_url_is_refused_rather_than_served_empty(self, remote_repo: dict) -> None:
         """A named remote with nothing to point at is a link card to nowhere."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_config_cli.py
 # Description: Host API Config Module — showing and setting what the server binds, serves and execs
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-14
-# Modified: 2026-09-14
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -289,18 +289,18 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("host-api", "host_api"):
         return False
 
-    # NO-ARGS GATE and HELP GATE (seedgo standard), as in host_serve.py: host_api.py
-    # reaches both first today, and a router only correct given its caller is a trap.
+    # NO-ARGS GATE and HELP GATE (seedgo standard), as in host_serve.py: the help gate
+    # claims only config and set-config; `host-api --help` is host_api.py's.
     if not args:
-        print_introspection()
-        return True
-
-    if any(arg in ("--help", "-h", "help") for arg in args):
         print_introspection()
         return True
 
     if args[0] not in SUBCOMMANDS:
         return False
+
+    if any(arg in ("--help", "-h", "help") for arg in args):
+        print_introspection()
+        return True
 
     if args[0] == "config":
         _cmd_config()

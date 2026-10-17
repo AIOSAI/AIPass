@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -182,7 +182,11 @@ def print_help():
     table.add_row("caller-usage", "Show usage by caller module")
     table.add_row("cleanup", "Clean up old usage data")
     table.add_row("integrations", "List or call a registered contract")
-    table.add_row("host-api", "The phone's server: serve, status, stop, tokens, config")
+    table.add_row(
+        "host-api",
+        "The phone's server: serve, status, stop, autostart, issue-token, list-tokens,"
+        " revoke-token, pair, config, set-config",
+    )
 
     console.print(table)
     console.print()

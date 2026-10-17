@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-12
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -84,6 +84,7 @@
 # seedgo: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -100,7 +101,10 @@ from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.api.apps import api as api_entry
 from aipass.api.apps.modules import host_api as host_api_module
+from aipass.api.apps.modules import host_config_cli as host_config_cli_module
+from aipass.api.apps.modules import host_pair_cli as host_pair_cli_module
 from aipass.api.apps.modules import host_serve as host_serve_module
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
 
@@ -275,6 +279,52 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
 
         helped.assert_called_once()
         served.assert_not_called()
+
+
+class TestTheHelpsNameOnlyRealVerbs:
+    """`drone @api --help` named a `tokens` verb nobody routes; `host-api --help` printed only pair."""
+
+    def test_every_verb_either_help_names_resolves_to_a_routed_command(self, capsys: Any, monkeypatch: Any) -> None:
+        reached = []
+        for module, name in (
+            (host_serve_module, "cmd_serve"),
+            (host_serve_module, "cmd_status"),
+            (host_serve_module, "cmd_stop"),
+            (host_serve_module, "cmd_autostart"),
+            (host_config_cli_module, "_cmd_config"),
+            (host_config_cli_module, "_cmd_set_config"),
+            (host_pair_cli_module, "_cmd_pair"),
+            (host_api_module, "_cmd_issue_token"),
+            (host_api_module, "_cmd_list_tokens"),
+            (host_api_module, "_cmd_revoke_token"),
+        ):
+            monkeypatch.setattr(module, name, lambda *_, _name=name: reached.append(_name))
+        api_entry.print_help()
+        host_api_module.print_help()
+        shown = capsys.readouterr().out
+        row = next(line for line in shown.splitlines() if "The phone's server:" in line)
+        named = {verb.strip(" │|") for verb in row.split("The phone's server:")[1].split(",")}
+        named |= set(re.findall(r"host-api ([a-z][a-z-]*)", shown))
+
+        for verb in sorted(named):
+            handle_command("host-api", [verb])
+
+        assert "Unknown host-api subcommand" not in capsys.readouterr().err
+        assert len(reached) == len(named)
+
+    def test_host_api_help_lists_every_verb_whatever_order_the_modules_load_in(
+        self, store: Path, capsys: Any, monkeypatch: Any
+    ) -> None:
+        found = [host_pair_cli_module, host_serve_module, host_config_cli_module, host_api_module]
+        monkeypatch.setattr(api_entry, "discover_modules", lambda: found)
+        monkeypatch.setattr(sys, "argv", ["api", "host-api", "--help"])
+
+        api_entry.main()
+
+        out = capsys.readouterr().out
+        assert "revoke-token <id>" in out
+        assert "set-config" in out
+        assert "a phone signs in by its camera" not in out
 
 
 class TestRevokeTokenCommandRefuses:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_serve.py
 # Description: Host API Serve Module — starting, watching and stopping the server
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -390,21 +390,22 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("host-api", "host_api"):
         return False
 
-    # NO-ARGS GATE and HELP GATE (seedgo standard). host_api.py reaches both
-    # first today, so neither fires in practice — they are here because a
-    # router that is only correct given its current caller is a trap for the
-    # next one. A help flag ANYWHERE means "explain", never "run": checking
-    # only args[0] is what once let `cleanup 30 --help` run a real cleanup.
+    # NO-ARGS GATE and HELP GATE (seedgo standard). The help gate claims only
+    # this router's own subcommands: `host-api --help` is host_api.py's, and
+    # drone's router offers it to every discovered module in whatever order the
+    # directory listed them. A help flag ANYWHERE in an owned subcommand means
+    # "explain", never "run": checking only args[0] is what once let
+    # `cleanup 30 --help` run a real cleanup.
     if not args:
-        print_introspection()
-        return True
-
-    if any(arg in ("--help", "-h", "help") for arg in args):
         print_introspection()
         return True
 
     if args[0] not in SUBCOMMANDS:
         return False
+
+    if any(arg in ("--help", "-h", "help") for arg in args):
+        print_introspection()
+        return True
 
     subcommand, rest = args[0], args[1:]
 

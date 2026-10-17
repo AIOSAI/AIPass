@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane.py
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-16
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
@@ -626,13 +626,27 @@ class TestReadLaneRoutes:
         assert body["remote"] == "origin"
         assert body["redacted"] is False
 
-    def test_remote_absent_is_400_in_the_envelope(self, client: Any, remote_repo: dict) -> None:
-        """
-        Two real projects have no remote. The face gets a refusal it can show,
-        never an empty string it would render as a dead link.
-        """
+    def test_remote_absent_is_200_with_remote_null(self, client: Any, remote_repo: dict) -> None:
+        """Contract C-D: the face reads remote null as "no remote configured", never as a refusal."""
         api, raw = client
         remote_repo["serve"](remotes_document([]))
+
+        response = api.get(
+            "/v1/git-remote",
+            params={"branch": "demo"},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+
+        body = response.json()
+        assert response.status_code == 200
+        assert body["remote"] is None
+        assert body["url"] is None
+        assert body["web"] is None
+        assert "error" not in body
+
+    def test_remote_of_an_unreadable_repository_stays_400_in_the_envelope(self, client: Any, remote_repo: dict) -> None:
+        api, raw = client
+        remote_repo["serve"](remotes_document([], ok=False, message="git remote error: not a repository"))
 
         response = api.get(
             "/v1/git-remote",
@@ -646,7 +660,7 @@ class TestReadLaneRoutes:
         # seedgo exception_text_in_response, PR #774.
         assert error["message"] == host_denials.SENTENCES["read_refused"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
-        assert "no remote configured" not in response.text
+        assert "not a repository" not in response.text
 
 
 class TestReadsFollowTheFleetLane:
