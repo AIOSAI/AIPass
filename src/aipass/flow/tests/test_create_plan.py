@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/create_plan.py -- handle_command routing
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/create_plan.py."""
@@ -19,13 +19,7 @@ import pytest
 from aipass.cli.apps.modules import command_failed, reset_command_state
 from aipass.flow.apps.modules.create_plan import handle_command
 
-# ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.create_plan"
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. Command != "create" -> returns False
-# ═══════════════════════════════════════════════════════════
 
 
 class TestCommandRouting:
@@ -37,11 +31,6 @@ class TestCommandRouting:
 
     def test_empty_command_returns_false(self):
         assert handle_command("", []) is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. command == "create" with no args -> introspection
-# ═══════════════════════════════════════════════════════════
 
 
 class TestIntrospection:
@@ -56,13 +45,8 @@ class TestIntrospection:
         """Introspection should not attempt to parse arguments."""
         with patch(f"{_MOD}.parse_create_plan_args") as mock_parse:
             result = handle_command("create", [])
-            assert result is True  # Command was handled
+            assert result is True
             mock_parse.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. command == "create" with --help -> help
-# ═══════════════════════════════════════════════════════════
 
 
 class TestHelp:
@@ -85,11 +69,6 @@ class TestHelp:
         mock_help.assert_called_once()
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. command == "create" with valid args -> calls create_plan
-# ═══════════════════════════════════════════════════════════
-
-
 class TestValidArgs:
     @patch(f"{_MOD}.display_plan_result", return_value="[green]OK[/green]")
     @patch(f"{_MOD}.create_plan", return_value=(True, 1, ".", "default", ""))
@@ -106,7 +85,7 @@ class TestValidArgs:
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     def test_valid_args_calls_create_plan(self, mock_parse, mock_get_type, mock_create, mock_display):
         result = handle_command("create", [".", "My Plan"])
-        assert result is True  # Command was handled
+        assert result is True
         mock_create.assert_called_once_with(
             ".",
             "My Plan",
@@ -120,7 +99,7 @@ class TestValidArgs:
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     def test_valid_args_calls_display_result(self, mock_parse, mock_get_type, mock_create, mock_display):
         result = handle_command("create", [".", "My Plan"])
-        assert result is True  # Command was handled
+        assert result is True
         mock_display.assert_called_once_with(
             True,
             1,
@@ -147,11 +126,6 @@ class TestValidArgs:
         )
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. Invalid plan type -> error displayed, returns True
-# ═══════════════════════════════════════════════════════════
-
-
 class TestInvalidPlanType:
     @patch(f"{_MOD}.create_plan")
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))
@@ -160,11 +134,7 @@ class TestInvalidPlanType:
         self, mock_get_type, mock_parse, mock_create, capsys: pytest.CaptureFixture[str]
     ):
         """Invalid plan type is an error but command was still handled.
-
-        Handled, and handled as a FAILURE: the reason reaches stderr through cli's
-        error(), which marks the process failed so flow's entry point exits 2
-        (compass 451), and no plan is created. create_plan is patched so that a
-        router which ran on past the refusal is caught here, not in a real registry.
+        Handled as a FAILURE: reason on stderr, process marked failed, no plan created.
         Mutant: `cli_error(str(exc))` -> `console.print(str(exc))` reddens this.
         """
         reset_command_state()
@@ -183,13 +153,8 @@ class TestInvalidPlanType:
     @patch(f"{_MOD}.get_plan_type", side_effect=ValueError("Unknown plan type 'bad_type'"))
     def test_invalid_type_calls_error(self, mock_get_type, mock_parse, mock_cli_error):
         result = handle_command("create", [".", "My Plan", "bad_type"])
-        assert result is True  # Command was handled (error displayed)
+        assert result is True
         mock_cli_error.assert_called_once_with("Unknown plan type 'bad_type'")
-
-
-# ═══════════════════════════════════════════════════════════
-# 6. json_handler.log_operation is called on valid commands
-# ═══════════════════════════════════════════════════════════
 
 
 class TestOperationLogging:
@@ -200,7 +165,7 @@ class TestOperationLogging:
     @patch(f"{_MOD}.json_handler", spec=True)
     def test_logs_operation(self, mock_jh, mock_parse, mock_get_type, mock_create, mock_display):
         result = handle_command("create", [".", "My Plan"])
-        assert result is True  # Command was handled
+        assert result is True
         mock_jh.log_operation.assert_called_once_with(
             "plan_created",
             {"command": "create", "args": [".", "My Plan"]},

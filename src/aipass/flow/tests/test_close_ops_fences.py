@@ -3,7 +3,7 @@
 # Description: Tests for close_all's project-scope fence, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the project-scope fence of close_all_plans_impl in apps/handlers/plan/close_ops.py."""
@@ -23,20 +23,7 @@ from aipass.flow.tests.support_close_ops import _closed_ids, _held_ids, _scope
 def _under(path: PurePath, root: PurePath) -> bool:
     """True when `path` IS `root` or lives beneath it.
 
-    A path relationship, never a string prefix. This exists because three
-    tests in this file red on the windows-setup CI runner while their
-    siblings stayed green, and the difference was exactly the idiom:
-
-        str(Path("/aipass/src"))            # posix   -> "/aipass/src"
-        str(Path("/aipass/src"))            # windows -> "\\aipass\\src"
-        "\\aipass\\src".startswith("/aipass")  # False
-
-    So a resolver written as ``str(path).startswith("/aipass")`` returned None
-    for every row on Windows, the whole sweep landed in the held bucket, and
-    nothing closed. The siblings compared ``str(path)`` to ``str(root)`` --
-    both sides wearing the same separator -- which is why they survived.
-    Neither idiom belongs in a path test; is_relative_to answers the question
-    that was actually being asked, on every platform.
+    A path relationship, never a string prefix: Windows separators break ``str(path).startswith``.
     """
     return path.is_relative_to(root)
 
@@ -79,9 +66,7 @@ class TestProjectScopeFence:
             get_open_plans=MagicMock(return_value=open_plans),
             close_plan_fn=mock_close,
         )
-        # REACHED: the sweep ran against both rows and closed the local one.
         assert _closed_ids(mock_close) == ["DPLAN-0100"]
-        # OUTCOME: the nested foreign row was held, not closed, not a failure.
         assert _held_ids(result) == ["DPLAN-0101"]
         assert result["failure_count"] == 0
         mock_bg.assert_called_once_with()
@@ -116,9 +101,7 @@ class TestProjectScopeFence:
             get_open_plans=MagicMock(return_value=open_plans),
             close_plan_fn=mock_close,
         )
-        # REACHED: the sweep ran and closed the attributable row.
         assert _closed_ids(mock_close) == ["DPLAN-0100"]
-        # OUTCOME: a row no register stands above is held, not swept by default.
         assert _held_ids(result) == ["DPLAN-0102"]
         summary = next(m for m in result["messages"] if m.get("type") == "close_all_scope")
         assert summary["held_out_of_scope"] == 1
@@ -172,7 +155,7 @@ class TestProjectScopeFence:
         )
         assert result["success"] is False
         mock_close.assert_not_called()
-        # Refused BEFORE reading the registries -- not after filtering to zero.
+        # Refused before reading the registries, not after filtering to zero.
         mock_get.assert_not_called()
         assert any("REFUSED" in str(m.get("text", "")) for m in result["messages"])
 
@@ -227,7 +210,7 @@ class TestDryRunEqualsRunUnderFences:
             **scope,
         )
 
-        # The one assertion this whole build turns on.
+        # The preview must name exactly what the run closes.
         assert preview["plan_ids"] == _closed_ids(mock_close) == ["DPLAN-0316"]
         assert preview["held_ids"] == run["held_ids"] == ["APLAN-0004", "DPLAN-0101", "FPLAN-0102"]
         assert preview["refused"] == ["0999"]
@@ -293,12 +276,7 @@ class TestDryRunEqualsRunUnderFences:
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
     def test_a_corrupt_nested_register_refuses_the_sweep_not_hands_its_rows_over(self, _mock_jh, mock_bg, tmp_path):
-        """The real resolver: a row under a project whose register is broken.
-
-        Until leg 6 the walk read the broken register as "not a project" and
-        went on up, so the row counted as the outer caller's and was closed.
-        Red first on that code; the mutant is in test_project_scope.
-        """
+        """The real resolver: a row under a project whose register is broken."""
         suffix = "_REGISTRY" + ".json"  # assembled: the literal name is a sealed-write trigger
         outer = tmp_path / "outer"
         nested = outer / "projects" / "nested"
@@ -328,14 +306,7 @@ class TestDryRunEqualsRunUnderFences:
 
 
 class TestTheScopeComparisonIsPlatformNeutral:
-    """Guards the idiom the windows-setup runner caught, from Linux.
-
-    The three tests that red on Windows all shared one line shape and no
-    Linux run could see it: the whole failure lived in what str(Path(...))
-    produces on a platform this machine is not. PureWindowsPath implements
-    exactly those semantics here, so the class of bug is now catchable
-    locally rather than only in CI on a runner nobody can reach.
-    """
+    """Guards the idiom the windows-setup runner caught, from Linux."""
 
     ROW = "/aipass/src"
     ROOT = "/aipass"
@@ -364,17 +335,7 @@ class TestTheScopeComparisonIsPlatformNeutral:
 class TestTheFenceUnderWindowsPathSemantics:
     """Runs the scope fence with close_ops seeing Windows paths, from Linux.
 
-    close_ops turns each row's location into ``Path(location)`` before handing
-    it to the scope resolver, so patching that one name to PureWindowsPath puts
-    the resolver in exactly the position it occupies on the windows-setup
-    runner. This is not a substitute for CI -- it cannot see filesystem or
-    drive-letter behaviour -- but it makes the SEPARATOR class of defect
-    reproducible on a machine that has no Windows, which is the class that
-    reddened three tests here and could not be seen locally at all.
-
-    Proven faithful: with the old ``str(path).startswith("/aipass")`` idiom
-    restored, this harness reproduces the CI job's three assertions verbatim --
-    [] == ['DPLAN-0100'], [] == ['DPLAN-0316'], and 0 == 1.
+    Patching close_ops' ``Path`` to PureWindowsPath reproduces separator defects; not drive or filesystem ones.
     """
 
     @staticmethod
@@ -415,8 +376,6 @@ class TestTheFenceUnderWindowsPathSemantics:
                 close_plan_fn=mock_close,
             )
 
-        # In scope, foreign and unattributable each land where they belong --
-        # the exact split that collapsed to "everything is unattributable".
         assert _closed_ids(mock_close) == ["DPLAN-0100"]
         assert sorted(_held_ids(result)) == ["DPLAN-0101", "DPLAN-0102"]
         mock_bg.assert_called_once_with()

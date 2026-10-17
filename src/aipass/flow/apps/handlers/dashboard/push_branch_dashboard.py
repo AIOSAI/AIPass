@@ -3,52 +3,13 @@
 # Description: Push flow section to branch dashboards
 # Version: 2.2.0
 # Created: 2026-03-01
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Push Flow Section to Branch Dashboard
+"""Push Flow Section to Branch Dashboard
 
-Pushes the "flow" section of a branch's DASHBOARD.local.json via the
-DevPulse write_section() write-through API.
-
-Unlike update_local.py (which updates Flow's OWN dashboard), this handler
-targets the branch where a plan LIVES. Each branch sees its own active plans
-on its own dashboard.
-
-Data Flow:
-    1. Read fplan_registry.json (source of truth)
-    2. Filter active plans for target branch (by location path)
-    3. Get recently closed plans (last 5, within last 7 days)
-    4. Get total plan count for this branch
-    5. Call write_section(branch_path, "flow", section_data)
-
-Section Structure:
-{
-    "managed_by": "flow",
-    "active_plans": 23,
-    "open_recent": [
-        {"plan_id": "FPLAN-0373", "subject": "...", "created": "..."}
-    ],
-    "recently_closed": [
-        {"id": "FPLAN-0372", "subject": "...", "closed": "..."}
-    ],
-    "total_plans": 15
-}
-
-open_recent is the bounded reading window: the 5 newest open plans by created
-date, newest first, capped here in the renderer. Read it with active_plans —
-the count is what stops 5 rows from reading as the whole world.
-
-active_plans is an int COUNT, not a list. Ruling of 2026-08-16 (the owner, via
-@devpulse): the full open-plan list is the unbounded context a dashboard must
-never carry, so it left the section entirely and `drone @flow list open` is the
-only full-detail door. The int also matches the shape @prax's refresh already
-writes, so the field means one thing no matter which writer built the section.
-
-Usage:
-    from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_branch_dashboard
-    success = push_flow_to_branch_dashboard(Path("/path/to/branch"))
+active_plans is an int count, never the list: the full open-plan list is unbounded context a dashboard
+must not carry (`drone @flow list open` is the full-detail door), and @prax's refresh writes the same int.
 """
 
 import json
@@ -60,60 +21,31 @@ from typing import Dict, Any, List, Tuple
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# The dashboard caps contract (prax/docs/dashboard_caps.md). Import the numbers,
-# never retype them: a second copy is what drifts. `sections.flow` has two
-# writers -- prax's refresh and this push -- and a cap on one side alone
-# re-inflates on the other side's next plan operation.
+# Import the caps, never retype them: `sections.flow` has two writers (prax's refresh and this push).
 from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# Registry location (fallback default)
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 
-# Dashboard template path (package-relative)
 DASHBOARD_TEMPLATE_FILE = _PKG_ROOT / "devpulse" / "templates" / "DASHBOARD.template.json"
 
-# quick_status ownership. Flow is the authority for plan counts and the only
-# writer that emits commons_mentions, so it always recomputes those.
+# Flow is the authority for these quick_status keys, so it always recomputes them.
 OWNED_KEYS = frozenset({"active_plans", "commons_mentions"})
 
-# Mail counts mirror data Flow does not own — @prax sources them straight from
-# inbox.json, while all we can see is the (possibly stale) ai_mail section. We
-# seed them on a fresh dashboard but never overwrite a value already there.
+# @prax sources mail counts from inbox.json; ours may be stale, so seed them but never overwrite.
 MIRROR_KEYS = frozenset({"new_mail", "opened_mail"})
 
-# Computed from every counter in the merged block, ours and foreign alike.
 DERIVED_KEYS = frozenset({"action_required", "summary"})
 
 
-# =============================================
-# DASHBOARD WRITE (local — no cross-branch imports)
-# =============================================
-
-
 def _warn_over_budget(branch_path: Path, rendered: str) -> None:
-    """
-    Log one WARNING when a rendered dashboard is over DASHBOARD_CHAR_BUDGET.
-
-    prax's save_dashboard() carries this measurement for every writer that goes
-    through it; this handler writes the file itself, so it mirrors the budget on
-    its own write -- same number, same warn-only shape.
-
-    Warn, never refuse, never trim. A refused save leaves a stale dashboard, and
-    stale is the failure already on the board: zero new mail reported while three
-    wait in the inbox. The budget is a signal to the branch that owns the file.
-
-    Units are chars -- len() over the rendered JSON, the number wc -m reports.
-
-    Args:
-        branch_path: Path to branch root (named in the warning)
-        rendered: The exact JSON text about to be written
+    """Log one WARNING when a rendered dashboard is over DASHBOARD_CHAR_BUDGET.
+    Warn, never refuse or trim: a refused save leaves a stale dashboard. Units are chars (len of the JSON).
     """
     size = len(rendered)
     if size > DASHBOARD_CHAR_BUDGET:
@@ -126,22 +58,7 @@ def _warn_over_budget(branch_path: Path, rendered: str) -> None:
 
 
 def _write_dashboard_section(branch_path: Path, section_name: str, section_data: Dict[str, Any]) -> bool:
-    """
-    Write a single section to a branch's DASHBOARD.local.json.
-
-    Self-contained dashboard write — equivalent to DevPulse write_section()
-    but without cross-branch imports. Loads existing dashboard, updates
-    the named section, merge-updates quick_status (our keys recomputed,
-    other writers' keys preserved), and saves.
-
-    Args:
-        branch_path: Path to branch root directory
-        section_name: Section key (e.g. "flow")
-        section_data: Dict of data for this section
-
-    Returns:
-        True if saved successfully, False on any error
-    """
+    """Write a single section to a branch's DASHBOARD.local.json."""
     try:
         dashboard_path = branch_path / "DASHBOARD.local.json"
 
@@ -178,15 +95,7 @@ def _write_dashboard_section(branch_path: Path, section_name: str, section_data:
 
 
 def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
-    """
-    Create fresh dashboard structure from template or fallback.
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        Fresh dashboard dict
-    """
+    """Create fresh dashboard structure from template or fallback."""
     if DASHBOARD_TEMPLATE_FILE.exists():
         try:
             template = json.loads(DASHBOARD_TEMPLATE_FILE.read_text())
@@ -220,19 +129,8 @@ def _as_count(value: Any) -> int:
 
 
 def _foreign_counters(existing: Dict[str, Any]) -> Dict[str, int]:
-    """
-    Extract positive `*_count` counters written by other services.
-
-    quick_status has several writers with different schemas (@prax's refresh
-    contributes `todo_count`, for one). We cannot interpret arbitrary foreign
-    keys, but a key named `*_count` holding a real integer is unambiguously a
-    counter, so it can still feed action_required and the summary line.
-
-    Args:
-        existing: The quick_status block currently on disk
-
-    Returns:
-        Mapping of foreign counter key -> positive count
+    """Extract positive `*_count` counters written by other services.
+    Foreign keys cannot be interpreted, but a `*_count` int is unambiguously a counter.
     """
     known = OWNED_KEYS | MIRROR_KEYS | DERIVED_KEYS
     counters: Dict[str, int] = {}
@@ -251,25 +149,9 @@ def _counter_label(key: str) -> str:
 
 
 def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> Dict[str, Any]:
-    """
-    Recalculate the quick_status keys Flow owns, preserving every other key.
-
-    quick_status is shared ground: @prax's dashboard refresh writes it too,
-    with a different set of keys. Replacing the whole block means whichever
-    service wrote last silently deletes the other's fields — that is how a
-    plan close used to zero `todo_count` on a branch card. So we merge:
-
-      - OWNED_KEYS   recomputed from live section data (we are the authority)
-      - MIRROR_KEYS  preserved if already set, seeded only when absent
-      - DERIVED_KEYS recomputed over every counter present, foreign included
-      - anything else carried through untouched
-
-    Args:
-        sections: All dashboard sections dict
-        existing: The quick_status block currently on disk (ignored if not a dict)
-
-    Returns:
-        Quick status dict — our keys recomputed, other writers' keys preserved
+    """Recalculate the quick_status keys Flow owns, preserving every other key.
+    @prax's refresh writes quick_status too; replacing the whole block lets the last writer delete the
+    other's fields, so OWNED keys are recomputed, MIRROR keys seeded only when absent, the rest kept.
     """
     existing = existing if isinstance(existing, dict) else {}
 
@@ -277,15 +159,10 @@ def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> D
     flow = sections.get("flow", {})
     commons = sections.get("commons_activity", {})
 
-    # Mirror keys: never downgrade a value another writer sourced first-hand.
     new_mail = existing["new_mail"] if "new_mail" in existing else ai_mail.get("new", ai_mail.get("unread", 0))
     opened_mail = existing["opened_mail"] if "opened_mail" in existing else ai_mail.get("opened", 0)
 
-    # Read active_plans, the one key BOTH writers set. This used to read
-    # active_count, which only Flow writes — so a section built by @prax's
-    # refresh counted as zero open plans on the glance.
-    # The list branch covers dashboards written before the 2026-08-16 ruling,
-    # which still carry the old full-list shape until their next push.
+    # active_plans is the one key both writers set; a list is the old shape, kept until the next push.
     active_plans = flow.get("active_plans", 0)
     if isinstance(active_plans, list):
         active_plans = len(active_plans)
@@ -307,7 +184,6 @@ def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> D
         parts.append(f"{mentions} mentions")
     parts.extend(f"{count} {_counter_label(key)}" for key, count in foreign.items())
 
-    # Foreign keys first (preserved verbatim), then the values we stand behind.
     merged = dict(existing)
     merged.update(
         {
@@ -320,11 +196,6 @@ def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> D
         }
     )
     return merged
-
-
-# =============================================
-# PLAN TYPE HELPERS
-# =============================================
 
 
 def _get_all_registry_files() -> List[str]:
@@ -348,20 +219,9 @@ def _get_all_registry_files() -> List[str]:
     return [REGISTRY_FILE.name]
 
 
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-
 def _load_registry() -> Dict[str, Any]:
-    """
-    Load all per-type plan registries and merge into a single dict.
-
-    Uses PREFIX-NNNN composite keys to avoid collisions between registries
-    that share the same plan number (e.g. FPLAN-0013 vs DPLAN-0013).
-
-    Returns:
-        Merged registry dict or empty structure if unavailable
+    """Load all per-type plan registries and merge into a single dict.
+    Keys are PREFIX-NNNN so registries sharing a plan number (FPLAN-0013, DPLAN-0013) do not collide.
     """
     merged: Dict[str, Any] = {"plans": {}, "next_number": 1}
     for registry_file in _get_all_registry_files():
@@ -390,15 +250,8 @@ def _load_registry() -> Dict[str, Any]:
 def _filter_branch_plans(
     registry: Dict[str, Any], branch_path: Path
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
-    """
-    Filter plans for a specific branch from the registry.
-
-    Args:
-        registry: Full fplan_registry.json data
-        branch_path: Absolute path to the branch directory
-
-    Returns:
-        Tuple of (active_plans, recently_closed_plans, total_branch_plans)
+    """Filter plans for a specific branch from the registry.
+    Returns (active_plans, recently_closed_plans, total_branch_plans).
     """
     plans = registry.get("plans", {})
     branch_path_str = str(branch_path)
@@ -412,12 +265,10 @@ def _filter_branch_plans(
     for plan_key, plan_data in plans.items():
         location = plan_data.get("location", "")
 
-        # Match plans whose location is this branch
         if location != branch_path_str:
             continue
 
         branch_total += 1
-        # plan_key is composite PREFIX-NNNN from merged registry
         plan_id = plan_key
 
         if plan_data.get("status") == "open":
@@ -431,7 +282,6 @@ def _filter_branch_plans(
             )
         elif plan_data.get("status") == "closed":
             closed_ts = plan_data.get("closed", "")
-            # Only include recently closed (within 7 days)
             if closed_ts:
                 try:
                     closed_dt = datetime.fromisoformat(closed_ts)
@@ -440,47 +290,26 @@ def _filter_branch_plans(
                             {"id": plan_id, "subject": plan_data.get("subject", ""), "closed": closed_ts}
                         )
                 except (ValueError, TypeError) as exc:
-                    # If we can't parse the timestamp, include it anyway
                     logger.warning(
                         "Unparseable closed timestamp '%s' for plan %s, including anyway: %s", closed_ts, plan_id, exc
                     )
                     closed_plans.append({"id": plan_id, "subject": plan_data.get("subject", ""), "closed": closed_ts})
 
-    # Sort active by created date (newest first)
     active_plans.sort(key=lambda x: x.get("created", ""), reverse=True)
 
-    # Sort closed by closed date (newest first), limit to 5
     closed_plans.sort(key=lambda x: x.get("closed", ""), reverse=True)
     recent_closed = closed_plans[:5]
 
     return active_plans, recent_closed, branch_total
 
 
-# How many open plans the bounded window publishes. the owner's spec: a reader
-# gets its bearings from 5 named plans plus the total, never from 22 rows.
+# A reader gets its bearings from 5 named plans plus the total, never from every row.
 OPEN_RECENT_LIMIT = 5
 
 
 def _build_open_recent(active_plans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Build the bounded window of the newest open plans, newest first.
-
-    The cap lives here, in the renderer, not in whoever reads the section —
-    a consumer that has to remember to slice is a consumer that will one day
-    forget, and the point of the field is that the full list never travels.
-
-    Sorting is done here rather than trusted from the caller so the field's
-    newest-first contract holds for any input order. Plans with no `created`
-    date sort last instead of raising.
-
-    Args:
-        active_plans: Open plan dicts as built by _filter_branch_plans
-
-    Subjects are cut to SUBJECT_CAP by prax's cap_subject() -- truncate, never
-    refuse, because refusing drops the plan from the glance entirely.
-
-    Returns:
-        At most OPEN_RECENT_LIMIT entries of {plan_id, subject, created}
+    """Build the bounded window of the newest open plans, newest first.
+    The cap lives in the renderer: a consumer that must remember to slice will one day forget.
     """
     newest_first = sorted(active_plans, key=lambda p: p.get("created") or "", reverse=True)
     return [
@@ -496,21 +325,8 @@ def _build_open_recent(active_plans: List[Dict[str, Any]]) -> List[Dict[str, Any
 def _build_section_data(
     active_plans: List[Dict[str, Any]], recently_closed: List[Dict[str, Any]], total_plans: int
 ) -> Dict[str, Any]:
-    """
-    Build the flow section data for write_section().
-
-    Every published subject goes through prax's cap_subject() here, at the one
-    seam both lists pass through -- _filter_branch_plans builds closed entries
-    on two paths (parseable and unparseable timestamps), and a cap applied per
-    path is a cap one new path forgets.
-
-    Args:
-        active_plans: List of active plan dicts
-        recently_closed: List of recently closed plan dicts
-        total_plans: Total plan count for this branch
-
-    Returns:
-        Section data dict ready for write_section()
+    """Build the flow section data for write_section().
+    Subjects are capped here, the one seam both lists pass through, so no new build path can skip it.
     """
     return {
         "managed_by": "flow",
@@ -521,50 +337,26 @@ def _build_section_data(
     }
 
 
-# =============================================
-# HANDLER FUNCTION
-# =============================================
-
-
 def push_flow_to_branch_dashboard(branch_path: Path) -> bool | None:
-    """
-    Push flow section to a branch's DASHBOARD.local.json via write_section().
+    """Push flow section to a branch's DASHBOARD.local.json via write_section().
+    Failures are logged, never raised: the plan operation that called this has already happened.
 
-    Reads the flow registry, filters plans for the target branch,
-    and writes the flow section to the branch's dashboard.
-
-    Dashboard write failures are logged, never raised: the plan operation that
-    called this has already happened and must not be undone by a card.
-
-    Args:
-        branch_path: Absolute path to the branch directory
-            (e.g. Path("/repo/src/aipass/devpulse"))
-
-    Returns:
-        True if written; None if the path has no DASHBOARD.local.json (not a
-        branch, nothing to push, nothing created); False if the push failed
-        (the section write refused, or an error was raised and logged). Flow's
-        leg 3 decision: None and False were one value before, so a caller that
-        saw a failure told the user no branch was tracking the plan.
+    Returns True if written, None if the path has no DASHBOARD.local.json (not a branch, nothing
+    created), False if the push failed; None and False must stay distinct.
     """
     try:
         branch_path = Path(branch_path)
 
-        # Guard: only push to paths that already have a dashboard (real branches)
         dashboard_file = branch_path / "DASHBOARD.local.json"
         if not dashboard_file.exists():
             return None
 
-        # 1. Load the registry
         registry = _load_registry()
 
-        # 2. Filter plans for this branch
         active_plans, recently_closed, total_plans = _filter_branch_plans(registry, branch_path)
 
-        # 3. Build section data
         section_data = _build_section_data(active_plans, recently_closed, total_plans)
 
-        # 4. Write flow section to branch dashboard
         result = _write_dashboard_section(branch_path, "flow", section_data)
 
         if result:
@@ -587,24 +379,8 @@ def push_flow_to_branch_dashboard(branch_path: Path) -> bool | None:
 
 
 def push_flow_to_all_branch_dashboards() -> Dict[str, int]:
-    """
-    Push the flow section to every branch Flow holds plans for.
-
-    Card values are written per-branch on plan events, so a change to the
-    section contract only reaches a branch that happens to file a plan
-    afterwards. After the 2.0.0 shape change, 14 of 17 cards still read
-    total_plans 0 and two more still served the pre-2.0.0 list shape: those
-    branches were not waiting on time, they were waiting on an event that may
-    never arrive (@prax, 2026-08-16). This sweep is the repair, and the way to
-    land any future contract change fleet-wide instead of one plan at a time.
-
-    Branches are discovered from plan locations in the registry. Paths without
-    a dashboard are skipped, never created — push_flow_to_branch_dashboard
-    already refuses those, and a directory with no dashboard is not a branch.
-    One branch failing never costs the others their push.
-
-    Returns:
-        Counts of {"pushed", "skipped", "failed"}
+    """Push the flow section to every branch Flow holds plans for.
+    Cards are written on plan events, so this sweep lands a section contract change fleet-wide.
     """
     registry = _load_registry()
     locations = {plan.get("location", "") for plan in registry.get("plans", {}).values() if plan.get("location", "")}

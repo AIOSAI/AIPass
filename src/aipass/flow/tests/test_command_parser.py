@@ -3,7 +3,7 @@
 # Description: Tests for flow command argument parser (apps/handlers/plan/command_parser.py)
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/command_parser.py."""
@@ -23,36 +23,19 @@ from aipass.flow.apps.handlers.plan.command_parser import (
 from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
 
 
-# ---------------------------------------------------------------------------
-# Default type map returned by the mocked get_type_map
-# ---------------------------------------------------------------------------
 DEFAULT_TYPE_MAP = {
     "default": "flow_plans",
     "fplan": "flow_plans",
     "dplan": "dev_plans",
 }
 
-# The registered set these tests parse against.
-#
-# WHY THIS IS PINNED RATHER THAN READ. --exclude-type validates against the
-# live template registry, which is runtime state: a fresh checkout ships no
-# registry at all. Asserting that APLAN is accepted therefore asserted that
-# THIS MACHINE had audit_plans registered, and CI -- which is always a fresh
-# checkout -- red on exactly that (PR 739, linux 3.10). What these tests are
-# for is the parser: does it collect the value, upper-case it, repeat, refuse
-# an unknown one. None of that is a claim about which types happen to exist.
-# The one test that IS a claim about the live registry stays live and is
-# marked as such; TestRegisteredPrefixesContract keeps this constant honest.
+# Pinned, not read: the live registry is runtime state and a fresh checkout (CI) has none.
+# TestRegisteredPrefixesContract keeps this constant shaped like production.
 FAKE_REGISTERED = ["APLAN", "DPLAN", "FPLAN", "PPLAN"]
 
 
 def _live_registered() -> list[str]:
-    """The registered set as the public parser reports it to the operator.
-
-    An unknown --exclude-type refuses and names every registered prefix, in the
-    order the registered-type source returns them -- so the refusal message is
-    the public door onto that source.
-    """
+    """The registered set as the public parser reports it to the operator."""
     _, _, _, _, _, error = parse_close_command_args(["--all", "--exclude-type", "NOT_A_TYPE"])
     assert error is not None
     head, sep, listed = error.partition(". Registered: ")
@@ -71,9 +54,6 @@ def registered(request):
         yield mocked
 
 
-# ---------------------------------------------------------------------------
-# parse_create_plan_args
-# ---------------------------------------------------------------------------
 class TestParseCreatePlanArgs:
     """Tests for parse_create_plan_args."""
 
@@ -131,7 +111,6 @@ class TestParseCreatePlanArgs:
     )
     def test_unknown_type_passed_through(self, _mock_type_map):
         _, _, plan_type_key = parse_create_plan_args(["@flow", "Experiment", "custom_thing"])
-        # Not in the type map, so the raw value is returned as-is
         assert plan_type_key == "custom_thing"
 
     @patch(
@@ -186,10 +165,8 @@ class TestParseCreatePlanArgs:
 
         Mutant: args[0] if len(args) > 0 -> args[0].upper() if len(args) > 0 reddens this.
         """
-        # None case
         loc1, _, _ = parse_create_plan_args([])
         assert loc1 is None
-        # String case
         loc2, _, _ = parse_create_plan_args(["@flow"])
         assert loc2 == "@flow"
 
@@ -202,9 +179,6 @@ class TestParseCreatePlanArgs:
         assert result[0] is None
 
 
-# ---------------------------------------------------------------------------
-# parse_close_command_args
-# ---------------------------------------------------------------------------
 class TestParseCloseCommandArgs:
     """Tests for parse_close_command_args."""
 
@@ -293,7 +267,7 @@ class TestParseCloseCommandArgs:
     def test_yes_flag_is_redundant(self):
         plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["42", "--yes"])
         assert plan_num == "42"
-        # --yes does NOT set confirm (it's for backward compat, auto-confirm is default)
+        # --yes is accepted for compatibility but never sets confirm.
         assert confirm is False
         assert error is None
 
@@ -344,29 +318,16 @@ class TestParseCloseCommandArgs:
         Mutant: if arg.startswith("-"): -> if arg.startswith("-") and False: reddens this.
         """
         plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--help"])
-        # --help starts with -- so it is refused as a flag, never taken as the plan number.
         assert plan_num is None
         assert error == "Unrecognised argument: --help"
 
-    # ---- the silent flag drop ----
-    # `--exclude APLAN` used to be byte-identical to passing nothing: the
-    # argument vanished and the bulk close ran anyway. Red first — every one
-    # of these returned error=None before the fix.
+    # An unknown flag must refuse the run, never vanish while the bulk close proceeds.
 
     def test_unknown_flag_refuses(self):
         plan_num, _, all_plans, _, _excl, error = parse_close_command_args(["--all", "--exclude", "APLAN"])
-        # PINNED TO THE STRING THE PARSER RETURNS, measured by calling it:
-        # ("Unrecognised argument: --exclude"). `error is not None` was true of
-        # any refusal at all, including one naming the wrong flag.
         assert error == "Unrecognised argument: --exclude"
-        # REFUSES the run: nothing survives the parse to be acted on.
         assert plan_num is None
-        # `all_plans is False or error` could never fail - the right clause was
-        # the error string this test had just required to be non-empty, so the
-        # `or` short-circuited to truthy whatever all_plans held. Measured, the
-        # parser leaves all_plans TRUE on a refusal; it does not unset the flag,
-        # and the error is the whole of what stops the caller. Pinned as it IS,
-        # so a future parser that starts clearing the flag has to say so here.
+        # The parser leaves all_plans set on a refusal; the error alone stops the caller.
         assert all_plans is True
 
     def test_typo_in_the_flag_name_refuses(self):
@@ -389,8 +350,6 @@ class TestParseCloseCommandArgs:
         _, _, _, _, _excl, error = parse_close_command_args(["--all", "42"])
         assert error == "Unrecognised argument: 42 (--all takes no plan number)"
 
-    # ---- --exclude-type ----
-
     def test_exclude_type_collected(self, registered):
         _, _, all_plans, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", "APLAN"])
         assert error is None
@@ -412,19 +371,12 @@ class TestParseCloseCommandArgs:
     def test_unknown_plan_type_refuses_and_names_the_valid_ones(self, registered):
         """Mutant: Registered: {', '.join(valid)} -> Registered: {', '.join(valid[:1])} reddens this."""
         _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-type", "APLNA"])
-        # The operator must be able to act on the refusal, so every registered
-        # type is named -- whatever the registered set happens to be.
         assert error == f"Unknown plan type(s): APLNA. Registered: {', '.join(FAKE_REGISTERED)}"
 
     def test_exclude_type_validated_against_the_live_registry(self):
         """Not a literal list -- the valid set comes from the registered templates.
 
-        Deliberately NOT mocked: this is the one test that must touch the real
-        registry, because what it pins is that the parser and `drone @flow
-        templates` read the same source. It is hermetic by construction rather
-        than by isolation -- the input is derived from the same call the parser
-        validates against, so it holds on a fresh checkout with two types and
-        on this machine with seven.
+        Deliberately unmocked: the input comes from the same source the parser reads, so it holds anywhere.
         """
         live = {p.upper() for p in get_prefix_map().values() if p}
         assert live, "the registry must always answer with at least the protected types"
@@ -434,13 +386,7 @@ class TestParseCloseCommandArgs:
             assert exclude_types == [prefix]
 
     def test_a_bare_registry_still_accepts_the_protected_types(self):
-        """What a fresh checkout is GUARANTEED to have, tracked tree alone.
-
-        flow_json/ is not tracked, so CI starts with no registry and seeds
-        _DEFAULT_TYPES. FPLAN and DPLAN are also _PROTECTED_TYPES and cannot be
-        removed, so they are the only prefixes any checkout can promise. This
-        test is the floor the CI failure exposed.
-        """
+        """What a fresh checkout is GUARANTEED to have, tracked tree alone."""
         for prefix in ("FPLAN", "DPLAN"):
             _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", prefix])
             assert error is None, f"{prefix} is protected but was refused"
@@ -463,9 +409,6 @@ class TestParseCloseCommandArgs:
         assert error is not None
 
 
-# ---------------------------------------------------------------------------
-# parse_restore_command_args
-# ---------------------------------------------------------------------------
 class TestParseRestoreCommandArgs:
     """Tests for parse_restore_command_args."""
 
@@ -524,17 +467,8 @@ class TestParseRestoreCommandArgs:
         assert error is None
 
 
-# ---------------------------------------------------------------------------
-# The mock's contract with production
-# ---------------------------------------------------------------------------
 class TestRegisteredPrefixesContract:
-    """Proves FAKE_REGISTERED is shaped like what production actually returns.
-
-    A mock is only worth what its shape agreement is worth. The exclude-type
-    tests above run against FAKE_REGISTERED; if _registered_prefixes() ever
-    starts returning something else -- a dict, lower-case, dir names instead of
-    prefixes -- those tests would keep passing against a fiction. These do not.
-    """
+    """Proves FAKE_REGISTERED is shaped like what production actually returns."""
 
     @staticmethod
     def _is_prefix_list(value) -> bool:

@@ -3,60 +3,23 @@
 # Description: Registry Doctrine Self-Heal Handler
 # Version: 1.5.0
 # Created: 2026-07-29
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Registry Doctrine Self-Heal Handler
 
-Extends the S155 "drift bugs auto-heal" doctrine to the per-type plan
-registries. A registry audit found three classes of corruption that must
-never again require a manual JSON edit:
+Heals the plan-registry corruption classes so none needs a manual JSON edit:
+1. Number collision: a row's file is gone and an unregistered file holds its number.
+2. Unregistered file: a plan file on disk with no row in its type's registry.
+3. Wrong-prefix row: a row in another type's registry (TDPLAN file in fplan_registry).
+4. Missing-file orphan: an open row whose file is gone; closed on every scan, not only on create.
+5. Orphan location: a row recorded at a ghost path or a project root instead of its seat.
+   Stale paths are expected debris, so the class is healed; unattributable rows are quarantined.
+6. Not a plan: an open row whose file is_plan_file calls False; closed in the registry only.
 
-1. Number collision — a registry entry points at a file path that no
-   longer exists, while a *different*, unregistered plan file occupies the
-   same type+number on disk.
-2. Unregistered file — a well-formed plan file exists on disk with no
-   registry key at all for its number, in its own type's registry.
-3. Wrong-prefix row — a registry row lives in the wrong type's registry
-   entirely (e.g. a row keyed "0011" in fplan_registry.json whose
-   file_path actually names a TDPLAN file).
-4. Missing-file orphan — a registry row is still "open" but its
-   file_path no longer exists on disk, and no on-disk file squats on
-   that number (if one did, that's case 1 instead). Previously this
-   only self-healed as a side effect of creating a *new* plan of the
-   same type (auto_cleanup.auto_close_orphaned_plans, wired into
-   create_plan_impl) — so a type with no recent creates could sit on a
-   stale open row indefinitely. Now every scan closes these directly,
-   for every registered type, regardless of create activity.
-5. Orphan location — a row whose recorded location is not where its
-   citizen lives: a ghost path left by an old branch move, or a project
-   root holding records that belong to the seat inside it. Ruling of
-   2026-08-16 (the owner, via @devpulse): stale paths are expected debris
-   because branches get tested and moved constantly, so hand-editing the
-   JSON is the wrong fix — it does not stick while code still writes the
-   stale value. The healer handles the class instead, and a row it cannot
-   attribute on evidence is quarantined for a human rather than guessed.
-6. Not a plan — an open row whose present file monitor_ops.is_plan_file
-   calls False (a report renamed and registered before leg 7). Closed in
-   the registry only, closed_reason "not_a_plan"; the file is never touched.
-
-Guarantees:
-- On-disk .md files are NEVER renamed, moved or deleted here. Only
-  registry JSON rows are edited/removed. Content always survives.
-- Deterministic — the registry record wins for history, the on-disk file
-  gets a fresh slot. Nothing is guessed.
-- Every heal is logged via prax + json_handler.
-- Registry writes always go through save_registry (atomic + locked).
-
-Usage:
-    from aipass.flow.apps.handlers.registry.heal_registry import (
-        heal_registry_doctrine_impl,
-    )
-
-    result = heal_registry_doctrine_impl(ecosystem_root=REPO_ROOT)
-    # result -> {"healed": [...], "healed_count": 3,
-    #            "quarantined": [...], "quarantined_count": 0}
+On-disk .md files are never renamed, moved or deleted here; only registry rows change,
+always through save_registry. Nothing is guessed.
 """
 
 import os
@@ -76,19 +39,9 @@ from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
 from aipass.flow.apps.handlers.repo_root import exists_exactly, find_repo_root
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "heal_registry"
 
-# Matches the plan-type prefix at the start of a plan filename.
 FILENAME_PREFIX_PATTERN = re.compile(r"^([A-Z]+PLAN)-")
-
-
-# =============================================
-# CASE 5 — OPEN ROW WHOSE FILE IS NOT A PLAN
-# =============================================
 
 
 def _heal_not_a_plan_rows(
@@ -99,24 +52,8 @@ def _heal_not_a_plan_rows(
 ) -> List[Dict[str, Any]]:
     """Close, registry only, open rows whose present file is not a plan.
 
-    Until leg 7 of fleet green the scan renamed reports named like plans and
-    heal registered them, so open rows point at reports (FPLAN 0564 to 0583
-    on 2026-10-04). Such a row cannot be retired by close, which archives the
-    file (devpulse's ruling of leg 8, flow's design). The file is never touched.
-    Only a False from monitor_ops.is_plan_file closes a row: an unreadable
-    file (None) and an absent file are left to the other sweeps.
-
-    Args:
-        prefix: Plan-type prefix (e.g. "FPLAN")
-        registry_file: Registry filename for this type
-        load_registry_fn: Registry loader (injected)
-        save_registry_fn: Registry saver (injected)
-
-    Returns:
-        List of heal-action dicts, one per row closed with closed_reason "not_a_plan".
-
-    Raises:
-        Whatever the loader raises, as _heal_missing_file_plans does.
+    close would archive the file, so these rows are retired here and the file is never touched.
+    Only a False from is_plan_file closes a row: unreadable (None) and absent files are left alone.
     """
     registry = load_registry_fn(registry_file=registry_file)
     registry.setdefault("plans", {})
@@ -142,40 +79,19 @@ def _heal_not_a_plan_rows(
         )
         logger.warning(f"[{MODULE_NAME}] Closed {prefix}-{number}, registry only: its file is not a plan: {file_path}")
 
-    # save_registry answers False rather than raising. Each sweep runs in its
-    # own try in heal_registry_doctrine_impl, so this raise is logged as that
-    # sweep's failure instead of reporting rows never written (flow's
-    # decision, leg 10). The same holds at every save in this file.
+    # save_registry answers False instead of raising; raising here makes the caller log a failed
+    # sweep rather than report rows never written. Same at every save in this file.
     if actions and not save_registry_fn(registry, registry_file=registry_file):
         raise OSError(f"could not save {registry_file}: no row was closed")
     return actions
 
 
-# =============================================
-# FILESYSTEM INDEX
-# =============================================
-
-
 def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
     """Index every plan file on disk by (prefix, number).
 
-    Keyed by the *pair* deliberately: DPLAN-0011, TDPLAN-0011 and
-    PPLAN-0011 are three legitimately different plans, so a number-only
-    index would collapse them into one and cross-heal the wrong registry.
-
-    Walk skeleton mirrors ``monitor_ops.scan_plan_files_impl`` (same
-    IGNORE_FOLDERS pruning, same permission-error tolerance). Directory and
-    file lists are sorted so the index is deterministic run to run.
-    Only a file monitor_ops.is_plan_file() calls a plan is indexed: a report
-    named after a plan was registered as one until leg 7 of fleet green.
-
-    Args:
-        ecosystem_root: Root directory to scan from
-
-    Returns:
-        Dict of (prefix, number) -> Path, e.g. ``("DPLAN", "0165")``.
-        On a genuine on-disk duplicate of the same prefix+number the first
-        path wins and a warning is logged (renumbering is out of scope).
+    Keyed by the pair: DPLAN-0011 and TDPLAN-0011 are different plans, and a number-only
+    index would cross-heal the wrong registry. Sorted walk, so the index is deterministic;
+    on an on-disk duplicate the first path wins.
     """
 
     def handle_walk_error(error):
@@ -186,7 +102,7 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
     index: Dict[Tuple[str, str], Path] = {}
 
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
-        # Exact-name pruning (substring matching silently skipped whole trees)
+        # Exact-name pruning: substring matching skips whole trees.
         dirs[:] = sorted(d for d in dirs if d not in IGNORE_FOLDERS)
 
         for filename in sorted(files):
@@ -206,11 +122,6 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
     return index
 
 
-# =============================================
-# CASE 4 — MISSING-FILE ORPHANS
-# =============================================
-
-
 def _heal_missing_file_plans(
     prefix: str,
     registry_file: str,
@@ -219,26 +130,7 @@ def _heal_missing_file_plans(
 ) -> List[Dict[str, Any]]:
     """Close open registry rows whose file_path no longer exists on disk.
 
-    Reuses the same logic create_plan_impl already applies to whatever
-    type it's creating into (auto_cleanup.auto_close_orphaned_plans), but
-    runs it here for every registered type on every scan — so a type with
-    no recent creates doesn't sit on a stale open row indefinitely.
-
-    Args:
-        prefix: Plan-type prefix (e.g. "TDPLAN")
-        registry_file: Registry filename for this type
-        load_registry_fn: Registry loader (injected)
-        save_registry_fn: Registry saver (injected)
-
-    Returns:
-        List of heal-action dicts performed for this type; [] means nothing
-        needed healing.
-
-    Raises:
-        Whatever the loader raises. An unreadable registry is a failed sweep,
-        not an empty one: flow's leg 3 decision lets it reach the one caller
-        (heal_registry_doctrine_impl), which logs it as an error for this type
-        and goes on with the others.
+    Raises whatever the loader raises: an unreadable registry is a failed sweep, not an empty one.
     """
     registry = load_registry_fn(registry_file=registry_file)
 
@@ -271,11 +163,6 @@ def _heal_missing_file_plans(
     return actions
 
 
-# =============================================
-# CASE 1 + 2 — PER-TYPE HEAL
-# =============================================
-
-
 def _heal_type_registry(
     prefix: str,
     registry_file: str,
@@ -285,25 +172,7 @@ def _heal_type_registry(
 ) -> List[Dict[str, Any]]:
     """Heal unregistered files (case 2) and number collisions (case 1).
 
-    For each on-disk file of this prefix:
-    - No registry row for its number -> register it (case 2).
-    - Row exists and its file_path is this exact file -> already correct.
-    - Row exists, its file_path is missing from disk, and the path is not
-      merely relocated (open or closed -- status alone proves nothing) ->
-      collision (case 1): register the on-disk file at a fresh number and
-      leave the original row untouched.
-    - Row exists and its file_path still exists on disk -> not one of the
-      three doctrine cases, left strictly alone.
-
-    Args:
-        prefix: Plan-type prefix (e.g. "DPLAN")
-        registry_file: Registry filename for this type
-        plan_file_index: Output of :func:`_build_plan_file_index`
-        load_registry_fn: Registry loader (injected)
-        save_registry_fn: Registry saver (injected)
-
-    Returns:
-        List of heal-action dicts performed for this type.
+    A collision registers the on-disk file at a fresh number and leaves the original row untouched.
     """
     actions: List[Dict[str, Any]] = []
 
@@ -319,13 +188,8 @@ def _heal_type_registry(
 
     registry.setdefault("plans", {})
 
-    # Path-level idempotency: a squatter file keeps its OLD number in its own
-    # filename forever (files are never renamed), so re-scanning always finds
-    # it under the same (prefix, number) key -- but a prior heal may already
-    # have registered it under a *different*, fresh number, and that row
-    # (open or closed) is never removed. Keying only on (prefix, number)
-    # can't see that, so it mints a brand new duplicate row every scan. This
-    # index lets both registration sites below check by file_path first.
+    # A squatter keeps its old number in its filename forever, but a prior heal registered it
+    # under a fresh one. Keying only on (prefix, number) would mint a duplicate row every scan.
     registered_by_path: Dict[Path, str] = {}
     for existing_number, existing_entry in registry["plans"].items():
         existing_path = existing_entry.get("file_path", "")
@@ -361,7 +225,7 @@ def _heal_type_registry(
 
         registered_path = entry.get("file_path", "")
         if not registered_path:
-            # Nothing to compare against — refuse to guess (doctrine: deterministic only).
+            # Nothing to compare against: refuse to guess.
             logger.warning(f"[{MODULE_NAME}] Row {prefix}-{number} has no file_path — leaving alone")
             continue
 
@@ -369,15 +233,10 @@ def _heal_type_registry(
             continue
 
         if Path(registered_path).exists():
-            # Both the row's file and this file are real — not a doctrine case.
             continue
 
-        # Row's own file is gone -- whether or not it archived legitimately
-        # (e.g. a closed plan's routine move to .backup/processed_plans),
-        # that's a fact about the OLD file, not about `path`. `path` is a
-        # different, real, live file squatting on the same number: a
-        # genuine collision regardless of the stale row's status or where
-        # its history went.
+        # The row's file may have archived legitimately; `path` is still a different live file on
+        # the same number, so this is a collision whatever the stale row's status.
         already_registered_as = registered_by_path.get(path)
         if already_registered_as is not None:
             logger.info(
@@ -407,36 +266,12 @@ def _heal_type_registry(
     return actions
 
 
-# =============================================
-# CASE 3 — WRONG-PREFIX ROWS
-# =============================================
-
-
 def _heal_wrong_prefix_rows(
     registered_types: Dict[str, Dict[str, Any]],
     load_registry_fn: Callable[..., Dict[str, Any]],
     save_registry_fn: Callable[..., bool],
 ) -> List[Dict[str, Any]]:
-    """Relocate or drop registry rows that live in the wrong type registry.
-
-    A row whose ``file_path`` names e.g. ``TDPLAN-0011_....md`` has no
-    business sitting in ``fplan_registry.json``. Three outcomes:
-
-    - Already correctly registered under its real type (same file_path)
-      -> the wrong-registry row is a pure ghost duplicate: removed.
-    - File is real on disk but not properly registered -> re-homed into
-      its real type's registry, then removed from the wrong one.
-    - File does not exist and is registered nowhere correct -> orphaned
-      metadata with nothing behind it: removed.
-
-    Args:
-        registered_types: ``_load_template_registry()["types"]``
-        load_registry_fn: Registry loader (injected)
-        save_registry_fn: Registry saver (injected)
-
-    Returns:
-        List of heal-action dicts performed.
-    """
+    """Relocate or drop registry rows that live in the wrong type registry."""
     actions: List[Dict[str, Any]] = []
 
     prefix_map: Dict[str, str] = {}
@@ -520,26 +355,8 @@ def _heal_wrong_prefix_rows(
     return actions
 
 
-# =============================================
-# ORCHESTRATOR
-# =============================================
-
-
-# =============================================
-# CASE 5 — ORPHAN LOCATION (ghost paths, root/seat misfiles)
-# =============================================
-
-
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="heal_registry")
 
 
@@ -559,23 +376,14 @@ def _project_root(path: Path) -> Path | None:
 def _citizen_seat_index() -> Dict[str, List[Path]]:
     """Index live citizen seats by directory name.
 
-    Two sources, both evidence rather than assumption: the ecosystem registry
-    (authoritative for AIPass citizens) and the locations already recorded in
-    the plan registries (which is how citizens living in other repos — vera,
-    baud, speakeasy — are known at all). A path only counts once it carries a
-    passport, so a project root that merely contains a citizen never qualifies.
-
-    Returns:
-        Mapping of directory name -> list of live seat paths with that name
+    Sources: the ecosystem registry, plus locations in the plan registries (the only way citizens
+    in other repos are known). A path counts only if it carries a passport.
     """
     repo_root = _find_repo_root()
     candidates: set[Path] = set()
 
-    # exists_exactly, not is_file(): on a folding filesystem is_file() answers
-    # True for a file actually named aipass_registry.json. find_repo_root already
-    # anchors on the exact spelling, so this only bites when it took the
-    # SOURCE_ROOT fallback — a tree with no registry, where a lowercase lookalike
-    # would then be read as the fleet anchor.
+    # exists_exactly: on a case-folding filesystem is_file() accepts a lowercase lookalike,
+    # which matters when find_repo_root fell back to SOURCE_ROOT.
     registry_file = repo_root / "AIPASS_REGISTRY.json"
     if exists_exactly(registry_file) and registry_file.is_file():
         try:
@@ -597,8 +405,7 @@ def _citizen_seat_index() -> Dict[str, List[Path]]:
         try:
             registry = load_registry(f"{prefix.lower()}_registry.json")
         except Exception as exc:
-            # A seat index built from fewer registries can only under-attribute,
-            # which quarantines rather than mis-heals — but say so out loud.
+            # A smaller seat index only under-attributes (quarantines, never mis-heals); say so.
             logger.warning(
                 f"[{MODULE_NAME}] Could not read '{prefix.lower()}_registry.json' for the seat index; "
                 f"citizens known only from it may be quarantined this run: {exc}"
@@ -624,23 +431,9 @@ def _seats_beneath(location: Path, seats: Dict[str, List[Path]]) -> List[Path]:
 def _is_orphan_location(location: Path, seats: Dict[str, List[Path]]) -> bool:
     """Decide whether a recorded location is orphaned.
 
-    Two precise signals, deliberately not "anything that is not a seat" — a
-    plan filed at the repo root or in a subdirectory of a citizen is a normal
-    filing, not debris, and sweeping those into the refusal lane would bury the
-    real orphans in 30 rows of noise nobody reads.
-
-      1. The path is gone from disk — a ghost left by an old move.
-      2. The path exists, is not itself a seat, and holds exactly ONE citizen
-         seat beneath it — records filed at a project root that belong to the
-         seat inside it (the baud root/seat pair). A directory holding several
-         seats is a container, not a misfile, and is left alone.
-
-    Args:
-        location: Location recorded on the plan row
-        seats: Live seat index from _citizen_seat_index()
-
-    Returns:
-        True when the row needs re-attribution or a human ruling
+    Orphaned means gone from disk, or a non-seat holding exactly one seat beneath it. Not
+    "anything that is not a seat": repo-root and subdirectory filings are normal, and a
+    directory holding several seats is a container.
     """
     if not location.exists():
         return True
@@ -652,19 +445,9 @@ def _is_orphan_location(location: Path, seats: Dict[str, List[Path]]) -> bool:
 def _attribute_orphan(location: Path, seats: Dict[str, List[Path]]) -> Tuple[Path | None, str]:
     """Decide which live citizen an orphaned location belongs to.
 
-    Heals only on evidence: exactly one live seat shares the orphan's directory
-    name, AND the orphan sits inside that seat's repository. A bare name match
-    across repos is a coincidence, not an identity, so it is refused.
-
-    Args:
-        location: The orphaned location recorded on the plan row
-        seats: Live seat index from _citizen_seat_index()
-
-    Returns:
-        (seat, "") when attributable, else (None, reason for quarantine)
+    Containment of exactly one seat wins; otherwise exactly one same-named seat whose repository
+    holds the orphan. A bare name match across repos is refused. Returns (seat, "") or (None, reason).
     """
-    # Containment is the strongest evidence there is: a directory holding
-    # exactly one seat is that citizen's own ground, whatever it is called.
     enclosed = _seats_beneath(location, seats)
     if len(enclosed) == 1:
         return enclosed[0], ""
@@ -691,23 +474,8 @@ def _heal_orphan_locations(
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Re-attribute plan rows whose location is not a live citizen seat.
 
-    Stale paths are expected debris — branches get moved and re-seated — so
-    this heals the class rather than the instance (ruling 2026-08-16). An
-    orphan is a row whose location is not a seat: either gone from disk (a
-    ghost path from an old move) or present without a passport (a project root
-    holding records that belong to the seat beneath it).
-
-    Rows are never deleted and locations are never guessed. Anything that
-    cannot be attributed on evidence is returned for quarantine so a human can
-    rule on it, and stays exactly where it is meanwhile.
-
-    Args:
-        types: Registered plan types from the template registry
-        load_registry_fn: Registry loader (injected)
-        save_registry_fn: Registry saver (injected)
-
-    Returns:
-        (heal actions, quarantined rows)
+    Rows are never deleted and locations never guessed: unattributable rows are returned as
+    quarantined and left as they are. Returns (heal actions, quarantined rows).
     """
     seats = _citizen_seat_index()
     actions: List[Dict[str, Any]] = []
@@ -743,8 +511,7 @@ def _heal_orphan_locations(
                 continue
 
             row["location"] = str(seat)
-            # Keep the row internally consistent — a half-moved record is worse
-            # than an un-moved one.
+            # A half-moved record is worse than an un-moved one.
             for key in ("file_path", "relative_path"):
                 value = row.get(key, "")
                 if value and str(value).startswith(raw_location):
@@ -780,14 +547,7 @@ def find_quarantined_locations(
 ) -> List[Dict[str, Any]]:
     """List plan rows whose location cannot be attributed to a live citizen.
 
-    Read-only by construction — status output must never write, so this shares
-    the attribution rule with the healer but not its registry writes.
-
-    Args:
-        load_registry_fn: Registry loader (injected, defaults to the real one)
-
-    Returns:
-        Quarantined row descriptors awaiting a human ruling
+    Read-only: status output must never write.
     """
     seats = _citizen_seat_index()
     types = _load_template_registry().get("types", {})
@@ -831,20 +591,8 @@ def heal_registry_doctrine_impl(
 ) -> Dict[str, Any]:
     """Run the full registry doctrine heal across every registered plan type.
 
-    Order matters: all per-type heals (cases 1 and 2) run before the
-    wrong-prefix sweep (case 3), so real files are already registered under
-    their correct type by the time case 3 runs — which reduces most
-    wrong-prefix work to pure ghost-row cleanup.
-
-    Args:
-        ecosystem_root: Root directory to scan for plan files
-        load_registry_fn: Registry loader (injected, defaults to real one)
-        save_registry_fn: Registry saver (injected, defaults to real one)
-
-    Returns:
-        Dict containing:
-        - healed: List of heal-action dicts
-        - healed_count: Number of heals performed
+    Per-type heals run before the wrong-prefix sweep, so real files are already registered
+    under their correct type and most wrong-prefix work is ghost-row cleanup.
     """
     template_reg = _load_template_registry()
     types = template_reg.get("types", {})

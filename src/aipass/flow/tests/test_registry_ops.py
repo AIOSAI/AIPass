@@ -3,7 +3,7 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -28,11 +28,7 @@ from aipass.flow.apps.handlers.template import registry_ops
 class TestPlanRegistryLoadRefusesWhatItCannotRead:
     """The plan registry load: absent is empty, unreadable is a refusal.
 
-    An unreadable registry answered the empty default until leg 6, and that
-    answer is a namesake (create reissued 0001; a save wrote a one-row
-    registry over it). Red first on that code; mutant: the JSON-object check
-    deleted, and `raise RegistryUnreadableError(...) from e` -> `return
-    {"plans": {}, "next_number": 1}`.
+    An empty answer for an unreadable registry lets create reissue 0001 and a save overwrite every row.
     """
 
     @pytest.fixture
@@ -62,13 +58,8 @@ class TestPlanRegistryLoadRefusesWhatItCannotRead:
             plan_load.load_registry("dplan_registry.json")
 
 
-# ---------------------------------------------------------------------------
-# Module-level patch targets (patch where used, not where defined)
-# ---------------------------------------------------------------------------
-
 _MOD = "aipass.flow.apps.handlers.template.registry_ops"
-# The PLAN registry writer: same function name, different module, no test
-# class of its own. Its lock cases ride in TestSaveRegistry below.
+# The PLAN registry writer has no test class of its own; its lock cases ride in TestSaveRegistry.
 _PLAN_REG_MOD = "aipass.flow.apps.handlers.registry.save_registry"
 
 
@@ -76,16 +67,8 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     """A stand-in for save_registry's _create_exclusive seam that answers the
     way Windows does mid-release.
 
-    Windows answers an exclusive create against a lock another writer is still
-    removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured, handed in through the product's
-    own seam so os.open stays whole for every other reader. The first
-    ``denials`` creates of ``lock_path`` are denied (None = never clears);
-    after that the real exclusive create is made on disk.
-
-    Returns:
-        (side_effect, attempts, raised): attempts counts every exclusive create
-        of lock_path; raised holds each PermissionError handed out.
+    Windows denies a create on a delete-pending lock with PermissionError; Linux cannot, so it is manufactured.
+    The first ``denials`` creates are denied (None = never clears); returns (side_effect, attempts, raised).
     """
     attempts: list[int] = []
     raised: list[PermissionError] = []
@@ -100,11 +83,6 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
         return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
     return fake_create, attempts, raised
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -165,11 +143,6 @@ def _create_template_dir(flow_root: Path, name: str, md_files: list[str] | None 
     return tpl_dir
 
 
-# =============================================================================
-# load_registry
-# =============================================================================
-
-
 class TestLoadRegistry:
     """Tests for load_registry() — auto-creation, healing, corrupt handling."""
 
@@ -189,15 +162,7 @@ class TestLoadRegistry:
         assert reg_path.exists()
 
     def test_first_read_of_a_fresh_install_sees_every_shipped_template(self, setup_flow_root):
-        """The defect CI found: call 1 answered with 2 types, call 2 with 7.
-
-        A fresh checkout ships template directories and no registry. The
-        create branch returned the bare defaults and never ran the same
-        auto-discovery the read branch runs, so the FIRST flow command on a
-        new install saw a registered set that was missing every shipped type
-        beyond FPLAN and DPLAN -- and the second command saw them all. Two
-        answers to one question, decided by call ordering.
-        """
+        """The create branch must run the same auto-discovery as the read branch, or call 1 and call 2 differ."""
         mod = registry_ops
         for name in ("flow_plans", "dev_plans", "audit_plans", "playbook_plans"):
             _create_template_dir(setup_flow_root, name, ["default.md"])
@@ -259,7 +224,6 @@ class TestLoadRegistry:
 
         result = mod.load_registry()
 
-        # Recreated with the default types, and the list on disk is replaced by it.
         assert set(result["types"]) == {"flow_plans", "dev_plans"}
         assert json.loads(reg_path.read_text(encoding="utf-8")) == result
 
@@ -312,14 +276,8 @@ class TestLoadRegistry:
             patch(f"{_MOD}._auto_register_new_types", return_value=False) as mock_auto,
         ):
             result = mod.load_registry()
-            # Both passes run over the very registry load_registry returns.
             mock_prune.assert_called_once_with(result)
             mock_auto.assert_called_once_with(result)
-
-
-# =============================================================================
-# save_registry
-# =============================================================================
 
 
 class TestSaveRegistry:
@@ -354,10 +312,9 @@ class TestSaveRegistry:
         assert saved["metadata"]["type_count"] == 2
 
     def test_raises_for_invalid_structure_not_dict(self, setup_flow_root):
-        """Raises when data is not a dict, and writes nothing.
+        """Raises when data is not a dict, and writes nothing: False would read as a failed write.
 
-        It answered False before leg 5, the same as a failed write. Red first
-        on that code; mutant `raise ValueError(...)` -> `return False`.
+        Mutant: `raise ValueError(...)` -> `return False` reddens this.
         """
         mod = registry_ops
 
@@ -379,7 +336,7 @@ class TestSaveRegistry:
         """Returns False when file write fails with OSError."""
         mod = registry_ops
         data = _valid_registry()
-        # Use a file as parent so mkdir fails on all platforms
+        # A file as parent makes mkdir fail on every platform.
         blocker = tmp_path / "blocker"
         blocker.write_text("I am a file", encoding="utf-8")
         monkeypatch.setattr(mod, "REGISTRY_PATH", blocker / "subdir" / "registry.json")
@@ -407,9 +364,6 @@ class TestSaveRegistry:
     def test_plan_registry_save_retries_a_delete_pending_denial(self, tmp_path, monkeypatch):
         """handlers/registry/save_registry.py: a Windows delete-pending denial on
         the lock is a held lock, retried on the same budget, and the write lands.
-
-        It used to give up on the first denial (PermissionError is an OSError)
-        and the registry write was lost.
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
         target = tmp_path / "fplan_registry.json"
@@ -453,27 +407,21 @@ class TestSaveRegistry:
 
         assert result is False
         assert json.loads(target.read_text(encoding="utf-8")) == before
-        # The logged arguments themselves, never str(call): a call's repr doubles
-        # every backslash, so a Windows path is never a substring of it.
+        # Never str(call): its repr doubles every backslash, hiding a Windows path.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        # The budget as the product reports it to the operator; the attempts
-        # actually made must match it exactly.
         reported = re.search(r"still denied after (\d+) attempts", logged)
         assert reported, logged
         budget = int(reported.group(1))
         assert budget > 1
         assert len(attempts) == budget
-        # What each wait was given: positive, doubling, summed into the message.
-        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
-        # `(2**attempt)` growth each redden this.
+        # Mutant: `_sleep(delay)` -> `_sleep(0.0)`, or dropping `(2**attempt)`, reddens this.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert len(delays) == budget
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in logged
-        # The cause chain, read through the public door: save_registry logs the
-        # exception itself, so the operator's log carries the last denial.
+        # save_registry logs the exception itself, so the cause chain is read from the log.
         logged_errors = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
         assert len(logged_errors) == 1
         assert isinstance(logged_errors[0], PermissionError)
@@ -484,11 +432,7 @@ class TestSaveRegistry:
     ):
         """A lock create that fails with neither contention nor denial is not "after N retries".
 
-        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
-        the exclusive create fails on disk. _acquire_lock used to answer False for
-        that - the same answer as contention - and the caller logged a retry
-        budget that was never spent. It now propagates. Which error a 257-byte
-        name raises is the platform's choice, so the test asks the platform first.
+        The .lock sibling's 257-byte name fails on disk; which error is the platform's choice, so it is asked first.
         Mutant: `except OSError as exc:` + `raise` -> `return False` reddens this.
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
@@ -510,11 +454,6 @@ class TestSaveRegistry:
         assert logged[0].errno == answer.errno
 
 
-# =============================================================================
-# add_type
-# =============================================================================
-
-
 class TestAddType:
     """Tests for add_type() — validation, registration, plan registry creation."""
 
@@ -527,7 +466,6 @@ class TestAddType:
         data = _valid_registry()
         _write_registry(setup_flow_root, data)
 
-        # Prevent auto-register from claiming task_plans before add_type does
         with patch(f"{_MOD}._auto_register_new_types", return_value=False):
             result = mod.add_type("task_plans", "TPLAN", "test")
 
@@ -604,11 +542,6 @@ class TestAddType:
         assert content["plans"] == {}
 
 
-# =============================================================================
-# remove_type
-# =============================================================================
-
-
 class TestRemoveType:
     """Tests for remove_type() — removal, protection, not-found."""
 
@@ -629,7 +562,6 @@ class TestRemoveType:
         data = _valid_registry(extra_types=extra)
         _write_registry(setup_flow_root, data)
 
-        # Prevent auto-register from re-adding task_plans after removal
         with patch(f"{_MOD}._auto_register_new_types", return_value=False):
             result = mod.remove_type("task_plans")
 
@@ -674,11 +606,6 @@ class TestRemoveType:
         assert result is False
 
 
-# =============================================================================
-# get_prefix_map
-# =============================================================================
-
-
 class TestGetPrefixMap:
     """Tests for get_prefix_map() — dir_name to prefix mapping."""
 
@@ -716,11 +643,6 @@ class TestGetPrefixMap:
 
         assert result["task_plans"] == "TPLAN"
         assert len(result) == 3
-
-
-# =============================================================================
-# get_type_map
-# =============================================================================
 
 
 class TestGetTypeMap:
@@ -771,11 +693,6 @@ class TestGetTypeMap:
         result = mod.get_type_map()
 
         assert result["tplan"] == "task_plans"
-
-
-# =============================================================================
-# scan_unregistered
-# =============================================================================
 
 
 class TestScanUnregistered:
@@ -892,11 +809,6 @@ class TestScanUnregistered:
         assert result == []
 
 
-# =============================================================================
-# _prune_orphaned_types
-# =============================================================================
-
-
 class TestPruneOrphanedTypes:
     """Tests for _prune_orphaned_types() — cleaning stale entries."""
 
@@ -961,11 +873,6 @@ class TestPruneOrphanedTypes:
         mod._prune_orphaned_types(data)
 
         assert not plan_reg.exists()
-
-
-# =============================================================================
-# _auto_register_new_types
-# =============================================================================
 
 
 class TestAutoRegisterNewTypes:
@@ -1051,7 +958,6 @@ class TestAutoRegisterNewTypes:
         mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
-        # "f" would try FPLAN (collision), but len("f") == 1 so no 2-char fallback
         _create_template_dir(setup_flow_root, "f", ["test.md"])
         data = _valid_registry()
 
@@ -1073,11 +979,6 @@ class TestAutoRegisterNewTypes:
         assert plan_reg.exists()
         content = json.loads(plan_reg.read_text(encoding="utf-8"))
         assert content["next_number"] == 1
-
-
-# =============================================================================
-# _derive_prefix
-# =============================================================================
 
 
 class TestDerivePrefix:
@@ -1124,12 +1025,7 @@ class TestDerivePrefix:
         assert result == "XPLAN"
 
     def test_every_meaningful_word_contributes_an_initial(self):
-        """One initial per word, trailing 'plans' dropped: SAPLAN, not SPLAN.
-
-        Was pinned as SPLAN while the rule read the first word only. That rule
-        is what made ``team_dev_plans`` derive TPLAN on a fresh install and it
-        was changed under the 2026-09-07 ruling, so this pin moves with it.
-        """
+        """One initial per word, trailing 'plans' dropped: SAPLAN, not SPLAN."""
         mod = registry_ops
 
         result = mod._derive_prefix("security_audit_plans", set())
@@ -1143,11 +1039,7 @@ class TestDerivePrefix:
         assert mod._derive_prefix("team_dev_plans", set()) == "TDPLAN"
 
     def test_derivation_does_not_depend_on_what_is_already_registered(self):
-        """Same directory, three different registries, one answer.
-
-        The defect was that the answer moved with install history; a pin that
-        only asks the empty case cannot see that coming back.
-        """
+        """Same directory, three different registries, one answer: install history must not move it."""
         mod = registry_ops
 
         answers = {
@@ -1161,10 +1053,7 @@ class TestDerivePrefix:
     def test_every_shipped_template_dir_derives_its_registered_prefix(self):
         """A fresh install must reach the prefixes this branch's files already use.
 
-        Measured off the tree and off the registry rather than from a list
-        written here: a hand-copied table would agree with itself no matter how
-        wrong the rule is. This is the pin that fails if a NEW template
-        directory is added whose registered prefix the rule cannot reach.
+        Read off the live registry, not a hand-copied table that would agree with itself.
         """
         mod = registry_ops
         registry = mod.load_registry()

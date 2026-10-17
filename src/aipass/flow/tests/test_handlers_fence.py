@@ -3,14 +3,12 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
 
-# A foreign importer of aipass.flow.apps.handlers is refused at import time;
-# kin and the modules door pass. The refusal banner's prose beyond the caller
-# line is not asserted.
+# The refusal banner's prose beyond the caller line is not asserted.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
@@ -83,9 +81,7 @@ class TestAForeignImporterIsRefused:
     @pytest.mark.parametrize("shape", FOREIGN_SHAPES)
     def test_the_cwd_inside_this_branch_buys_a_foreign_seat_nothing(self, foreign_seat, shape):
         """The process cwd is not a frame. Measured 2026-10-08: the bootstrap's pseudo
-        filenames resolved against a cwd inside this branch and read as kin, so a
-        foreign line that did not spell the handlers was let through. The cwd here
-        is the branch root; the verdicts are the ones the tmp cwd gives."""
+        filenames read as kin against a branch cwd; here the cwd is the branch root."""
         answer = _probe(foreign_seat, shape, KIN_PROBE.parents[1])
         assert answer.startswith(("DENIED", "REFUSED")), answer
         if answer.startswith("DENIED"):

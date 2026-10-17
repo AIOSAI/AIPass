@@ -3,7 +3,7 @@
 # Description: Tests for flow's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-04
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""
@@ -46,18 +46,8 @@ def _run(monkeypatch, argv):
     return branch_entry.main()
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
-
-
 def test_print_introspection_renders_identity_and_help_pointer(capsys, stub_module):
-    """print_introspection names the branch and points at --help.
-
-    flow's introspection and help both TAKE the discovered modules rather than
-    rediscovering them, so the list is passed here. Adapted to what flow wrote;
-    the entry point is the contract.
-    """
+    """print_introspection names the branch and points at --help."""
     branch_entry.print_introspection([stub_module])
 
     out = capsys.readouterr().out
@@ -67,21 +57,12 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys, stub_modu
 
 
 def test_print_help_has_usage_and_examples(capsys, stub_module):
-    """print_help carries the two sections the house pattern requires.
-
-    Asserted in flow's own casing (USAGE:/EXAMPLES:) - a test does not get to
-    rename the entry point's headings.
-    """
+    """print_help carries the two sections the house pattern requires."""
     branch_entry.print_help([stub_module])
 
     out = capsys.readouterr().out
     assert "USAGE:" in out
     assert "EXAMPLES:" in out
-
-
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -108,11 +89,6 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
 
     out = capsys.readouterr().out
     assert "FLOW" in out
-
-
-# =============================================================================
-# COMMAND ROUTING - SUCCESS AND FAILURE PATHS
-# =============================================================================
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
@@ -142,9 +118,6 @@ def test_route_command_survives_a_raising_module(mock_logger):
     result = branch_entry.route_command("probe", [], [_Exploding()])
 
     assert result is False
-    # flow's mock_logger is a MagicMock standing in for the prax logger, not the
-    # template's (level, args) list - asserted in the shape flow's conftest
-    # actually yields.
     assert mock_logger.error.called, "the swallowed module exception was never logged"
 
 
@@ -177,9 +150,6 @@ def clean_exit_flag():
 def test_handled_command_that_reported_an_error_exits_two(monkeypatch, capsys, clean_exit_flag):
     """A handler that calls error() and returns True is a failed command: exit 2, not 0.
 
-    Compass 451. Before the entry point read resolve_exit, main() returned 0 after
-    any handled route, so `drone @flow close X` that printed an error still told
-    its caller it succeeded.
     Mutant: return resolve_exit(True) -> return 0 reddens this.
     """
     monkeypatch.setattr(branch_entry, "discover_modules", lambda: [_ErroringModule()])
@@ -193,8 +163,6 @@ def test_handled_command_that_reported_an_error_exits_two(monkeypatch, capsys, c
 def test_good_command_exits_zero_after_an_earlier_failure(monkeypatch, stub_module, clean_exit_flag):
     """main() clears the failure flag on entry, so a previous command's error does not leak.
 
-    A long-lived process (drone's in-process adapter, a test run) calls main() more
-    than once; the second, clean command must not inherit the first one's exit 2.
     Mutant: reset_command_state() removed from _main_impl reddens this.
     """
     mark_command_failed()
@@ -211,11 +179,6 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
-
-
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     """`flow probe --help` asks the module for help; it never runs bare."""
     assert _run(monkeypatch, ["probe", "--help"]) == 0
@@ -226,23 +189,7 @@ def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
 def test_subcommand_help_on_unknown_command_shows_module_help(monkeypatch, stub_module, capsys):
     """`flow ghost --help` falls through to module help and exits 0.
 
-    Pinned as flow WROTE it, not as the template wished: when no module claims
-    the command and a help flag follows, main() calls print_module_help() and
-    returns 0. A help request answered with help is not a refusal, so there is
-    nothing here for a non-zero exit to mean. The entry point is not bent to
-    fit the test.
-
-    The capture is READ, and it is read on both streams because that is where
-    the output measurably goes: print_module_help() finds no module claiming
-    `nonexistent`, sends its diagnostic through error() to stderr and the
-    pointer to stdout. Asserting only the exit code left the whole printed
-    answer unexamined - a main() that returned 0 and printed nothing at all
-    passed this test.
-
-    The third assertion was written the wrong way round first and measured
-    right: main() DOES offer `nonexistent` to every discovered module before
-    it falls through, and the stub declines by returning False. The help
-    fall-through is what happens after the offer, not instead of it.
+    A help request answered with help is not a refusal. Both streams are read: a silent main() returning 0 must fail.
     """
     result = _run(monkeypatch, ["nonexistent", "--help"])
 

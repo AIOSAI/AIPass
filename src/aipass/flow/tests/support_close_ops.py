@@ -3,7 +3,7 @@
 # Description: Shared helpers for the close_ops test files (split from test_close_ops.py, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Shared helpers for the tests of apps/handlers/plan/close_ops.py (no test_ prefix: never collected)."""
@@ -15,12 +15,7 @@ from unittest.mock import MagicMock
 
 
 def _scope(tmp_path, **overrides) -> dict:
-    """Scope dependencies for close_all: caller in <tmp_path>/proj, every row in it.
-
-    Injected explicitly in every close_all test. The fence is not optional and
-    an un-injected default would let a test pass while saying nothing about
-    which project it was standing in.
-    """
+    """Scope dependencies for close_all: caller in <tmp_path>/proj, every row in it."""
     proj = tmp_path / "proj"
     deps = {"caller_project": proj, "resolve_project_fn": lambda _path: proj}
     deps.update(overrides)

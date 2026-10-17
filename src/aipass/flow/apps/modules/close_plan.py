@@ -3,7 +3,7 @@
 # Description: PLAN closure module with registry cleanup
 # Version: 3.6.1
 # Created: 2025-11-25
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -31,32 +31,24 @@ if sys.platform == "win32":
 
 from typing import List, Dict, Any
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# External: Prax logger
 from aipass.prax import logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# CLI services for display and error handling
 from aipass.cli.apps.modules import console, error, warning
 
-# handle_command binds a local named `error` (the parser's message), which
-# shadows the helper above for that whole function. Aliased so a refusal can
-# still be printed rather than swallowed.
+# handle_command binds a local `error` that shadows the helper; this alias still prints.
 from aipass.cli.apps.modules import error as error_display
 
-# Internal: Registry handlers
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
 
-# Internal: Plan handlers
 from aipass.flow.apps.handlers.plan.get_open_plans import get_open_plans
 from aipass.flow.apps.handlers.plan.validator import normalize_plan_number, validate_plan_exists
 from aipass.flow.apps.handlers.plan.confirmation import confirm_plan_deletion
@@ -68,18 +60,14 @@ from aipass.flow.apps.handlers.plan.display import (
     format_delete_usage_error,
 )
 
-# Internal: Dashboard handlers
 from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
 from aipass.flow.apps.handlers.dashboard.push_central import push_to_plans_central
 from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_branch_dashboard
 
-# Internal: Memory template check + archive (lightweight, no API calls)
 from aipass.flow.apps.handlers.mbank.process import is_template_content, archive_plan
 
-# Internal: Close operations handler (implementation)
 from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl, close_all_plans_impl
 
-# Internal: Trigger (optional — may not be installed)
 try:
     from aipass.trigger.apps.modules.core import trigger as _trigger_module
 
@@ -88,24 +76,11 @@ except ImportError:
     logger.info("[close_plan] Trigger module not available, plan events will be skipped")
     _trigger_fire = None
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "close_plan"
 
 
-# =============================================
-# DISPLAY HELPERS
-# =============================================
-
-
 def _display_messages(messages: List[Dict[str, Any]]):
-    """Render handler result messages to console
-
-    Args:
-        messages: List of message dicts from handler with type/text keys
-    """
+    """Render handler result messages to console"""
     for msg in messages:
         msg_type = msg.get("type", "")
 
@@ -142,21 +117,15 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(format_plan_deletion_success(msg["plan_key"], prefix=msg.get("prefix", "FPLAN")))
 
         elif msg_type == "dry_run_row":
-            # plan_id arrives as DATA from the same resolution the run uses --
-            # never re-derived here, or the preview could drift from the run.
-            # Location is width-capped rather than padded: a 40-char absolute
-            # path silently overflows a fixed field and butts against the
-            # subject, and this listing is what a human reads before
-            # authorising a bulk close.
+            # plan_id is never re-derived here, or the preview could drift from the run.
+            # Location is width-capped: a long path would overflow into the subject.
             location = str(msg.get("location", "unknown"))
             if len(location) > 44:
                 location = f"...{location[-41:]}"
             console.print(f"[dim]  {msg.get('plan_id', '?'):<14}  {location:<44}  {msg.get('subject', '')}[/dim]")
 
         elif msg_type == "close_all_scope":
-            # The fence, stated before the list it produced. Held-back rows are
-            # counted separately from refusals: one is the fence working, the
-            # other is a broken registry row, and a single number hides that.
+            # Held-back rows (the fence working) are counted apart from refusals (a broken row).
             console.print()
             console.print(f"[bold]Project:[/bold] {msg['project']}")
             console.print(f"  [dim]open plans considered:[/dim] {msg['considered']}")
@@ -176,9 +145,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
         elif msg_type == "plan_list":
             warning(f"Found {msg['count']} open plan(s) to close:")
             for plan in msg.get("plans", []):
-                # plan_num is already the typed ID. It used to be a bare key
-                # that this line prefixed with a guessed "FPLAN", which since
-                # the typed-ID fix printed "FPLAN-DPLAN-0300".
+                # plan_num is already the typed ID; never prefix it.
                 console.print(f"  * {plan['plan_num']}: {plan['subject']}")
 
         elif msg_type == "confirm_warning":
@@ -189,8 +156,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print("-" * 60)
 
         elif msg_type == "closing_single":
-            # Position/total so a multi-minute sweep visibly advances. Silence
-            # during a bulk close reads as a hang.
+            # A silent multi-minute bulk close reads as a hang.
             position = msg.get("position")
             counter = f"[{position}/{msg.get('total', '?')}] " if position else ""
             console.print(f"\n[dim]{counter}Closing {msg['plan_num']}...[/dim]")
@@ -203,11 +169,6 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(f"  * Held back by the fences: {msg.get('held_count', 0)}")
             console.print(f"  * Total open plans considered: {msg['total']}")
             console.print("=" * 60 + "\n")
-
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -273,11 +234,6 @@ def print_help():
     console.print()
 
 
-# =============================================
-# CLOSE PLAN WORKFLOW (thin orchestrator)
-# =============================================
-
-
 def close_plan(
     plan_num: str | None = None,
     confirm: bool = False,
@@ -289,27 +245,8 @@ def close_plan(
     """
     Orchestrate plan closure workflow (thin orchestrator)
 
-    Auto-confirms by default - running 'close' IS the intent.
-    Use confirm=True (--confirm/--interactive) to explicitly request a prompt.
-
-    Delegates all business logic to handlers:
-    - Validation: validator handler
-    - Registry ops: registry handlers
-    - File ops: file_ops handler
-    - Confirmation: confirmation handler
-    - Display: display handler
-    - Close implementation: close_ops handler
-
-    Args:
-        plan_num: Plan number (e.g., "0001" or "1" or "42") - required if all_plans=False
-        confirm: Whether to ask for confirmation (default False, auto-confirms)
-        all_plans: If True, close all open plans (default False)
-        spawn_background: Whether to spawn background post-processing (default True).
-                          Set False when called from close_all_plans() to avoid race condition.
-        dry_run: If True, preview what would be closed without taking action (default False)
-
-    Returns:
-        True if successful, False otherwise
+    Auto-confirms by default: running 'close' IS the intent.
+    spawn_background=False from close_all_plans() avoids a post-processing race.
     """
     result = close_plan_impl(
         plan_num=plan_num,
@@ -318,7 +255,6 @@ def close_plan(
         spawn_background=spawn_background,
         dry_run=dry_run,
         exclude_types=exclude_types,
-        # Inject dependencies
         normalize_plan_number=normalize_plan_number,
         load_registry=load_registry,
         save_registry=save_registry,
@@ -333,12 +269,10 @@ def close_plan(
         trigger_fire_fn=_trigger_fire,
     )
 
-    # Handle dict result from handler
     if isinstance(result, dict):
         _display_messages(result.get("messages", []))
         return result.get("success", False)
 
-    # Fallback for bool result
     return bool(result)
 
 
@@ -346,17 +280,7 @@ def close_all_plans(confirm: bool = False, dry_run: bool = False, exclude_types:
     """
     Close all open plans in one operation (thin orchestrator)
 
-    Scope comes from the handler's own project resolution: the caller's
-    location decides which project's plans "all" means. Nothing is passed in
-    here, so there is one answer to that question and one place to change it.
-
-    Args:
-        confirm: Whether to ask for bulk confirmation (default False, auto-confirms)
-        dry_run: If True, preview what would be closed without taking action (default False)
-        exclude_types: Plan-type prefixes to hold back (e.g. ["APLAN"])
-
-    Returns:
-        True if at least one plan closed successfully, False otherwise
+    Scope is resolved only in the handler, from the caller's location; nothing is passed in.
     """
     result = close_all_plans_impl(
         confirm=confirm,
@@ -366,12 +290,10 @@ def close_all_plans(confirm: bool = False, dry_run: bool = False, exclude_types:
         close_plan_fn=close_plan,
     )
 
-    # Handle dict result from handler
     if isinstance(result, dict):
         _display_messages(result.get("messages", []))
         return result.get("success", False)
 
-    # Fallback for bool result
     return bool(result)
 
 
@@ -379,19 +301,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle command routing for close_plan module (thin orchestrator)
 
-    Delegates to handlers:
-    - Argument parsing: command_parser handler
-    - Workflow execution: close_plan orchestrator
-    - Error display: display handler
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        bool indicating success or failure
+    Raises SystemExit(1) on a refusal or failed close; False means only "not my command".
     """
-    # Check if this is our command
     if command != "close":
         return False
 
@@ -399,72 +310,43 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence -- a help question must never
-    # close a plan (`close FPLAN-0042 --help` used to do exactly that)
+    # Help anywhere in args wins: a help question must never close a plan.
     if wants_help(args):
         print_help()
         return True
 
-    # Import parser here (after command check)
     from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-    # Log the operation
     json_handler.log_operation("plan_closed", {"command": command, "args": args})
 
-    # 1. PARSE ARGS: Use command_parser handler
     plan_num, confirm, all_plans, dry_run, exclude_types, error = parse_close_command_args(args)
 
-    # 2. VALIDATE: Check for parsing errors.
-    # The parser's own message is printed FIRST. It used to be discarded in
-    # favour of a generic usage block, which meant "Unknown plan type: APLNA.
-    # Registered: APLAN, CPLAN, ..." reached nobody -- a refusal the operator
-    # could not act on is only marginally better than a silent drop.
     if error:
-        # The parser's own message, and nothing else. It used to be discarded
-        # in favour of a fixed usage block that says "ERROR: Plan number
-        # required / Usage: delete <plan_number>" -- wrong verb, wrong
-        # diagnosis, and printed directly under the true reason it replaced.
-        # A refusal the operator cannot act on is barely better than a silent
-        # drop, and a refusal followed by a false explanation is worse.
+        # The parser's own message and nothing else: a generic usage block would hide the real reason.
         console.print()
         error_display(error)
         console.print()
         console.print("[dim]Run 'drone @flow close --help' for usage[/dim]")
         console.print()
-        # Handled, and FAILED. It used to return True here, which flow.py reads
-        # as success: `drone @flow close not_a_plan` printed the refusal and
-        # exited 0, so a script chained on && carried on as if a plan had
-        # closed (ruling 2026-09-07 — a refusal must carry a failing code).
+        # A refusal must exit non-zero so `&&` chains stop.
         raise SystemExit(1)
 
-    # 3. EXECUTE: Run workflow orchestrator
     closed = close_plan(
         plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run, exclude_types=exclude_types
     )
 
-    # 4. RETURN: handled is not the same as succeeded. Returning True on a
-    #    failed close made `drone @flow close not_a_plan` print "Invalid plan
-    #    number" and exit 0 — the refusal was already correct, the exit code
-    #    lied about it (ruling 2026-09-07). False still must not be returned:
-    #    flow.py reads that as "no module claimed this command" and prints a
-    #    second, contradictory "Unknown command".
+    # Handled is not succeeded: exit 1. Never return False, which flow.py reads as "Unknown command".
     if not closed:
         raise SystemExit(1)
 
     return True
 
 
-# =============================================
-# STANDALONE EXECUTION (for testing)
-# =============================================
-
 if __name__ == "__main__":
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         import argparse
 
@@ -501,13 +383,10 @@ EXAMPLES:
         PARSER.print_help()
         sys.exit(0)
 
-    # Confirm logger connection
     logger.info("Prax logger connected to close_plan")
 
-    # Log standalone execution
     json_handler.log_operation("plan_closed", {"command": "standalone"})
 
-    # Call handle_command with default
     args = sys.argv[1:] if len(sys.argv) > 1 else []
     if not args:
         console.print(format_delete_usage_error())
@@ -515,12 +394,11 @@ EXAMPLES:
         console.print()
         sys.exit(1)
 
-    # If first arg is not command, assume it's plan number (backward compatibility)
+    # A bare plan number (no verb) is still accepted.
     if args[0] not in ["close", "close_plan"]:
         args.insert(0, "close")
 
     result = handle_command(args[0], args[1:])
-    # Result is True on success, False on failure
     if result:
         sys.exit(0)
     else:

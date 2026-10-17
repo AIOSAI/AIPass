@@ -3,25 +3,11 @@
 # Description: Plan Closure Helper Functions
 # Version: 1.3.0
 # Created: 2026-05-16
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Plan Closure Helpers
-
-Routing, resolution, self-healing, and utility functions extracted from close_ops.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.close_helpers import (
-        _extract_prefix,
-        _resolve_registry_file,
-        _find_plan_across_registries,
-        _find_relocated_plan,
-        _find_unregistered_plan_file,
-        _self_heal_unregistered_plan,
-        _spawn_background_runner,
-        _cleanup_orphaned_plan,
-    )
 """
 
 import sys
@@ -37,10 +23,6 @@ from aipass.flow.apps.handlers.plan.registry_routing import _load_template_regis
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
 
-# =============================================
-# INFRASTRUCTURE
-# =============================================
-
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
@@ -50,35 +32,15 @@ MODULE_NAME = "close_plan"
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="close_helpers")
 
 
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
-# Plan-type routing (_extract_prefix, _resolve_registry_file,
-# _load_template_registry, _find_plan_across_registries) now lives in
-# registry_routing.py -- imported above so existing call sites/tests in
-# this module and close_ops.py keep working unchanged.
-
-# =============================================
-# HELPER
-# =============================================
-
 
 def _find_relocated_plan(plan_file: Path) -> Path | None:
-    """Search common locations for a plan file that was manually moved.
-
-    Returns the found path, or None if not found anywhere.
-    """
+    """Search common locations for a plan file that was manually moved."""
     filename = plan_file.name
     branch_dir = plan_file.parent
 
@@ -104,13 +66,11 @@ def _find_unregistered_plan_file(prefix: str, plan_key: str) -> Path | None:
     """
     aipass_root = FLOW_ROOT.parent
     pattern = f"{prefix}-{plan_key}*.md"
-    # dropbox: a sandbox like .archive, nothing looks into it (ruling of 2026-09-27);
-    # a copy there would be registered and closed by close_ops' self-heal.
+    # A copy under a sandbox (dropbox, .archive) would be registered and closed by self-heal.
     skip_parts = {".backup", ".archive", "dropbox", "__pycache__", ".git", "processed_plans"}
 
     for match in aipass_root.rglob(pattern):
-        # Parts below the scan root only: a checkout that itself lives under a
-        # directory named dropbox or .backup must still find its plans (leg 4).
+        # Parts below the scan root only: a checkout living under e.g. dropbox/ still finds its plans.
         if any(part in skip_parts for part in match.relative_to(aipass_root).parts):
             continue
         if not is_plan_file(match):
@@ -147,7 +107,7 @@ def _self_heal_unregistered_plan(
     actual_key = plan_key
 
     if plan_key in registry.get("plans", {}):
-        # Not next_number alone: it can name a row already held (leg 7).
+        # Not next_number alone: it can name a row already held.
         next_num = next_free_number(registry)
         actual_key = f"{next_num:04d}"
         messages.append(
@@ -202,12 +162,9 @@ def _self_heal_unregistered_plan(
     }
 
     registry["plans"][actual_key] = entry
-    # Always, not only on a bump: a row registered at the stored number
-    # without moving it on left DPLAN next_number at 358 beside row 0358,
-    # and the next create would have issued 0358 again (leg 7).
+    # Always, not only on a bump, or the next create reissues this number.
     registry["next_number"] = next_free_number(registry)
-    # save_registry answers False rather than raising; a row it never wrote
-    # is no registration (flow's decision, leg 10).
+    # save_registry answers False rather than raising; an unwritten row is no registration.
     if not save_registry_fn(registry, registry_file=reg_file):
         raise OSError(f"could not save {reg_file}: {prefix}-{actual_key} was not registered")
 

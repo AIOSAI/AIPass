@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/close_plan.py -- handle_command routing
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/close_plan.py."""
@@ -18,16 +18,9 @@ from unittest.mock import patch
 from aipass.flow.apps.handlers.plan.confirmation import confirm_plan_deletion
 from aipass.flow.apps.modules.close_plan import close_all_plans, close_plan, handle_command
 
-# ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.close_plan"
-# parse_close_command_args is imported *inside* handle_command, not at module
-# level, so we must patch it at the handler where it lives.
+# handle_command imports the parser at call time, so patch it where it lives.
 _PARSER = "aipass.flow.apps.handlers.plan.command_parser"
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. Command != "close" -> returns False
-# ═══════════════════════════════════════════════════════════
 
 
 class TestCommandRouting:
@@ -39,11 +32,6 @@ class TestCommandRouting:
 
     def test_empty_command_returns_false(self):
         assert handle_command("", []) is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. command == "close" with no args -> introspection
-# ═══════════════════════════════════════════════════════════
 
 
 class TestIntrospection:
@@ -60,11 +48,6 @@ class TestIntrospection:
             result = handle_command("close", [])
             assert result is True  # Command was handled
             mock_parse.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. command == "close" with --help -> help
-# ═══════════════════════════════════════════════════════════
 
 
 class TestHelp:
@@ -85,11 +68,6 @@ class TestHelp:
         result = handle_command("close", ["help"])
         assert result is True
         mock_help.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. command == "close" with plan number -> calls close_plan
-# ═══════════════════════════════════════════════════════════
 
 
 class TestCloseSinglePlan:
@@ -127,11 +105,6 @@ class TestCloseSinglePlan:
         )
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. command == "close" with --all -> calls close_plan(all_plans=True)
-# ═══════════════════════════════════════════════════════════
-
-
 class TestCloseAllPlans:
     @patch(f"{_MOD}.close_plan")
     @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, False, True, False, [], None))
@@ -158,11 +131,6 @@ class TestCloseAllPlans:
             dry_run=False,
             exclude_types=[],
         )
-
-
-# ═══════════════════════════════════════════════════════════
-# 6. command == "close" with --dry-run -> passes dry_run flag
-# ═══════════════════════════════════════════════════════════
 
 
 class TestDryRun:
@@ -193,11 +161,6 @@ class TestDryRun:
         )
 
 
-# ═══════════════════════════════════════════════════════════
-# 7. Parse error -> displays usage error, returns True
-# ═══════════════════════════════════════════════════════════
-
-
 class TestParseError:
     @patch(f"{_MOD}.format_delete_usage_error", return_value="Usage error text")
     @patch(f"{_MOD}.close_plan")
@@ -208,10 +171,7 @@ class TestParseError:
     def test_parse_error_exits_non_zero_without_closing_anything(self, mock_parse, mock_close, mock_format):
         """A refused close FAILS.
 
-        Was pinned as "still a handled command" returning True, which flow.py
-        turns into exit 0 — so `drone @flow close not_a_plan && next_step` ran
-        the next step as if a plan had closed (ruling 2026-09-07). Handled and
-        succeeded are different answers; the refusal itself was always correct.
+        Returning True would make flow.py exit 0, so a `&&` chain would run on as if a plan had closed.
         """
         with pytest.raises(SystemExit) as exit_info:
             handle_command("close", ["--unknown-flag"])
@@ -225,12 +185,7 @@ class TestParseError:
         return_value=(None, False, False, False, [], "Unknown plan type(s): APLNA. Registered: APLAN, FPLAN"),
     )
     def test_parse_error_prints_the_parsers_own_reason(self, mock_parse, mock_close, mock_error):
-        """The specific reason reaches the operator, not a fixed usage block.
-
-        The generic block said "ERROR: Plan number required / Usage: delete
-        <plan_number>" for EVERY parse failure -- wrong verb, and a false
-        diagnosis printed under a true refusal.
-        """
+        """The specific reason reaches the operator, not a fixed usage block."""
         with pytest.raises(SystemExit) as exit_info:
             handle_command("close", ["--all", "--exclude-type", "APLNA"])
         assert exit_info.value.code == 1  # Handled, refused, and it says so
@@ -246,11 +201,6 @@ class TestParseError:
         with pytest.raises(SystemExit):
             handle_command("close", ["--unknown-flag"])
         mock_format.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════
-# 8. close_plan orchestrator delegates to close_plan_impl
-# ═══════════════════════════════════════════════════════════
 
 
 class TestClosePlanOrchestrator:
@@ -272,11 +222,6 @@ class TestClosePlanOrchestrator:
         assert result is True
 
 
-# ═══════════════════════════════════════════════════════════
-# 9. close_all_plans delegates to close_all_plans_impl
-# ═══════════════════════════════════════════════════════════
-
-
 class TestCloseAllOrchestrator:
     @patch(f"{_MOD}.close_all_plans_impl", return_value={"success": True, "messages": []})
     def test_close_all_success(self, mock_impl):
@@ -292,11 +237,6 @@ class TestCloseAllOrchestrator:
     def test_close_all_bool_fallback(self, mock_impl):
         result = close_all_plans()
         assert result is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 10. --confirm: the prompt close_plan hands to close_plan_impl
-# ═══════════════════════════════════════════════════════════
 
 
 class _Terminal:

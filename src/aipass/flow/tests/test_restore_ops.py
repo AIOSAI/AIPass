@@ -3,7 +3,7 @@
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -30,21 +30,14 @@ from aipass.flow.apps.handlers.plan.validator import (
     validate_plan_exists as real_validate,
 )
 
-# A real temp directory rather than a hardcoded "/tmp": these rows are only
-# fixture data, but a POSIX-only literal is a Windows defect waiting for the
-# first assertion that reads one back.
+# Not a hardcoded "/tmp": a POSIX-only literal breaks on Windows once an assertion reads it back.
 _TMP = Path(tempfile.gettempdir())
-
-
-# ─── Helpers ─────────────────────────────────────────────
 
 
 def _make_deps(**overrides) -> dict[str, Any]:
     """Build a default set of injected dependencies, with optional overrides.
 
-    Annotated ``dict[str, Any]`` on purpose: callers substitute plain functions
-    for the MagicMock defaults, and without the annotation the value type is
-    inferred from those defaults alone.
+    Annotated ``dict[str, Any]`` because callers swap plain functions in for the MagicMock defaults.
     """
     deps: dict[str, Any] = {
         "normalize_plan_number": MagicMock(side_effect=lambda x: x.zfill(4)),
@@ -77,11 +70,6 @@ def _make_deps(**overrides) -> dict[str, Any]:
     return deps
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. restore_plan_impl -- no plan number
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRestoreNoPlanNumber:
     def test_none_returns_error(self):
         fn = restore_plan_impl
@@ -93,11 +81,6 @@ class TestRestoreNoPlanNumber:
         fn = restore_plan_impl
         result = fn(plan_num="", **_make_deps())
         assert result["success"] is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. restore_plan_impl -- success path
-# ═══════════════════════════════════════════════════════════
 
 
 class TestRestoreSuccess:
@@ -130,7 +113,7 @@ class TestRestoreSuccess:
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
     def test_an_unsaved_restore_fails_and_says_so(self, tmp_path):
-        """save_registry answers False, never raises: the plan is still closed (leg 10)."""
+        """save_registry answers False, never raises: the plan is still closed."""
         plan_file = tmp_path / "FPLAN-0001.md"
         plan_file.write_text("# Plan", encoding="utf-8")
         registry = {"plans": {"0001": {"status": "closed", "file_path": str(plan_file), "location": str(tmp_path)}}}
@@ -205,7 +188,6 @@ class TestRestoreSuccess:
         with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
-        # The auto-heal scan runs exactly once, argument-free, and the restore then completes.
         scan_mock.assert_called_once_with()
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
@@ -236,11 +218,6 @@ class TestRestoreSuccess:
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
 
-# ═══════════════════════════════════════════════════════════
-# 3. restore_plan_impl -- plan already open
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRestoreAlreadyOpen:
     def test_open_plan_returns_error(self, tmp_path):
         fn = restore_plan_impl
@@ -263,11 +240,6 @@ class TestRestoreAlreadyOpen:
 
         assert result["success"] is False
         assert any(m.get("error_type") == "already_open" for m in result["messages"])
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. restore_plan_impl -- plan not found + recovery
-# ═══════════════════════════════════════════════════════════
 
 
 class TestRestoreNotFound:
@@ -301,9 +273,7 @@ class TestRestoreNotFound:
             }
         }
 
-        # registry_file-keyed responses -- only fplan_registry.json has the
-        # recovered plan; every other type's registry is empty. Emulates the
-        # real load_registry() contract (routes on registry_file, not call order).
+        # Routes on registry_file, not call order, as the real load_registry() does.
         def load_side_effect(registry_file=None):
             return recovered_registry if registry_file == "fplan_registry.json" else {"plans": {}}
 
@@ -314,10 +284,7 @@ class TestRestoreNotFound:
             load_registry=load_mock,
         )
 
-        # The no-prefix fallback discovers plan types from flow_json/
-        # template_registry.json — a runtime-managed (gitignored) file that
-        # doesn't exist on fresh checkouts/CI. Pin the discovery so this
-        # test never depends on the machine's live registry state.
+        # template_registry.json is gitignored and absent on CI, so discovery is pinned.
         with (
             patch(
                 "aipass.flow.apps.handlers.plan.registry_routing._load_template_registry",
@@ -330,11 +297,6 @@ class TestRestoreNotFound:
         assert result["success"] is True
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="9999", location=str(tmp_path))
         assert any(m.get("type") == "success" for m in result["messages"])
-
-
-# ═══════════════════════════════════════════════════════════
-# 5. restore_plan_impl -- file missing
-# ═══════════════════════════════════════════════════════════
 
 
 class TestRestoreFileMissing:
@@ -358,11 +320,6 @@ class TestRestoreFileMissing:
         assert any(m.get("error_type") == "file_missing" for m in result["messages"])
 
 
-# ═══════════════════════════════════════════════════════════
-# 6. restore_plan_impl -- ValueError (invalid number)
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRestoreValueError:
     def test_invalid_plan_number_raises_value_error(self):
         fn = restore_plan_impl
@@ -383,11 +340,6 @@ class TestRestoreValueError:
         assert result["messages"][0]["plan_key"] == "xyz"
 
 
-# ═══════════════════════════════════════════════════════════
-# 7. restore_plan_impl -- generic exception
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRestoreGenericException:
     def test_unexpected_error(self):
         fn = restore_plan_impl
@@ -399,11 +351,6 @@ class TestRestoreGenericException:
         assert result["success"] is False
         assert result["messages"][0]["error_type"] == "general"
         assert "kaboom" in result["messages"][0]["details"]
-
-
-# ═══════════════════════════════════════════════════════════
-# 8. restore_plan_impl -- dashboard failures
-# ═══════════════════════════════════════════════════════════
 
 
 class TestRestoreDashboardFailures:
@@ -496,14 +443,8 @@ class TestRestoreDashboardFailures:
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
 
-# ═══════════════════════════════════════════════════════════
-# 9. restore_plan_impl -- cross-type same-number collision (VERA repro)
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRestoreCrossTypeCollision:
-    """Regression coverage for the reported bug: `restore PPLAN-0011` must
-    never resolve against FPLAN-0011 just because both share number 0011."""
+    """`restore PPLAN-0011` must never resolve against FPLAN-0011 just because both share number 0011."""
 
     def _registries(self, tmp_path):
         fplan_file = tmp_path / "FPLAN-0011.md"
@@ -557,7 +498,6 @@ class TestRestoreCrossTypeCollision:
 
         assert result["success"] is True
         assert result["plan_key"] == "0011"
-        # Never touched the unrelated FPLAN-0011 entry
         assert fplan_registry["plans"]["0011"]["status"] == "open"
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0011", location=str(tmp_path))
         save_mock.assert_called_once()
@@ -566,8 +506,7 @@ class TestRestoreCrossTypeCollision:
         assert saved_registry["plans"]["0011"]["status"] == "open"
 
     def test_explicit_prefix_does_not_fall_back_to_other_type(self, tmp_path):
-        """If PPLAN-0011 doesn't exist but FPLAN-0011 does, restore must fail
-        outright -- never silently restore the FPLAN entry instead."""
+        """If PPLAN-0011 doesn't exist but FPLAN-0011 does, restore must fail outright."""
         fn = restore_plan_impl
         fplan_registry, _ = self._registries(tmp_path)
         registries = {"fplan_registry.json": fplan_registry, "pplan_registry.json": {"plans": {}}}
@@ -587,8 +526,7 @@ class TestRestoreCrossTypeCollision:
         assert any(m.get("prefix") == "PPLAN" for m in result["messages"])
 
     def test_restore_success_message_carries_resolved_type_prefix(self, tmp_path):
-        """Display messages must reflect the plan's real type, not a silent
-        'FPLAN' default -- otherwise a restored PPLAN prints as 'FPLAN-0011'."""
+        """Display messages must reflect the plan's real type, not a silent 'FPLAN' default."""
         fn = restore_plan_impl
         _, pplan_registry = self._registries(tmp_path)
         registries = {"pplan_registry.json": pplan_registry}
@@ -611,11 +549,6 @@ class TestRestoreCrossTypeCollision:
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0011", location=str(tmp_path))
 
 
-# ═══════════════════════════════════════════════════════════
-# 10. recover_plan_from_backup
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRecoverPlanFromBackup:
     def test_no_backup_dir(self, tmp_path):
         fn = recover_plan_from_backup
@@ -632,7 +565,6 @@ class TestRecoverPlanFromBackup:
     def test_successful_recovery(self, tmp_path):
         fn = recover_plan_from_backup
 
-        # Create backup file with Location header
         backup_dir = tmp_path / "processed_plans"
         backup_dir.mkdir()
         backup_file = backup_dir / "FPLAN-0042.md"
@@ -657,11 +589,7 @@ class TestRecoverPlanFromBackup:
         assert saved_reg["plans"]["0042"]["status"] == "closed"
 
     def test_an_unsaved_registry_is_no_recovery(self, tmp_path):
-        """save_registry answers False, never raises: the row does not exist (leg 10).
-
-        Before leg 10 this answered (True, "Recovered ...") and restore_plan_impl
-        then read the missing row.
-        """
+        """save_registry answers False, never raises: the row does not exist."""
         fn = recover_plan_from_backup
         backup_dir = tmp_path / "processed_plans"
         backup_dir.mkdir()
@@ -684,10 +612,7 @@ class TestRecoverPlanFromBackup:
     def test_a_registry_that_cannot_be_loaded_leaves_no_copy_behind(self, tmp_path):
         """The load runs before the copy, so its raise leaves nothing on disk.
 
-        Before leg 6 the copy came first; with the load now raising on an
-        unreadable registry, that order would strand an unregistered plan
-        file. Red first on that order; mutant: the copy moved back above the
-        load.
+        Mutant: the copy moved back above the load reddens this.
         """
         fn = recover_plan_from_backup
         backup_dir = tmp_path / "processed_plans"
@@ -731,14 +656,11 @@ class TestRecoverPlanFromBackup:
             ok, msg = fn("0010", load_registry=load, save_registry=save)
 
         assert ok is True
-        # Should default to FLOW_ROOT
         saved_reg = save.call_args[0][0]
         assert saved_reg["plans"]["0010"]["location"] == str(flow_root)
 
-    # ── What "absolute" means in a registry shared across install histories ──
-    # Ruled 2026-09-07 (FPLAN-0492 wave 4): absolute is EITHER dialect, and a
-    # vanished absolute record is refused by name — never re-homed to FLOW_ROOT.
-    # The host running these tests must not decide any of these verdicts.
+    # Absolute is EITHER dialect, and a vanished absolute record is refused by name, never re-homed
+    # to FLOW_ROOT. The host running these tests must not decide any of these verdicts.
 
     def _recover_with_recorded_location(self, tmp_path, recorded, plan_key="0077"):
         """Recover a backup whose header records *recorded*, in a sandbox tree."""
@@ -765,14 +687,7 @@ class TestRecoverPlanFromBackup:
         return ok, msg, save, flow_root
 
     def test_a_windows_recorded_location_is_not_read_as_relative(self, tmp_path):
-        """``C:\\plans`` is absolute even on POSIX, so it cannot land in FLOW_ROOT.
-
-        This is the defect the ruling names: ``startswith("/")`` calls a
-        drive-letter path relative, the relative branch fails to resolve it, and
-        the fallback files the plan under FLOW_ROOT — a directory the plan's own
-        header never mentioned. Refusing is the cure; where it must NOT go is the
-        assertion that catches a regression.
-        """
+        """``C:\\plans`` is absolute even on POSIX, so it cannot land in FLOW_ROOT."""
         ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"C:\plans\archive")
 
         assert ok is False
@@ -823,7 +738,6 @@ class TestRecoverPlanFromBackup:
         backup_dir = tmp_path / "processed_plans"
         backup_dir.mkdir()
 
-        # Create two variants - older FPLAN, newer DPLAN
         old_file = backup_dir / "FPLAN-0005.md"
         old_file.write_text("# Old\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
         aged = old_file.stat().st_mtime - 100
@@ -847,9 +761,7 @@ class TestRecoverPlanFromBackup:
         assert "DPLAN-0005" in msg
 
     def test_no_prefix_writes_to_registry_matching_recovered_file(self, tmp_path):
-        """Even without an explicit prefix, the entry must land in the
-        registry matching the RECOVERED file's actual type (DPLAN here),
-        never the default fplan_registry.json."""
+        """Without an explicit prefix the entry lands in the RECOVERED file's type registry, never the default."""
         fn = recover_plan_from_backup
 
         backup_dir = tmp_path / "processed_plans"
@@ -874,20 +786,17 @@ class TestRecoverPlanFromBackup:
         assert save.call_args[1].get("registry_file") == "dplan_registry.json"
 
     def test_explicit_prefix_restricts_search_to_matching_type(self, tmp_path):
-        """A caller-specified prefix must not be overridden by a newer
-        same-numbered backup from a different plan type."""
+        """A caller-specified prefix must not be overridden by a newer same-numbered backup of another type."""
         fn = recover_plan_from_backup
 
         backup_dir = tmp_path / "processed_plans"
         backup_dir.mkdir()
 
-        # Older FPLAN backup, requested explicitly
         fplan_backup = backup_dir / "FPLAN-0011.md"
         fplan_backup.write_text("# FPLAN\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
         aged = fplan_backup.stat().st_mtime - 100
         os.utime(fplan_backup, (aged, aged))
 
-        # Newer PPLAN backup with the SAME number -- must be ignored
         pplan_backup = backup_dir / "PPLAN-0011.md"
         pplan_backup.write_text("# PPLAN\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
 
@@ -908,14 +817,7 @@ class TestRecoverPlanFromBackup:
         assert save.call_args[1].get("registry_file") == "fplan_registry.json"
 
 
-# ═══════════════════════════════════════════════════════════
-# 10. THE ARCHIVE IS THE SAFETY NET — restoring a normally-closed plan
-#
-# Measured on the live tree before writing any of this: 719 closed
-# rows, 0 with a file at their registered path, 412 with an intact
-# copy in the archive. Restore failed for all 719 because step 5
-# checked one location and never looked at the other.
-# ═══════════════════════════════════════════════════════════
+# A normally-closed plan has no file at its registered path: the archive copy is the safety net.
 
 
 def _closed_plan(tmp_path, name="FPLAN-0042_the_real_subject_2026-08-01.md"):
@@ -944,14 +846,12 @@ class TestFindBackupCopy:
 
         found = find_backup_copy(row, "0042", backup_dir=archive)
         assert found is not None
-        # Not a PREFIX-NNNN.md husk -- the name that carries the work.
         assert found.name == name
         assert "the_real_subject" in found.name and "2026-08-01" in found.name
 
     def test_glob_fallback_is_type_scoped(self, tmp_path):
         """Every registry numbers from 0001; a bare-number glob returns the wrong plan."""
         row, _home, archive, _name = _closed_plan(tmp_path, "FPLAN-0011_wanted_2026-08-01.md")
-        # Row points at a name that is NOT in the archive, forcing the fallback.
         row["file_path"] = str(tmp_path / "gone" / "FPLAN-0011_renamed_2026-08-01.md")
         (archive / "DPLAN-0011_decoy_2026-08-01.md").write_text("# decoy", encoding="utf-8")
 
@@ -1052,7 +952,6 @@ class TestRestoreOfANormallyClosedPlan:
         assert restored["subject"] == "The real subject"
         assert restored["created"] == "2026-08-01T00:00:00+00:00"
         assert restored["subject"] != "Recovered from backup"
-        # Close metadata is cleared, which is what reopening means.
         assert "closed" not in restored
 
     def test_no_archived_copy_still_refuses_and_says_where_it_looked(self, tmp_path):

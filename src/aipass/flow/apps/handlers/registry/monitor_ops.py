@@ -3,19 +3,10 @@
 # Description: Registry Monitor Implementation Handler
 # Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Registry Monitor Operations Handler
-
-Implements filesystem scanning and registry healing logic.
-
-Usage:
-    from aipass.flow.apps.handlers.registry.monitor_ops import (
-        scan_plan_files_impl, get_status_impl
-    )
-"""
+"""Registry Monitor Operations Handler"""
 
 import os
 import re
@@ -26,20 +17,13 @@ from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
 
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "registry_monitor"
 
-# PLAN file pattern — matches any plan prefix (FPLAN, DPLAN, APLAN, RPLAN, TDPLAN, etc.)
-# Real plan files carry a subject slug + date suffix: PREFIX-NNNN_slug_YYYY-MM-DD.md
-# The slug is optional so bare PREFIX-NNNN.md (e.g. test fixtures) still matches.
+# The slug is optional so a bare PREFIX-NNNN.md still matches.
 PLAN_PATTERN = re.compile(r"^([A-Z]+PLAN)-(\d{4})(?:_.*)?\.md$")
 
-# Directories to ignore during monitoring
 IGNORE_FOLDERS = {
-    # Development and version control
     ".git",
     ".venv",
     "venv",
@@ -50,7 +34,6 @@ IGNORE_FOLDERS = {
     "build",
     ".idea",
     ".vscode",
-    # Backup and archive
     "backup",
     "backups",
     ".backup",
@@ -59,11 +42,9 @@ IGNORE_FOLDERS = {
     "backup",
     "archive_temp",
     "processed_plans",
-    # Memory and admin
     "memory",
     "admin",
     "aipass-help",
-    # User directories
     ".local",
     "Downloads",
     "downloads",
@@ -83,21 +64,9 @@ IGNORE_FOLDERS = {
 
 def is_plan_file(path: Path) -> Optional[bool]:
     """True if ``path`` is a plan, not only a file named like one.
-
-    A plan carries its own identity on its first line, the line every plan
-    template opens with: ``# {PREFIX}-{NNNN}: {subject}``, the same prefix and
-    number as its filename. Older templates wrote ``# {PREFIX}-{NNNN} - {subject}``,
-    and live open plans still carry it, so both forms are plans (devpulse,
-    verifying leg 7: six open plans use the dash). A report or brief named after a plan
-    (``DPLAN-0356_ph2_report.md``, first line ``DPLAN-0356 phase 2 DONE``)
-    matches PLAN_PATTERN and nothing else. Until leg 7 of fleet green the
-    name alone was enough, and registry scan renamed such files in other
-    branches' folders and registered them as plans (flow's decision, leg 7).
-
-    Returns:
-        True for a plan, False for a look-alike, None when the file cannot be
-        read so nobody can tell. Every caller treats None as "not a plan to
-        act on": it is never renamed, registered or closed.
+    A plan opens with ``# {PREFIX}-{NNNN}: `` (older templates: `` - ``) matching its filename; a report
+    named after a plan matches PLAN_PATTERN and nothing else.
+    Returns None when the file cannot be read; every caller treats None as "never rename, register or close".
     """
     match = PLAN_PATTERN.match(path.name)
     if not match:
@@ -112,22 +81,8 @@ def is_plan_file(path: Path) -> Optional[bool]:
     return first_line.startswith((f"{plan_id}:", f"{plan_id} - "))
 
 
-# =============================================
-# HELPER
-# =============================================
-
-
 def _fire_event(event_name: str, **kwargs) -> bool:
-    """
-    Fire a trigger event (internal helper)
-
-    Args:
-        event_name: Name of the event to fire
-        **kwargs: Event data
-
-    Returns:
-        True if event fired successfully, False otherwise
-    """
+    """Fire a trigger event (internal helper)"""
     try:
         from aipass.trigger.apps.modules.core import trigger
 
@@ -138,42 +93,15 @@ def _fire_event(event_name: str, **kwargs) -> bool:
         return False
 
 
-# =============================================
-# SCAN AND HEAL IMPLEMENTATION
-# =============================================
-
-
 def scan_plan_files_impl(
     ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}
 ) -> Dict[str, Any]:
-    """
-    Scan ecosystem for PLAN files and fire events to heal registry
-
-    Fires events for:
-    - Missing registry entries (plan_file_created)
-    - Orphaned entries (plan_file_deleted)
-    - Location mismatches (plan_file_moved)
-    - Duplicate plan numbers are reported in "duplicates", never renamed
-
-    Only a file that is_plan_file() calls a plan is counted; a file merely
-    named like one is not seen at all.
-
-    Architecture (v2.0):
-    - This function DETECTS changes and FIRES events
-    - Trigger handlers in plan_file.py HANDLE the registry updates
-    - Flow never touches registry directly during scan
-
-    Args:
-        ecosystem_root: Root directory to scan from
-        load_registry: Registry loader function (injected from module)
-
-    Returns:
-        Dict with scan results and event stats
+    """Scan ecosystem for PLAN files and fire events to heal registry
+    Detects and fires events only; trigger handlers in plan_file.py update the registry. Duplicate
+    plan numbers are reported in "duplicates", never renamed.
     """
     logger.info(f"[{MODULE_NAME}] Starting PLAN file scan from: {ecosystem_root}")
 
-    # Find all PLAN files (detect duplicates). Keyed by (prefix, number) --
-    # see the duplicate-detection comment below for why the bare number is wrong.
     plan_files: Dict[Tuple[str, str], Path] = {}
     duplicates: Dict[Tuple[str, str], List[Path]] = {}
 
@@ -182,36 +110,21 @@ def scan_plan_files_impl(
         if not isinstance(error, PermissionError):
             logger.warning(f"[{MODULE_NAME}] Error during scan: {error}")
 
-    # Use os.walk() with error handling
     found: List[Tuple[Tuple[str, str], Path]] = []
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
-        # Skip ignored directories (modify dirs in-place to prevent descent).
-        # Exact-name match — substring match ("dev" in "devpulse", "sys" in "system_logs")
-        # silently skipped whole project trees, causing their open plans to read as orphaned.
+        # Exact-name match: a substring match ("dev" in "devpulse") skips whole project trees.
         dirs[:] = [d for d in dirs if d not in IGNORE_FOLDERS]
 
-        # Check for PLAN files in this directory
         for filename in files:
             match = PLAN_PATTERN.match(filename)
             if match and is_plan_file(Path(root) / filename):
-                # Keyed by (prefix, number), never the bare number. Every type
-                # numbers from 0001, so APLAN-0007 and FPLAN-0007 are two
-                # different plans -- a number-only key called them one plan
-                # filed twice. heal_registry._build_plan_file_index keys the
-                # same way. A file only NAMED like a plan is not counted.
+                # Keyed by (prefix, number): every type numbers from 0001, so APLAN-0007 is not FPLAN-0007.
                 found.append(((match.group(1), match.group(2)), Path(root) / filename))
 
-    # Sort by path before deciding anything. os.walk yields directories and
-    # their files in OS order, so "keep the first occurrence" used to hand the
-    # number to whichever file the filesystem happened to name first -- the same
-    # tree renamed a different file on a different run, and a live plan could be
-    # the one renamed. heal_registry._build_plan_file_index sorts for the same
-    # reason. This does not decide the RIGHT keeper (the registry is not
-    # consulted here, and it holds one type only), just the same one every run.
+    # os.walk order is OS order; sorting makes "first occurrence" the same file every run.
     found.sort(key=lambda entry: str(entry[1]))
 
     for plan_key, file_path in found:
-        # Duplicate detection -- same TYPE and same number
         if plan_key in plan_files:
             if plan_key not in duplicates:
                 duplicates[plan_key] = [plan_files[plan_key]]
@@ -220,11 +133,7 @@ def scan_plan_files_impl(
         else:
             plan_files[plan_key] = file_path
 
-    # Duplicates are REPORTED, never renamed. The scan renamed every file
-    # after the first until leg 7 of fleet green, and the files it renamed
-    # were mostly reports named after a plan in other branches' folders (46
-    # renames in flow's logs, 2026-09-07 to 2026-10-04). Which of two real
-    # plans keeps a number is a human's call (flow's decision, leg 7).
+    # Which of two real plans keeps a number is a human's call, so duplicates are only reported.
     duplicate_report: List[Dict[str, Any]] = [
         {"prefix": dup_prefix, "number": plan_num, "paths": [str(p) for p in paths]}
         for (dup_prefix, plan_num), paths in duplicates.items()
@@ -232,56 +141,39 @@ def scan_plan_files_impl(
     if duplicate_report:
         logger.warning(f"[{MODULE_NAME}] Found {len(duplicate_report)} duplicate plan number(s), none renamed")
 
-    # Load current registry to compare (read-only - we don't modify it here)
     registry = load_registry()
     plans = registry.get("plans", {})
 
-    # Track events fired
     added: List[str] = []
     updated: List[str] = []
     removed: List[str] = []
 
-    # Fire events for missing files (not in registry).
-    # NOTE: `plans` here is whatever load_registry() returned -- the injected
-    # default is the FPLAN registry, so rows of other types read as unregistered
-    # and re-fire plan_file_created on every scan. Reported separately; not
-    # changed here, as this run is scoped to the duplicate-keying hazard.
+    # `plans` is one registry type (FPLAN by default): other types' files re-fire plan_file_created every scan.
     for (_plan_prefix, plan_number), file_path in plan_files.items():
         if plan_number not in plans:
-            # File exists but not in registry - fire created event
             if _fire_event("plan_file_created", path=str(file_path)):
                 added.append(plan_number)
                 logger.info(f"[{MODULE_NAME}] Fired plan_file_created for {file_path.name}")
         else:
-            # Check if location changed (file moved)
             current_path = plans[plan_number].get("file_path", "")
             if current_path != str(file_path):
-                # Fire moved event
                 if _fire_event("plan_file_moved", src_path=current_path, dest_path=str(file_path)):
                     updated.append(plan_number)
                     logger.info(f"[{MODULE_NAME}] Fired plan_file_moved for {file_path.name}")
 
-    # Fire events for orphaned registry entries (in registry but file doesn't exist).
-    # Closed plans are expected to be archived out of the scanned tree (see IGNORE_FOLDERS) —
-    # treating that as "deleted" every scan is what caused the runaway log (305 closed plans
-    # logged as orphaned on every single run). Only open plans can be genuinely orphaned.
-    # Compared on the bare number, matching `plans` (which is keyed that way).
-    # The typed index above is about not confusing two plans for one; this check
-    # only asks "is there a file with this number at all", which is what the
-    # single-type registry in `plans` can answer.
+    # Closed plans are archived out of the scanned tree, so only open plans can be orphaned.
+    # Bare numbers here: the single-type `plans` registry is keyed that way.
     disk_numbers = {num for _pfx, num in plan_files}
     for plan_number in list(plans.keys()):
         if plans[plan_number].get("status") == "closed":
             continue
         if plan_number not in disk_numbers:
-            # Registry entry but no file - fire deleted event
             orphan_path = plans[plan_number].get("file_path", "")
             orphan_name = Path(orphan_path).name if orphan_path else f"PLAN-{plan_number}.md"
             if _fire_event("plan_file_deleted", path=orphan_path or f"PLAN-{plan_number}.md"):
                 removed.append(plan_number)
                 logger.info(f"[{MODULE_NAME}] Fired plan_file_deleted for {orphan_name}")
 
-    # Log event results
     if added or updated or removed or duplicate_report:
         logger.info(
             "[%s] Events fired - Created: %d, Moved: %d, Deleted: %d, Duplicates reported: %d",
@@ -292,7 +184,7 @@ def scan_plan_files_impl(
             len(duplicate_report),
         )
 
-    # Reload registry to get updated count (after handlers processed events)
+    # Reload: the trigger handlers have updated the registry since the first load.
     registry = load_registry()
     total_plans = len(registry.get("plans", {}))
 
@@ -320,23 +212,10 @@ def scan_plan_files_impl(
     }
 
 
-# =============================================
-# STATUS IMPLEMENTATION
-# =============================================
-
-
 def get_status_impl(
     ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}
 ) -> Dict[str, Any]:
-    """Get registry status
-
-    Args:
-        ecosystem_root: Root directory being watched
-        load_registry: Registry loader function (injected from module)
-
-    Returns:
-        Dict with registry status information
-    """
+    """Get registry status"""
     registry = load_registry()
     total_plans = len(registry.get("plans", {}))
     open_plans = sum(1 for p in registry.get("plans", {}).values() if p.get("status") == "open")

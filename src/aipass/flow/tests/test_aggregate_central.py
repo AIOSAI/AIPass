@@ -3,7 +3,7 @@
 # Description: Tests for the aggregate command - routing, heal flags, card sweep
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/aggregate_central.py."""
@@ -18,14 +18,7 @@ import pytest
 
 from aipass.flow.apps.modules.aggregate_central import aggregate_central, handle_command
 
-
-# ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.aggregate_central"
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. Command != "aggregate" -> returns False
-# ═══════════════════════════════════════════════════════════
 
 
 class TestCommandRouting:
@@ -39,11 +32,6 @@ class TestCommandRouting:
         assert handle_command("", []) is False
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. command == "aggregate" with no args -> introspection
-# ═══════════════════════════════════════════════════════════
-
-
 class TestNoArgs:
     @patch(f"{_MOD}.print_introspection")
     def test_no_args_calls_introspection(self, mock_intro):
@@ -51,11 +39,6 @@ class TestNoArgs:
         result = handle_command("aggregate", [])
         assert result is True
         mock_intro.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. command == "aggregate" with --help -> help
-# ═══════════════════════════════════════════════════════════
 
 
 class TestHelp:
@@ -76,11 +59,6 @@ class TestHelp:
         result = handle_command("aggregate", ["help"])
         assert result is True
         mock_help.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. command == "aggregate" with ["run"] -> calls aggregate_central(heal=True)
-# ═══════════════════════════════════════════════════════════
 
 
 class TestRunCommand:
@@ -104,11 +82,6 @@ class TestRunCommand:
         mock_aggregate.assert_called_once_with(heal=False)
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. command == "aggregate" with ["--no-heal"] -> calls aggregate_central(heal=False)
-# ═══════════════════════════════════════════════════════════
-
-
 class TestNoHealFlag:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_no_heal_flag(self, mock_aggregate):
@@ -127,18 +100,12 @@ class TestNoHealFlag:
         sweep.assert_called_once_with()
 
 
-# ═══════════════════════════════════════════════════════════
-# 6. aggregate_central orchestrator delegates to aggregate_central_impl
-# ═══════════════════════════════════════════════════════════
-
-
 class TestAggregateCentralOrchestrator:
     @patch(f"{_MOD}.aggregate_central_impl", return_value=True)
     def test_impl_success_returns_true(self, mock_impl):
         result = aggregate_central(heal=True)
         assert result is True
         mock_impl.assert_called_once()
-        # Verify heal and path args are passed through
         call_kwargs = mock_impl.call_args[1]
         assert call_kwargs["heal"] is True
         assert "central_file" in call_kwargs
@@ -162,11 +129,6 @@ class TestAggregateCentralOrchestrator:
         assert result is True  # Impl succeeded
         call_kwargs = mock_impl.call_args[1]
         assert call_kwargs["heal"] is True
-
-
-# ═══════════════════════════════════════════════════════════
-# 7. json_handler.log_operation is called on valid commands
-# ═══════════════════════════════════════════════════════════
 
 
 class TestOperationLogging:
@@ -197,16 +159,8 @@ class TestOperationLogging:
         mock_jh.log_operation.assert_not_called()
 
 
-# ═══════════════════════════════════════════════════════════
-# 9. --sweep-cards re-pushes every branch card, and its failures fail the command
-# ═══════════════════════════════════════════════════════════
-
-
 class TestSweepCardsFlag:
-    """The sweep writes every branch's dashboard, so each test stubs it first.
-
-    Mutant run 2026-09-27: deleting the `if "--sweep-cards" in args:` block reddens
-    the first and third tests here."""
+    """The sweep writes every branch's dashboard, so each test stubs it first."""
 
     @patch(f"{_MOD}.push_flow_to_all_branch_dashboards", return_value={"pushed": 3, "skipped": 1, "failed": 0})
     @patch(f"{_MOD}.aggregate_central", return_value=True)

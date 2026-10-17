@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/display.py -- plan display formatting
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/display.py."""
@@ -15,17 +15,9 @@
 import aipass.flow.apps.handlers.plan.display as mod
 
 
-# ─── Helpers ─────────────────────────────────────────────
-
-
 def _import(name: str):
     """Return a function from the display module."""
     return getattr(mod, name)
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. display_plan_created
-# ═══════════════════════════════════════════════════════════
 
 
 class TestDisplayPlanCreated:
@@ -65,11 +57,6 @@ class TestDisplayPlanCreated:
         assert "FPLAN-0007" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. display_plan_result
-# ═══════════════════════════════════════════════════════════
-
-
 class TestDisplayPlanResult:
     def test_success_result(self):
         fn = _import("display_plan_result")
@@ -96,11 +83,6 @@ class TestDisplayPlanResult:
         result = fn(success=False, plan_num=99, location="flow", template_type="default", error="disk full")
         assert "FPLAN" not in result
         assert "disk full" in result
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. format_plan_deletion_header
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatPlanDeletionHeader:
@@ -130,11 +112,6 @@ class TestFormatPlanDeletionHeader:
         assert "N/A" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. format_plan_error
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatPlanError:
     def test_not_found(self):
         fn = _import("format_plan_error")
@@ -162,11 +139,6 @@ class TestFormatPlanError:
         assert "DPLAN-0002 not found" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. format_plan_deletion_success
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatPlanDeletionSuccess:
     def test_default_prefix(self):
         fn = _import("format_plan_deletion_success")
@@ -179,20 +151,10 @@ class TestFormatPlanDeletionSuccess:
         assert "DPLAN-0003 closed successfully" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 6. format_deletion_cancelled
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatDeletionCancelled:
     def test_output(self):
         fn = _import("format_deletion_cancelled")
         assert fn() == "Deletion cancelled"
-
-
-# ═══════════════════════════════════════════════════════════
-# 7. format_delete_usage_error
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatDeleteUsageError:
@@ -202,11 +164,6 @@ class TestFormatDeleteUsageError:
         assert "Plan number required" in result
         assert "Usage:" in result
         assert "delete" in result
-
-
-# ═══════════════════════════════════════════════════════════
-# 8. format_restore_header
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatRestoreHeader:
@@ -239,11 +196,6 @@ class TestFormatRestoreHeader:
         assert "Restore DPLAN-0003" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 9. format_restore_success
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatRestoreSuccess:
     def test_with_location(self, tmp_path):
         fn = _import("format_restore_success")
@@ -262,11 +214,6 @@ class TestFormatRestoreSuccess:
         fn = _import("format_restore_success")
         result = fn("0005", prefix="DPLAN")
         assert "DPLAN-0005" in result
-
-
-# ═══════════════════════════════════════════════════════════
-# 10. format_restore_error
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatRestoreError:
@@ -299,22 +246,12 @@ class TestFormatRestoreError:
         assert "Unknown error" in fn("something_else")
 
 
-# ═══════════════════════════════════════════════════════════
-# 11. format_restore_usage_error
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatRestoreUsageError:
     def test_contains_usage(self):
         fn = _import("format_restore_usage_error")
         result = fn()
         assert "Plan number required" in result
         assert "restore" in result
-
-
-# ═══════════════════════════════════════════════════════════
-# 12. format_plan_info
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatPlanInfo:
@@ -375,11 +312,6 @@ class TestFormatPlanInfo:
         assert "not-a-date" in result
 
 
-# ═══════════════════════════════════════════════════════════
-# 13. format_plans_list
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFormatPlansList:
     def test_empty_plans(self):
         fn = _import("format_plans_list")
@@ -434,11 +366,6 @@ class TestFormatPlansList:
         first_pos = result.index("First")
         third_pos = result.index("Third")
         assert first_pos < third_pos
-
-
-# ═══════════════════════════════════════════════════════════
-# 14. format_statistics_summary
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFormatStatisticsSummary:

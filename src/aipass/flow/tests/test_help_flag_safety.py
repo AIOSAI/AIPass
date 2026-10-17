@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -32,21 +32,11 @@ from aipass.flow.apps.modules import (
     template_manager,
 )
 
-# The contract: a help flag ANYWHERE in the argument sequence means explain and
-# do nothing else. Flow's verbs mutate plans -- `close FPLAN-0042 --help` used to
-# CLOSE FPLAN-0042 -- so every canary here asserts two things together:
-# help was printed AND the destructive target was never called.
-#
-# Free-text safety is asserted alongside it: a plan subject containing the word
-# "help" must stay a subject.
+# A help flag anywhere means explain and do nothing: each canary asserts help printed AND the verb never ran.
 
 
 def _read_answer(path: Path) -> OSError | None:
-    """Read ``path`` with the test's own hands and keep what the platform answers.
-
-    Returns:
-        The OSError the read raised, or None when the read succeeded.
-    """
+    """Read ``path`` with the test's own hands and keep what the platform answers."""
     try:
         path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -55,22 +45,13 @@ def _read_answer(path: Path) -> OSError | None:
 
 
 def _create_answer(path: Path) -> OSError | None:
-    """Exclusively create ``path`` with the test's own hands, the lock's create, and keep the answer.
-
-    Returns:
-        The OSError the create raised, or None when the create succeeded.
-    """
+    """Exclusively create ``path`` with the test's own hands, the lock's create, and keep the answer."""
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except OSError as exc:
         return exc
     os.close(fd)
     return None
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. wants_help predicate
-# ═══════════════════════════════════════════════════════════
 
 
 class TestWantsHelpPredicate:
@@ -116,10 +97,6 @@ class TestWantsHelpPredicate:
         assert wants_help(["help", "--help"], bare_help=False) is True
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. close -- a help probe must never close a plan
-# ═══════════════════════════════════════════════════════════
-
 _CLOSE = "aipass.flow.apps.modules.close_plan"
 
 
@@ -152,10 +129,6 @@ class TestCloseHelpSafety:
         assert handled is False
         help_fn.assert_not_called()
 
-
-# ═══════════════════════════════════════════════════════════
-# 3. create -- a help probe must never create a plan
-# ═══════════════════════════════════════════════════════════
 
 _CREATE = "aipass.flow.apps.modules.create_plan"
 
@@ -192,10 +165,6 @@ class TestCreateHelpSafety:
         help_fn.assert_not_called()
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. restore -- a help probe must never restore a plan
-# ═══════════════════════════════════════════════════════════
-
 _RESTORE = "aipass.flow.apps.modules.restore_plan"
 
 
@@ -217,10 +186,6 @@ class TestRestoreHelpSafety:
         help_fn.assert_not_called()
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. aggregate -- a help probe must never aggregate
-# ═══════════════════════════════════════════════════════════
-
 _AGG = "aipass.flow.apps.modules.aggregate_central"
 
 
@@ -241,10 +206,6 @@ class TestAggregateHelpSafety:
         assert handled is False
         help_fn.assert_not_called()
 
-
-# ═══════════════════════════════════════════════════════════
-# 6. template_manager -- register/unregister mutate the registry
-# ═══════════════════════════════════════════════════════════
 
 _TPL = "aipass.flow.apps.modules.template_manager"
 
@@ -290,14 +251,6 @@ class TestTemplateManagerHelpSafety:
         help_fn.assert_not_called()
 
 
-# ═══════════════════════════════════════════════════════════
-# 7. Modules seedgo did NOT flag, same shape, two of them mutate
-#
-# help_flag_safety named 5 modules. These three carried the identical
-# args[0]-only gate: `registry scan` heals the registry and `post` archives
-# and vectorises closed plans, so both mutate state on a help probe.
-# ═══════════════════════════════════════════════════════════
-
 _LIST = "aipass.flow.apps.modules.list_plans"
 _REG = "aipass.flow.apps.modules.registry_monitor"
 _POST = "aipass.flow.apps.modules.post_close_runner"
@@ -333,20 +286,12 @@ class TestUnflaggedModulesHelpSafety:
         """A lock that can never be created is reported as an error, not a crash
         and not "Another instance is already running".
         Mutant: for attempt in range(_CREATE_RETRIES): -> for attempt in range(_CREATE_RETRIES - 1): reddens this.
-
-        Windows answers a create against a lock still being removed with
-        PermissionError; try_create_lock retries that on a short budget and then
-        raises. handle_command must turn the raise into an honest report.
-
-        The processing path sits behind refuse_extra, which refuses every
-        non-empty argument list (and no arguments prints introspection), so the
-        gate is patched open here to reach the lock call at all.
+        refuse_extra refuses every argument list, so it is patched open to reach the lock call at all.
         """
         lock = tmp_path / ".post_close_runner.lock"
         attempts: list[str] = []
 
-        # The denial is handed in through lock_ops' own create seam (leg 11),
-        # so os.open stays whole for every other reader.
+        # Denied through lock_ops' own create seam so os.open stays whole for every other reader.
         def fake_create(path):
             attempts.append(str(path))
             raise PermissionError(13, "Access is denied")
@@ -373,7 +318,6 @@ class TestUnflaggedModulesHelpSafety:
         assert len(logged) == 1
         assert logged[0].args[2] == lock
         assert isinstance(logged[0].args[3], PermissionError)  # raised by lock_ops past its budget
-        # The budget as the error reports it; the attempts made must match it.
         reported = re.search(r"still denied after (\d+) attempts", error_fn.call_args.args[0])
         assert reported, error_fn.call_args.args[0]
         assert int(reported.group(1)) > 1
@@ -384,20 +328,9 @@ class TestUnflaggedModulesHelpSafety:
     def test_post_unreadable_lock_reports_an_error_not_already_running(self, tmp_path, mock_logger):
         """A lock path that exists but cannot be read is an error, not a running instance.
 
-        A directory at the lock path used to read as 'stale', fail its unlink and
-        come back as False - "Another instance is already running" - so the runner
-        exited quietly forever. It is now reported as an error, with no processing.
-        The argument gate is patched open for the reason the test above gives.
-        What the exclusive create and the read answer for a directory is the
-        platform's choice: Linux and macOS refuse the create with FileExistsError
-        and the read with IsADirectoryError, so the product reaches the read and
-        logs its error; Windows refuses the create with PermissionError, so the
-        product spends its retry budget and logs its own PermissionError, chained
-        from that denial. The test makes both calls with its own hands first and
-        asserts the product logged the error its platform's route ends in.
-        Mutant: except OSError as e: -> except PermissionError as e: reddens this
-        where the platform's answer is not a PermissionError; on Windows it is
-        one, and there this mutant survives.
+        The platform picks the route (POSIX: create FileExistsError then read fails; Windows: create PermissionError
+        past the retry budget), so the test asks the platform first and asserts the error that route ends in.
+        Mutant: except OSError as e: -> except PermissionError as e: reddens this off Windows.
         Mutant: is_lock_stale returning False on a read error ('already running') reddens this on Linux and macOS.
         Mutant: try_create_lock returning False past its budget reddens this on Windows.
         """
@@ -454,9 +387,6 @@ class TestUnflaggedModulesHelpSafety:
     def test_detached_run_with_an_unreadable_lock_logs_and_exits_1(self, tmp_path, mock_logger):
         """The detached program close_plan starts meets the same lock: logged, exit 1, no pass.
 
-        main() is the body of the __main__ guard; a lock that cannot be read
-        used to end it with a traceback and no log line. LOCK_FILE is redirected
-        so the real lock is never touched, and the pass itself is stubbed.
         Mutant: except OSError as e: -> except PermissionError as e: (in main) reddens this.
         """
         lock = tmp_path / ".post_close_runner.lock"

@@ -3,7 +3,7 @@
 # Description: PLAN restore module (reopen closed plans)
 # Version: 1.5.0
 # Created: 2025-11-22
-# Modified: 2025-11-22
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -30,27 +30,21 @@ if sys.platform == "win32":
 
 from typing import List, Dict, Any
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# CLI services for display and error handling
 from aipass.cli.apps.modules import console, warning
 
-# Internal: Registry handlers
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
 
-# Internal: Plan handlers
 from aipass.flow.apps.handlers.plan.validator import normalize_plan_number, validate_plan_exists
 from aipass.flow.apps.handlers.plan.display import (
     format_restore_header,
@@ -59,33 +53,19 @@ from aipass.flow.apps.handlers.plan.display import (
     format_restore_usage_error,
 )
 
-# Internal: Dashboard handlers
 from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
 from aipass.flow.apps.handlers.dashboard.push_central import push_to_plans_central
 
-# Internal: Restore operations handler (implementation)
 from aipass.flow.apps.handlers.plan.restore_ops import (
     recover_plan_from_backup as _recover_plan_from_backup_impl,
     restore_plan_impl,
 )
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "restore_plan"
-
-# =============================================
-# DISPLAY HELPERS
-# =============================================
 
 
 def _display_messages(messages: List[Dict[str, Any]]):
-    """Render handler result messages to console
-
-    Args:
-        messages: List of message dicts from handler with type/text keys
-    """
+    """Render handler result messages to console"""
     for msg in messages:
         msg_type = msg.get("type", "")
 
@@ -112,11 +92,6 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(
                 format_restore_success(msg["plan_key"], msg.get("location"), prefix=msg.get("prefix", "FPLAN"))
             )
-
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -166,24 +141,11 @@ def print_help():
     console.print()
 
 
-# =============================================
-# RECOVERY FUNCTIONS
-# =============================================
-
-
 def recover_plan_from_backup(plan_key: str, plan_num_raw: str | None = None) -> tuple[bool, str]:
     """
     Attempt to recover a plan from processed_plans backup (thin orchestrator)
 
-    Delegates to restore_ops handler for implementation.
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0165")
-        plan_num_raw: Original plan number as given by the caller, prefix
-            intact (e.g. "PPLAN-0165"). Scopes recovery to that type.
-
-    Returns:
-        (success, message)
+    plan_num_raw keeps the caller's prefix (e.g. "PPLAN-0165") to scope recovery to that type.
     """
     return _recover_plan_from_backup_impl(
         plan_key,
@@ -193,30 +155,13 @@ def recover_plan_from_backup(plan_key: str, plan_num_raw: str | None = None) -> 
     )
 
 
-# =============================================
-# RESTORE PLAN WORKFLOW
-# =============================================
-
-
 def restore_plan(plan_num: str | None) -> bool:
-    """
-    Orchestrate plan restore workflow (thin orchestrator)
-
-    Delegates all business logic to restore_ops handler.
-    Module handles all display output.
-
-    Args:
-        plan_num: Plan number (e.g., "0001" or "1" or "42")
-
-    Returns:
-        True if successful, False otherwise
-    """
-    # Import scan_plan_files here (lazy import to avoid circular dependency)
+    """Orchestrate plan restore workflow (thin orchestrator)"""
+    # Lazy: a module-level import is circular.
     from aipass.flow.apps.modules.registry_monitor import scan_plan_files
 
     result = restore_plan_impl(
         plan_num=plan_num,
-        # Inject dependencies
         normalize_plan_number=normalize_plan_number,
         load_registry=load_registry,
         save_registry=save_registry,
@@ -227,28 +172,12 @@ def restore_plan(plan_num: str | None) -> bool:
         push_to_plans_central=push_to_plans_central,
     )
 
-    # Module handles display
     _display_messages(result.get("messages", []))
     return result.get("success", False)
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle command routing for restore_plan module (thin orchestrator)
-
-    Delegates to handlers:
-    - Argument parsing: command_parser handler
-    - Workflow execution: restore_plan orchestrator
-    - Error display: display handler
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        bool indicating success or failure
-    """
-    # Check if this is our command
+    """Handle command routing for restore_plan module (thin orchestrator)"""
     if command != "restore":
         return False
 
@@ -256,51 +185,36 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence -- a help question must never
-    # restore a plan
+    # Help anywhere in args: a help question must never restore a plan.
     if wants_help(args):
         print_help()
         return True
 
-    # Import parser here (after command check)
     from aipass.flow.apps.handlers.plan.command_parser import parse_restore_command_args
 
-    # Log the operation
     json_handler.log_operation("plan_restored", {"command": command, "args": args})
 
-    # 1. PARSE ARGS: Use command_parser handler
     plan_num, error = parse_restore_command_args(args)
 
-    # 2. VALIDATE: Check for parsing errors
     if error:
         console.print(format_restore_usage_error())
-        # Handled, and FAILED — same ruling as close (2026-09-07). Exiting 0
-        # after refusing tells a caller the plan was reopened.
+        # Exiting 0 after refusing would tell a caller the plan was reopened.
         raise SystemExit(1)
 
-    # 3. EXECUTE: Run workflow orchestrator
     restored = restore_plan(plan_num=plan_num)
 
-    # 4. RETURN: handled is not the same as succeeded — same ruling as close.
-    #    Returning False here is still wrong: flow.py reads that as "no module
-    #    claimed this command" and prints a contradictory second message.
+    # Not return False: flow.py reads that as "no module claimed this command".
     if not restored:
         raise SystemExit(1)
 
     return True
 
 
-# =============================================
-# STANDALONE EXECUTION (for testing)
-# =============================================
-
 if __name__ == "__main__":
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         import argparse
 
@@ -331,13 +245,10 @@ NOTES:
         PARSER.print_help()
         sys.exit(0)
 
-    # Confirm logger connection
     logger.info("Prax logger connected to restore_plan")
 
-    # Log standalone execution
     json_handler.log_operation("plan_restored", {"command": "standalone"})
 
-    # Call handle_command with default
     args = sys.argv[1:] if len(sys.argv) > 1 else []
     if not args:
         console.print(format_restore_usage_error())
@@ -345,12 +256,10 @@ NOTES:
         console.print()
         sys.exit(1)
 
-    # If first arg is not command, assume it's plan number (backward compatibility)
     if args[0] not in ["restore", "restore_plan"]:
         args.insert(0, "restore")
 
     result = handle_command(args[0], args[1:])
-    # Result is True on success, False on failure
     if result:
         sys.exit(0)
     else:

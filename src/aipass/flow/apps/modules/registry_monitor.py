@@ -3,7 +3,7 @@
 # Description: Registry auto-healing module
 # Version: 3.4.0
 # Created: 2025-11-21
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -44,58 +44,39 @@ if sys.platform == "win32":
 from pathlib import Path
 from typing import Dict, Any, List
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# CLI services for display
 from aipass.cli.apps.modules import console, error, success, warning
 
-# Registry handlers
 from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
 
-# Implementation handler
 from aipass.flow.apps.handlers.registry.monitor_ops import (
     scan_plan_files_impl,
     get_status_impl,
 )
 
-# Registry doctrine self-heal (number collisions / unregistered files / wrong-prefix rows)
 from aipass.flow.apps.handlers.registry.heal_registry import (
     find_quarantined_locations,
     heal_registry_doctrine_impl,
 )
 
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "registry_monitor"
 
-# The subcommands this verb accepts, named once for the check and the refusal.
 REGISTRY_SUBCOMMANDS = ("scan", "heal", "status")
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="registry_monitor")
 
 
@@ -103,25 +84,8 @@ REPO_ROOT = _find_repo_root()
 ECOSYSTEM_ROOT = REPO_ROOT  # Scan from repo root
 
 
-# =============================================
-# THIN ORCHESTRATION WRAPPERS
-# =============================================
-
-
 def scan_plan_files() -> Dict[str, Any]:
-    """
-    Scan ecosystem for PLAN files and heal the registry (thin orchestrator)
-
-    Two passes, both delegated to handlers:
-    1. monitor_ops.scan_plan_files_impl — detection + duplicate report
-    2. heal_registry.heal_registry_doctrine_impl — direct, synchronous
-       registry repair for the three doctrine cases (number collision,
-       unregistered file, wrong-prefix row). Runs on every scan so these
-       never need a manual JSON fix again.
-
-    Returns:
-        Dict with scan results, event stats, and doctrine heal results
-    """
+    """Scan ecosystem for PLAN files and heal the registry (thin orchestrator)"""
     result = scan_plan_files_impl(
         ecosystem_root=ECOSYSTEM_ROOT,
         load_registry=load_registry,
@@ -142,28 +106,8 @@ def get_status() -> Dict[str, Any]:
     )
 
 
-# =============================================
-# COMMAND HANDLER
-# =============================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle command routing for registry_monitor module
-
-    Commands:
-        scan    - One-time scan and heal
-        heal    - Alias for scan
-        status  - Show registry status
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if command handled successfully, False otherwise
-    """
-    # Check if this is our command
+    """Handle command routing for registry_monitor module"""
     if command != "registry":
         return False
 
@@ -171,16 +115,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence -- `registry scan --help`
-    # reached scan_plan_files(), which WRITES to the registry
+    # Help anywhere in args: `registry scan --help` must never reach the scan, which WRITES.
     if wants_help(args):
         print_help()
         return True
 
-    # Get subcommand
     subcommand = args[0] if args else "status"
 
-    # Log the operation
     json_handler.log_operation("registry_monitor", {"command": command, "subcommand": subcommand})
 
     if subcommand in ["scan", "heal"]:
@@ -188,8 +129,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         try:
             result = scan_plan_files()
         except RegistryUnreadableError as exc:
-            # Refused, not routed on: a raise here used to reach flow.py's
-            # router, which logged it and answered "unknown command".
             error(f"Registry scan refused: {exc}")
             return True
 
@@ -238,8 +177,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Open plans: {status['open_plans']}")
         console.print(f"  • Ignored folders: {status['ignore_folders']}")
 
-        # Refusal lane: rows the healer would not guess at. Surfaced here so a
-        # human can rule on them — never auto-corrected, never dropped.
         quarantined = find_quarantined_locations()
         console.print()
         if quarantined:
@@ -263,21 +200,12 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     else:
-        # Through the shared gate (ruling 2026-09-07). This door already
-        # refused by name and exited 1, but by returning False — which tells
-        # flow.py no module claimed the command, so it printed a SECOND,
-        # contradictory "Unknown command: registry" and the whole help screen
-        # underneath the real diagnosis. One refusal, one exit.
+        # Exit here, never return False: False makes flow.py print a second "Unknown command".
         try:
             refuse_unknown(subcommand, door="registry", valid=REGISTRY_SUBCOMMANDS, noun="subcommand")
         except UnknownArgument as exc:
             error(exc.message, suggestion=exc.usage)
             raise SystemExit(1) from exc
-
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -333,28 +261,19 @@ def print_help():
     console.print()
 
 
-# =============================================
-# STANDALONE EXECUTION
-# =============================================
-
 if __name__ == "__main__":
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Confirm logger connection
     logger.info("Prax logger connected to registry_monitor")
 
-    # Log standalone execution
     json_handler.log_operation("registry_monitor", {"command": "standalone"})
 
-    # Call handle_command
     args = sys.argv[1:] if len(sys.argv) > 1 else []
     result = handle_command("registry_monitor", args)
 

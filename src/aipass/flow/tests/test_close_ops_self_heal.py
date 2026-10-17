@@ -3,7 +3,7 @@
 # Description: Tests for close's self-heal of an unregistered plan, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.1.0
 # Created: 2026-10-06
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for close_plan_impl's self-heal in apps/handlers/plan/close_ops.py and close_helpers.py."""
@@ -19,18 +19,10 @@ from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl
 from aipass.flow.tests.support_close_ops import _make_deps
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. _find_unregistered_plan_file
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFindUnregisteredPlanFile:
-    """_find_unregistered_plan_file, reached through close (leg 10).
+    """_find_unregistered_plan_file, reached through close.
 
-    A plan no registry row names is looked for on disk, registered and
-    archived. What close finds is what it hands the (stubbed) archive; a file
-    it must not find ends in not_found with nothing archived. Every skipped
-    copy carries a real plan header, so only the skip can keep it out.
+    Every skipped copy carries a real plan header, so only the skip can keep it out.
     """
 
     @staticmethod
@@ -69,9 +61,9 @@ class TestFindUnregisteredPlanFile:
         assert self._found_by_close("DPLAN-0176", tmp_path) == plan_file
 
     def test_a_report_named_like_the_plan_is_never_found(self, tmp_path):
-        """Leg 7: close would register and archive hooks' DPLAN-0356_ph2_report.md as the plan.
+        """A report named like the plan must not be registered and archived as the plan.
 
-        Mutant: the is_plan_file gate off reddens this (leg7 C1)."""
+        Mutant: the is_plan_file gate off reddens this."""
         report = tmp_path / "hooks" / "docs.local" / "DPLAN-0356_ph2_report.md"
         report.parent.mkdir(parents=True)
         report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
@@ -98,8 +90,6 @@ class TestFindUnregisteredPlanFile:
     def test_a_checkout_inside_a_dropbox_still_finds_its_plans(self, tmp_path):
         """The skip reads the parts below the scan root, never the whole path.
 
-        A checkout that itself lives under a directory named dropbox (or .backup)
-        must still find its plans; a copy in a dropbox inside the tree must not be.
         Mutant: `match.relative_to(aipass_root).parts` -> `match.parts` reddens this.
         """
         aipass_root = tmp_path / "dropbox" / "aipass"
@@ -125,17 +115,10 @@ class TestFindUnregisteredPlanFile:
         assert self._found_by_close("FPLAN-0010", tmp_path) is None
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. _self_heal_unregistered_plan
-# ═══════════════════════════════════════════════════════════
-
-
 class TestSelfHealNoCollision:
-    """_self_heal_unregistered_plan, reached through close (leg 10).
+    """_self_heal_unregistered_plan, reached through close.
 
-    Close self-heals only a plan no row names; a same-number row means no
-    self-heal there, so the bump on a collision is pinned through the heal
-    (test_heal_registry TestNumberCollision).
+    The bump on a same-number collision is pinned in test_heal_registry TestNumberCollision.
     """
 
     @staticmethod
@@ -186,10 +169,7 @@ class TestSelfHealNoCollision:
         assert registered["plans"]["0176"]["self_healed"] is True
         assert registered["plans"]["0176"]["status"] == "open"
         assert registered["plans"]["0176"]["file_path"] == str(plan_file)
-        # 177: the counter moves past the row it was standing on (live: DPLAN
-        # row 0358 beside next_number 358, 2026-10-04, leg 7). Input 176 since
-        # 2026-10-12: next_free_number walks past held rows, so 175 beside a
-        # row at 0176 is an honest counter and no longer the case to pin.
+        # The counter moves past the row it was standing on.
         assert registered["next_number"] == 177
 
     def test_extracts_subject_from_filename(self, tmp_path):
@@ -223,22 +203,6 @@ class TestSelfHealNoCollision:
 
         assert "0013" in saved[0][1]["plans"]
         assert any("FPLAN-0013 also exists" in m.get("text", "") for m in result["messages"])
-
-    # Retired leg 10: test_skips_own_prefix_in_cross_check. Close loads the
-    # plan's own registry itself, so whether the cross check skips it is
-    # invisible through close; a note against its own registry cannot arise,
-    # since no row there names the number.
-
-
-# Moved leg 10: TestSelfHealSamePrefixCollision. A same-number collision
-# reaches the self-heal only through the heal, so both pins (the bump to
-# next_number, and the bump never landing on a held row) live in
-# test_heal_registry TestNumberCollision.
-
-
-# ═══════════════════════════════════════════════════════════
-# 6. close_plan_impl — self-heal integration path
-# ═══════════════════════════════════════════════════════════
 
 
 class TestClosePlanImplSelfHeal:
@@ -300,11 +264,6 @@ class TestClosePlanImplSelfHeal:
         result = close_plan_impl(plan_num="FPLAN-9990", **deps)
         assert result["success"] is False
         assert result["messages"][0]["text"] == "not_found"
-
-
-# ═══════════════════════════════════════════════════════════
-# 7. [VERIFY] block — physical state checks after self-heal
-# ═══════════════════════════════════════════════════════════
 
 
 class TestSelfHealVerifyBlock:

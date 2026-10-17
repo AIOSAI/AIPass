@@ -3,7 +3,7 @@
 # Description: Unit tests for apps/modules/list_plans.py
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -17,16 +17,8 @@ from unittest.mock import patch
 
 from aipass.flow.apps.modules.list_plans import handle_command, list_plans
 
-# ---------------------------------------------------------------------------
-# Module-level patch targets (patch where used, not where defined)
-# ---------------------------------------------------------------------------
-
+# Patch where used, not where defined.
 _MOD = "aipass.flow.apps.modules.list_plans"
-
-
-# ---------------------------------------------------------------------------
-# handle_command routing tests
-# ---------------------------------------------------------------------------
 
 
 class TestHandleCommandRouting:
@@ -82,11 +74,7 @@ class TestHandleCommandRouting:
     def test_unknown_filter_is_refused_by_name_and_exits_non_zero(self, capsys: pytest.CaptureFixture[str]):
         """An unknown filter FAILS — it does not quietly become 'open'.
 
-        Was pinned the other way ("defaults to open with a warning") until the
-        2026-09-07 ruling: listing the open plans because the caller misspelled
-        "closed" answers a question nobody asked, and exit 0 tells a script it
-        got what it asked for. The listing must NOT run — that assertion is
-        what catches a silent return of the default.
+        Exit 0 would tell a script it got what it asked for; the listing must NOT run.
         Mutant: error(exc.message, suggestion=exc.usage) -> print(exc.message) reddens this.
         """
         with (
@@ -100,7 +88,6 @@ class TestHandleCommandRouting:
         mock_error.assert_called_once()
         assert "garbage" in mock_error.call_args[0][0]
         mock_lp.assert_not_called()
-        # The refusal is the error line alone: nothing reaches stdout.
         assert capsys.readouterr().out == ""
 
     def test_a_trailing_argument_after_a_valid_filter_is_refused(self, capsys: pytest.CaptureFixture[str]):
@@ -132,11 +119,6 @@ class TestHandleCommandRouting:
             )
 
 
-# ---------------------------------------------------------------------------
-# list_plans orchestrator tests
-# ---------------------------------------------------------------------------
-
-
 class TestListPlansOrchestrator:
     """Verify list_plans delegates to list_plans_impl and displays results."""
 
@@ -158,7 +140,6 @@ class TestListPlansOrchestrator:
 
             assert result is True
             mock_impl.assert_called_once()
-        # Both formatted outputs reach stdout, list first, markup rendered away.
         out, _err = capsys.readouterr()
         assert out == "Plan list output\n3 plans total\n"
 
@@ -242,9 +223,7 @@ class TestListPlansOrchestrator:
     def test_broken_pipe_during_display_does_not_crash(self, capsys: pytest.CaptureFixture[str]):
         """BrokenPipeError during console.print should be caught gracefully.
 
-        The real console raises it while rendering the list, as it would on a
-        closed pipe. Mutant: except BrokenPipeError: -> except KeyError: (the
-        display one) reddens this.
+        Mutant: except BrokenPipeError: -> except KeyError: (the display one) reddens this.
         """
 
         class _ClosedPipeRenderable:
@@ -260,7 +239,6 @@ class TestListPlansOrchestrator:
         }
 
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result):
-            # Should not raise
             result = list_plans("open")
             assert result is True
         # The pipe broke on the first line, so the stats line is never attempted.
@@ -281,6 +259,5 @@ class TestListPlansOrchestrator:
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
             mock_error.side_effect = BrokenPipeError("pipe closed")
 
-            # Should not raise
             result = list_plans("open")
             assert result is False

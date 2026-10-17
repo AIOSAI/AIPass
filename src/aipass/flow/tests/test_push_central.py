@@ -3,7 +3,7 @@
 # Description: Tests for push_central handler -- push to Plans Central
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_central.py."""
@@ -39,19 +39,8 @@ def _row(prefix, number, branch, status="open", **extra):
 def _push(tmp_path, registries=None, plan_types=None, central=None):
     """Run the PUBLIC push against a tmp_path world; return what it wrote.
 
-    Every path the push touches is redirected before it runs: FLOW_JSON_DIR (the
-    registries it reads), AI_CENTRAL_DIR and CENTRAL_FILE (the file it writes).
-    ``aggregate_central_impl`` stays patched — with heal=True it auto-closes rows
-    in live branch registries — and is asserted, never discarded.
-
-    Args:
-        registries: filename -> dict (written as JSON) or str/bytes (written raw).
-        plan_types: what discover_plan_types answers; an Exception is raised
-            instead. Defaults to one type per registry written.
-        central: an existing PLANS.central.json, dict or raw bytes.
-
-    Returns:
-        (push result, parsed PLANS.central.json)
+    aggregate_central_impl stays patched in every push test: with heal=True it auto-closes rows
+    in live branch registries. plan_types as an Exception is raised by discovery instead.
     """
     registries = registries or {}
     flow_json = tmp_path / "flow_json"
@@ -84,11 +73,7 @@ def _push(tmp_path, registries=None, plan_types=None, central=None):
 
 
 def _branches(tmp_path, registry):
-    """Push a merged-shape registry ({"FPLAN-0001": row}) and return the written branches.
-
-    Each composite key is split back to how it lives on disk — ``fplan_registry.json``
-    keyed ``"0001"`` — so the push reads it through its own loader.
-    """
+    """Push a merged-shape registry ({"FPLAN-0001": row}) and return the written branches."""
     on_disk = {}
     for key, row in registry.get("plans", {}).items():
         prefix, number = key.rsplit("-", 1)
@@ -107,36 +92,12 @@ def _plan_ids(written):
     }
 
 
-# =============================================
-# 1. _find_repo_root
-# =============================================
-
-
 class TestFindRepoRoot:
-    """``push_central._find_repo_root`` — now a delegation, not a private walk.
-
-    REWRITTEN 2026-08-31. Flow carried SEVEN near-identical private
-    ``_find_repo_root`` copies, each ending ``return Path.cwd()``, and six were
-    called at MODULE level. These tests patched ``push_central.__file__`` to
-    steer that private walk; the walk lives in ``handlers/repo_root`` now, so
-    the patch no longer reaches it and the cases had to move with the code.
-
-    ``test_falls_back_to_cwd_when_no_marker`` is REVERSED below rather than
-    deleted. It asserted ``result == Path.cwd()`` and was GREEN — a test
-    standing guard over the exact construct that takes CI down on a box whose
-    working directory is gone, and that silently resolves a WRITER against
-    whatever directory the caller's shell was pointing at when no registry
-    exists. @memory found the same reversed test in their own tree the same
-    week. The contract it pinned was wrong; the test now pins the correct one
-    and says why, so nobody restores the old assertion thinking they found a
-    regression.
-    """
+    """``push_central._find_repo_root`` — now a delegation, not a private walk."""
 
     def test_delegates_to_the_one_implementation(self):
         """The private copy is gone: the central file must sit under the shared answer.
 
-        Read through what the delegation builds at import — the public
-        ``AI_CENTRAL_DIR`` / ``CENTRAL_FILE`` the push writes — not the helper.
         Mutant: find_repo_root(caller="push_central") -> Path("/elsewhere") reddens this.
         """
         root = repo_root.find_repo_root()
@@ -165,19 +126,14 @@ class TestFindRepoRoot:
     def test_never_falls_back_to_cwd_when_no_marker(self, tmp_path, monkeypatch):
         """THE REVERSED TEST. No marker anywhere → the SOURCE tree, never cwd.
 
-        The old assertion was ``result == Path.cwd()``. Both defects it blessed
-        are pinned here: the process directory is not consulted at all (so a
-        deleted cwd cannot kill a module-level caller), and the answer does not
-        move when the caller's shell moves (so a writer cannot be steered into a
-        tree nobody chose).
+        Never restore ``== Path.cwd()``: a deleted cwd kills module-level callers, and a moved
+        shell would steer writers into a tree nobody chose.
         """
         sub = tmp_path / "sub"
         sub.mkdir()
 
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
-        # A real chdir, not a patch over pathlib: the process directory really
-        # is ``elsewhere`` for the call, and monkeypatch restores it after.
         monkeypatch.chdir(elsewhere)
 
         result = repo_root.find_repo_root(sub)
@@ -186,11 +142,7 @@ class TestFindRepoRoot:
         assert result != elsewhere, "the walk is still answering with the process directory"
 
     def test_the_cwd_stand_in_is_live(self, tmp_path, monkeypatch):
-        """Control: a process directory that HOLDS the marker still steers nothing.
-
-        The test above would pass vacuously if the walk consulted the cwd only
-        when a marker sits there; here one does, and the answer must not move.
-        """
+        """Control: a process directory that HOLDS the marker still steers nothing."""
         sub = tmp_path / "sub"
         sub.mkdir()
         elsewhere = tmp_path / "elsewhere"
@@ -205,19 +157,7 @@ class TestFindRepoRoot:
 class TestTheBareWorldIsStatedNotInherited:
     """Both marker worlds are asserted here, so neither is inherited from the host.
 
-    ``AIPASS_REGISTRY.json`` is gitignored and machine-local. Every test above
-    ran on a machine that HAS it, and that is exactly how
-    ``test_success_returns_true`` shipped green and reddened all four Python
-    versions on CI (round 5, @devpulse): with no marker the walk takes the
-    fallback, the fallback LOGS, and the autouse ``mock_json_handler`` counted
-    two calls where the test pinned one. The production code was right the whole
-    time; the assertion was measuring the host.
-
-    The count assertions are fixed in ``tests/conftest.py`` — the six
-    module-level callers are pre-imported, so the import-time diagnostic can
-    never land in a test window. These two tests are the other half: they say
-    out loud what the bare world DOES, so it is a pinned behaviour rather than a
-    condition nobody on a dev box ever sees.
+    AIPASS_REGISTRY.json is gitignored and machine-local, so dev boxes never see the bare world CI runs in.
     """
 
     def test_no_marker_means_source_root_and_a_logged_fallback(self, monkeypatch):
@@ -259,42 +199,22 @@ class TestTheBareWorldIsStatedNotInherited:
     def test_the_fallback_records_without_ever_raising(self, tmp_path, mock_json_handler, monkeypatch):
         """Six callers reach _record_fallback at IMPORT time.
 
-        A diagnostic write that fails in a bare world must not become the import
-        crash the module exists to prevent, so the real recorder is exercised
-        here with its json_handler dead.
-
-        The dead handler is the autouse spy told to raise, NOT a second
-        monkeypatch on the same attribute: monkeypatch is one shared instance
-        that mock_logger already took, so it is torn down AFTER the spy's
-        patch exits and would put the spy's MagicMock back onto the shim for
-        good. That leak was invisible while flow ran alone and reddened
-        seedgo's contract for [flow] the moment both shared one process
-        (CI coverage leg, DPLAN-0325 pair 7).
+        A failed diagnostic write must not become an import crash. The dead handler is the spy told
+        to raise, never a second monkeypatch: that teardown order leaks the spy onto the shim.
         """
 
         def explode(*args, **kwargs):
             raise OSError("no writable tree")
 
         mock_json_handler.side_effect = explode
-        # The walk is reached through its public door with the marker denied,
-        # so the REAL recorder runs on the fallback branch it guards.
         monkeypatch.setattr(
             repo_root, "exists_exactly", lambda path: Path(path).name != repo_root.CORE_REGISTRY and Path(path).exists()
         )
 
-        # MUST NOT RAISE, and that is now stated rather than merely survived:
-        # the walk still answers, and the exploding handler must actually have
-        # been REACHED. Without the second assertion a recorder that returned
-        # early - never touching the diagnostic write at all - passed this test
-        # while proving nothing about the bare world it exists for.
+        # The second assertion proves the exploding handler was reached, not skipped.
         # Mutant: the recorder's `except Exception` -> `except ImportError` reddens this.
         assert repo_root.find_repo_root(tmp_path / "nowhere", caller="push_central") == repo_root.SOURCE_ROOT
         assert mock_json_handler.call_args[0][0] == "repo_root_fallback"
-
-
-# =============================================
-# 2. _get_all_registry_files
-# =============================================
 
 
 class TestGetAllRegistryFiles:
@@ -321,9 +241,6 @@ class TestGetAllRegistryFiles:
 
         assert result is True
         assert _plan_ids(written) == {"FPLAN-0001", "DPLAN-0002"}
-
-    # Retired leg 10: test_deduplicates_registry_files. A registry file read
-    # twice lands the same composite keys twice, so no push can tell.
 
     def test_falls_back_on_discovery_exception(self, tmp_path):
         """Falls back to REGISTRY_FILE.name when discover_plan_types raises.
@@ -357,7 +274,6 @@ class TestGetAllRegistryFiles:
             plan_types=mock_types,
         )
 
-        # No registry_file keys, so files list is empty -> fallback
         assert result is True
         assert _plan_ids(written) == {"FPLAN-0001"}
 
@@ -377,20 +293,13 @@ class TestGetAllRegistryFiles:
         assert _plan_ids(written) == {"FPLAN-0001"}
 
 
-# =============================================
-# 3. _load_registry
-# =============================================
-
-
 class TestLoadRegistry:
     """Tests for _load_registry."""
 
     def test_merges_multiple_registries(self, tmp_path):
         """Merges plans from multiple registry files using composite keys.
 
-        Two registries sharing plan number 1 must stay two plans (the collision
-        the composite key exists for). Mutant: `f"{prefix}-{plan_num.zfill(4)}"`
-        -> `plan_num` reddens this.
+        Mutant: `f"{prefix}-{plan_num.zfill(4)}"` -> `plan_num` reddens this.
         """
         result, written = _push(
             tmp_path,
@@ -406,8 +315,6 @@ class TestLoadRegistry:
     def test_handles_missing_registry(self, tmp_path, mock_logger):
         """Gracefully handles a missing registry file — silently, not as a failure.
 
-        Without the exists() guard the open raises, is caught and the push still
-        succeeds, so the absent warning is what tells the two apart.
         Mutant: `if not target.exists():` -> `if False:` reddens this.
         """
         result, written = _push(tmp_path, plan_types={"x": {"registry_file": "nonexistent_registry.json"}})
@@ -415,9 +322,6 @@ class TestLoadRegistry:
         assert result is True
         assert written["branches"] == {}
         mock_logger.warning.assert_not_called()
-
-    # Retired leg 10: test_keeps_highest_next_number. The merged next_number
-    # is computed and never read by the push, so no caller can see it.
 
     def test_handles_corrupt_registry_gracefully(self, tmp_path):
         """Skips a corrupt registry file and continues with others."""
@@ -457,7 +361,6 @@ class TestLoadRegistry:
             },
         )
 
-        # Falls back to CUSTOM (from custom_registry.json -> custom -> CUSTOM)
         assert _plan_ids(written) == {"CUSTOM-0003"}
 
     def test_empty_registry_plans(self, tmp_path):
@@ -474,13 +377,7 @@ class TestLoadRegistry:
             {"fplan_registry.json": {"plans": {"1": _row("FPLAN", 1, "flow", file_path="")}, "next_number": 2}},
         )
 
-        # Falls back to FPLAN prefix from registry filename
         assert _plan_ids(written) == {"FPLAN-0001"}
-
-
-# =============================================
-# 4. _extract_plans_by_branch
-# =============================================
 
 
 class TestExtractPlansByBranch:
@@ -658,11 +555,6 @@ class TestExtractPlansByBranch:
         assert result["devpulse"]["active_plans"][0]["branch"] == "devpulse"
 
 
-# =============================================
-# 5. _load_central
-# =============================================
-
-
 class TestLoadCentral:
     """Tests for _load_central."""
 
@@ -708,19 +600,12 @@ class TestLoadCentral:
     def test_returns_empty_structure_on_read_exception(self, tmp_path):
         """A central file that cannot even be DECODED is replaced, not fatal.
 
-        The unreadable file is real bytes on disk (invalid UTF-8), so the read
-        raises in the product itself — no patch over ``open``.
         Mutant: the load's `except Exception` -> `except json.JSONDecodeError` reddens this.
         """
         result, written = _push(tmp_path, central=b"\xff\xfe\x00 not utf-8")
 
         assert result is True
         assert set(written) == {"generated_at", "branches", "global_statistics"}
-
-
-# =============================================
-# 6. _calculate_global_statistics
-# =============================================
 
 
 class TestCalculateGlobalStatistics:
@@ -756,10 +641,6 @@ class TestCalculateGlobalStatistics:
         result, written = _push(tmp_path, central={"generated_at": ""})
         assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
 
-    # Retired leg 10: test_branch_missing_statistics. The push replaces every
-    # branch with a section it built, each with statistics, so a branch
-    # without them never reaches the sum.
-
     def test_single_branch(self, tmp_path):
         """Handles a single branch correctly."""
         plans = {str(n): _row("FPLAN", n, "flow", status="open" if n <= 7 else "closed") for n in range(1, 20)}
@@ -770,20 +651,11 @@ class TestCalculateGlobalStatistics:
         assert stats["branches_reporting"] == 1
 
 
-# =============================================
-# 7. push_to_plans_central
-# =============================================
-
-
 class TestPushToPlansCentral:
     """Tests for push_to_plans_central main handler."""
 
     def test_an_aggregation_that_failed_is_no_push(self, tmp_path, mock_json_handler):
-        """aggregate_central_impl answers False and never raises (leg 10).
-
-        Before leg 10 the push ignored it and logged plans_central_pushed with
-        success True; close, create and restore warn on this False.
-        """
+        """aggregate_central_impl answers False and never raises; the push must report failure."""
         central_file = tmp_path / ".ai_central" / "PLANS.central.json"
         with (
             patch.object(mod, "AI_CENTRAL_DIR", central_file.parent),
@@ -867,7 +739,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         assert central_file.exists()
@@ -915,7 +786,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
@@ -943,7 +813,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         assert ai_central.exists()
@@ -992,7 +861,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
@@ -1039,7 +907,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
@@ -1079,7 +946,6 @@ class TestPushToPlansCentral:
         ):
             mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
 
         call_args = mock_json_handler.call_args
@@ -1126,7 +992,6 @@ class TestPushToPlansCentral:
         ):
             result = mod.push_to_plans_central()
 
-        # Stays patched: with heal=True it auto-closes rows in live branch registries.
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))

@@ -3,7 +3,7 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -34,25 +34,14 @@ from aipass.flow.apps.flow import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _FLOW = "aipass.flow.apps.flow"
-# The package discover_modules builds every module name under.
 _MODULES_PKG = "aipass.flow.apps.modules"
 
 
 def _stand_in(monkeypatch: pytest.MonkeyPatch, stem: str, module: ModuleType | None) -> str:
     """Put ``module`` where the import system looks for ``<package>.<stem>``.
 
-    The real importlib.import_module answers it from sys.modules; None makes
-    the real import raise ModuleNotFoundError. monkeypatch undoes the entry
-    after the test, so nothing leaks (leg 11, in place of replacing
-    importlib.import_module for the whole process).
-
-    Returns:
-        The full module name discover_modules builds for ``stem``.
+    None makes the real import raise ModuleNotFoundError; monkeypatch undoes the entry.
     """
     name = f"{_MODULES_PKG}.{stem}"
     monkeypatch.setitem(sys.modules, name, module)
@@ -60,11 +49,7 @@ def _stand_in(monkeypatch: pytest.MonkeyPatch, stem: str, module: ModuleType | N
 
 
 def _import_refusal(name: str) -> str:
-    """Ask the interpreter what importing ``name`` raises, in the test's own hands.
-
-    Returns:
-        The text of the ModuleNotFoundError the real import raised.
-    """
+    """Ask the interpreter what importing ``name`` raises, in the test's own hands."""
     with pytest.raises(ModuleNotFoundError) as refused:
         importlib.import_module(name)
     return str(refused.value)
@@ -89,11 +74,6 @@ def _make_handling_module(name: str, doc: str | None = "Handles things") -> Modu
     mod = _make_module(name, doc=doc)
     mod.handle_command.return_value = True  # type: ignore[union-attr]
     return mod
-
-
-# ===========================================================================
-# discover_modules
-# ===========================================================================
 
 
 class TestDiscoverModules:
@@ -136,8 +116,7 @@ class TestDiscoverModules:
     def test_skips_underscore_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ignores files starting with underscore (e.g., __init__.py).
 
-        Each underscore name has a module with handle_command standing where
-        the import would find it, so only the skip keeps them out.
+        Each name has an importable module with handle_command, so only the skip keeps them out.
         """
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
@@ -185,11 +164,6 @@ class TestDiscoverModules:
         assert sorted(result, key=lambda m: m.__name__) == [mod_a, mod_b]
 
 
-# ===========================================================================
-# route_command
-# ===========================================================================
-
-
 class TestRouteCommand:
     """Tests for route_command()."""
 
@@ -211,8 +185,6 @@ class TestRouteCommand:
     def test_handles_broken_pipe_error(self) -> None:
         """Catches BrokenPipeError, returns True, and offers the command to no one else.
 
-        A broken pipe means the claiming module was already writing its answer, so the
-        command is handled: the next module must not be asked to run it a second time.
         Mutant: the BrokenPipeError branch's `return True` -> `continue` reddens this.
         """
         mod = _make_module("list_plans")
@@ -256,11 +228,6 @@ class TestRouteCommand:
 
         result = route_command("cmd", [], [mod])
         assert result is False
-
-
-# ===========================================================================
-# main / _main_impl
-# ===========================================================================
 
 
 class TestMain:
@@ -427,19 +394,11 @@ class TestMain:
         assert result == 1
 
 
-# ===========================================================================
-# SIGPIPE disposition
-# ===========================================================================
-
 _NO_SIGPIPE = "this platform has no SIGPIPE, and flow.py sets nothing where it is missing"
 
 
 def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
-    """Run ``code`` in a fresh interpreter, the only one whose import of flow.py is still to come.
-
-    Returns:
-        The finished child, its output decoded as UTF-8.
-    """
+    """Run ``code`` in a fresh interpreter, the only one whose import of flow.py is still to come."""
     return subprocess.run(
         [sys.executable, "-c", code],
         cwd=tmp_path,
@@ -485,11 +444,6 @@ class TestSigpipeDisposition:
         assert reported == [f"SIGPIPE {int(signal.SIG_DFL)}"], child.stderr
 
 
-# ===========================================================================
-# print_introspection
-# ===========================================================================
-
-
 class TestPrintIntrospection:
     """Tests for print_introspection()."""
 
@@ -523,32 +477,7 @@ class TestPrintIntrospection:
     def test_every_discovered_module_is_named(self, names, capsys: pytest.CaptureFixture[str]) -> None:
         """One module or several, each one appears in the listing.
 
-        MERGED (DPLAN-0323 contested band, 2026-09-07) with the former
-        ``test_multiple_modules``, which ran the identical call path with two
-        list entries instead of one and asserted nothing — 'lists all
-        discovered modules' was never read back. Mutation-checked before
-        merging: dropping the second module changed no branch, so the count is
-        a parameter, not a test. The oracle is new: both rows now READ the
-        output, so deleting the loop body reds them.
-
-        FLOOR BEFORE THE LOOP (FPLAN-0508, VACUOUS-LOOP). Every assertion here
-        sat inside `for name in names`, so a parametrise row that arrived empty
-        would pass the unit without reading one character of the listing. The
-        floor is the row's own width, and the printed text must be non-empty
-        before it is searched - a console that printed nothing at all would
-        otherwise satisfy an empty loop in silence.
-
-        THE DESCRIPTION MUST NOT ECHO THE NAME, and it used to. The doc was
-        ``f"{name} module"``, so `name in printed` was satisfied by the
-        DESCRIPTION column whether or not the name column printed anything at
-        all. Measured, not suspected: blanking `module_name` in the f-string at
-        flow.py:210 left all five rows of this class green. The descriptions
-        are name-free now and asserted beside the names, so each column has to
-        carry its own value.
-
-        The non-empty floor is now the count the listing prints, read off the
-        real channel: a listing that printed nothing, or miscounted, fails
-        before the loop is reached.
+        Descriptions never echo the name, so each column must carry its own value; the count floors the loop.
         Mutant: `{len(modules)}` -> `{len(modules) - 1}` in print_introspection reddens this.
         """
         assert len(names) >= 1
@@ -561,11 +490,6 @@ class TestPrintIntrospection:
         for name in names:
             assert name in printed
             assert docs[name] in printed
-
-
-# ===========================================================================
-# print_help
-# ===========================================================================
 
 
 class TestPrintHelp:
@@ -597,15 +521,7 @@ class TestPrintHelp:
     def test_the_help_table_prints_the_verb_that_executes(
         self, module_name, expected_verb, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Only the verb the dispatcher accepts is printed, never the filename.
-
-        REWRITTEN 2026-09-15 (FPLAN-0612). The old rows asserted the table
-        printed 'short, full' for an underscored name, which pinned a claim the
-        dispatcher does not honour: `drone @flow list_plans` is refused, exit 1.
-        The help screen said the opposite in prose, so the pin certified the
-        lie rather than catching it. The contract now is the measured one -
-        the table prints what executes and nothing else.
-        """
+        """Only the verb the dispatcher accepts is printed, never the filename."""
         print_help([_make_module(module_name, doc="Any description")])
 
         printed, _err = capsys.readouterr()
@@ -614,12 +530,7 @@ class TestPrintHelp:
             assert module_name not in printed
 
     def test_a_module_owning_several_verbs_declares_them(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """COMMAND_VERBS wins over the filename-derived short name.
-
-        template_manager owns templates/register/unregister/scan and answers to
-        none of them under the derived name 'template', which the help table
-        published as a command until 2026-09-15.
-        """
+        """COMMAND_VERBS wins over the filename-derived short name."""
         mod = _make_module("template_manager", doc="Template Manager Module")
         mod.__dict__["COMMAND_VERBS"] = ("templates", "register", "unregister", "scan")
         print_help([mod])
@@ -638,19 +549,12 @@ class TestPrintHelp:
         assert "No description" in out
 
 
-# ===========================================================================
-# print_module_help
-# ===========================================================================
-
-
 class TestPrintModuleHelp:
     """Tests for print_module_help()."""
 
     def test_exact_match(self, capsys: pytest.CaptureFixture[str], header_bus) -> None:
         """Finds module by exact name match, and the header names the module found.
 
-        The header's title is read off conftest's header_bus recorder, which
-        stands where the live trigger bus would be.
         Mutant: header(f"Flow - {module_name} Command") -> header("Flow - Command") reddens this.
         """
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
@@ -664,10 +568,7 @@ class TestPrintModuleHelp:
     def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.
 
-        The diagnostic leaves through cli's error() on stderr, the pointer through
-        console on stdout, so BOTH channels are read - asserting only on stdout
-        would have missed the whole message.
-        Mutant: the `error(...)` call in print_module_help's no-match branch removed reddens this.
+        The diagnostic goes to stderr and the pointer to stdout, so both channels are read.
         """
         mod = _make_module("create_plan")
         print_module_help("nonexistent", [mod])
@@ -688,13 +589,7 @@ class TestPrintModuleHelp:
     def test_a_multiline_docstring_is_shown_whole_and_stripped(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Every line reaches the reader, without the leading/trailing blanks.
 
-        KEPT rather than merged into ``test_exact_match`` (DPLAN-0323 contested
-        band, 2026-09-07). The two make the same found-module call, but this
-        one's subject is what ``print_module_help`` does to a docstring that
-        spans lines — ``.strip()`` on the whole string, not the first line
-        only, which is what the module listing does instead. Mutation-checked:
-        with the assertions it now carries, printing only the first line reds
-        it; before, it asserted nothing and both spellings passed.
+        Module help strips the whole docstring; the listing shows only its first line.
         """
         mod = _make_module(
             "list_plans",

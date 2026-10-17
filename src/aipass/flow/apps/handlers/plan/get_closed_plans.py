@@ -3,35 +3,21 @@
 # Description: Get Closed Plans Handler
 # Version: 1.0.0
 # Created: 2025-11-21
-# Modified: 2025-11-21
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Get Closed Plans Handler
-
-Returns list of closed plans from registry.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.get_closed_plans import get_closed_plans
-    closed_plans = get_closed_plans()
-"""
+"""Get Closed Plans Handler"""
 
 from typing import List, Tuple, Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 
-# Internal: Registry handler
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.json import json_handler
-
-# =============================================
-# MULTI-REGISTRY DISCOVERY
-# =============================================
 
 MODULE_NAME = "get_closed_plans"
 
@@ -39,8 +25,6 @@ MODULE_NAME = "get_closed_plans"
 def _get_all_registry_files() -> List[str]:
     """Return per-type registry filenames via plan-type discovery.
 
-    Uses the same pattern as mbank/process.py to discover all plan-type
-    registries (e.g. fplan_registry.json, dplan_registry.json).
     Falls back to the default fplan_registry.json if discovery fails.
     """
     try:
@@ -58,23 +42,10 @@ def _get_all_registry_files() -> List[str]:
     return ["fplan_registry.json"]
 
 
-# =============================================
-# HANDLER FUNCTION
-# =============================================
-
-
 def get_closed_plans() -> List[Tuple[str, Dict[str, Any]]]:
-    """
-    Get all closed plans from ALL discovered registries
+    """Get all closed plans from ALL discovered registries
 
-    Returns:
-        List of tuples: [(plan_num, plan_info), ...]
-        Empty list if no closed plans found
-
-    Example:
-        >>> plans = get_closed_plans()
-        >>> for plan_num, plan_info in plans:
-        ...     print(f"PLAN{plan_num}: {plan_info['subject']}")
+    Returns [(plan_num, plan_info), ...]; a registry that fails to load is skipped, not raised.
     """
     closed_plans: List[Tuple[str, Dict[str, Any]]] = []
 

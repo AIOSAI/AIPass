@@ -3,19 +3,12 @@
 # Description: Plan Restore Implementation Handler
 # Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Plan Restore Operations Handler
-
-Implements plan restore/recovery business logic, extracted from restore_plan module.
-Handles backup recovery and plan file restoration.
+"""Plan Restore Operations Handler
 
 Returns data dicts - module handles all display.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.restore_ops import recover_plan_from_backup, restore_plan_impl
 """
 
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -25,7 +18,6 @@ from typing import Dict, Any, List
 
 from aipass.prax import logger
 
-# logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
@@ -33,9 +25,6 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
     _find_plan_across_registries,
 )
 
-# =============================================
-# INFRASTRUCTURE
-# =============================================
 
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 
@@ -44,15 +33,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="restore_ops")
 
 
@@ -63,114 +44,61 @@ MODULE_NAME = "restore_plan"
 
 def _recorded_is_absolute(recorded: str) -> bool:
     """Is a path RECORDED IN THE REGISTRY absolute — in either dialect?
-
-    The registries are shared across install histories, so a row written on
-    Windows is read on POSIX and the other way round. ``Path.is_absolute()``
-    answers for the HOST, which means ``C:\\plans`` reads as relative on Linux
-    and ``/srv/plans`` reads as relative on Windows — and a relative record is
-    resolved against the local tree, so an unrecognised absolute path used to
-    land the file under FLOW_ROOT silently, somewhere its own header never
-    named. Asking both dialects by name is the only host-independent answer
-    (ruling 2026-09-07, FPLAN-0492 wave 4).
-
-    Note the asymmetry that makes both checks necessary: ``PureWindowsPath``
-    accepts a POSIX-absolute path (it reads ``/srv`` as drive-relative and
-    ``is_absolute()`` is False), while ``PurePosixPath`` refuses a drive letter
-    outright — neither dialect alone covers the other.
-
-    Args:
-        recorded: The location string as read from the plan header or registry.
-
-    Returns:
-        True when either dialect calls it absolute.
+    Registries are shared across hosts, and Path.is_absolute() answers only for this one. Both checks
+    are needed: PureWindowsPath calls ``/srv`` relative, PurePosixPath refuses a drive letter.
     """
     return PurePosixPath(recorded).is_absolute() or PureWindowsPath(recorded).is_absolute()
-
-
-# =============================================
-# RECOVERY IMPLEMENTATION
-# =============================================
 
 
 def recover_plan_from_backup(
     plan_key: str, plan_num_raw: str | None = None, load_registry: Any = None, save_registry: Any = None
 ) -> tuple[bool, str]:
+    """Attempt to recover a plan from processed_plans backup.
+    An explicit prefix in plan_num_raw restricts recovery to that type; never a same-numbered other type.
+    Returns (success, message).
     """
-    Attempt to recover a plan from processed_plans backup.
-
-    When ``plan_num_raw`` carries an explicit type prefix (e.g. "PPLAN-0011"),
-    recovery is restricted to that type -- it will not silently recover a
-    same-numbered backup from a different plan type (e.g. FPLAN-0011).
-    Falls back to a plan-type-agnostic search (any prefix matching the plan
-    key) only when no prefix was given.
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0165")
-        plan_num_raw: Original plan number as given by the caller, prefix
-            intact (e.g. "PPLAN-0165"). Used to scope the backup search.
-        load_registry: Registry loader function (injected from module)
-        save_registry: Registry saver function (injected from module)
-
-    Returns:
-        (success, message)
-    """
-    # Check backup processed_plans directory
     processed_plans = PROCESSED_PLANS_DIR
 
-    # If caller gave an explicit type prefix, restrict the search to it.
-    # Otherwise fall back to matching any prefix against the plan key.
     requested_prefix = _extract_prefix(plan_num_raw) if plan_num_raw else None
     glob_pattern = f"{requested_prefix}-{plan_key}*.md" if requested_prefix else f"*-{plan_key}*.md"
     variants = list(processed_plans.glob(glob_pattern)) if processed_plans.exists() else []
     plan_file = None  # No default -- use variant search
     if variants:
-        # Sort by modification time, newest first
         variants.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         plan_file = variants[0]  # Use most recent backup
     if plan_file is None or not plan_file.exists():
         return False, f"Plan {plan_key} not found in backups"
 
-    # Read plan file to extract original location from header
     try:
         with open(plan_file, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Parse location from header (e.g., "**Location**: /path/to/dir")
         original_location = None
         for line in content.split("\n")[:20]:  # Check first 20 lines
             if line.startswith("**Location**:"):
                 original_location = line.split("**Location**:")[1].strip()
                 break
 
-        # If location not found in header, default to FLOW_ROOT
         if not original_location:
             original_location = str(FLOW_ROOT)
 
-        # CRITICAL: Convert relative paths to absolute paths
-        # If location is relative (like "flow"), resolve it
         if _recorded_is_absolute(original_location):
-            # An absolute record names a real directory or nothing at all.
-            # Re-homing it to FLOW_ROOT would file the plan somewhere its own
-            # header never said, so a vanished one is refused by name.
+            # Re-homing a vanished absolute location would file the plan where its header never said.
             if not Path(original_location).is_dir():
                 return False, (
                     f"Recorded location '{original_location}' for {plan_file.stem} no longer exists — "
                     f"refusing to restore somewhere else; recreate the directory or edit the plan header"
                 )
         else:
-            # Relative path - resolve against _PKG_ROOT
             if original_location == "flow":
                 original_location = str(FLOW_ROOT)
             else:
-                # Try resolving relative to _PKG_ROOT
                 potential_path = _PKG_ROOT / original_location
                 if potential_path.exists():
                     original_location = str(potential_path)
                 else:
-                    # Fallback to FLOW_ROOT
                     original_location = str(FLOW_ROOT)
 
-        # Determine relative path
         original_path = Path(original_location)
         if original_path == FLOW_ROOT:
             relative_path = "flow"
@@ -190,21 +118,15 @@ def recover_plan_from_backup(
         original_location = str(FLOW_ROOT)
         relative_path = "flow"
 
-    # Derive display label from the backup filename
     plan_label = plan_file.stem  # e.g. "FPLAN-0165" or "DPLAN-0004"
 
-    # Write into the registry matching the RECOVERED file's actual type
-    # (not the caller-requested prefix or the default fplan registry) --
-    # a same-numbered plan of another type must never collide with this entry.
+    # The RECOVERED file's type picks the registry, so a same-numbered plan of another type never collides.
     actual_prefix = _extract_prefix(plan_label)
     reg_file = f"{actual_prefix.lower()}_registry.json" if actual_prefix else None
 
-    # Loaded BEFORE the copy: an unreadable registry raises, and a raise after
-    # the copy would leave a plan file on disk that no registry names (flow's
-    # decision, leg 6).
+    # Load BEFORE the copy: a raise after it would leave a plan file no registry names.
     registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
 
-    # Copy file to ORIGINAL location (preserve backup) using the original filename
     target = Path(original_location) / plan_file.name
     copy2(plan_file, target)
 
@@ -219,8 +141,7 @@ def recover_plan_from_backup(
         "closed_reason": "recovered_from_backup",
         "template_type": "default",
     }
-    # save_registry answers False when it could not write: the row does not
-    # exist, so this is no recovery (flow's decision, leg 10).
+    # An unsaved row means no recovery, even though the file was copied.
     if reg_file:
         saved = save_registry(registry, registry_file=reg_file)
     else:
@@ -236,27 +157,9 @@ def recover_plan_from_backup(
 
 def find_backup_copy(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path | None = None) -> Path | None:
     """Locate the archived copy of an ALREADY-REGISTERED closed plan.
-
-    Close archives the plan file out of the tree and leaves the registry row's
-    ``file_path`` pointing at where the file used to be. Measured on this
-    machine: 0 of 719 closed rows have a file at their registered path, while
-    412 have an intact copy sitting in the archive. The net exists; nothing
-    reached for it.
-
-    Matching is by the row's OWN filename first, because that name carries the
-    slug and the date. A bare ``PREFIX-NNNN.md`` husk is not a restore -- see
-    the auto-renumber that erased exactly that and left an orphaned row.
-
-    The glob fallback is TYPE-SCOPED. Every registry numbers from 0001, so
-    ``*-0011*.md`` would happily hand back a DPLAN when an FPLAN was asked for.
-
-    Args:
-        plan_info: The registry row (its file_path supplies the wanted name)
-        plan_key: Normalised plan number, e.g. "0011"
-        backup_dir: Archive directory; defaults to the live processed_plans
-
-    Returns:
-        Path to the archived file, or None when nothing credible was found.
+    Close archives the file and leaves file_path pointing at the old spot. Match the row's own filename
+    first (it carries slug and date); the glob fallback is type-scoped because every registry numbers from 0001.
+    Returns None when nothing credible was found.
     """
     archive = backup_dir if backup_dir is not None else PROCESSED_PLANS_DIR
     if not archive.is_dir():
@@ -281,18 +184,9 @@ def find_backup_copy(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path 
 
 def restore_file_from_backup(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path | None = None):
     """Copy a closed plan's archived file back to its registered location.
-
-    Deliberately narrow, and NOT recover_plan_from_backup: that function
-    rewrites the registry row with a synthetic one whose subject reads
-    "Recovered from backup" and whose created date is now. Calling it on a row
-    that already exists would destroy the real subject, the real creation date
-    and the real location in the act of "recovering" them.
-
-    COPY, never move. The archive stays intact, so a restore is repeatable and
-    a failed restore has not consumed the only copy.
-
-    Returns:
-        (restored_path, message). restored_path is None on failure.
+    Not recover_plan_from_backup: that rewrites the row with a synthetic one, destroying the real subject,
+    date and location. Copy, never move, so a failed restore has not consumed the only copy.
+    Returns (restored_path, message); restored_path is None on failure.
     """
     source = find_backup_copy(plan_info, plan_key, backup_dir=backup_dir)
     if source is None:
@@ -303,8 +197,7 @@ def restore_file_from_backup(plan_info: Dict[str, Any], plan_key: str, backup_di
         return None, "registry row has no file_path to restore to"
 
     if not target.parent.is_dir():
-        # The original directory is gone. Recreating it would invent a location
-        # for a plan whose home no longer exists; naming it is more useful.
+        # Recreating a vanished directory would invent a home for the plan.
         return None, f"original location no longer exists: {target.parent}"
 
     try:
@@ -321,14 +214,8 @@ def restore_file_from_backup(plan_info: Dict[str, Any], plan_key: str, backup_di
     return target, f"restored {target.name} from archive"
 
 
-# =============================================
-# RESTORE PLAN IMPLEMENTATION
-# =============================================
-
-
 def restore_plan_impl(
     plan_num: str | None = None,
-    # Dependencies injected from module
     normalize_plan_number: Any = None,
     load_registry: Any = None,
     save_registry: Any = None,
@@ -339,19 +226,8 @@ def restore_plan_impl(
     update_dashboard_local: Any = None,
     push_to_plans_central: Any = None,
 ) -> Dict[str, Any]:
-    """
-    Implement plan restore workflow
-
-    Restores a closed plan back to open status by updating registry metadata.
-    Does NOT move files - file must already be at registered location.
-
-    Args:
-        plan_num: Plan number (e.g., "0001" or "1" or "42")
-        (remaining args): Handler/service dependencies injected by module
-
-    Returns:
-        Dict with keys: success (bool), messages (list of dicts with type/text),
-        plan_key (str), restored_location (str)
+    """Implement plan restore workflow
+    Returns a dict with keys success, messages, plan_key, restored_location.
     """
     messages: List[Dict[str, Any]] = []
 
@@ -365,43 +241,33 @@ def restore_plan_impl(
         }
 
     try:
-        # 0. AUTO-HEAL: Run registry scan to detect moved files (self-healing)
         scan_plan_files()
         logger.info(f"[{MODULE_NAME}] Auto-heal scan completed")
 
-        # 1. VALIDATE: Normalize plan number (handler)
         plan_key = normalize_plan_number(plan_num)
         requested_prefix = _extract_prefix(plan_num)
 
-        # 2. LOAD DATA: Detect correct registry from prefix, then load
-        # (mirrors close_ops -- a bare load_registry() always defaults to
-        # fplan_registry.json and would silently resolve the wrong plan
-        # whenever another type shares this number, e.g. PPLAN-0011 vs FPLAN-0011)
+        # A bare load_registry() defaults to fplan and resolves the wrong plan when types share a number.
         reg_file = _resolve_registry_file(plan_num)
         if reg_file:
             registry = load_registry(registry_file=reg_file)
         else:
-            # No prefix -- try default registry first
             registry = load_registry()
             exists_default, _ = validate_plan_exists(plan_key, registry)
             if not exists_default:
-                # Search other registries
                 found_reg = _find_plan_across_registries(plan_key, load_registry)
                 if found_reg:
                     reg_file = found_reg
                     registry = load_registry(registry_file=reg_file)
 
-        # 3. VALIDATE: Check plan exists (handler)
         exists, error_msg = validate_plan_exists(plan_key, registry)
         if not exists:
-            # AUTO-RECOVERY: Try to recover from processed_plans
             messages.append({"type": "warning", "text": f"PLAN-{plan_key} not in registry - attempting recovery..."})
             recovered, recovery_msg = recover_plan_from_backup_fn(plan_key, plan_num)
 
             if recovered:
                 messages.append({"type": "success", "text": recovery_msg})
-                # Recovery writes into the registry matching the recovered
-                # file's actual type -- find it if we didn't already know it
+                # Recovery wrote to the recovered file's own type registry.
                 if not reg_file:
                     reg_file = _find_plan_across_registries(plan_key, load_registry)
                 registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
@@ -428,12 +294,9 @@ def restore_plan_impl(
             plan_info = registry["plans"][plan_key]
             plan_file = Path(plan_info.get("file_path", ""))
 
-        # Derive the plan's actual type prefix for display (from the resolved
-        # file/registry, falling back to what the caller requested)
         plan_label = plan_file.stem if plan_file.name else f"PLAN-{plan_key}"
         plan_prefix = _extract_prefix(plan_label) or requested_prefix or "FPLAN"
 
-        # 4. VALIDATE: Check plan is closed
         if plan_info.get("status") != "closed":
             logger.warning(f"[{MODULE_NAME}] Plan {plan_key} is already open")
             messages.append(
@@ -446,11 +309,7 @@ def restore_plan_impl(
                 "restored_location": "",
             }
 
-        # 5. RECOVER OR REFUSE: the file is not where the registry says it is.
-        # For a normally-closed plan it never is -- close archives it out of
-        # the tree. This branch used to be a hard failure, which made restore
-        # fail for 719 of 719 closed plans while 412 intact copies sat in the
-        # archive it never looked in.
+        # A normally-closed plan's file is never at its registered path: close archives it.
         if not plan_file.exists():
             recovered_path, recovery_msg = restore_file_from_backup_fn(plan_info, plan_key)
             if recovered_path is None:
@@ -468,13 +327,10 @@ def restore_plan_impl(
             plan_file = recovered_path
             messages.append({"type": "success", "text": f"  {recovery_msg}"})
 
-        # 6. DISPLAY: Plan info header data
         messages.append({"type": "restore_header", "plan_key": plan_key, "plan_info": plan_info, "prefix": plan_prefix})
 
-        # 7. UPDATE REGISTRY: Restore to open status
         plan_info["status"] = "open"
 
-        # Remove all close-related metadata
         plan_info.pop("closed", None)
         plan_info.pop("closed_reason", None)
         plan_info.pop("memory_created", None)
@@ -504,24 +360,20 @@ def restore_plan_impl(
             }
         logger.info(f"[{MODULE_NAME}] Restored plan {plan_key} to open status")
 
-        # 8. UPDATE DASHBOARDS: Sync dashboard files (handlers)
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()
 
-        # Log dashboard update results. None is "flow has no dashboard", not a
-        # failure (flow's decision, leg 4).
+        # None is "flow has no dashboard", not a failure.
         if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
 
-        # 9. Success message data
         restored_location = plan_info.get("location", "unknown")
         messages.append(
             {"type": "restore_success", "plan_key": plan_key, "location": restored_location, "prefix": plan_prefix}
         )
 
-        # Fire trigger event for plan restore
         try:
             from aipass.trigger.apps.modules.core import trigger
 

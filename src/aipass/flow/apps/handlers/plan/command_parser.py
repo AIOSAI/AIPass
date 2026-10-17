@@ -3,14 +3,10 @@
 # Description: Command Argument Parser
 # Version: 0.2.0
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Command Argument Parser
-
-Parses command-line arguments for plan operations.
-"""
+"""Command Argument Parser"""
 
 from typing import List, Tuple
 
@@ -21,44 +17,13 @@ MODULE_NAME = "command_parser"
 
 
 def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
-    """
-    Parse arguments for plan creation
-
-    The third argument is treated as a plan type identifier and mapped
-    to a plan_type_key understood by the plan_types plugin system:
-
-    - No 3rd arg or "default" -> "flow_plans" (FPLAN with default template)
-    - "master"                -> "master"     (FPLAN with master template)
-    - "dplan"                 -> "dev_plans"  (DPLAN with default template)
-    - Any other value         -> passed through for plan_type_loader lookup
-
-    Args:
-        args: List of command arguments
-
-    Returns:
-        Tuple of (location, subject, plan_type_key)
-        - location: First arg or None
-        - subject: Second arg or empty string
-        - plan_type_key: Resolved plan type key for the plugin system
-
-    Examples:
-        >>> parse_create_plan_args(["@flow", "My task", "master"])
-        ("@flow", "My task", "master")
-
-        >>> parse_create_plan_args(["@flow", "My task", "dplan"])
-        ("@flow", "My task", "dev_plans")
-
-        >>> parse_create_plan_args([])
-        (None, "", "flow_plans")
-
-        >>> parse_create_plan_args(["@flow"])
-        ("@flow", "", "flow_plans")
+    """Parse arguments for plan creation
+    An unmapped third argument passes through unchanged for plan_type_loader lookup.
     """
     location = args[0] if len(args) > 0 else None
     subject = args[1] if len(args) > 1 else ""
     raw_type = args[2] if len(args) > 2 else "default"
 
-    # Map raw type argument to plan_type_key via registry
     try:
         from aipass.flow.apps.handlers.template.registry_ops import get_type_map
 
@@ -74,20 +39,15 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     return location, subject, plan_type_key
 
 
-# Every argument the close command understands. Anything outside this set
-# REFUSES the run. The defect this removes: `--exclude APLAN` used to be
-# byte-identical to passing nothing at all -- the flag was dropped and the bulk
-# close proceeded, so the operator watched the dangerous thing happen while
-# believing they had fenced it. A fallback that does the risky action on an
-# argument it did not understand is the worst shape of fallback there is.
+# Anything outside this set REFUSES the run: dropping an unknown flag would run a bulk close
+# the operator believed they had fenced.
 _CLOSE_BOOL_FLAGS = {
     "--all": "all_plans",
     "--confirm": "confirm",
     "--interactive": "confirm",
     "--dry-run": "dry_run",
     "--preview": "dry_run",
-    # Accepted and inert: auto-confirm is already the default. Kept recognised
-    # so old scripts keep working -- inert is not the same as unrecognised.
+    # Inert (auto-confirm is the default) but recognised, so old scripts keep working.
     "--yes": None,
     "-y": None,
 }
@@ -97,10 +57,7 @@ _EXCLUDE_TYPE_FLAG = "--exclude-type"
 
 def _registered_prefixes() -> List[str]:
     """Return the plan-type prefixes that are actually registered.
-
-    Read from the template registry -- the same source `drone @flow templates`
-    reads -- never a literal list. Types are registered over time; a hardcoded
-    set goes stale the day someone adds a type that also must not be swept.
+    Read from the template registry, never a literal list: a hardcoded set misses a newly added type.
     """
     from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
 
@@ -109,13 +66,7 @@ def _registered_prefixes() -> List[str]:
 
 def _read_exclude_value(args: List[str], index: int) -> Tuple[str | None, int]:
     """Read the value of an --exclude-type occurrence at `index`.
-
-    Handles both ``--exclude-type APLAN`` and ``--exclude-type=APLAN``.
-
-    Returns:
-        (upper-cased type, next index), or (None, next index) when the flag
-        carries no value -- a flag with nothing after it is a fence the
-        operator believes they set, so it must refuse rather than pass.
+    A flag with no value returns (None, next index): a fence the operator believes they set must refuse.
     """
     arg = args[index]
     if "=" in arg:
@@ -137,9 +88,7 @@ def _validate_close_args(positionals: List[str], exclude_types: List[str], all_p
     if not exclude_types:
         return None
 
-    # Validate against the live registry, and name the valid ones. An unknown
-    # type is a typo in a fence -- accepting it silently would let the sweep
-    # run without the protection the operator asked for.
+    # An unknown type is a typo in a fence; accepting it would sweep unprotected.
     try:
         valid = _registered_prefixes()
     except Exception as e:
@@ -155,41 +104,9 @@ def _validate_close_args(positionals: List[str], exclude_types: List[str], all_p
 
 
 def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, bool, List[str], str | None]:
-    """
-    Parse arguments for close command
-
-    Auto-confirms by default (running 'close' IS the intent).
-    Use --confirm or --interactive to explicitly request a confirmation prompt.
-    --yes/-y kept for backwards compatibility (now redundant, already auto-confirms).
-    --dry-run or --preview previews what would be closed without taking action.
-    --exclude-type <TYPE> holds a whole plan type back from --all; repeatable.
-
-    Unrecognised arguments REFUSE the run -- see _CLOSE_BOOL_FLAGS.
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Tuple of (plan_num, confirm, all_plans, dry_run, exclude_types, error_message)
-        - plan_num: Plan number from the positional arg, or None if --all or missing
-        - confirm: True only if --confirm or --interactive flag present, False otherwise
-        - all_plans: True if --all flag present, False otherwise
-        - dry_run: True if --dry-run or --preview flag present, False otherwise
-        - exclude_types: Upper-cased plan-type prefixes to hold back (may be empty)
-        - error_message: None if valid, error string if invalid args
-
-    Examples:
-        >>> parse_close_command_args(["42"])
-        ("42", False, False, False, [], None)
-
-        >>> parse_close_command_args(["--all"])
-        (None, False, True, False, [], None)
-
-        >>> parse_close_command_args(["--all", "--exclude-type", "APLAN"])
-        (None, False, True, False, ["APLAN"], None)
-
-        >>> parse_close_command_args([])
-        (None, False, False, False, [], "Plan number or --all required")
+    """Parse arguments for close command
+    Auto-confirms by default (running 'close' IS the intent); --confirm/--interactive asks first.
+    Returns (plan_num, confirm, all_plans, dry_run, exclude_types, error_message).
     """
     all_plans = False
     confirm = False
@@ -240,27 +157,7 @@ def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, b
 
 
 def parse_restore_command_args(args: List[str]) -> Tuple[str | None, str | None]:
-    """
-    Parse arguments for restore command
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Tuple of (plan_num, error_message)
-        - plan_num: Plan number from first arg, or None if missing
-        - error_message: None if valid, error string if plan_num missing
-
-    Examples:
-        >>> parse_restore_command_args(["42"])
-        ("42", None)
-
-        >>> parse_restore_command_args(["0034"])
-        ("0034", None)
-
-        >>> parse_restore_command_args([])
-        (None, "Plan number required")
-    """
+    """Parse arguments for restore command"""
     if len(args) < 1:
         return None, "Plan number required"
 

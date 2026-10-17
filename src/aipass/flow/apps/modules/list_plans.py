@@ -3,7 +3,7 @@
 # Description: PLAN listing module with filtering
 # Version: 1.1.1
 # Created: 2025-11-21
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -40,46 +40,30 @@ if sys.platform == "win32":
 
 from typing import List
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# CLI services for display
 from aipass.cli.apps.modules import console, error, warning
 
-# Registry handlers
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.statistics import get_registry_statistics
 
-# Plan display handler
 from aipass.flow.apps.handlers.plan.display import format_plans_list, format_statistics_summary
 
-# Implementation handler
 from aipass.flow.apps.handlers.plan.list_ops import list_plans_impl
-
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "list_plans"
 
-# The filters this verb accepts. Named once so the refusal message, the help
-# text and the check itself cannot drift apart.
+# Named once so the refusal message and the check cannot drift apart.
 VALID_FILTERS = ("open", "closed", "all")
-
-# =============================================
-# INTROSPECTION FUNCTION
-# =============================================
 
 
 def print_introspection():
@@ -88,7 +72,6 @@ def print_introspection():
     console.print("[bold cyan]list_plans Module[/bold cyan]")
     console.print()
 
-    # List handlers this module actually imports/uses
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()
     console.print("  [cyan]handlers/registry/[/cyan]")
@@ -125,23 +108,9 @@ def print_help():
     console.print()
 
 
-# =============================================
-# ORCHESTRATION WORKFLOWS
-# =============================================
-
-
 def list_plans(filter_type: str = "open") -> bool:
     """
     Orchestrate plan listing workflow (thin orchestrator)
-
-    Delegates all business logic to list_ops handler.
-    Module handles all display output.
-
-    Args:
-        filter_type: Filter plans by status ("open", "closed", "all")
-
-    Returns:
-        True if successful, False otherwise
     """
     result = list_plans_impl(
         filter_type=filter_type,
@@ -151,7 +120,6 @@ def list_plans(filter_type: str = "open") -> bool:
         format_statistics_summary=format_statistics_summary,
     )
 
-    # Module handles display
     if result.get("empty") and result.get("success"):
         warning("No plans found in registry")
         return True
@@ -164,12 +132,10 @@ def list_plans(filter_type: str = "open") -> bool:
             logger.info(f"[{MODULE_NAME}] Broken pipe while displaying error (stdout closed early)")
         return False
 
-    # Display formatted results
     try:
         console.print(result["formatted_list"])
         console.print(result["formatted_stats"])
     except BrokenPipeError:
-        # Pipe closed by reader - not a real error
         logger.info(f"[{MODULE_NAME}] Broken pipe (stdout closed early)")
 
     return True
@@ -179,18 +145,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle command routing for list_plans module (thin orchestrator)
 
-    Delegates to handlers:
-    - Argument parsing: handled locally (simple case)
-    - Workflow execution: list_plans orchestrator
-
-    Args:
-        command: Command name ("list" or "list_plans")
-        args: Additional arguments (filter type)
-
-    Returns:
-        bool indicating success or failure
+    Raises SystemExit(1) on an unknown filter or extra argument.
     """
-    # Check if this is our command
     if command != "list":
         return False
 
@@ -198,18 +154,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence
     if wants_help(args):
         print_help()
         return True
 
-    # Log the operation
     json_handler.log_operation("plans_listed", {"command": command, "args": args})
 
-    # STEP 1: Parse filter argument. An unknown filter is REFUSED, never
-    # defaulted (ruling 2026-09-07): listing the open plans because the caller
-    # misspelled "closed" answers a question nobody asked, and exit 0 tells a
-    # script it got what it wanted.
+    # An unknown filter is refused, never defaulted to "open".
     try:
         filter_arg = args[0].lower()
         if filter_arg not in VALID_FILTERS:
@@ -222,54 +173,38 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     filter_type = filter_arg
 
-    # STEP 2: Execute workflow
     list_plans(filter_type)
 
-    # STEP 3: Command was handled (even if the operation failed, the error
-    # has already been displayed -- returning False would cause flow.py to
-    # print a spurious "Unknown command" message)
+    # False would make flow.py print a spurious "Unknown command"; the error is already shown.
     return True
 
 
-# =============================================
-# STANDALONE EXECUTION (for testing)
-# =============================================
-
 if __name__ == "__main__":
     try:
-        # Show introspection when run without arguments
         if len(sys.argv) == 1:
             print_introspection()
             sys.exit(0)
 
-        # Handle help flag
         if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
             print_help()
             sys.exit(0)
 
-        # Confirm logger connection
         logger.info("Prax logger connected to list_plans")
 
-        # Log standalone execution
         json_handler.log_operation("plans_listed", {"command": "standalone"})
 
-        # Call handle_command
         args = sys.argv[1:] if len(sys.argv) > 1 else []
 
-        # If first arg is not our command, assume it's a filter (backward compatibility)
+        # A bare filter (no verb) is still accepted.
         if args and args[0] not in ["list", "list_plans"]:
-            # First arg is filter
             result = handle_command("list", args)
         else:
-            # Standard command format
             cmd = args[0] if args else "list"
             result = handle_command(cmd, args[1:] if len(args) > 1 else [])
 
-        # Exit with appropriate code
         sys.exit(0 if result else 1)
 
     except BrokenPipeError:
-        # Pipe closed by reader - exit cleanly
         import os
 
         logger.info(f"[{MODULE_NAME}] Broken pipe in standalone mode (stdout closed early)")

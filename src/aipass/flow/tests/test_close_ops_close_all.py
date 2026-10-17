@@ -3,7 +3,7 @@
 # Description: Tests for close_all_plans_impl, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for close_all_plans_impl in apps/handlers/plan/close_ops.py and the typed IDs it hands on."""
@@ -16,11 +16,6 @@ from unittest.mock import MagicMock, patch
 from aipass.flow.apps.handlers.plan.close_ops import close_all_plans_impl
 from aipass.flow.apps.handlers.plan.registry_routing import canonical_plan_id
 from aipass.flow.tests.support_close_ops import _closed_ids, _held_ids, _scope
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. close_all_plans_impl
-# ═══════════════════════════════════════════════════════════
 
 
 class TestCloseAllNoPlans:
@@ -80,15 +75,9 @@ class TestCloseAllSuccess:
         assert result["failure_count"] == 0
         assert result["total"] == 2
         assert mock_close.call_count == 2
-        # Each call should have spawn_background=False. Written as a single
-        # clause: the two halves of the old `or` were the SAME expression -
-        # call.kwargs IS call[1] - so the second could never rescue the first
-        # and the shape only made the assertion look like it probed two things.
-        # Subscripted rather than .get() so a call that omits the keyword
-        # entirely raises here instead of comparing None is False and passing.
+        # Subscripted, not .get(): a call omitting the keyword must raise, not compare None.
         for call in mock_close.call_args_list:
             assert call.kwargs["spawn_background"] is False
-        # Background runner spawned once
         mock_bg.assert_called_once()
 
 
@@ -104,7 +93,6 @@ class TestCloseAllPartialFailure:
             ("3", {"subject": "Plan C", "location": "/c", "file_path": "/c/FPLAN-0003_c.md"}),
         ]
         mock_get = MagicMock(return_value=open_plans)
-        # First succeeds, second fails
         mock_close = MagicMock(
             side_effect=[
                 {"success": True, "messages": []},
@@ -152,16 +140,7 @@ class TestCloseAllException:
         assert any("Error" in m.get("text", "") for m in result["messages"])
 
 
-# ═══════════════════════════════════════════════════════════
-# 8. Plan identity: the bulk path must address a TYPE, not a bare number
-#
-# Every per-type registry numbers from 0001, so a bare registry key is
-# ambiguous across types. close_all used to hand that bare key to
-# close_plan_fn, which re-resolved it and defaulted to fplan_registry.json --
-# measured on live data as 61 of 72 open plans routed to the wrong registry.
-# These tests pin the IDENTITY passed downstream, which is the thing the
-# original close_all tests never looked at (they only counted calls).
-# ═══════════════════════════════════════════════════════════
+# Every per-type registry numbers from 0001, so a bare registry key is ambiguous across types.
 
 
 class TestCanonicalPlanId:
@@ -253,12 +232,7 @@ class TestCloseAllRefusesUnresolvableRow:
         )
         blob = " ".join(str(m.get("text", "")) for m in result["messages"])
         assert "0042" in blob
-        # PINNED TO THE ONE STRING close_ops PRINTS, measured by running the
-        # refusal: _refusal_text() writes "REFUSED 0042 (orphan row) - registry
-        # row has no typed file_path, so its plan type cannot be established.
-        # Refusing to guess." The old `"refus" in blob or "cannot" in blob`
-        # passed on either word, so the message could lose half its meaning and
-        # still be green; both clauses are the machine's actual words now.
+        # Pinned to _refusal_text()'s actual words, so neither clause can silently drop.
         assert "REFUSED 0042" in blob
         assert "no typed file_path" in blob
         assert "Refusing to guess." in blob
@@ -284,12 +258,7 @@ class TestCloseAllRefusesUnresolvableRow:
 
 
 class TestDryRunEqualsRun:
-    """The preview must resolve through the same path as the execution.
-
-    The owner's success criterion: 'if the dry run accurately tells us what's
-    actually gonna happen, then yeah, we're good.' Two paths that merely agree
-    today can drift; these pin them to one resolution.
-    """
+    """The preview must resolve through the same path as the execution."""
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
@@ -353,14 +322,7 @@ class TestDryRunEqualsRun:
         mock_bg.assert_not_called()  # a preview closes nothing, so it spawns nothing
 
 
-# ═══════════════════════════════════════════════════════════
-# 7. THE FENCES — type exclusion, project scope, dry-run parity
-#
-# Written red first. Each asserts REACHED before it asserts the
-# outcome: a fence test that never reached the fence is green for
-# the wrong reason, and would stay green through any regression in
-# the one thing it exists to guard.
-# ═══════════════════════════════════════════════════════════
+# Each fence test asserts REACHED before the outcome: one that never reached the fence is green for nothing.
 
 
 class TestExcludeTypeHoldsTypeBack:
