@@ -24,15 +24,14 @@ the bare `drone @drone` prints the live module inventory.
 
 The `@target` lane has **no module fallback on the error path.** A `BranchNotFoundError` from a
 branch the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a
-registry path that escapes the project root, and the old fallback answered that security refusal by
+registry path that escapes the project root, and a fallback would answer that security refusal by
 quietly running the module instead.
 
 One fallback deliberately survives, and only in the **custom-command** lane
 (`_handle_custom_command()` in `apps/drone.py`): a registered shortcut whose target is a module but
 not a branch here falls back to module routing, logged at INFO. That lane resolves its target from
 `drone_command_registry.json` rather than from the argv, so the look-before-route check the
-`@target` lane uses does not apply to it. Unverified whether it should — it has never been measured
-for happy-path firing the way `@git status` was.
+`@target` lane uses does not apply to it. Whether it fires on a happy path is unmeasured.
 
 ---
 
@@ -62,13 +61,11 @@ interactive parameter — so a module target never receives it and never could. 
 `@spawn` are both module and branch, so an interactive command against them takes the subprocess
 lane and renders live.
 
-`git` is a module and **never** a branch. `drone @git status` matched the interactive tuple,
-skipped the module fast path, and raised `BranchNotFoundError` on every call by design — a fallback
-firing on the **happy path**, which is worse than one firing on failure because it trains everyone
-to ignore the channel it fires on. It dominated `system_logs/drone_drone.log`, burying the one real
-WARNING in there (DPLAN-0315, the owner's ruling: *"there should be no fallback full stop... if our
-intended action or process fail, it fail loud"*). The target is now checked for a branch before the
-interactive lane is taken, and the cure held on re-measurement.
+`git` is a module and **never** a branch, so the target is checked for a branch before the
+interactive lane is taken: `drone @git status` matches the interactive tuple and still takes the
+module lane. There is no fallback: an intended action that fails, fails loud. A fallback firing on
+the **happy path** is worse than one firing on failure, because it trains everyone to ignore the
+channel it fires on.
 
 **Always interactive** — presentational shapes that inherit the terminal for Rich color on a TTY,
 plain when piped: bare `@branch` (no-args introspection), `@branch --help`, `@branch -h`.
@@ -83,7 +80,7 @@ plain when piped: bare `@branch` (no-args introspection), `@branch --help`, `@br
 
 ## Help flags — explain, never execute
 
-A help flag **anywhere** in a command means explain, never execute (DPLAN-0291 rule E). Every
+A help flag **anywhere** in a command means explain, never execute. Every
 module's `handle_command()` calls `wants_help()` from `apps/handlers/help_flags.py` before
 dispatching:
 
@@ -96,11 +93,8 @@ Modules that own `help` as a real verb pass `bare_help=False`; `discovery` does,
 
 The check lives **inside** each `handle_command()`, not in the router, because every module also
 has a standalone `__main__` path that takes raw argv and never touches the router. One predicate,
-many call sites — the gate previously existed as copies of the same two lines, which is how a group
-of modules drifted into the same bug at once.
-
-Why it mattered: the old gate read only `command` or `args[0]`, so `drone rm notes.md --help`
-**deleted notes.md** and then tried to delete a file named `--help`.
+many call sites: copies of the same two lines drift together. A gate that read only `command` or
+`args[0]` would let `drone rm notes.md --help` delete `notes.md`.
 `tests/test_help_flag_safety.py` mocks every dispatch target and asserts it was never called — no
 live verb is fired to prove the trap.
 
@@ -114,7 +108,7 @@ from aipass.drone import resolve_branch, list_branches, route_command
 path = resolve_branch("@seedgo")
 
 active = list_branches()                      # status defaults to "active" — the default IS a filter
-by_type = list_branches(branch_type="core")   # empty today — see below
+by_type = list_branches(branch_type="core")   # empty: no row carries a type — see below
 
 result = route_command("@seedgo", "audit", args=["aipass", "@drone"])
 print(result.stdout)
@@ -124,9 +118,8 @@ print(result.exit_code)
 `list_branches()` returns more rows than `AIPASS_REGISTRY.json` holds: `get_all_branches()` merges
 the primary registry with the external tier declared in `AIPASS_ROOTS.json`. `list_branches(
 branch_type=...)` is a live parameter with nothing to match — no row carries a type field, so the
-type filter always returns `[]`, and any status but `active` returns `[]` too. One precision the
-earlier wording missed: the filter reads `branch.get("type")`, not `branch_type`, so it names a key
-no code reads. Documented as it behaves, not as it reads.
+type filter always returns `[]`, and any status but `active` returns `[]` too. The filter reads the
+row key `type` (`branch.get("type")`), which no registry row carries.
 
 ### Registry path resolution
 
@@ -140,9 +133,8 @@ reset_registry_path()
 Order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path()` →
 **`AIPASS_REGISTRY`** env var → walk up from cwd, skipping any registry whose `metadata.id`
 conflicts with the nearest passport's `citizenship.registry_id` → the AIPass home (below) → walk up
-from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`, not
-`AIPASS_REGISTRY_PATH` — the latter name appeared in the README until 2026-08-25 and was never read
-by any code.
+from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`;
+`AIPASS_REGISTRY_PATH` is read by no code.
 
 ### Error handling
 
@@ -181,10 +173,8 @@ per-project registration.
   3. The homes enrolled in `~/.aipass/trusted_projects.json`: only projects holding an
      `AIPASS_REGISTRY.json` count, and the newest `enrolled` wins.
 
-  This cures the terminal opened before setup.sh wrote `AIPASS_HOME` into the shell rc. That
-  terminal used to end every printed `drone @api …` hint on "Branch '@api' not found in registry"
-  (BAUD's public install, 2026-10-13). Pinned by `TestAipassHomeResolution` in
-  `tests/test_registry_handler.py`.
+  So a terminal opened before setup.sh wrote `AIPASS_HOME` into the shell rc still finds the home.
+  Pinned by `TestAipassHomeResolution` in `tests/test_registry_handler.py`.
 - **The home's own interpreter.** `branch_interpreter(branch_path)` answers which python runs a
   branch app. Every launch site asks it: `router_handler.execute_branch_command`, and the `--help`
   runs in `discovery_handler` (`discover_modules`, `get_help`) and `scanning/scanner`.
@@ -194,9 +184,9 @@ per-project registration.
     INFO once per home.
   - No venv there: `sys.executable`, with one WARNING naming the half-installed home.
 
-  A stranger's machine holds aipass twice. The uv tool venv's `drone` comes first on PATH, and the
-  home's apps, run on that venv's python, import their handlers from the tool's site-packages. The
-  handlers fence then refuses them (the owner's sandbox, DPLAN-0408). Pinned by
+  A machine can hold aipass twice. The uv tool venv's `drone` comes first on PATH, and the home's
+  apps, run on that venv's python, would import their handlers from the tool's site-packages. The
+  handlers fence would refuse them. Pinned by
   `TestBranchInterpreter`, and at the launch sites in `test_router.py`, `test_discovery.py` and
   `test_scan.py`.
 - **Module routing, not a fallback.** An external seat reaches those modules because `is_module()`

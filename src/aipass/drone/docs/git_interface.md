@@ -25,8 +25,8 @@ flag (empty, or a leading `-`) — the same guard the tag lanes use.
 
 ## Machine output — `--json` on the read doors
 
-`status`, `log`, `show` and `remote` answer in prose by default and in one JSON document with
-`--json`. The flag rides in **any slot** and is stripped before positional parsing, so
+`status`, `log`, `show`, `remote` and `release list` answer in prose by default and in one JSON
+document with `--json`. The flag rides in **any slot** and is stripped before positional parsing, so
 `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is
 still a question.
 
@@ -34,10 +34,8 @@ Every document carries an `ok` verdict, **including refusals** — a caller that
 parse why it failed rather than getting a bare sentence it has to guess at. The exit code still
 goes non-zero, so a shell script reading only `$?` is told the same truth.
 
-Consumers were previously scraping the rendered output (@api's host lane was keyed on the *shape*
-of a status row). That migration has completed: `api/apps/handlers/host/git_reads.py` takes the
-document and reads no rendered drone row anywhere. Prose output is unchanged by design — every
-existing reader keeps working — but new callers should take the document.
+Prose output is kept stable for human readers; a machine caller takes the document, never the
+shape of a rendered row.
 
 **`status --json` reports git's two porcelain columns, which the rendered view cannot.** The
 columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M`
@@ -53,9 +51,8 @@ change as unstaged. The document carries `status` verbatim plus `index` and `wor
 
 ## Where a repository points — `remote`
 
-`remote` is global tier: listing remotes writes nothing. It exists because there was no door for
-the question at all — @api's host lane read `.git/config` as an INI file and hand-rolled its own
-worktree-following to locate it. Shelling the question through git resolves a worktree's common
+`remote` is global tier: listing remotes writes nothing. It answers where a repository points
+without a caller parsing `.git/config` itself, and asking git resolves a worktree's common
 directory for free.
 
 **Credentials never travel.** An `http(s)` URL configured with credentials is answered with its
@@ -82,8 +79,8 @@ in the body — a body of any length is fine and wanted.
 The number is **prax's** `SUBJECT_CAP`, imported from `aipass.prax.apps.modules.dashboard` and
 never copied into drone: a commit subject and a plan subject are the same glance (the dashboard's
 `last_commit_msg`, the oneline log, the PR list), so they are the same cap. Pinned by reading the
-import line out of the source, because a hand-copied number survives an identity check — CPython
-interns small ints, and that mutant lived until the pin changed.
+import line out of the source, because a hand-copied number survives an identity check: CPython
+interns small ints.
 
 Where it sits matters as much as the number. `subject_refusal()` runs **first** in
 `commit_handler.commit_changes()` — before the repo is resolved, before `--all`'s ruff pass, before
@@ -100,19 +97,16 @@ The lock is a non-blocking exclusive create of `.git_pr.lock`, and on Windows a 
 another process's release answers access denied rather than file exists, so that arm answers
 `Lock blocked` too — the holder if the file still reads, else the denial named with a retry.
 
-DPLAN-0347 / FPLAN-0593 Phase 3. Pinned by `TestCommitSubjectCap` in `tests/test_git_access.py`
-(including the boundary: a subject exactly at the cap commits) and by two cases in `TestPRHandler`
-in `tests/test_git_module.py`.
+Pinned by `TestCommitSubjectCap` in `tests/test_git_access_handlers.py` (including the boundary: a
+subject exactly at the cap commits) and by two cases in `TestPRHandler` in
+`tests/test_git_module_handlers.py`.
 
 ---
 
 ## `untrack` — out of the index, never off the disk
 
-A `.gitignore` line never untracks a file the index already holds. Four seedgo ratchet artifacts
-were committed with the owner's home path in them, their directory was then ignored, and they still
-rode every clone; with raw git blocked for every seat there was no door to `git rm --cached`
-(DPLAN-0409 C1, 2026-10-15). `drone @git untrack <path ...>` is that door, owner tier, beside
-`commit`. Each path is classified exactly as `tracked` classifies it. Only a tracked file leaves the
+A `.gitignore` line never untracks a file the index already holds, and raw git is blocked for every
+seat. `drone @git untrack <path ...>` is the door to `git rm --cached`, owner tier, beside `commit`. Each path is classified exactly as `tracked` classifies it. Only a tracked file leaves the
 index; an untracked, ignored, missing or outside path is refused by name with its class and nothing
 is done for it, and a directory is refused unless `--recursive` is given, because one directory can
 untrack a whole tree. Refusals do not stop the accepted paths, and any refusal makes the exit 1.
@@ -123,7 +117,8 @@ stages a still-present file straight back into the index, or fails outright on o
 ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
 every verb's does, and there is no separate owner-verb ledger to write. `untrack` and `tracked` also
 run through the external-repo door (`--repo <path>`, admin seat, paths repo-relative, every use in
-its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in `tests/test_git_module.py`, against a real repo.
+its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in
+`tests/test_git_module.py`, against a real repo.
 
 ---
 
@@ -133,8 +128,8 @@ its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `Test
 across several branch directories. Before it stages, it runs ruff (`check --fix`, `format`, then
 `check` as a gate) and then pytest for every branch whose files changed, mapping a changed file to
 its branch by walking up for `.trinity/`. Templates ship complete branch skeletons, so the
-**outermost** hit inside the project wins — citizens never nest, and the innermost rule sent the
-gate running pytest inside @spawn's template.
+**outermost** hit inside the project wins: citizens never nest, and the innermost hit can be a
+template skeleton inside @spawn.
 
 A branch with no `tests/` directory is skipped, not failed. A per-branch pytest budget bounds the
 gate: the largest suite in the fleet runs a few minutes, and a cap below a green suite's real
@@ -145,8 +140,8 @@ runtime turns the gate into a false red that blocks every commit touching that b
 ## Tag lanes — AIPass vs an external repo
 
 `tag` is one verb with two release lanes, chosen by the repo the command will actually run in
-(`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it does not). The gate
-that used to refuse `tag` from a `projects/*` seat is gone: it now translates.
+(`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it does not). A
+`projects/*` seat gets the external lane.
 
 | | AIPass repo | External project seat |
 |---|---|---|
@@ -161,12 +156,10 @@ refused before any argv is built.
 
 Why no version guard outside AIPass: an external repo has its own manifests and its own release
 lane. Reading ours out of someone else's tree would be an invented rule, so version discipline
-stays with the repo owner (DPLAN-0290 item 1, the user's ruling).
+stays with the repo owner.
 
 Both lanes are covered by `tests/test_tag_handler.py`, where `TestAipassSeatUnchanged` pins the
-AIPass lane argv-for-argv so translation elsewhere cannot move it. The external lane was
-additionally proven end to end against a throwaway repo with a real bare origin by a local
-acceptance script (that directory is git-ignored, so it is not in a clone).
+AIPass lane argv-for-argv so translation elsewhere cannot move it.
 
 ---
 
@@ -175,32 +168,31 @@ acceptance script (that directory is git-ignored, so it is not in a clone).
 `issue`, `run` and `workflow` pass straight through to the `gh` CLI. Two exceptions:
 
 **`issue view <n>`.** gh's default view is a GraphQL query requesting `repository.issue.projectCards`,
-a Projects-classic field GitHub now rejects outright: the call returned the deprecation notice and
-no issue at all, and `--comments` failed the same way. `_rewrite_issue_view()` renders the same view
+a Projects-classic field GitHub rejects outright, so the call returns the deprecation notice and no
+issue at all, `--comments` too. `_rewrite_issue_view()` renders the same view
 from pinned `--json` fields plus a `--template`, so the dead field is never requested. `--comments`
 becomes a requested field rather than a flag (it conflicts with `--json`). Callers who already chose
 a rendering — `--json`, `--jq`, `--template`, `--web` — keep their own invocation untouched;
 unrelated flags are preserved. No other issue subcommand is rewritten.
 
 **`run view --log` / `--log-failed`.** gh 2.45 finds each step's log by file name inside the run's
-log archive, and GitHub's archive now holds job-level files only, so gh printed nothing and exited
-0. When `run view` with a log flag comes back empty on a clean exit, drone reads the jobs API
+log archive, and GitHub's archive holds job-level files only, so gh prints nothing and exits 0.
+When `run view` with a log flag comes back empty on a clean exit, drone reads the jobs API
 through `gh api`: each job's full log (only the failed jobs for `--log-failed`), every line led by
 the job name and a tab, with a notice on stderr saying so. `-R/--repo`, `--job` and `--attempt` are
 honoured, and a job whose log the API refuses fails the command by name (`TestRunLogFallback` in
 `tests/test_git_module.py`).
 
-Note the collision that shaped the door: these three verbs take gh's **own** `--repo OWNER/NAME`,
-which is why they are not external-repo door verbs.
+These three verbs take gh's **own** `--repo OWNER/NAME`, which is why they are not external-repo
+door verbs.
 
 ---
 
 ## `release list` — published releases, every seat
 
 `drone @git release list [--repo OWNER/NAME] [--since TAG] [--limit N] [--json]` is global tier, like
-`run list` and `log`, so project citizens read it too. @vera's release watcher shelled gh to read
-AIPass's release tags and notes, and the lockdown refused it (feedback b44c7003, the owner's go
-2026-10-15). `--repo` is GitHub's OWNER/NAME, never a path, so `release` sits beside the gh
+`run list` and `log`, so project citizens read it too: a release watcher reads AIPass's release
+tags and notes through it. `--repo` is GitHub's OWNER/NAME, never a path, so `release` sits beside the gh
 passthroughs where the external-repo door does not take the flag; it defaults to AIOSAI/AIPass.
 Rows come newest first, tag, `published_at` and name, with the notes indented under each; `--json`
 gives one document with the raw rows. Drafts are skipped. `--since TAG` stops before that tag, and

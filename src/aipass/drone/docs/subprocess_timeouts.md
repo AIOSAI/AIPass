@@ -21,24 +21,16 @@ All five live in `apps/handlers/executor.py`.
 
 ## Why 600
 
-The default was raised 30 → 60 on 2026-08-13 (the owner's ruling): two known runners finish around
-31s and were tripping the old default. It was raised again 60 → 600 on 2026-08-27, after two live
-kills in one morning — the fleet-wide trinity push died at 60s mid-alphabet (it needs about five
-minutes; the re-fire used `--drone-timeout 900`), and an `@all` mail broadcast was killed at 60s
-*after* every message had been delivered. The owner's ruling: *"it is configured wrong — it should not
-be timing out before it completes; processing time is fine, increase the allowed timeout so things
-can actually complete."*
-
-**The timeout is sized for the worst *legitimate* case.** Per-verb budgets were considered and
+**The timeout is sized for the worst *legitimate* case**, so a command is never killed before it
+completes; processing time is fine. The slowest known fleet-wide runs, a trinity push across every
+branch and an `@all` mail broadcast, finish inside it. Per-verb budgets were considered and
 rejected: an integer per command cannot tell `email @seedgo` from `email @all`, which is one verb
 with two very different worst cases.
 
-**`TIMEOUT_OVERRIDES` is empty on purpose.** It held three entries — `memory process-plans` 120s,
-`memory rollover` 100s, `flow close` 90s — and every one of them was written to *raise* above the
-old 60s default. Against a 600s base the same numbers invert into *caps*: the commands we know are
-slow would get the least time in the fleet. The mechanism stays, because a per-command policy is a
-decision, not a floor — it still wins even if it is *lower* than the default (`resolve_timeout` has
-no `max()`, and a test pins that). Only the now-harmful data is gone.
+**`TIMEOUT_OVERRIDES` is empty on purpose.** A per-command entry below the 600s base is a *cap*,
+and the commands known to be slow would then get the least time in the fleet. The mechanism stays,
+because a per-command policy is a decision, not a floor: it wins even when it is *lower* than the
+default (`resolve_timeout` has no `max()`, and a test pins that).
 
 ---
 
@@ -76,19 +68,17 @@ the lifetime of this process is otherwise invisible. Every other rung logs at de
 **A killed command still reports what it did.** The timeout error replays the child's partial
 stdout and stderr under `--- partial stdout (N bytes) ---` banners, truncated to the last 4000
 characters *and told so when truncated*, and the chained `subprocess.TimeoutExpired` carries the
-same bytes on `.output` / `.stderr`. This is the other half of the `@all` broadcast defect: every
-message was delivered, and the old error said only *"Command timed out after 60s"* because the
-child's captured output was discarded with the exception.
+same bytes on `.output` / `.stderr`, so a command that did its work before the kill says what it
+did.
 
 ---
 
 ## Two lanes take no timeout, and say so
 
 Module routing runs in-process, and interactive commands inherit the terminal — neither is
-captured, so neither can be timed. The flag still *parses* there, so before this an operator's
-number vanished in silence: `drone @seedgo audit aipass --drone-timeout 5` ran unbounded and said
-nothing. Both lanes now emit a WARNING to the log and to stderr naming the number and the reason. A
-silently discarded cap is the same species of defect as a silent kill.
+captured, so neither can be timed. The flag still *parses* there (`drone @seedgo audit aipass
+--drone-timeout 5` runs unbounded), so both lanes emit a WARNING to the log and to stderr naming the
+number and the reason. A silently discarded cap is the same species of defect as a silent kill.
 
 ---
 

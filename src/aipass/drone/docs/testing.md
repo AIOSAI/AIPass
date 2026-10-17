@@ -21,7 +21,7 @@ python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q
 ```
 
 Both rootdirs are run before anything is reported green — a suite that passes from one directory
-and not the other is a real defect in the fixtures, and this branch has shipped that bug before.
+and not the other is a real defect in the fixtures.
 Live counts come from the run, not from a table: `-q` prints them, and `--collect-only -q | tail -1`
 prints the collected total without executing anything.
 
@@ -86,5 +86,5 @@ since it proves the rule is still load-bearing.
 
 A test that cannot fail is scenery. The bar in this branch is mutation: apply the mutant to the
 source, run the targeted tests, expect red, restore. A pin that survives its mutant gets rewritten
-rather than counted — the commit subject cap shipped with one that passed a copied constant,
-because CPython interns small ints, and it was only the mutant that said so.
+rather than counted: a pin comparing a copied constant passes, because CPython interns small ints,
+and only the mutant says so.
