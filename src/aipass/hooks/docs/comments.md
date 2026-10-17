@@ -15,6 +15,7 @@ Every edit to a source file is measured: what share of its lines are full-line c
 - **Comment line:** Python, a comment token with only whitespace before it (read by `tokenize`); a bare string statement counts from its second line on, so a one-line docstring is free and a three-line one costs two. TS/JS/CSS, a `//` line or any line of a `/* */` block opened at a line's start (`{/*` too). Shell, a `#` line.
 - **Free:** shebang, `# -*- coding`, `# noqa`, `# type:`, `# pyright:`, `# pragma`, `# fmt:`, `# ruff:`, `# pylint:`, `// eslint-`, `// @ts-`, `// prettier-ignore`, `/* eslint`.
 - **Budget:** `over = comments - floor(body * 10 / 100)`; a file at exactly 10% is not over. `BUDGET_PERCENT` in `comment_scan.py`.
+- **Floor:** a file under 20 non-blank lines (`MIN_BODY_LINES`) is never over: one why-line in a 4-line `__init__.py` is 25%. Its edit still writes a ledger row with the share as measured, and the statusline says `not judged`. Chosen over exempting a module's first docstring, which would make a 60-line docstring free.
 
 ## What is not counted
 
@@ -27,6 +28,7 @@ Every edit to a source file is measured: what share of its lines are full-line c
 - Within budget: a statusline `systemMessage` only, `[comments] mod.py 4% ok`.
 - Over: PostToolUse `additionalContext`, under 700 characters: the counts, the share, the over count, what this edit added or removed, the three heaviest runs, and the rule.
 - `added`: Edit and MultiEdit count `new_string` minus `old_string`; Write is the file's comments now minus the ledger's last row for it, unknown on a first sighting.
+- Bash lane: a Bash call is judged on the files it wrote, read by `bash_writes.write_targets` (sed -i, redirections, tee, cp/mv targets). An interpreter's held path (a python heredoc's `open()`) may only have been read, so it counts as written only if its mtime is under `HELD_FRESH_SECONDS` (10 s) old. One row per file (`tool` Bash, `added` unknown); the over answer lists every over file worst first, cut to fit, the rule kept. Missed: an interpreter path with no slash (`open("x.py")`), a path built in code or a variable, and a file a held read touched within the window.
 - Scratch ground (`docs.local`, `dropbox`, `.backup`, `.archive`, the harness scratchpad) answers a skip line and writes no row: the same `_scratch_ground` auto_fix uses.
 - Never blocks; an error is logged and the edit stands.
 

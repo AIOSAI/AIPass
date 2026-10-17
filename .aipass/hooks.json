@@ -142,7 +142,7 @@
     "comment_budget": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.comment_budget.handle",
-      "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+      "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
       "timeout": 10
     },
     "auto_watchdog": {

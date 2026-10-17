@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: comment_scan.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Comment budget counter: full-line comment share of a source file
 # Branch: hooks
 # Layer: apps/modules
@@ -21,6 +21,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 BUDGET_PERCENT = 10
+MIN_BODY_LINES = 20
 
 KINDS = {
     ".py": "python",
@@ -56,9 +57,14 @@ class Scan:
         """Comment lines over body lines, 0.0 for an empty body."""
         return self.comments / self.body if self.body else 0.0
 
+    @property
+    def judged(self) -> bool:
+        """False under MIN_BODY_LINES: a percentage has no meaning on a file that small."""
+        return self.body >= MIN_BODY_LINES
+
     def over(self, budget: int = BUDGET_PERCENT) -> int:
-        """Comment lines past the budget; zero or less is within it."""
-        return self.comments - self.body * budget // 100
+        """Comment lines past the budget; zero or less is within it, and an unjudged file is never over."""
+        return self.comments - self.body * budget // 100 if self.judged else 0
 
     def heaviest(self, count: int = 3) -> list[tuple[int, int]]:
         """The longest runs, longest first, earliest first among equals."""

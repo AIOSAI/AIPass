@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: comments.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: The comments verb — the comment budget's ledger, trend and on-demand scan
 # Branch: hooks
 # Layer: apps/modules
@@ -37,7 +37,10 @@ def print_introspection() -> None:
 
 def _print_help() -> None:
     """The verb's help: the budget and the metric in four lines."""
-    CONSOLE.print(f"Budget: full-line comments at most {comment_scan.BUDGET_PERCENT}% of a file's non-blank lines.")
+    CONSOLE.print(
+        f"Budget: full-line comments at most {comment_scan.BUDGET_PERCENT}% of a file's non-blank lines; "
+        f"files under {comment_scan.MIN_BODY_LINES} are not judged."
+    )
     CONSOLE.print("Comments: # / // lines, /* */ block lines, Python docstring lines past the first.")
     CONSOLE.print("Free: the AIPass header, one-line docstrings, directives (noqa, eslint-, @ts-...).")
     CONSOLE.print("Usage: comments (last 20 edits) | comments <path> | --file <path> (trend) | --over")
