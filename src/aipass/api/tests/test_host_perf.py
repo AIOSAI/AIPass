@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-18
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -102,7 +102,10 @@ LOOP_SAFE_GETS = {"/v1/ping", "/v1/whoami"}
 # /v1/backup/cancel (DPLAN-0412) is the fourth: it writes nothing of this
 # server's (no job table, no file), so the loop has nothing of it to serialize,
 # and @backup's stop can wait 30 s for a lane, which must not hold the loop.
-LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run", "/v1/backup/cancel"}
+# /v1/verbs/new-project (FPLAN-0649) is the fifth: it writes nothing of this
+# server's; @aipass's create_project owns its directory and its own cleanup,
+# and its git and spawn take seconds that must not hold the loop.
+LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run", "/v1/backup/cancel", "/v1/verbs/new-project"}
 
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),

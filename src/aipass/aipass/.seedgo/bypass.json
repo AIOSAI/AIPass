@@ -157,8 +157,8 @@
     {
       "file": "apps/modules/new_project.py",
       "standard": "logged_fallback",
-      "lines": [132],
-      "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [146],
+      "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-17 (+14: the module door for the host API, FPLAN-0649)."
     },
     {
       "file": "apps/modules/install.py",

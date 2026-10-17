@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-08-14
 # Modified: 2026-10-16
 # =============================================
@@ -27,9 +27,8 @@ for the Google stack, never a silent no-op.
 Endpoints in Phase 1:
     GET /v1/ping    - 204, no auth. Tells "tunnel down" from "token rejected"
                       without leaking whether the token was close.
-    GET /v1/whoami  - read scope. The auth layer proving itself end to end, and
-                      the phone's enrollment check. Returns only what the caller
-                      already holds.
+    GET /v1/whoami  - read scope. The auth layer proving itself end to end, and the phone's enrollment check.
+                      Returns only what the caller already holds.
     POST /v1/pair   - no bearer: a one-use pairing code buys one (pair_route.py).
 
 Endpoints added in Phase 2 (read lane):
@@ -85,13 +84,12 @@ FPLAN-0585 row 2 adds the lock chip's read (see lock.py):
                       is a 200; 503 only when the door raised or broke its shape.
 
 Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
-    POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
-                                     admin keyword is UNREACHABLE through it,
-                                     not merely set False.
+    POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The admin keyword is UNREACHABLE
+                                     through it, not merely set False.
     POST /v1/verbs/kill            - Routed, validated and GATED: @baud has no
                                      headless kill, and theirs is the one door.
-    POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never
-                                     gated — lock must fire from anywhere.
+    POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never gated — lock must fire from anywhere.
+    POST /v1/verbs/new-project     - @aipass's create_project, the agent always made; new_project_route.py
     /v1/backup/run (operate, 202), /cancel (operate), /job, /status (read) - @backup's door, backup_route.py
 
 RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
@@ -125,6 +123,7 @@ from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import machine_route as host_machine_route
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
+from aipass.api.apps.handlers.host import new_project_route as host_new_project_route
 from aipass.api.apps.handlers.host import pair_route as host_pair_route
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import reads as host_reads
@@ -1147,6 +1146,7 @@ def create_app() -> Any:
 
     host_backup_route.register(app, _deny, require_scope)
     host_machine_route.register(app, _deny, _logged_denial, require_scope)
+    host_new_project_route.register(app, _deny, _logged_denial, require_scope)
     # ---------------------------------------------------------- settings --
     # The desktop's two gears, served (DPLAN-0300): reads ride the read scope
     # because a dial's position is observation; writes are operate because

@@ -92,6 +92,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
+| `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
 | `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line verbatim. Nothing running: **404** `not_running`, @backup's line |
 | `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
@@ -145,8 +146,7 @@ the owner's configuration.
 memory_config_refused`, the code's fixed sentence and a `ref`; their sentence,
 remedy line and whole payload go to this host's log under that ref. It shipped with two — an argument this server rejected before routing was
 a 400, while a refusal @memory *spoke* came back `200 {ok: false}` — so a client
-had to check the status code **and** a flag to learn one fact. @baud found it
-reading the handler, devpulse confirmed it on the wire, and both now answer
+had to check the status code **and** a flag to learn one fact. Both now answer
 identically. Note this is deliberately **not** the verb lane's rule (see
 [host_surfaces.md](host_surfaces.md)): a
 refused wake is a normal outcome of asking and the phone renders it, but a
@@ -163,8 +163,6 @@ file git has never seen; counting it here would make the phone disagree with the
 desktop about the same branch at the same moment, with the phone being wrong.
 And **branch-local names**, because every `src/aipass` branch shares one repo and
 a repo-relative row would push the part that differs off a phone screen.
-Verified against a real branch: 14 files, identical to their command's own
-output, name for name.
 
 `untracked` rides alongside as a separate count, never folded into theirs.
 Matching a contract is not a reason to discard something already measured —
@@ -203,8 +201,7 @@ carries its own `.git`, so the seat-relative prefix *resolves cleanly* and is
 still the wrong one — nothing raises, and every row silently keeps its prefix.
 The prefix is now the repository **discovered** by walking up for a `.git`
 marker, which is the only one guaranteed to match what was printed; the seat is
-a fallback. Verified against a real foreign tree: 7 files, identical to @baud's
-own command. Two mutations — restoring seat-first, and requiring the marker to
+a fallback. Two mutations — restoring seat-first, and requiring the marker to
 be a directory rather than the file a worktree carries — survived the suite
 before the tests that now catch them.
 

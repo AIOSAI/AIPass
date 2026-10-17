@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: denials.py
 # Description: Host API Denials — the fixed sentence a client gets, the words the log keeps
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-10
-# Modified: 2026-10-13
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -48,6 +48,8 @@ SENTENCES = {
     "memory_config_refused": "@memory refused this config request; the reason is in this host's log",
     "memory_config_unavailable": "@memory could not answer this config request; the reason is in this host's log",
     "pairing_unavailable": "The pairing could not be completed; the reason is in this host's log",
+    "project_door_failed": "@aipass could not create the project; the reason is in this host's log",
+    "project_refused": "@aipass refused this project; the reason is in this host's log",
     "read_refused": "This read was refused; the reason is in this host's log",
     "read_unavailable": "This read could not be answered; the reason is in this host's log",
     "roots_unavailable": "The branch roots could not be listed; the reason is in this host's log",

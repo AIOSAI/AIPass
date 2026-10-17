@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verbs.py
-# Description: Host API Verb Handler — wake, kill and lock, each a proxy
-# Version: 1.0.0
+# Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -111,12 +111,22 @@ That is deliberately stricter than the read lane, where an omitted project means
 "the seated one". Reading the wrong project returns the wrong bytes; ending a
 session in the wrong project ends somebody's work.
 
+NEW-PROJECT GOES THROUGH @aipass's MODULES DOOR (FPLAN-0649)
+------------------------------------------------------------------------
+`aipass new` from the phone: create_project(name, template, no_agent=False,
+host=repo_root()). The name and template are refused here BEFORE the door is
+knocked on. create_project and TEMPLATES are read off @aipass's modules door at
+call time: their handlers package fences out every foreign importer, and a door
+that does not carry the two names answers 503, never a 500.
+
 Functions:
     wake_branch() - Wake a citizen through @ai_mail's dispatch door
     kill_room()   - End a branch's session through @baud's --end-room
     lock_screen() - Lock the machine through @skills' screen_lock
+    new_project() - Create a project and its manager through @aipass's create_project
 """
 
+import re
 from typing import Any, Dict
 
 from aipass.prax import logger
@@ -135,6 +145,8 @@ import aipass.drone as drone
 # @skills publishes this handler as the in-process door and names the host API
 # verb lane as a consumer in SKILL.md. lib/ is their public shape, not internals.
 from aipass.skills.lib.screen_lock import handler as screen_lock
+
+from aipass.aipass.apps.modules import new_project as project_door
 
 # Spawning an agent is slower than a read but not open-ended: the dispatch
 # returns once the session is started, not when the agent finishes.
@@ -362,6 +374,114 @@ def lock_screen() -> Dict[str, Any]:
         "method": method,
         "session": result.get("session"),
     }
+
+
+# ==============================================
+# NEW PROJECT
+# ==============================================
+
+#: create_project's own name rule plus a 64-character cap (the contract's rule).
+PROJECT_NAME_RULE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+PROJECT_NAME_SENTENCE = "A project name is a letter, then up to 63 more letters, digits, underscores or hyphens"
+PROJECT_EXISTS_PREFIX = "Project already exists"
+SEAM_MISSING = "aipass.aipass.apps.modules.new_project publishes no create_project and TEMPLATES"
+
+
+class ProjectRefused(VerbRefused):
+    """A new-project request refused; the route answers `status` and `code`, saying the sentence when `spoken`."""
+
+    status = 400
+    code = "project_refused"
+    spoken = False
+
+
+class ProjectNameRefused(ProjectRefused):
+    """The name is outside the rule. The sentence is PROJECT_NAME_SENTENCE."""
+
+    code = "project_name_refused"
+    spoken = True
+
+
+class TemplateRefused(ProjectRefused):
+    """The template is not one of the door's TEMPLATES. The sentence lists them."""
+
+    code = "template_refused"
+    spoken = True
+
+
+class ProjectExists(ProjectRefused):
+    """create_project's "Project already exists: <target>", verbatim."""
+
+    status = 409
+    code = "project_exists"
+    spoken = True
+
+
+class ProjectDoorFailed(VerbUnavailable):
+    """The door could not make the project: git, spawn, the root, the disk, or a missing seam."""
+
+    status = 503
+    code = "project_door_failed"
+
+
+def new_project(name: str, template: str = "empty") -> Dict[str, Any]:
+    """
+    Create a project and its manager agent, as `aipass new <name> --template <t>`.
+
+    Args:
+        name: The project name, checked against PROJECT_NAME_RULE first.
+        template: One of the door's TEMPLATES.
+
+    Returns:
+        Dict with ok, name, target, template, agent, agent_home and detail.
+
+    Raises:
+        ProjectRefused: A refusal; ProjectNameRefused, TemplateRefused and
+            ProjectExists carry a sentence the caller may read.
+        ProjectDoorFailed: The door raised anything else, or does not exist.
+    """
+    if not PROJECT_NAME_RULE.fullmatch(name):
+        raise _project_refusal(ProjectNameRefused(PROJECT_NAME_SENTENCE), name, template)
+
+    create = getattr(project_door, "create_project", None)
+    templates = getattr(project_door, "TEMPLATES", None)
+    if create is None or templates is None:
+        raise _project_refusal(ProjectDoorFailed(SEAM_MISSING), name, template)
+    if template not in templates:
+        sentence = f"The template must be one of: {', '.join(templates)}"
+        raise _project_refusal(TemplateRefused(sentence), name, template)
+
+    try:
+        result = create(name, template, no_agent=False, host=host_reads.repo_root())
+    except ValueError as e:
+        raise _project_refusal(ProjectRefused(str(e)), name, template) from e
+    except RuntimeError as e:
+        if str(e).startswith(PROJECT_EXISTS_PREFIX):
+            raise _project_refusal(ProjectExists(str(e)), name, template) from e
+        raise _project_refusal(ProjectDoorFailed(str(e)), name, template) from e
+    except OSError as e:
+        raise _project_refusal(ProjectDoorFailed(str(e)), name, template) from e
+
+    json_handler.log_operation("host_api_verb_new_project", {"name": name, "template": template, "ok": True})
+    logger.info("[host_api] project %s created (%s) at %s", name, template, result["target"])
+    return {
+        "ok": True,
+        "name": name,
+        "target": result["target"],
+        "template": result["template"],
+        "agent": result["spawn_result"]["branch_name"],
+        "agent_home": result["agent_home"],
+        "detail": f"Project {name} created with its manager agent",
+    }
+
+
+def _project_refusal(error: Any, name: str, template: str) -> Any:
+    """Record a refused new-project request and hand back the error to raise."""
+    if isinstance(error, ProjectDoorFailed):
+        logger.error("[host_api] project %s could not be created: %s", name, error, exc_info=error.__cause__)
+    record = {"name": name, "template": template, "ok": False, "code": error.code}
+    json_handler.log_operation("host_api_verb_new_project", record)
+    return error
 
 
 # ==============================================

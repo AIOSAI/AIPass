@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
@@ -746,9 +746,11 @@ class TestNoMechanismIsReimplementedHere:
         mechanisms = [line for line in imports if "aipass.api" not in line and "typing" not in line]
 
         assert mechanisms == [
+            "import re",
             "from aipass.prax import logger",
             "import aipass.drone as drone",
             "from aipass.skills.lib.screen_lock import handler as screen_lock",
+            "from aipass.aipass.apps.modules import new_project as project_door",
         ]
 
     def test_every_verb_names_the_branch_that_owns_it(self) -> None:
@@ -845,7 +847,7 @@ class TestTheScopeWallCarriesProductionWeight:
 
 
 @fastapi_required
-class TestTheVerbRouteTableIsExactlyThreeThings:
+class TestTheVerbRouteTableIsExactlyFourThings:
     """
     The route table read back, so a verb cannot arrive quietly.
 
@@ -864,16 +866,21 @@ class TestTheVerbRouteTableIsExactlyThreeThings:
             if getattr(route, "path", "").startswith("/v1/verbs")
         }
 
-    def test_exactly_three_verbs_are_registered(self) -> None:
+    def test_exactly_four_verbs_are_registered(self) -> None:
         """
-        wake, kill, lock. A fourth briefly existed and was cut.
+        wake, kill, lock, and new-project (FPLAN-0649). /v1/verbs/keys briefly existed and was cut.
 
         /v1/verbs/keys shipped under the Round 18 capture design and the owner
         superseded it four minutes later: keystrokes ride the attach PTY, not a
         send-keys proxy. This test is what makes leaving it mounted impossible —
         a superseded surface that still answers is the second door.
         """
-        assert set(self._verb_routes()) == {"/v1/verbs/wake", "/v1/verbs/kill", "/v1/verbs/lock"}
+        assert set(self._verb_routes()) == {
+            "/v1/verbs/wake",
+            "/v1/verbs/kill",
+            "/v1/verbs/lock",
+            "/v1/verbs/new-project",
+        }
 
     def test_verb_wake_is_post_only(self) -> None:
         """A wake spawns a real agent — never something a browser can prefetch."""
