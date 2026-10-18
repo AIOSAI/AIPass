@@ -80,10 +80,19 @@ jobs:
         with:
           inputs: ./dist/*.tar.gz ./dist/*.whl
           release-signing-artifacts: false
-      - name: Extract latest CHANGELOG section
+      - name: Extract the tag's CHANGELOG section
         run: |
-          # Grab the topmost "## [...]" block from CHANGELOG.md as release notes.
-          awk '/^## \[/{c++} c==1' CHANGELOG.md | sed '/^---$/d' > release_notes.md
+          # The block whose "## [...]" header names this tag, not the topmost one:
+          # an [Unreleased] header above it shipped v2.8.20 with an empty body.
+          # The tag must sit between non-version characters so v2.8.2 never
+          # claims v2.8.20. No such block is an error, never an empty release.
+          awk -v tag="$GITHUB_REF_NAME" \
+            '/^## \[/{p = ($0 ~ ("(^|[^0-9A-Za-z.])" tag "([^0-9]|$)"))} p' \
+            CHANGELOG.md | sed '/^---$/d' > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "no CHANGELOG.md section header carries $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
           # GitHub refuses a release body over 125,000 characters (HTTP 422,
           # v2.8.11's block was 144,571). Cut on an entry boundary under the cap
           # and point at the full block; the CHANGELOG stays the record.
