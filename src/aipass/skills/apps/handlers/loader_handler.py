@@ -3,18 +3,11 @@
 # Description: Skill loading handler
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Skill Loading Handler
-
-Contains the core logic for loading skills: parsing full SKILL.md files
-(frontmatter + body) and dynamically importing handler.py modules.
-
-Purpose:
-    Implementation logic for skill loading, separated from
-    orchestration layer to satisfy thin-module standard.
 """
 
 import importlib.util
@@ -27,14 +20,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def parse_full_skill_md(skill_md_path):
-    """Parse a SKILL.md file into frontmatter metadata and body text.
-
-    Args:
-        skill_md_path: Path to the SKILL.md file.
-
-    Returns:
-        tuple: (metadata_dict, body_string) or (None, None) on failure.
-    """
+    """Parse a SKILL.md file into frontmatter metadata and body text."""
     try:
         content = Path(skill_md_path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -45,7 +31,6 @@ def parse_full_skill_md(skill_md_path):
     if not lines or lines[0].strip() != "---":
         return None, None
 
-    # Find closing ---
     end_idx = None
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":
@@ -55,12 +40,10 @@ def parse_full_skill_md(skill_md_path):
     if end_idx is None:
         return None, None
 
-    # Parse frontmatter
     metadata = parse_frontmatter(skill_md_path)
     if metadata is None:
         return None, None
 
-    # Body is everything after the closing ---
     body_lines = lines[end_idx + 1 :]
     body = "\n".join(body_lines).strip()
 
@@ -70,18 +53,7 @@ def parse_full_skill_md(skill_md_path):
 def import_handler(skill_path, skill_name):
     """Dynamically import a handler.py from a skill directory.
 
-    Args:
-        skill_path: Path to the skill directory.
-        skill_name: Name of the skill (used for module naming).
-
-    Returns:
-        module or None: The imported handler module, or None when the skill
-        has no handler.py.
-
-    Raises:
-        Exception: Whatever handler.py raised while importing. A broken handler
-        is a failure the caller reports, never a skill without a handler.
-    """
+    Returns None only when there is no handler.py; a handler that raises on import propagates."""
     handler_file = Path(skill_path) / "handler.py"
     if not handler_file.exists():
         return None
@@ -103,15 +75,7 @@ def import_handler(skill_path, skill_name):
 
 
 def find_skill_in_registry(name, registry):
-    """Find a skill entry in the registry by name.
-
-    Args:
-        name: Skill name to find.
-        registry: List of skill dicts.
-
-    Returns:
-        dict or None: The matching skill dict, or None if not found.
-    """
+    """Find a skill entry in the registry by name."""
     for skill in registry:
         if skill["name"] == name:
             return skill
@@ -119,28 +83,7 @@ def find_skill_in_registry(name, registry):
 
 
 def load_skill(name, registry):
-    """Load a skill by name from a pre-built registry.
-
-    Steps:
-        1. Find skill in registry
-        2. Parse full SKILL.md (frontmatter + body)
-        3. If has_handler is true, import handler.py from skill directory
-        4. Return loaded skill dict
-
-    Args:
-        name: The skill name to load.
-        registry: List of skill dicts from discovery.
-
-    Returns:
-        dict: {
-            "success": bool,
-            "metadata": dict or None,
-            "body": str or None,
-            "handler": module or None,
-            "path": Path or None,
-            "error": str or None
-        }
-    """
+    """Load a skill by name from a pre-built registry."""
     skill_entry = find_skill_in_registry(name, registry)
 
     if skill_entry is None:
@@ -156,7 +99,6 @@ def load_skill(name, registry):
     skill_path = Path(skill_entry["path"])
     skill_md = skill_path / "SKILL.md"
 
-    # Parse full SKILL.md
     metadata, body = parse_full_skill_md(skill_md)
     if metadata is None:
         return {
@@ -168,7 +110,6 @@ def load_skill(name, registry):
             "error": f"Failed to parse SKILL.md at {skill_md}",
         }
 
-    # Import handler if present
     handler = None
     if isinstance(metadata, dict) and metadata.get("has_handler", False):
         try:

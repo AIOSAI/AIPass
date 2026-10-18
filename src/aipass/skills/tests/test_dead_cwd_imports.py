@@ -3,7 +3,7 @@
 # Description: Dead-cwd import pins
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -47,13 +47,7 @@ GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 def _skills_modules(branch_root: Path = BRANCH_ROOT) -> list:
     """Every importable skills module, by dotted name.
 
-    Skips are judged on the parts relative to branch_root, never the whole
-    path, so a checkout under a directory named dropbox is still walked.
-    dropbox is a sandbox nothing runs out of (the owner's ruling of
-    2026-09-27); docs.local is untracked scratch no import can spell.
-
-    Returns:
-        list[str]: Dotted module names, tests and templates excluded.
+    Skips are judged on parts relative to branch_root, so a checkout under a directory named dropbox is still walked.
     """
     mods = []
     for path in sorted(branch_root.rglob("*.py")):
@@ -71,9 +65,7 @@ def _skills_modules(branch_root: Path = BRANCH_ROOT) -> list:
 
 SKILLS_MODULES = _skills_modules()
 
-# The child probe. Rides a <string> frame; each denial raises a FRESH exception
-# instance - a single reused instance accumulates __traceback__ frames across
-# raises and the blame it reports is then the instrument's, not the tree's.
+# Each denial raises a FRESH exception: a reused one accumulates __traceback__ frames and blames the instrument.
 _PROBE = r"""
 import os
 import os.path
@@ -147,43 +139,16 @@ print("OK %s" % TARGET)
 """
 
 
-# WHY TWO WORLDS. They convict different constructions and neither is sufficient:
-#
-#   World A - take the Windows reading of realpath (call getcwd first), then deny
-#             getcwd. Convicts a raw ``Path.resolve()`` reached at import.
-#             It CANNOT convict ``inspect.stack()``: denying getcwd kills
-#             abspath, so ``getmodule`` dies inside ``getabsfile`` where inspect
-#             already catches it, and stack() completes green for the wrong
-#             reason.
-#   World B - deny ``os.path.realpath`` outright and leave abspath working.
-#             Convicts ``inspect.stack()`` through getmodule's UNGUARDED
-#             ``os.path.realpath`` at inspect.py:1009.
-#
-# WHY SUBPROCESSES. The defect is import-time. A module already in
-# ``sys.modules`` cannot demonstrate it, and the denial has to be installed
-# before the first import rather than around it.
+# Two worlds: A convicts Path.resolve() but not inspect.stack() (inspect catches A's abspath raise); B convicts
+# inspect.stack(). A child process, because the denial must be installed before the first import, not around it.
 def _run_probe(mode: str, target: str, inject: bool = True):
-    """Import one module in a child process under a denial world.
-
-    Args:
-        mode: "healthy", "A", or "B".
-        target: Dotted module name, or "__control__" for the control probe.
-        inject: False kills the injection - the negative control for the
-            positive control.
-
-    Returns:
-        subprocess.CompletedProcess: The child's result.
-    """
+    """Import one module in a child process under a denial world; inject=False is the control's negative control."""
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env["SKILLS_PROBE_INJECT"] = "1" if inject else "0"
     env["SKILLS_WORLD_TEXT"] = {"A": WORLD_A, "B": WORLD_B}.get(mode, "")
-    # The suite sets AIPASS_TEST_LOG_DIR, and log_streamer returns on it BEFORE
-    # its resolve. Inheriting it here made reverting that site survive every
-    # pin — a measurement that quietly stopped reaching the code it measures.
+    # log_streamer returns on AIPASS_TEST_LOG_DIR BEFORE its resolve; inherited, it hides that site from every pin.
     env.pop("AIPASS_TEST_LOG_DIR", None)
-    # A -c STRING AND NOT STDIN. A probe piped through stdin gets cached by
-    # linecache under the <stdin> key, and the probe then lies green. The child
-    # rides a string-pseudo frame instead.
+    # A -c string, not stdin: linecache caches a <stdin> probe and the probe then lies green.
     return subprocess.run(
         [
             sys.executable,
@@ -202,11 +167,6 @@ def _run_probe(mode: str, target: str, inject: bool = True):
     )
 
 
-# ---------------------------------------------------------------------------
-# Controls first: a pin whose world is not live reports nothing at all
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("mode", ["A", "B"])
 def test_denial_world_is_live(mode):
     """Each world must actually deny the call the defect makes."""
@@ -219,11 +179,7 @@ def test_denial_world_is_live(mode):
 
 @pytest.mark.parametrize("mode", ["A", "B"])
 def test_control_can_say_no(mode):
-    """Kill the injection and the control must REPORT it, not pass anyway.
-
-    The negative control for the positive control. Without this, a control
-    that always prints CONTROL_LIVE would certify a dead world.
-    """
+    """Kill the injection and the control must REPORT it, not pass anyway."""
     result = _run_probe(mode, "__control__", inject=False)
     assert "CONTROL_DEAD" in result.stdout, (
         f"world {mode} control reported live with the injection removed - it "
@@ -232,27 +188,10 @@ def test_control_can_say_no(mode):
 
 
 def test_healthy_world_imports_everything():
-    """Baseline: with no denial, every module imports.
-
-    A red here is a broken tree, not a dead-cwd finding, and it would make the
-    denial worlds unreadable.
-    """
+    """Baseline: with no denial, every module imports."""
     failures = [(m, _run_probe("healthy", m)) for m in SKILLS_MODULES]
     red = [(m, r.stdout.strip() or r.stderr.strip()[-300:]) for m, r in failures if r.returncode != 0]
     assert red == [], f"modules failed to import in a HEALTHY world: {red}"
-
-
-# ---------------------------------------------------------------------------
-# The measurement
-#
-# THE DEFECT. ntpath.realpath calls os.getcwd() on its first lines
-# UNCONDITIONALLY - before it checks whether the path is even relative.
-# posixpath.realpath reads the cwd only for relative paths, which is why this
-# was invisible on Linux for as long as it existed. Path.resolve() routes
-# through realpath, so on Windows every Path(__file__).resolve() REACHED AT
-# IMPORT is an import-time crash for a process whose directory was deleted or
-# whose network share dropped. Not "degrades" - cannot import.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("mode", ["A", "B"])
@@ -269,21 +208,8 @@ def test_every_module_imports_with_a_dead_cwd(mode):
     )
 
 
-# ---------------------------------------------------------------------------
-# The pin-shape hole: the deleted second walk is unreachable from any
-# import-shaped test, so restoring it leaves every behavioural pin green
-# ---------------------------------------------------------------------------
-
-
 def _inspect_stack_calls(source: str) -> list:
-    """Find inspect.stack() calls in source, by parse tree.
-
-    Args:
-        source: Python source text.
-
-    Returns:
-        list[int]: Line numbers of every ``inspect.stack(...)`` call.
-    """
+    """Find inspect.stack() calls in source, by parse tree."""
     found = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
@@ -302,12 +228,7 @@ def _inspect_stack_calls(source: str) -> list:
 def test_guard_contains_no_inspect_stack_call():
     """The guard must not call inspect.stack(), at any line.
 
-    Behavioural pins CANNOT catch a restored ``inspect.stack()`` walk in the
-    caller-is-None branch: apps/__init__.py always supplies a real-file frame,
-    so that branch is unreachable from an import-shaped test and returns either
-    way. Measured in trigger and reproduced in hooks, drone, api and backup.
-    This is a parse-tree ban, not a string ban - the docstring above the walk
-    names inspect.stack while explaining the defect.
+    No import-shaped pin reaches the caller-is-None branch. A parse-tree ban, since the guard's prose names the call.
     """
     lines = _inspect_stack_calls(GUARD_FILE.read_text(encoding="utf-8"))
     assert lines == [], (
@@ -334,11 +255,6 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
     assert _inspect_stack_calls(source) == []
 
 
-# ---------------------------------------------------------------------------
-# Runtime species: the audit trail's caller name
-# ---------------------------------------------------------------------------
-
-
 _CALLER_MODULE = r"""
 from aipass.skills.apps.handlers.json import json_handler
 
@@ -352,13 +268,8 @@ def a_named_caller():
     return writes_an_audit_entry()
 """
 
-# The child denies realpath, then imports the module above FROM A <string>
-# FRAME. That frame is what convicts inspect.stack(): getsourcefile() returns
-# early for a filename that exists on disk and never reaches getmodule, so a
-# stack of nothing but real files does NOT need realpath. Put one pseudo-frame
-# underneath and getmodule runs, hits os.path.realpath at inspect.py:1009
-# outside any try, and dies. This is why the dispatch specifies a
-# string-pseudo frame: without it the pin passes over the live defect.
+# Driven from a <string> frame: getsourcefile() returns early for real files, so only a pseudo-frame makes
+# getmodule reach the unguarded realpath. Without it the pin passes over the live defect.
 _CALLER_DRIVER = r"""
 import os
 import os.path
@@ -401,23 +312,10 @@ print("WROTE=%s" % ",".join(sorted(p.name for p in json_dir.iterdir())))
 def test_caller_module_name_survives_and_still_answers(tmp_path):
     """The caller name must survive a dead cwd AND still name the caller.
 
-    Returning "unknown" for every caller also satisfies a does-not-crash
-    assertion, and it destroys the audit trail while doing so — so this
-    asserts the ANSWER, not merely the absence of a crash. The answer is read
-    off the DOCUMENT the audit trail landed in: since DPLAN-0325 the caller is
-    resolved inside the fleet service, and what this branch owns is that a
-    ``log_operation`` reached through its own shim still files the entry under
-    the calling module's name.
-
-    The caller lives in a real file (a ``<string>`` frame has no module name to
-    report, so the pin could not tell a working answer from a degraded one),
-    and it is driven from a ``<string>`` frame (without a pseudo-frame in the
-    stack, inspect.stack() never reaches the realpath that convicts it).
+    "unknown" also passes a does-not-crash check, so the ANSWER is read off the document the entry landed in.
     """
     (tmp_path / "a_named_module.py").write_text(_CALLER_MODULE, encoding="utf-8")
-    # The seam is SET, not inherited: the shim writes into the live skills_json/
-    # unless it is, and a probe that pollutes the branch is not a pin. Its value
-    # is this test's own tmp_path, so nothing of the suite's leaks in.
+    # The seam is SET to tmp_path, not inherited: unset, the shim writes into the live skills_json/.
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env["AIPASS_TEST_LOG_DIR"] = str(tmp_path / "_aipass_json_seam")
     result = subprocess.run(
@@ -443,16 +341,7 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
     )
 
 
-# ---------------------------------------------------------------------------
-# Skills-specific: the search paths a skill unit resolves at RUNTIME
-#
-# Skill units run in host processes this branch did not choose - the telegram
-# relay, cron-fired lanes, hook subprocesses - which are exactly the processes
-# likely to hold a deleted or disconnected working directory. Import-time pins
-# cannot see these: both sites are inside functions.
-# ---------------------------------------------------------------------------
-
-
+# Runtime paths, which import-time pins cannot see: both sites are inside functions.
 _RUNTIME_PROBE = r"""
 import os
 import sys
@@ -503,13 +392,7 @@ def _run_runtime_probe():
 
 
 def test_skill_discovery_survives_a_dead_cwd():
-    """Discovery must keep serving global and builtin skills without a cwd.
-
-    "The current project" has no answer when there is no current directory, so
-    that ONE search path drops out. Taking all of discovery down with it would
-    make every `drone @skills list/info/run` fail in the host processes most
-    likely to hit this.
-    """
+    """Discovery must keep serving global and builtin skills without a cwd; only the project path drops."""
     result = _run_runtime_probe()
     assert result.returncode == 0, f"runtime probe crashed: {result.stderr[-800:]}"
     assert "ARMED_CWD=1" in result.stdout, (
@@ -522,12 +405,7 @@ def test_skill_discovery_survives_a_dead_cwd():
 
 
 def test_skill_creation_refuses_rather_than_guessing():
-    """Creating into "the current project" must REFUSE, not write elsewhere.
-
-    Unlike discovery this path writes. A default target that cannot be computed
-    has to fail loudly: scaffolding a skill into the wrong tree is worse than
-    scaffolding none.
-    """
+    """Creating into "the current project" must REFUSE, not write elsewhere."""
     result = _run_runtime_probe()
     assert result.returncode == 0, f"runtime probe crashed: {result.stderr[-800:]}"
     assert "ARMED_CWD=1" in result.stdout, (
@@ -537,17 +415,7 @@ def test_skill_creation_refuses_rather_than_guessing():
     assert "CREATE_ERROR_MENTIONS_CWD=True" in result.stdout, f"refusal did not name the reason: {result.stdout!r}"
 
 
-# ---------------------------------------------------------------------------
-# The fence under a dead cwd, through its public shape (DPLAN-0404)
-#
-# The fence reads every frame's path, and Path.resolve reaches realpath, which
-# on Windows reads the cwd first. The child removes its own cwd (POSIX; Windows
-# holds a process's cwd open, so there world A's denial stands in for it), arms
-# world A on top, then runs tests/support_fence.py from a seat: kin must still
-# be let through and a seat outside any branch must still be refused by name.
-# ---------------------------------------------------------------------------
-
-
+# The child removes its own cwd (Windows holds a cwd open, so there world A's denial stands in) and arms world A.
 _FENCE_DEAD_CWD_DRIVER = r"""
 import os
 import runpy
@@ -576,11 +444,7 @@ runpy.run_path(seat, run_name="__main__")
 
 
 def _run_fence_with_a_dead_cwd(seat: Path, tmp_path: Path) -> list:
-    """Run the fence probe at `seat` (shape pkg) in a child whose cwd is gone.
-
-    Returns:
-        list[str]: The child's stdout lines.
-    """
+    """Run the fence probe at `seat` (shape pkg) in a child whose cwd is gone."""
     doomed = tmp_path / "doomed_cwd"
     doomed.mkdir()
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT), SKILLS_WORLD_TEXT=WORLD_A)
@@ -616,8 +480,7 @@ def test_the_fence_lets_kin_through_with_a_dead_cwd(tmp_path):
 def test_the_fence_refuses_an_elsewhere_seat_with_a_dead_cwd(tmp_path):
     """A seat outside any branch is still refused, and named, with no readable cwd.
 
-    Without this, a fence that stopped working under a dead cwd would pass the
-    kin pin above by letting everybody in.
+    Without this, a fence broken under a dead cwd passes the kin pin above by letting everybody in.
     """
     seat = tmp_path / "elsewhere" / "probe.py"
     seat.parent.mkdir()
@@ -625,16 +488,7 @@ def test_the_fence_refuses_an_elsewhere_seat_with_a_dead_cwd(tmp_path):
     assert _run_fence_with_a_dead_cwd(seat, tmp_path)[-1] == "DENIED Caller branch: unknown"
 
 
-# ---------------------------------------------------------------------------
-# Same family, different symptom: a WARNING emitted at MODULE IMPORT
-#
-# Ten imports across the denial worlds produced ten identical warnings about
-# one condition and escalated a medic alert. An absent optional dependency is a
-# property of the environment, not of the import - so it is reported once, at
-# first use, where it names something a caller actually tried to do.
-# ---------------------------------------------------------------------------
-
-
+# An absent optional dependency is reported once, at first use, never as a WARNING at module import.
 _IMPORT_WARNING_PROBE = r"""
 import importlib
 import sys
@@ -673,12 +527,7 @@ print("IMPORT_TIME_TELETHON_WARNINGS=%d" % len(telethon_warnings))
 
 
 def test_absent_telethon_is_not_announced_on_every_import():
-    """Importing the module must not log the same environment fact each time.
-
-    A WARNING at module scope fires once per import. Repeated across a sweep
-    that imports every module in several worlds, one condition became ten
-    identical records and an escalation - noise measured as severity.
-    """
+    """Importing the module must not log the same environment fact each time."""
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env.pop("AIPASS_TEST_LOG_DIR", None)
     result = subprocess.run(
@@ -695,18 +544,7 @@ def test_absent_telethon_is_not_announced_on_every_import():
     assert line.endswith("=0"), f"the absent-Telethon condition is still announced at import time: {line}"
 
 
-# ---------------------------------------------------------------------------
-# The accessor trap, reproduced locally
-#
-# There is no Python 3.10 on this machine. Rather than record a derived row -
-# a CI red is a NEGATIVE measurement: it proves not-unconditionally-X, never
-# which value - these rebuild pre-3.11 pathlib's capture on whatever
-# interpreter is running, so the discrimination CI found stays falsifiable here
-# forever. Without them, dropping the accessor patch from the shipped worlds
-# would go unnoticed on 3.11+ and red again on the next 3.10 leg.
-# ---------------------------------------------------------------------------
-
-
+# Pre-3.11 pathlib's capture, rebuilt here so dropping the accessor patch reddens on 3.11+ too, not only on 3.10.
 _EMULATION = r"""
 import os
 import os.path
@@ -771,8 +609,7 @@ else:
 
 _BARE_MODULE_PATCH = "def _dead(*a, **k):\n    raise FileNotFoundError(2, 'dead cwd')\nos.getcwd = _dead\n"
 
-# A bare module patch that ALSO gives os.path.realpath the windows shape.
-# Reaches nothing the accessor captured, which is exactly the point.
+# A windows-shaped bare module patch: reaches nothing the accessor captured, which is the point.
 _BARE_WINDOWS_MODULE_PATCH = _BARE_MODULE_PATCH + (
     "_rr = os.path.realpath\n"
     "def _reads(p, *a, **k):\n"
@@ -788,10 +625,7 @@ _ZERO_ARG_ACCESSOR_PATCH = (
     "pathlib._NormalAccessor.getcwd = _dead\n"
 )
 
-# The shape as it was WRITTEN BEFORE ROUND 7 - capturing the live host
-# realpath. Kept as a named constant, not as a comment, because it is the only
-# thing that makes the platform slot falsifiable: it is the one shape whose
-# verdict is SUPPOSED to move with the dialect.
+# Captures the live host realpath: the one shape whose verdict is SUPPOSED to move with the dialect.
 _LIVE_CAPTURE_SHAPE = (
     "class _NormalAccessor:\n"
     "    getcwd = staticmethod(os.getcwd)\n"
@@ -817,23 +651,7 @@ _PLATFORMS = {
 
 
 def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "host") -> str:
-    """Run the pre-3.11 accessor emulation under a given world.
-
-    Args:
-        shape: Source defining ``pathlib._NormalAccessor``.
-        world: Source installing a denial.
-        call: Which pre-3.11 route to exercise - "cwd" for
-            ``Path.cwd() -> _accessor.getcwd()``, or "resolve" for
-            ``Path.resolve() -> _accessor.realpath()``. They are patched
-            separately and a world can arm one while leaving the other inert.
-        platform: "host" to leave this interpreter's path module alone, or
-            "posix"/"nt" to install that dialect's realpath before the shape
-            captures anything. Every verdict here must be identical under all
-            three - see ``test_every_accessor_verdict_is_platform_blind``.
-
-    Returns:
-        str: The child's VERDICT line.
-    """
+    """Run the pre-3.11 accessor emulation under a given world; returns the child's VERDICT line."""
     source = _EMULATION.format(platform=_PLATFORMS[platform], shape=shape, world=world)
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env.pop("AIPASS_TEST_LOG_DIR", None)
@@ -855,62 +673,26 @@ class TestTheAccessorTrapIsReproducibleLocally:
     """Pin the 3.10 discrimination on whatever interpreter is running."""
 
     def test_the_shipped_world_does_reach_a_captured_accessor(self):
-        """The cure, measured against the same emulation.
-
-        Same shape, same call, different world text - and this one arms. That
-        difference IS the fix; without it this pin and the bare-patch pin in
-        test_the_emulation_itself_captures_eagerly would agree and neither
-        would mean anything.
-        """
+        """The cure: the shipped world arms where the bare module patch does not."""
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_A) == "VERDICT=RAISED"
 
     def test_a_zero_argument_denial_breaks_the_call_instead_of_denying_it(self):
-        """A plain function on a class arrives BOUND - the accessor is self.
-
-        Without ``*a`` or ``staticmethod`` the replacement raises TypeError,
-        not FileNotFoundError, so a pin that only asserts "it raised" passes
-        for the wrong reason. Both halves are carried deliberately; either
-        alone cures this, which is why neither may be deleted as redundant.
-        """
+        """A plain function on a class arrives BOUND, so a zero-arg denial raises TypeError, not FileNotFoundError."""
         verdict = _run_emulation(ACCESSOR_SHAPE, _ZERO_ARG_ACCESSOR_PATCH)
         assert verdict.startswith("VERDICT=TYPEERROR"), verdict
 
     def test_the_emulation_itself_captures_eagerly(self):
-        """The published shape must capture at class creation, not at read.
-
-        A lazily-read accessor resolves the PATCHED name and would arm under
-        the bare module patch - so the two pins above would stop
-        distinguishing an accessor patch from a module patch, and the
-        instrument would quietly stop measuring the thing it exists for.
-        """
+        """The published shape must capture at class creation, not at read."""
         assert _run_emulation(_LAZY_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=RAISED"
-        # This is the defect: rebinding a name nothing reads again. The accessor
-        # took its copy of os.getcwd at class creation, so the world reports no
-        # denial at all - and every pin underneath it would be vacuously green.
+        # The defect: the accessor took its copy at class creation, so a bare module rebind arms nothing.
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
 
     def test_the_runtime_world_also_reaches_a_captured_accessor(self):
-        """The getcwd world the runtime pins use, under the same emulation.
-
-        Its consequence exists only before 3.11, so on this interpreter no
-        behavioural pin can tell the cured world from the uncured one. This is
-        where that difference is measured.
-        """
+        """The getcwd world the runtime pins use reaches the captured accessor, measurable only here on 3.11+."""
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_GETCWD_DENIED) == "VERDICT=RAISED"
 
     def test_the_platform_slot_is_live(self):
-        """ARMING PROBE for the litmus below - and the CI red, kept local.
-
-        A litmus that requires verdicts NOT to move is vacuously green if the
-        platform emulation never reaches the child: drop the slot, patch
-        nothing, and all three runs are the same run. So one shape must be
-        held whose verdict is SUPPOSED to move, and the honest choice is the
-        exact shape round 6 shipped - a live capture of the host realpath.
-
-        posix leaves an absolute path alone; nt reads the cwd before looking
-        at it. Same world, same call, two answers - which IS the windows-setup
-        red of round 7, reproduced on Linux and now unable to leave silently.
-        """
+        """ARMING PROBE for the litmus below: one shape whose verdict SHOULD move proves the platform slot is live."""
         posix = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="posix")
         nt = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="nt")
         assert posix == "VERDICT=NO_RAISE", posix
@@ -920,17 +702,7 @@ class TestTheAccessorTrapIsReproducibleLocally:
     def test_every_accessor_verdict_is_platform_blind(self):
         """THE LITMUS: no verdict in this class may move with the platform.
 
-        This class measures whether a PATCH reached a CAPTURED attribute. That
-        question has nothing to do with which path dialect the host speaks, so
-        every probe here must answer the same under a posix realpath, an nt
-        realpath, and this interpreter's own - and any probe whose answer moves
-        is importing behaviour it is not testing.
-
-        It cost a windows-setup red to learn: ``ACCESSOR_SHAPE`` used to
-        capture the LIVE ``os.path.realpath``, and on nt that reads the cwd on
-        its own account, so a world that reached NOTHING still answered RAISED
-        and the pin below convicted the host. Restore that capture and this
-        pin reddens here, on Linux, without waiting for CI.
+        Restore a live realpath capture in ACCESSOR_SHAPE and this reddens on Linux, without waiting for Windows CI.
         """
         cases = [
             (ACCESSOR_SHAPE, _BARE_MODULE_PATCH, "cwd"),
@@ -954,25 +726,7 @@ class TestTheAccessorTrapIsReproducibleLocally:
 class TestTheArmingProbeIsDialectDependent:
     """Why the world A arming probe uses an ABSOLUTE path - per dialect.
 
-    Round 6 established this claim on posix and shipped it as universal, and
-    the windows-setup leg refused it. It is TWO rows, not one, and each is
-    measured here under an emulated dialect rather than derived from a CI red:
-
-        dialect   relative probe   absolute probe
-        posix     RAISED           NO_RAISE
-        nt        RAISED           RAISED
-
-    posixpath.realpath consults the cwd only to complete a RELATIVE path;
-    ntpath.realpath reads it on its first lines whatever it was handed. So the
-    relative probe raises in both dialects, and in neither does that raise
-    mean the world armed - it means the path had a shape. That is the whole
-    claim, and it is what makes an arming probe spelled "." dishonest.
-
-    The absolute probe is where the dialects part, and the nt row is a fact
-    rather than a defect: ntpath's cwd read is a module-attribute lookup, so a
-    bare ``os.getcwd`` rebind reaches THROUGH a captured realpath on nt while
-    being inert on posix. The pre-3.11 capture that hid a dead world on 3.10
-    Linux would not have hidden it on 3.10 Windows.
+    A relative probe raises in both dialects whether or not the world armed, so "." reports a shape, never a world.
     """
 
     _EXPECTED = {
@@ -1006,12 +760,7 @@ class TestTheArmingProbeIsDialectDependent:
 
     @pytest.mark.parametrize("dialect", ["posix", "nt"])
     def test_a_relative_probe_raises_in_both_dialects(self, dialect):
-        """The load-bearing half: "." can never report a world, only a shape.
-
-        Both dialects, same answer, and the world here armed NOTHING the
-        captured accessor reads - so a RAISED from "." is worth nothing as an
-        arming signal on any platform.
-        """
+        """The load-bearing half: "." can never report a world, only a shape."""
         assert self._probe(dialect, NATIVE_PATHS[dialect]["relative"]) == "RAISED"
 
     @pytest.mark.parametrize("dialect", ["posix", "nt"])
@@ -1021,26 +770,12 @@ class TestTheArmingProbeIsDialectDependent:
         assert self._probe(dialect, NATIVE_PATHS[dialect]["absolute"]) == expected
 
     def test_a_dialect_probe_fed_the_other_dialect_spelling_measures_nothing(self):
-        """Negative control for the table: the spellings are not swappable.
-
-        Hand posix's "/probe" to the nt shape and it still raises - but for
-        the shape's unconditional read, not for anything about the path. Hand
-        nt's "C:\\probe" to the posix shape and it raises too, because
-        posixpath does not read a drive letter as absolute. Either mix-up
-        produces an all-RAISED table that looks like agreement and measures
-        the SPELLING. This is why NATIVE_PATHS exists.
-        """
+        """Negative control for the table: either spelling mix-up yields an all-RAISED table that measures nothing."""
         assert self._probe("posix", NATIVE_PATHS["nt"]["absolute"]) == "RAISED"
         assert self._probe("nt", NATIVE_PATHS["posix"]["absolute"]) == "RAISED"
 
     def test_the_live_host_agrees_with_its_own_dialect_row(self):
-        """The emulations are stand-ins; this is the run that licenses them.
-
-        Drives the real thing - ``pathlib.Path(p).resolve()`` on this
-        interpreter, this platform, no dialect patched - and requires it to
-        land on the row the table claims for ``os.name``. The day a host stops
-        agreeing with its own row, the table is wrong rather than the host.
-        """
+        """The emulations are stand-ins; the real Path.resolve() on this host must land on its own table row."""
         probe = (
             "import os, pathlib\n" + _BARE_MODULE_PATCH + "def _try(p):\n"
             "    try:\n"
@@ -1078,28 +813,14 @@ class TestTheArmingProbeIsDialectDependent:
 
 
 class TestTheAccessorTrapResolveRoute:
-    """The realpath half of the capture - Path.resolve(), not Path.cwd().
-
-    Before 3.11 these ride DIFFERENT captured attributes, so arming one says
-    nothing about the other.
-    """
+    """The realpath half of the capture - Path.resolve(), not Path.cwd(); arming one says nothing about the other."""
 
     def test_world_a_reaches_the_captured_accessor_on_the_resolve_route(self):
-        """WORLD_A patches two accessor attributes; this measures the second.
-
-        ``Path.cwd()`` and ``Path.resolve()`` go through DIFFERENT captured
-        attributes before 3.11 - ``getcwd`` and ``realpath``. Arming one says
-        nothing about the other, and WORLD_A's realpath patch was unmeasured
-        until a mutant removed it and the whole suite stayed green.
-        """
+        """WORLD_A patches two accessor attributes; this measures the second."""
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_A, call="resolve") == "VERDICT=RAISED"
 
     def test_a_bare_module_patch_misses_the_resolve_route_too(self):
-        """The same discrimination on the resolve route.
-
-        Without this the pin above could pass because the world armed for some
-        other reason rather than because it reached the accessor.
-        """
+        """The same discrimination on the resolve route."""
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve") == "VERDICT=NO_RAISE"
 
 
@@ -1107,9 +828,7 @@ class TestTheModuleWalk:
     def test_the_walk_skips_sandboxes_by_name_relative_to_its_root(self, tmp_path):
         """Pins the shipped defect: docs.local/ scratch tools were walked and went RED as modules.
 
-        The root stands inside a directory named dropbox, so a skip judged on
-        the whole path would hide the branch itself. A test module cannot be
-        served by the mutant runner; this pin stands on red first alone.
+        The root stands inside a directory named dropbox, so a skip judged on the whole path would hide the branch.
         """
         branch = tmp_path / "dropbox" / "skills"
         for rel in ("apps/a.py", "dropbox/tool.py", "docs.local/x/tool.py", ".archive/old.py", "tests/test_a.py"):

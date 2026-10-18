@@ -3,7 +3,7 @@
 # Description: Skills test configuration
 # Version: 3.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -18,19 +18,12 @@
 #   - Sets the AIPASS_TEST_LOG_DIR seam before the first aipass import
 # =============================================
 
-"""Skills test configuration.
-
-The autouse fixture here is the load-bearing one: this branch's json_handler
-binds the fleet's one json service (DPLAN-0325), which writes into skills_json/
-unless AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that
-variable per test, so every test lands in its own tmp_path without knowing it.
-"""
+"""Skills test configuration."""
 
 import os
 import tempfile
 
-# Redirect prax logs AND the fleet json service to a temp directory during
-# tests. Must be set before any prax imports to catch logger initialization.
+# Must be set before the first aipass import: loggers and the json service read it at init.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -41,45 +34,21 @@ from typing import Callable, Generator
 
 import pytest
 
-# aipass is an installed package (pip install -e), so nothing here hacks
-# sys.path to reach it — a conftest that prepends src/ hides a broken install
-# and shadows the wheel the e2e job measures.
+# No sys.path hack: prepending src/ would hide a broken install and shadow the wheel e2e measures.
 from aipass.cli.apps.modules import display
 from aipass.skills.apps.handlers.json import json_handler
 from aipass.skills.apps.modules import creator
 
 BRANCH_MODULE = "aipass.skills"
 
-# Archived files are a record, never a subject: nothing under .archive/ is
-# collected, imported or discovered (DPLAN-0325 - a sibling branch's rglob
-# walked into one and generated a dotted name that would not parse).
+# Nothing under .archive/ is collected: a rglob there yields dotted names that do not parse.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect this branch's json writes into a temp dir, and silence logging.
-
-    autouse=True on purpose: the shim's names write into the real skills_json/
-    unless the seam is set, so a test that forgets to redirect pollutes the
-    branch. The guard belongs on every test, not on the ones that remember.
-
-    The service recomputes its directory on every call, so setting the variable
-    here - after import - still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/skills/skills_json, so a seam AT tmp_path would create
-    # tmp_path/skills/ in every test and collide with a test that builds a
-    # directory of its own branch's name.
+    """Redirect json writes to a per-test sandbox (autouse: unset, they hit the real skills_json/)."""
+    # A seam AT tmp_path would create tmp_path/skills/ and collide with tests that build that dir.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -105,15 +74,7 @@ def pinned_console_width() -> None:
 
 @pytest.fixture(autouse=True)
 def bus_recorder(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Every trigger event the creator fires lands here, never on the real bus.
-
-    creator.py binds the trigger object at import, so the recorder replaces it
-    where this branch binds it; the bus probe counted ten real skill_created
-    fires before this (skills, fleet green leg 3).
-
-    Returns:
-        A list that fills with (event, data) tuples.
-    """
+    """Every trigger event the creator fires lands here, never on the real bus (creator binds it at import)."""
     fired: list = []
 
     class _Recorder:
@@ -149,13 +110,7 @@ def audit_hook_installed() -> None:
 
 @pytest.fixture()
 def audit_guard(audit_hook_installed: None) -> Generator[Callable, None, None]:
-    """Arm guards on the interpreter's audit events for one test.
-
-    The "open" event fires for builtins.open, io.open, os.open and pathlib
-    alike, so a guard sees every route to a file without replacing any stdlib
-    name - patching three names saw three routes. A guard that raises makes
-    the audited call raise that error.
-    """
+    """Arm guards on the interpreter's audit events ("open" covers every file route) for one test."""
     armed: list = []
 
     def arm(guard: Callable[[str, tuple], None]) -> None:

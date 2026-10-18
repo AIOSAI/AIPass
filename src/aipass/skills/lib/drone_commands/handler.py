@@ -18,16 +18,12 @@
 """
 Drone Commands skill handler.
 
-Top-level entry point that delegates to the command_runner module
-in the 3-layer apps/ structure.
-
 Called by: drone @skills run drone_commands <action> [args]
 """
 
 import os
 import sys
 
-# Set up import path for this skill's apps package
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _APPS_DIR = os.path.join(_THIS_DIR, "apps")
 _MODULES_DIR = os.path.join(_APPS_DIR, "modules")
@@ -41,19 +37,7 @@ from modules import command_runner
 
 
 def run(action, args=None, config=None):
-    """Execute a drone commands action.
-
-    Args:
-        action: One of: run, list, help
-        args: Dict of action arguments:
-            - run: {"command": "drone @module action"}
-            - list: {} (no args needed)
-            - help: {"module": "module_name"}
-        config: Dict of resolved config values (unused)
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute a drone commands action; returns {"success", "output", "error"}."""
     args = args or {}
     config = config or {}
 

@@ -3,31 +3,21 @@
 # Description: Entry point CLI for drone @skills
 # Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-09-26
+# Modified: 2026-10-17
 # =============================================
 
-"""Skills system entry point.
-
-Provides handle_command(command, args) for drone routing.
-Commands: list, info, run, create, validate, on, off, switch, --help, --version.
-"""
+"""Skills system entry point."""
 
 import os
 import sys
 from pathlib import Path
 
-# Prevent this script's parent dir from shadowing the 'skills' package.
-# Guarded inline rather than through handlers.module_paths: this block runs
-# BEFORE any aipass import by design, and importing the helper would resolve
-# 'aipass' through the very shadowed path this is here to remove.
-# resolve() reads the cwd on Windows (ntpath.realpath, unconditionally), so a
-# process with a dead cwd could not start the CLI at all.
+# Runs before any aipass import: the script dir would shadow the 'skills' package.
+# resolve() reads the cwd on Windows, so a dead cwd falls back to abspath.
 try:
     _script_dir = str(Path(__file__).resolve().parent)
 except OSError as _resolve_error:
-    # prax is not importable yet — this block runs before it on purpose — so
-    # the report goes to stderr, which is the accepted last resort for a
-    # diagnostic that cannot afford a logger.
+    # No logger yet (prax is not importable before this block): stderr is the last resort.
     sys.stderr.write(f"[skills] resolve() unavailable ({_resolve_error}); using the unresolved absolute spelling\n")
     _script_dir = str(Path(os.path.abspath(__file__)).parent)
 if _script_dir in sys.path:
@@ -36,7 +26,6 @@ if _script_dir in sys.path:
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
-# One version string, printed by --version and carried in this file's header.
 VERSION = "1.1.1"
 
 
@@ -49,11 +38,7 @@ def _header_description(path):
 
 
 def print_introspection(modules_dir=None):
-    """Display module introspection info, derived from the modules directory.
-
-    Args:
-        modules_dir: Directory to list; defaults to this entry point's modules/.
-    """
+    """Display module introspection info, derived from the modules directory."""
     modules_dir = Path(modules_dir) if modules_dir else Path(_script_dir) / "modules"
     console.print()
     console.print("[bold cyan]skills Entry Point[/bold cyan]")
@@ -73,15 +58,7 @@ def print_introspection(modules_dir=None):
 
 
 def handle_command(command, args=None):
-    """Route a skills command to the appropriate module.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if command was handled, False otherwise.
-    """
+    """Route a skills command to the appropriate module."""
     args = args or []
 
     if command is None:
@@ -111,9 +88,7 @@ def handle_command(command, args=None):
             return False
         name = args[0]
         action = args[1] if len(args) > 1 else None
-        # `run <skill> --help` must document the skill, not be dispatched as an
-        # action named "--help": handlers that fall through to a default reading
-        # (branch_health, inbox_check) answered with "Branch '--help' not found".
+        # Handlers with a default reading would take "--help" as an argument.
         if action in ("--help", "-h", "help"):
             return _cmd_info(name)
         extra_args = _parse_extra_args(args[2:]) if len(args) > 2 else {}
@@ -192,8 +167,7 @@ def _cmd_list():
 
     skills = discover_all()
 
-    # A switched-off skill is still LISTED, marked. A dark skill you cannot see
-    # is a dark skill you cannot turn back on.
+    # A switched-off skill is still listed, marked, so it can be turned back on.
     try:
         switch_state = read_state()
     except SwitchStateUnreadable as exc:
@@ -210,7 +184,6 @@ def _cmd_list():
     console.print(f"  Found {len(skills)} skill(s):")
     console.print()
 
-    # Group by source
     sources = {}
     for skill in skills:
         source = skill["source"]
@@ -322,7 +295,6 @@ def _cmd_create(args):
 
     name = args[0]
 
-    # Determine template type from flags
     template_type = "markdown_only"
     if "--with-handler" in args:
         template_type = "with_handler"
@@ -367,15 +339,7 @@ def _cmd_validate(name):
 
 
 def _cmd_switch(command, args):
-    """Route an off-switch command to the switch module.
-
-    Args:
-        command: One of on, off, switch.
-        args: Skill name, plus an optional reason for `off`.
-
-    Returns:
-        bool: True when the command succeeded.
-    """
+    """Route an off-switch command to the switch module."""
     from aipass.skills.apps.modules.switch import show_switch, switch_off, switch_on
 
     if command == "switch":
@@ -393,16 +357,7 @@ def _cmd_switch(command, args):
 
 
 def _parse_extra_args(arg_list):
-    """Parse extra arguments into a dict.
-
-    Supports key=value pairs and positional arguments.
-
-    Args:
-        arg_list: List of argument strings.
-
-    Returns:
-        dict: Parsed arguments.
-    """
+    """Parse key=value and positional arguments into a dict (positionals as arg0, arg1, ...)."""
     result = {}
     positional_idx = 0
 
@@ -430,17 +385,12 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     if not args:
-        # Bare `drone @skills` is the live self-map across the fleet; it printed
-        # this page's reference text instead, so print_introspection was
-        # unreachable through drone. --help is still the reference.
+        # Bare `drone @skills` is the live self-map; --help is the reference.
         ok = handle_command(None)
     else:
         command = args[0]
         remaining = args[1:] if len(args) > 1 else []
         ok = handle_command(command, remaining)
 
-    # drone runs a branch command as a subprocess and propagates its return code.
-    # Discarding the result here made every failure — unknown skill, missing
-    # argument, unknown command — exit 0, so `drone @skills validate x && ...`
-    # ran the second half on a failed validate.
+    # drone propagates this exit code; callers chain on it (`validate x && ...`).
     sys.exit(0 if ok else 1)

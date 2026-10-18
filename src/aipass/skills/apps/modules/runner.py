@@ -3,14 +3,10 @@
 # Description: Execute skills
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill runner module.
-
-Thin orchestration layer - delegates to runner_handler for executing
-skill handlers and assembling markdown output.
-"""
+"""Skill runner module."""
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
@@ -21,15 +17,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if not args:
         print_introspection()
         return True
@@ -76,28 +64,14 @@ def _parse_run_args(arg_list):
 
 
 def run_skill(name, action=None, args=None, config=None):
-    """Execute a skill by name.
-
-    Args:
-        name: The skill name to run.
-        action: The action to perform (required for handler-based skills).
-        args: Dict of action arguments.
-        config: Dict of resolved config values.
-
-    Returns:
-        dict: {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute a skill by name: {success, output, error}."""
     args = args or {}
     config = config or {}
 
-    # The off-switch's second door (DPLAN-0306). Stopping a skill's systemd
-    # units only quiets the machine; this path starts a skill's code IN-PROCESS
-    # with systemd never consulted, so the gate has to bite here too — and
-    # before load_skill, which imports the skill's handler.
+    # This path runs skill code in-process, bypassing systemd, so the off-switch
+    # gates here too — before load_skill, which imports the skill's handler.
     try:
         if not is_enabled(name):
-            # The recorded reason rides in the refusal, so a retired skill says
-            # why it is dark in the one line a caller sees (telegram, 2026-09-14).
             reason = off_reason(name)
             why = f" ({reason})" if reason else ""
             return {
@@ -109,12 +83,10 @@ def run_skill(name, action=None, args=None, config=None):
                 ),
             }
     except SwitchStateUnreadable as exc:
-        # Cannot tell what is off, so nothing runs. Answering "everything is on"
-        # here would start the very processes an operator switched off.
+        # Fail closed: treating unreadable state as "on" would run switched-off skills.
         logger.error("Refusing to run '%s' — switch state unreadable: %s", name, exc)
         return {"success": False, "output": "", "error": str(exc)}
 
-    # Load the skill
     loaded = load_skill(name)
     if not loaded["success"]:
         return {
@@ -127,7 +99,6 @@ def run_skill(name, action=None, args=None, config=None):
     metadata = loaded["metadata"]
     body = loaded["body"]
 
-    # Delegate to handler for execution
     if handler is not None:
         result = run_handler(handler, name, action, args, config)
     else:

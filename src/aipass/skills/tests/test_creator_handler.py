@@ -3,7 +3,7 @@
 # Description: Tests for skill creation handler
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/creator_handler.py: is_valid_name and create_skill."""
@@ -16,11 +16,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aipass.skills.apps.handlers.creator_handler import create_skill, is_valid_name
-
-
-# ===================================================================
-# 1. is_valid_name — name validation
-# ===================================================================
 
 
 class TestIsValidName:
@@ -39,7 +34,7 @@ class TestIsValidName:
         assert is_valid_name("my_skill") is True
 
     def test_hyphens_allowed(self):
-        # Mutant killed 2026-09-27: "-" dropped from is_valid_name's "-_".
+        # Pins "-" in is_valid_name's "-_".
         assert is_valid_name("my-skill") is True
 
     def test_mixed_separators(self):
@@ -74,11 +69,6 @@ class TestIsValidName:
         assert is_valid_name("my/skill") is False
 
 
-# ===================================================================
-# 2. create_skill — skill creation orchestration
-# ===================================================================
-
-
 class TestCreateSkill:
     """Tests for create_skill — full creation pipeline."""
 
@@ -100,9 +90,7 @@ class TestCreateSkill:
         assert (Path(result["path"]) / "apps").is_dir()
 
     def test_returns_created_files_list(self, tmp_path):
-        # Mutant killed 2026-09-27: copy_template appends before its is_file() filter, listing directories.
-        # The answer itself is pinned, order and spelling: re-sorting it as Paths
-        # compared case-blind on Windows and put SKILL.md last (CI, 2026-10-10).
+        # Pins the is_file() filter, and the exact order: re-sorting as Paths is case-blind on Windows.
         result = create_skill("test-files", template_type="full", target_dir=tmp_path)
         assert result["files"] == [
             "SKILL.md",
@@ -164,8 +152,7 @@ class TestCreateSkill:
     def test_logs_json_operation_on_failure(self, tmp_path):
         _mod = sys.modules["aipass.skills.apps.handlers.creator_handler"]
 
-        # Use a duplicate-name scenario so validation passes but copy fails,
-        # which is the only failure path that reaches json_handler.log_operation.
+        # A duplicate passes validation but fails the copy: the only failure path that logs.
         create_skill("dup-log", template_type="markdown_only", target_dir=tmp_path)
 
         with patch.object(_mod, "json_handler") as mock_jh:

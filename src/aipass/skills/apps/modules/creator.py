@@ -3,16 +3,10 @@
 # Description: Scaffold new skills from templates
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill creator module.
-
-Scaffolds new skills from templates into a target location.
-Supports three tiers: markdown_only, with_handler, full.
-
-Thin orchestration layer - delegates to creator_handler for logic.
-"""
+"""Skill creator module."""
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
@@ -27,15 +21,7 @@ except ImportError:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if not args:
         print_introspection()
         return True
@@ -62,20 +48,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def create_skill(name, template_type="markdown_only", target_dir=None):
-    """Create a new skill from a template.
-
-    Delegates to handler for validation and creation logic,
-    then renders results with Rich.
-
-    Args:
-        name: Name for the new skill (used as directory name and placeholder).
-        template_type: Template tier - "markdown_only", "with_handler", or "full".
-        target_dir: Directory to create the skill in. Defaults to
-                    .aipass/skills/ in the current working directory.
-
-    Returns:
-        dict: {"success": bool, "path": str|None, "files": list[str], "error": str|None}
-    """
+    """Create a new skill from a template (target_dir defaults to ./.aipass/skills/)."""
     result = _handler_create_skill(name, template_type=template_type, target_dir=target_dir)
 
     if result["success"]:

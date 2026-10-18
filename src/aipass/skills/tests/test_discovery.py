@@ -3,7 +3,7 @@
 # Description: Unit tests for skills discovery
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: skills/tests
 # =============================================
 
@@ -42,9 +42,7 @@ class TestGetSearchPaths:
 
 
 class TestExtractFrontmatter:
-    """Reached through parse_frontmatter() on a SKILL.md under tmp_path (item 10);
-    PyYAML is installed here so this already exercises the real yaml.safe_load path,
-    same as it did when called directly."""
+    """Frontmatter extraction through parse_frontmatter(), on the real yaml.safe_load path."""
 
     def test_valid_frontmatter(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
@@ -88,11 +86,7 @@ class TestExtractFrontmatter:
 
 
 class TestSimpleFrontmatterParse:
-    """The no-yaml fallback parser, reached through parse_frontmatter() on a
-    SKILL.md under tmp_path (item 10). PyYAML is installed in this environment
-    and would otherwise intercept every case below, so the module's `yaml`
-    binding is patched to None to force the real fallback branch — the same
-    edge the product falls back to when PyYAML is absent."""
+    """The no-yaml fallback parser, forced by patching `yaml` to None (PyYAML would intercept otherwise)."""
 
     @pytest.fixture(autouse=True)
     def _force_no_yaml(self, monkeypatch):
@@ -134,27 +128,18 @@ class TestSimpleFrontmatterParse:
         assert result["requires"]["config"] == ["MY_TOKEN"]
 
     def test_nested_block_list(self, tmp_path):
-        # The no-yaml fallback silently answered "" here, so a skill's declared
-        # systemd units read as empty on any runner without PyYAML. That is the
-        # CI red of 2026-08-19 (run 32222871212), not a machine-state problem.
+        # Without this, declared systemd units read as empty on any runner lacking PyYAML.
         result = self._parse(tmp_path, "switch:\n  systemd_user:\n    - telegram-bot@api\n    - telegram-bot@base")
         assert result["switch"]["systemd_user"] == ["telegram-bot@api", "telegram-bot@base"]
 
     def test_top_level_block_list(self, tmp_path):
-        # Same defect one level up, and already live: screen_lock and github
-        # both declare when_to_use this way, and both parsed to {} without yaml.
+        # screen_lock and github declare when_to_use this way.
         result = self._parse(tmp_path, 'when_to_use:\n  - "lock the screen"\n  - "walking away"')
         assert result["when_to_use"] == ["lock the screen", "walking away"]
 
     def test_a_block_list_does_not_leak_into_the_next_key(self, tmp_path):
-        # The items must land under the key they follow. An earlier draft of
-        # this test put no "- " line AFTER the second key, so a parser that
-        # never closed the open list still passed it — the leak needs a later
-        # item to steal before it is visible.
-        # The open list has to be a NESTED inline one: only that branch arms the
-        # list cursor, so only that shape can leak. Two earlier drafts of this
-        # test used a top-level list and passed against a parser that never
-        # closed the cursor at all.
+        # Needs a NESTED inline list (only it arms the list cursor) and a later "- " item to steal,
+        # or a parser that never closes the cursor still passes.
         result = self._parse(tmp_path, "requires:\n  pip: [praw]\nwhen_to_use:\n  - stolen-if-broken\nversion: 3")
 
         assert result["requires"]["pip"] == ["praw"]
@@ -162,9 +147,6 @@ class TestSimpleFrontmatterParse:
         assert result["version"] == 3
 
     def test_an_empty_nested_key_swallows_nothing_from_its_siblings(self, tmp_path):
-        # Reaches the undecided-nested-key branch for real: "pip:" carries no
-        # value and no list follows, so the parser must leave it empty and let
-        # the sibling keys parse normally.
         result = self._parse(tmp_path, "requires:\n  pip:\n  bins: [gh]\n  config: [TOKEN]")
 
         assert not result["requires"]["pip"]
@@ -187,10 +169,7 @@ class TestSimpleFrontmatterParse:
 
 
 class TestParseSimpleValue:
-    """Value parsing reached through parse_frontmatter() on a single keyed
-    line (item 10), with the module's `yaml` binding patched to None so the
-    no-yaml fallback — and its value parser — resolves the type, the same
-    branch exercised directly before."""
+    """The no-yaml fallback's value parser, reached through parse_frontmatter() on one keyed line."""
 
     @pytest.fixture(autouse=True)
     def _force_no_yaml(self, monkeypatch):
@@ -247,8 +226,7 @@ class TestDiscoverSkillsInPath:
     def test_skill_dict_structure(self):
         catalog_path = Path(__file__).resolve().parent.parent / "lib"
         skills = discover_skills_in_path(catalog_path, "builtin")
-        # The floor: without it an empty lib/ makes the loop below a silent
-        # pass. Seven built-in skills ship in lib/ (measured).
+        # The floor: without it an empty lib/ makes the loop below a silent pass.
         assert len(skills) == 7, f"lib/ discovery returned {len(skills)} skills, expected 7"
         for skill in skills:
             assert "name" in skill

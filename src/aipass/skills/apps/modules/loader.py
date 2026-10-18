@@ -3,14 +3,10 @@
 # Description: Load SKILL.md and handlers
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill loader module.
-
-Thin orchestration layer - delegates to loader_handler for parsing
-SKILL.md files and dynamically importing handler modules.
-"""
+"""Skill loader module."""
 
 from aipass.cli.apps.modules import console, warning
 from aipass.prax import logger
@@ -20,18 +16,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Loader is a service module used by other modules (runner, validator, etc.).
-    It does not handle any direct CLI commands.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: Always False - loader is a service module, not a command handler.
-    """
+    """Handle commands routed by the entry point; loader is a service module with no CLI commands."""
     if not args:
         print_introspection()
         return True
@@ -43,23 +28,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def load_skill(name):
-    """Load a skill by name.
-
-    Discovers all skills, then delegates to handler for loading logic.
-
-    Args:
-        name: The skill name to load.
-
-    Returns:
-        dict: {
-            "success": bool,
-            "metadata": dict or None,
-            "body": str or None,
-            "handler": module or None,
-            "path": Path or None,
-            "error": str or None
-        }
-    """
+    """Load a skill by name: {success, metadata, body, handler, path, error}."""
     registry = discover_all()
     result = _handler_load_skill(name, registry)
 

@@ -17,20 +17,15 @@
 
 """
 Command runner module for drone_commands skill.
-
-Orchestrates drone command execution by coordinating between
-the executor (subprocess) and parser (output cleanup) handlers.
 """
 
 import os
 import sys
 
-# Resolve imports relative to this skill's package
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _APPS_DIR = os.path.dirname(_THIS_DIR)
 _HANDLERS_DIR = os.path.join(_APPS_DIR, "handlers")
 
-# Add handlers to path if not already there
 if _HANDLERS_DIR not in sys.path:
     sys.path.insert(0, _HANDLERS_DIR)
 if _APPS_DIR not in sys.path:
@@ -44,16 +39,7 @@ DRONE_BIN = os.path.join(AIPASS_ROOT, "drone")
 
 
 def run_command(command_string, timeout=None):
-    """Run an arbitrary drone command.
-
-    Args:
-        command_string: The full drone command to execute
-            (e.g., "drone @ai_mail inbox").
-        timeout: Optional timeout in seconds.
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Run an arbitrary drone command; returns {"success", "output", "error"}."""
     if not command_string or not command_string.strip():
         return {
             "success": False,
@@ -61,15 +47,12 @@ def run_command(command_string, timeout=None):
             "error": "No command provided",
         }
 
-    # Ensure command starts with "drone" if not already
     cmd = command_string.strip()
     if not cmd.startswith("drone"):
         cmd = f"drone {cmd}"
 
-    # Execute via handler
     result = executor.execute(cmd, cwd=AIPASS_ROOT, timeout=timeout)
 
-    # Parse and clean output
     stdout_clean = parser.parse_output(result.get("stdout", ""))
     stderr_clean = parser.parse_output(result.get("stderr", ""))
 
@@ -80,7 +63,6 @@ def run_command(command_string, timeout=None):
             "error": None,
         }
 
-    # Command failed -- include both stdout and stderr
     error_parts = []
     if stderr_clean:
         error_parts.append(stderr_clean)
@@ -96,14 +78,7 @@ def run_command(command_string, timeout=None):
 
 
 def list_modules(timeout=None):
-    """List all available drone modules via `drone systems`.
-
-    Args:
-        timeout: Optional timeout in seconds.
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """List all available drone modules via `drone systems`."""
     result = executor.execute("drone systems", cwd=AIPASS_ROOT, timeout=timeout)
 
     if not result["success"]:
@@ -121,7 +96,6 @@ def list_modules(timeout=None):
         module_list = "\n".join(f"  - {m}" for m in modules)
         output = f"Registered modules ({len(modules)}):\n{module_list}"
     else:
-        # Fallback: show raw cleaned output if parsing found nothing
         output = stdout_clean if stdout_clean else "No modules found"
 
     return {
@@ -132,15 +106,7 @@ def list_modules(timeout=None):
 
 
 def module_help(module_name, timeout=None):
-    """Get help for a specific drone module.
-
-    Args:
-        module_name: The module to get help for (e.g., "ai_mail").
-        timeout: Optional timeout in seconds.
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Get help for a specific drone module."""
     if not module_name or not module_name.strip():
         return {
             "success": False,

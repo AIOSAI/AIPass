@@ -9,9 +9,6 @@
 """
 Inbox Check skill handler.
 
-Scan AIPass branches for .ai_mail.local/inbox.json and report
-unread message counts or full message listings.
-
 Called by: drone @skills run inbox_check <action>
 """
 
@@ -20,16 +17,7 @@ from pathlib import Path
 
 
 def run(action, args=None, config=None):
-    """Execute an inbox check action.
-
-    Args:
-        action: One of: summary (default), all, or a specific branch name
-        args: Dict of action arguments (unused for this skill)
-        config: Dict of resolved config values (unused for this skill)
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute an inbox check action: summary, all, or a branch name."""
     args = args or {}
     config = config or {}
 
@@ -50,11 +38,6 @@ def get_actions():
     return ["summary", "all", "<branch_name>"]
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _src_root():
     """Return the src/ directory by navigating up from this handler."""
     # handler.py -> inbox_check/ -> lib/ -> skills/ -> aipass/ -> src/
@@ -65,7 +48,6 @@ def _find_inboxes():
     """Yield (branch_name, inbox_path) for all branches with inbox files."""
     src = _src_root()
 
-    # src/aipass/*/  branches
     aipass_dir = src / "aipass"
     if aipass_dir.is_dir():
         for branch_dir in sorted(aipass_dir.iterdir()):
@@ -74,7 +56,6 @@ def _find_inboxes():
                 if inbox.is_file():
                     yield (branch_dir.name, inbox)
 
-    # src/skills/ itself
     skills_inbox = src / "skills" / ".ai_mail.local" / "inbox.json"
     if skills_inbox.is_file():
         yield ("skills", skills_inbox)
@@ -147,7 +128,6 @@ def _scan_branch(branch_name):
     """Show inbox for a specific branch."""
     src = _src_root()
 
-    # Check src/aipass/<branch_name>/ first, then src/<branch_name>/
     candidates = [
         src / "aipass" / branch_name / ".ai_mail.local" / "inbox.json",
         src / branch_name / ".ai_mail.local" / "inbox.json",

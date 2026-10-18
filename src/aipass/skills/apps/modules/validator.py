@@ -3,14 +3,10 @@
 # Description: Skill validation module
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill validator module.
-
-Thin orchestration layer - delegates to validator handler for
-checking skill requirements (pip packages, CLI bins, config/env vars).
-"""
+"""Skill validator module."""
 
 from aipass.prax import logger  # noqa: F401
 from aipass.cli.apps.modules import console, error
@@ -19,15 +15,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if not args:
         print_introspection()
         return True
@@ -67,24 +55,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def validate_skill(skill_metadata):
-    """Check if a skill's requirements are met.
-
-    Delegates to handler for validation logic.
-
-    Args:
-        skill_metadata: Dict with 'requires' key containing:
-            - pip: list of Python package names
-            - bins: list of CLI tool names
-            - config: list of env var / config key names
-
-    Returns:
-        dict: {
-            "valid": bool,
-            "missing_pip": list[str],
-            "missing_bins": list[str],
-            "missing_config": list[str]
-        }
-    """
+    """Check a skill's requires {pip, bins, config}: {valid, missing_pip, missing_bins, missing_config}."""
     result = _handler_validate(skill_metadata)
     json_handler.log_operation(
         "skill_validated",

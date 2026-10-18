@@ -3,14 +3,10 @@
 # Description: Find skills across search paths
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill discovery module.
-
-Thin orchestration layer - delegates to discovery_handler for scanning
-search paths and parsing SKILL.md frontmatter.
-"""
+"""Skill discovery module."""
 
 from aipass.prax import logger  # noqa: F401
 from aipass.cli.apps.modules import console
@@ -24,15 +20,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The subcommand to execute.
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if not args:
         print_introspection()
         return True
@@ -77,12 +65,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def discover_all():
-    """Discover all skills across all search paths.
-
-    Returns:
-        list[dict]: All discovered skills, deduplicated by name
-            (first match wins).
-    """
+    """Discover all skills across all search paths, deduplicated by name (first match wins)."""
     search_paths = get_search_paths()
     result = build_registry(search_paths, discover_skills_in_path)
     json_handler.log_operation("skills_discovered", {"count": len(result)})

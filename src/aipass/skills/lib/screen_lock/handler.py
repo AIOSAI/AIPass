@@ -3,32 +3,14 @@
 # Name: handler.py - Screen Lock skill handler
 # Date: 2026-08-14
 # Version: 1.2.0
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # Category: skills/lib/screen_lock
 # =============================================
 
 """
 Screen Lock skill handler.
-
-Password-locks the graphical session and leaves everything running. No root, no
-sudoers grant, no polkit rule, and nothing sleeps — unlike /suspend there is no
-wake, grace-window or reachability story to get wrong (the owner's ruling #217).
-
-Extracted from the Telegram control bot (DPLAN-0300) so any caller — the host
-API's verb lane, drone, another skill — can lock the machine without importing
-the Telegram stack. Stdlib + the Prax logger only; that isolation is a test.
-
-DOCTRINE: a destructive action never fires from a locked screen. Lock is the
-exception that MUST work from anywhere — so this verb is never gated on screen
-state, session env, or a caller's desktop context. It tries, then reports.
-
-THE READ BESIDE THE LOCK (FPLAN-0585): lock_state() answers whether the screen
-IS locked, through the same pair the lock writes through, in the same order.
-It is not gated either, it never locks anything, and a read that cannot tell
-answers locked None with a reason — never False, because unknown is not
-unlocked.
-
-Called by: drone @skills run screen_lock lock | state
+Never gated on screen state or session: lock must work from anywhere (see SKILL.md).
+Stdlib + the Prax logger only; that isolation is a test.
 """
 
 import os
@@ -42,8 +24,7 @@ METHOD_DBUS = "dbus"
 
 LOCK_FAILED_MESSAGE = "Could not lock the screen — loginctl and the D-Bus fallback both failed."
 
-# Why lock_state() could not tell. A code for callers to branch on; the sentence
-# beside it is for people.
+# Why lock_state() could not tell: a code for callers to branch on.
 REASON_NO_SESSION = "no_session"
 REASON_NO_READER = "no_reader"
 REASON_READ_FAILED = "read_failed"
@@ -61,16 +42,7 @@ _GNOME_SCREENSAVER = [
 
 
 def run(action, args=None, config=None):
-    """Execute a screen_lock action.
-
-    Args:
-        action: "lock" locks the screen; "state" reads whether it is locked.
-        args: Dict of action arguments (unused for this skill).
-        config: Dict of resolved config values (unused for this skill).
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute a screen_lock action ("lock" or "state"): {success, output, error}."""
     args = args or {}
     config = config or {}
 
@@ -105,26 +77,8 @@ def get_actions():
     return ["lock", "state"]
 
 
-# ---------------------------------------------------------------------------
-# Public API — what the Telegram bot and the host verb lane call
-# ---------------------------------------------------------------------------
-
-
 def lock_screen() -> dict:
-    """Password-lock the screen, leaving every process running.
-
-    Tries `loginctl lock-session` against the explicitly resolved graphical
-    session first, then the GNOME ScreenSaver D-Bus method. Never reports a
-    lock it did not achieve.
-
-    Returns:
-        dict: {
-            "locked": bool,
-            "method": "loginctl" | "dbus" | None,
-            "session": str|None — the logind session id, None if unresolved,
-            "error": str|None,
-        }
-    """
+    """Password-lock the screen, leaving every process running: {locked, method, session, error}."""
     session_id = resolve_graphical_session()
     target = ["loginctl", "lock-session"] + ([session_id] if session_id else [])
 
@@ -147,23 +101,9 @@ def lock_screen() -> dict:
 
 
 def lock_state() -> dict:
-    """Read whether the screen is locked. Changes nothing, never raises.
-
-    Asks logind for LockedHint on the resolved graphical session first — the
-    mechanism lock_screen() writes through, so read and write agree — then
-    GNOME ScreenSaver's GetActive. Not gated: the lock never is, so its read
-    is not either.
-
-    Returns:
-        dict: {
-            "ok": bool — True when a reader answered,
-            "locked": bool|None — None whenever ok is False,
-            "method": "loginctl" | "dbus" | None,
-            "session": str|None — the resolved logind session id,
-            "reason": "no_session" | "no_reader" | "read_failed" | None,
-            "detail": str — this skill's sentence for the answer or the absence,
-        }
-    """
+    """Read whether the screen is locked. Changes nothing, never raises."""
+    # Reads through the same pair, in the same order, lock_screen() writes through.
+    # Unknown is never unlocked: a read that cannot tell answers locked None.
     session_id, logind_reason, logind_why = _resolve_session()
     if session_id:
         locked, logind_reason, logind_why = _read_locked_hint(session_id)
@@ -178,21 +118,14 @@ def lock_state() -> dict:
 
     reason = _cannot_tell_reason(logind_reason, dbus_reason)
     detail = f"Cannot tell whether the screen is locked. {logind_why} {dbus_why}"
-    # An answer handed to the caller, not a fault here: @api polls this every
-    # few seconds, and a WARNING per poll escalated as a 280-hour repeat.
+    # info, not warning: this is polled every few seconds and is an answer, not a fault.
     logger.info("lock_state cannot tell (%s): %s", reason, detail)
     return _state(False, None, None, session_id, reason, detail)
 
 
 def resolve_graphical_session() -> Optional[str]:
-    """
-    Find this user's active graphical logind session id, or None.
-
-    Callers commonly run as a `systemd --user` service, outside the graphical
-    session scope — they have no XDG_SESSION_ID, so `loginctl lock-session`
-    with no argument has no ambient session to resolve and may refuse. Naming
-    the session explicitly makes the call work from any context.
-    """
+    """Find this user's active graphical logind session id, or None."""
+    # systemd --user callers have no XDG_SESSION_ID, so the bare lock-session may refuse.
     return _resolve_session()[0]
 
 
@@ -235,17 +168,8 @@ def _resolve_session() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     return None, REASON_NO_SESSION, "logind lists no active graphical session of this user."
 
 
-# ---------------------------------------------------------------------------
-# The read's two legs
-# ---------------------------------------------------------------------------
-
-
 def _read_locked_hint(session_id: str) -> Tuple[Optional[bool], Optional[str], Optional[str]]:
-    """logind's LockedHint for one session: yes is locked, no is unlocked, anything else is no answer.
-
-    Returns:
-        tuple: (True/False, None, None) when it answered, else (None, reason code, sentence).
-    """
+    """logind's LockedHint for one session: yes is locked, no is unlocked, anything else is no answer."""
     try:
         shown = subprocess.run(
             ["loginctl", "show-session", session_id, "-p", "LockedHint"],
@@ -257,8 +181,7 @@ def _read_locked_hint(session_id: str) -> Tuple[Optional[bool], Optional[str], O
         logger.info("lock_state: loginctl not found, trying the D-Bus screensaver read")
         return None, REASON_NO_READER, "loginctl is not installed."
     except (OSError, subprocess.SubprocessError) as e:
-        # info, not warning: lock_state is polled, and a WARNING per poll is the
-        # shipped defect test_a_cannot_tell_is_logged_as_an_answer_not_a_warning pins.
+        # info, not warning: lock_state is polled (test_a_cannot_tell_is_logged_as_an_answer_not_a_warning).
         logger.info(
             "lock_state: LockedHint read of session %s failed: %s", session_id, _host_log_words(e), exc_info=True
         )
@@ -279,11 +202,7 @@ def _read_locked_hint(session_id: str) -> Tuple[Optional[bool], Optional[str], O
 
 
 def _read_screensaver_active() -> Tuple[Optional[bool], Optional[str], Optional[str]]:
-    """GNOME ScreenSaver's GetActive: (true,) is locked, (false,) is unlocked, anything else is no answer.
-
-    Returns:
-        tuple: (True/False, None, None) when it answered, else (None, reason code, sentence).
-    """
+    """GNOME ScreenSaver's GetActive: (true,) is locked, (false,) is unlocked, anything else is no answer."""
     try:
         shown = subprocess.run(
             _GNOME_SCREENSAVER + ["org.gnome.ScreenSaver.GetActive"],
@@ -329,12 +248,8 @@ def _word(locked: bool) -> str:
 
 
 def _describe(exc: Exception) -> str:
-    """Name a failed reader for a published sentence: its class, and its exit code when it had one.
-
-    detail travels verbatim to the handset through api's host server, so the
-    reader's own words (stderr, the OS message) never ride in it; the site that
-    caught the error logs them (CodeQL py/stack-trace-exposure).
-    """
+    """Name a failed reader for a published sentence: its class, and its exit code when it had one."""
+    # detail is published verbatim to the handset; stderr stays in the host log (CodeQL).
     if isinstance(exc, subprocess.CalledProcessError):
         return f"{type(exc).__name__}, exit {exc.returncode}"
     return type(exc).__name__
@@ -349,11 +264,6 @@ def _host_log_words(exc: Exception) -> str:
         said = " ".join((stderr or "").split())
         return f"exit {exc.returncode}: {said}" if said else f"exit {exc.returncode}"
     return str(exc) or type(exc).__name__
-
-
-# ---------------------------------------------------------------------------
-# Fallback path
-# ---------------------------------------------------------------------------
 
 
 def _lock_via_dbus() -> bool:

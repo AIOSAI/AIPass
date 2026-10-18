@@ -3,7 +3,7 @@
 # Description: Skill off-switch tests
 # Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -38,23 +38,13 @@ from aipass.skills.apps.modules import runner
 from aipass.skills.lib.telegram.apps.handlers import notifier
 
 
-# =============================================
-# FAKE SYSTEMCTL
-# =============================================
-
-
 class FakeSystemctl:
-    """Models `systemctl --user` over a set of units.
-
-    Records every argv it is handed and answers is-active from modelled state,
-    so a test can assert both what was ASKED and what the machine would SAY.
-    """
+    """Models `systemctl --user` over a set of units, recording every argv it is handed."""
 
     def __init__(self, active=(), masked=(), stubborn=()):
         self.active = set(active)
         self.masked = set(masked)
         self.enabled = set(active)
-        # Units that refuse to die - models a stop that does not take.
         self.stubborn = set(stubborn)
         self.calls = []
 
@@ -97,10 +87,8 @@ class FakeSystemctl:
 def state_dir(tmp_path, monkeypatch):
     """Point the switch's state document at a throwaway directory.
 
-    The redirect is the AIPASS_TEST_LOG_DIR seam the fleet json service reads
-    per call (DPLAN-0325) - the shim has no attribute left to patch. The
-    directory is then MEASURED off the service rather than spelled out, so this
-    fixture cannot claim a sandbox the switch does not actually write into.
+    The json service reads the AIPASS_TEST_LOG_DIR seam per call; the directory is MEASURED
+    off the service so this fixture cannot claim a sandbox the switch does not write into.
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     target = jh.get_json_path("switch", "data").parent
@@ -114,37 +102,21 @@ def fake_units(monkeypatch):
     monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one", "fake-bot@two"])
 
 
-# =============================================
-# STATE: PERSISTENCE
-# =============================================
-
-
 class TestStatePersistence:
     """The toggle's last value is what holds after a restart."""
 
     def test_state_path_follows_the_branch_json_dir(self, state_dir):
-        # Resolved at call time, not import time - else test isolation (and any
-        # relocation of skills_json/) silently writes to the wrong place.
+        # Resolved at call time, not import time, else isolation silently writes to the wrong place.
         assert sh.get_state_path() == state_dir / "switch_state.json"
 
     def test_a_skill_with_no_entry_is_on(self, state_dir):
-        # Fresh checkout: nothing has ever been toggled, so nothing is dark.
         assert sh.is_enabled("telegram") is True
 
     def test_off_survives_a_process_restart(self, state_dir):
         sh.set_enabled("telegram", False, reason="retired 08-18")
 
-        # A REAL restart: a fresh interpreter reading the same disk. An
-        # in-process importlib.reload() was tried first and rejected — it
-        # rebinds the module's globals, so SwitchStateUnreadable becomes a new
-        # class object while runner.py still holds the old one by value, and a
-        # LATER test in the same session stopped catching it. A restart test
-        # that corrupts the session it runs in is not modelling a restart.
-        #
-        # The child is aimed at the same disk through the seam, spelled out in
-        # its env rather than inherited: a pin that relies on inheritance is
-        # green for a reason it never states, and would stay green if the
-        # fixture stopped redirecting at all.
+        # A fresh interpreter, not importlib.reload(): reload rebinds SwitchStateUnreadable while
+        # runner.py holds the old class, breaking later tests. The seam is spelled out, not inherited.
         probe = (
             "import sys;"
             "from aipass.skills.apps.handlers import switch_handler as s;"
@@ -187,9 +159,7 @@ class TestStatePersistence:
         assert sh.is_enabled("screen_lock") is False
 
     def test_re_recording_the_same_value_keeps_the_reason(self, state_dir):
-        # Found live: `off telegram "<why>"` then a bare `off telegram` wiped the
-        # reason. The reason IS the record of why a skill is dark — a repeat of
-        # the same instruction must not erase it.
+        # The reason is the record of why a skill is dark; a bare repeat must not erase it.
         sh.set_enabled("telegram", False, reason="retired 08-18 by ruling")
         sh.set_enabled("telegram", False)
 
@@ -203,16 +173,12 @@ class TestStatePersistence:
         assert sh.read_state()["telegram"]["reason"] == "second reason"
 
     def test_flipping_the_value_drops_a_reason_that_no_longer_applies(self, state_dir):
-        # "retired" describes an OFF skill. Carrying it onto ON would misdescribe
-        # the state it is attached to.
         sh.set_enabled("telegram", False, reason="retired 08-18")
         sh.set_enabled("telegram", True)
 
         assert "reason" not in sh.read_state()["telegram"]
 
     def test_changed_only_moves_when_the_value_moves(self, state_dir):
-        # A "changed" stamp that advances on a no-op reports a change that never
-        # happened, in the one document meant to be the durable truth.
         sh.set_enabled("telegram", False, reason="retired 08-18")
         first = sh.read_state()["telegram"]["changed"]
 
@@ -226,11 +192,6 @@ class TestStatePersistence:
         sh.set_enabled("telegram", False)
         leftovers = [p.name for p in state_dir.iterdir() if p.suffix == ".tmp"]
         assert leftovers == []
-
-
-# =============================================
-# STATE: FAIL CLOSED
-# =============================================
 
 
 # Fails CLOSED: reading an unreadable document as "all on" resurrects the processes the operator killed.
@@ -254,22 +215,15 @@ class TestUnreadableStateFailsClosed:
         assert "delete" in message.lower()
 
     def test_wrong_shape_is_unreadable_too(self, state_dir):
-        # Parses as JSON, carries no skills map - we still cannot tell what is off.
         (state_dir / "switch_state.json").write_text('["not", "a", "map"]', encoding="utf-8")
 
         with pytest.raises(sh.SwitchStateUnreadable):
             sh.is_enabled("telegram")
 
     def test_a_missing_file_is_not_corrupt(self, state_dir):
-        # Missing and unreadable are different worlds: missing means nobody has
-        # toggled anything, and every skill is on.
+        # Missing means nobody has toggled anything: every skill is on.
         assert not (state_dir / "switch_state.json").exists()
         assert sh.read_state() == {}
-
-
-# =============================================
-# OFF: STOPS AND STAYS STOPPED
-# =============================================
 
 
 class TestTurnOff:
@@ -290,8 +244,7 @@ class TestTurnOff:
 
         sh.turn_off("telegram")
 
-        # Disabled alone only stops the BOOT path; mask is what refuses a
-        # manual start, a dependency pull, or a script that knows better.
+        # Disable only stops the BOOT path; mask refuses a manual start or a dependency pull.
         for unit in ("fake-bot@one", "fake-bot@two"):
             assert unit in fake.masked
             assert unit not in fake.enabled
@@ -308,8 +261,7 @@ class TestTurnOff:
         assert "fake-bot@one" not in fake.active
 
     def test_off_records_the_state_before_touching_systemd(self, state_dir, fake_units, monkeypatch):
-        # Intent lands on disk FIRST: a crash mid-actuation must not leave a
-        # machine going dark with no record of why.
+        # Intent lands on disk FIRST: a crash mid-actuation must not leave no record of why.
         seen = {}
 
         def recording_systemctl(*args, timeout=15):
@@ -327,7 +279,6 @@ class TestTurnOff:
 
         result = sh.turn_off("telegram")
 
-        # Never print "dark" over a live process.
         assert result["success"] is False
         assert "fake-bot@two" in result["error"]
 
@@ -341,11 +292,6 @@ class TestTurnOff:
         assert result["success"] is True
         assert fake.calls == []
         assert sh.is_enabled("github") is False
-
-
-# =============================================
-# ON: RESTORES
-# =============================================
 
 
 class TestTurnOn:
@@ -374,8 +320,7 @@ class TestTurnOn:
         sh.turn_on("telegram")
 
         verbs = fake.verbs_for("fake-bot@one")
-        # A start issued before the unmask is refused by systemd - order is the
-        # whole contract here, not a stylistic preference.
+        # systemd refuses a start issued before the unmask: the order is the contract.
         assert verbs.index("unmask") < verbs.index("start")
 
     def test_on_enables_so_the_unit_survives_a_reboot(self, state_dir, fake_units, monkeypatch):
@@ -404,23 +349,13 @@ class TestTurnOn:
         assert "fake-bot@one" in result["error"]
 
 
-# =============================================
-# THE RUNNER GATE
-# =============================================
-
-
 class TestRunnerGate:
     """The second door: AIPass must not start a skill it has switched off."""
 
     def test_run_skill_refuses_a_switched_off_skill(self, state_dir):
         sh.set_enabled("telegram", False, reason="retired 08-18")
 
-        # run_handler/run_markdown are stubbed so that a REGRESSION of the gate
-        # fails this test instead of executing the skill. Proven necessary: with
-        # the gate mutated out and these unstubbed, this call reached
-        # bot_operations.start_bot() and hung for 300s trying to bring up a real
-        # Telegram bot. A test for an off-switch must not be able to start the
-        # thing it is switching off.
+        # Stubbed so a regressed gate fails here instead of starting a real Telegram bot.
         with patch.object(runner, "run_handler") as ran_handler, patch.object(runner, "run_markdown") as ran_markdown:
             result = runner.run_skill("telegram", action="start", args={"arg0": "base"})
 
@@ -433,14 +368,12 @@ class TestRunnerGate:
         ran_markdown.assert_not_called()
 
     def test_the_gate_runs_before_the_handler_is_even_loaded(self, state_dir):
-        # Stopping systemd units is not enough: `run telegram start base` spawns
-        # a bot IN-PROCESS. The gate has to bite before the handler is imported.
+        # `run telegram start base` spawns a bot IN-PROCESS: the gate bites before the import.
         sh.set_enabled("telegram", False)
         with patch.object(runner, "load_skill") as loader:
             result = runner.run_skill("telegram", action="start")
 
         assert result["success"] is False
-        # No reason recorded, so no empty parentheses either.
         assert result["error"] == (
             "Skill 'telegram' is switched OFF and will not run. Turn it back on with: drone @skills on telegram"
         )
@@ -470,11 +403,6 @@ class TestRunnerGate:
         assert result["error"] == "reached the loader"
 
 
-# =============================================
-# DECLARATION
-# =============================================
-
-
 class TestDeclaredUnits:
     """A skill declares its own processes in SKILL.md frontmatter."""
 
@@ -490,13 +418,7 @@ class TestDeclaredUnits:
         assert sorted(sh.declared_units("telegram")) == self.EXPECTED_TELEGRAM_UNITS
 
     def test_the_declaration_reads_the_same_without_pyyaml(self):
-        # THE CI RED OF 2026-08-19 (run 32222871212). This assertion passed on
-        # a developer machine and failed on every runner, and the difference was
-        # never machine-local STATE — every file it reads is tracked. PyYAML is
-        # not declared in pyproject.toml, so a runner falls back to the parser
-        # in discovery_handler, which silently answered "" for a block list.
-        # An environment-dependent pin proves nothing; this one names the
-        # environment and asserts both halves of it.
+        # PyYAML is not declared in pyproject.toml, so CI uses discovery_handler's fallback parser.
         with patch.object(dh, "yaml", None):
             without_yaml = sh.declared_units("telegram")
 
@@ -504,9 +426,6 @@ class TestDeclaredUnits:
         assert sorted(without_yaml) == sorted(sh.declared_units("telegram"))
 
     def test_every_file_the_declaration_reads_is_tracked(self):
-        # The other half of the same lesson: if this skill's SKILL.md ever stops
-        # shipping, the pin above must fail LOUDLY here rather than quietly
-        # asserting against a file only this machine has.
         builtin = [path for path, source in dh.get_search_paths() if source == "builtin"][0]
         assert (builtin / "telegram" / "SKILL.md").exists(), (
             "telegram's SKILL.md is missing from the built-in lib — the declaration "
@@ -514,16 +433,10 @@ class TestDeclaredUnits:
         )
 
     def test_a_skill_that_declares_nothing_gets_an_empty_list(self):
-        # github is markdown-only - it owns no processes and must not fabricate any.
         assert sh.declared_units("github") == []
 
     def test_an_unknown_skill_declares_nothing(self):
         assert sh.declared_units("no_such_skill_anywhere") == []
-
-
-# =============================================
-# STATUS REPORTING
-# =============================================
 
 
 class TestSwitchRows:
@@ -543,8 +456,6 @@ class TestSwitchRows:
         assert row["reason"] == "retired 08-18"
 
     def test_a_skill_that_is_off_but_still_running_is_flagged(self, state_dir, monkeypatch):
-        # State says dark, machine says alive. Status must not repeat the state's
-        # claim - that discrepancy is the whole reason to look.
         monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one"])
         monkeypatch.setattr(sh, "_systemctl", FakeSystemctl(active=["fake-bot@one"]))
         sh.set_enabled("telegram", False)
@@ -554,18 +465,10 @@ class TestSwitchRows:
         assert row["live_units"] == ["fake-bot@one"]
 
 
-# =============================================
-# THE NOTIFIER DOOR
-# =============================================
-
-
 class TestTheNotifierDoor:
     """A door imported in-process asks the switch itself.
 
-    @daemon's lifecycle pings import send_telegram_notification and never pass
-    the runner's gate, so with telegram switched off they were still delivered
-    (notifier log, 2026-09-13 and 2026-09-14). Telegram is retired (the owner's
-    ruling 2026-09-14): off means this door sends nothing.
+    @daemon's lifecycle pings import send_telegram_notification and never pass the runner's gate.
     """
 
     BOT = {"bot_token": "123:not-a-token", "chat_id": "42"}

@@ -3,15 +3,12 @@
 # Description: screen_lock skill test configuration — log redirect and path setup
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 screen_lock skill test configuration.
-
-Redirects Prax logger output to a temp dir so test runs never write to the
-production log files, and puts the src root on sys.path so `aipass.*` resolves
-without a full pip install.
+Logs go to a temp dir, never production; src root on sys.path so `aipass.*` resolves uninstalled.
 """
 
 import os

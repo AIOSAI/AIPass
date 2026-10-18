@@ -16,9 +16,6 @@
 
 """
 Executor handler for drone commands.
-
-Runs shell commands via subprocess and captures output.
-Never prints -- always returns structured dicts.
 """
 
 import os
@@ -30,27 +27,12 @@ DEFAULT_TIMEOUT = 30
 
 
 def execute(command, cwd=None, timeout=None):
-    """Run a command via subprocess and capture output.
-
-    Args:
-        command: The command string to execute.
-        cwd: Working directory for the command. Defaults to AIPASS_ROOT.
-        timeout: Timeout in seconds. Defaults to DEFAULT_TIMEOUT.
-
-    Returns:
-        {
-            "success": bool,
-            "stdout": str,
-            "stderr": str,
-            "returncode": int
-        }
-    """
+    """Run a command via subprocess; returns {"success", "stdout", "stderr", "returncode"}."""
     if cwd is None:
         cwd = str(AIPASS_ROOT)
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
 
-    # Validate command is not empty
     if not command or not command.strip():
         return {
             "success": False,

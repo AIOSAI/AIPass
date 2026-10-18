@@ -3,18 +3,11 @@
 # Description: Skill execution handler
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Skill Execution Handler
-
-Contains the core logic for executing skills: calling handler.run()
-for handler-based skills, and assembling output for markdown-only skills.
-
-Purpose:
-    Implementation logic for skill execution, separated from
-    orchestration layer to satisfy thin-module standard.
 """
 
 from aipass.prax import logger
@@ -22,20 +15,8 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def run_handler(handler, name, action, args, config):
-    """Run a skill's handler module.
-
-    Args:
-        handler: The imported handler module.
-        name: Skill name (for error messages).
-        action: Action to perform.
-        args: Dict of action arguments.
-        config: Dict of config values.
-
-    Returns:
-        dict: {"success": bool, "output": str, "error": str|None}
-    """
+    """Run a skill's handler module."""
     if action is None:
-        # List available actions if no action specified
         if hasattr(handler, "get_actions"):
             try:
                 actions = handler.get_actions()
@@ -81,7 +62,6 @@ def run_handler(handler, name, action, args, config):
                 "output": result.get("output", ""),
                 "error": result.get("error"),
             }
-        # If handler returns a non-dict, wrap it
         return {
             "success": True,
             "output": str(result),
@@ -97,16 +77,7 @@ def run_handler(handler, name, action, args, config):
 
 
 def run_markdown(name, metadata, body):
-    """Run a markdown-only skill by returning its body content.
-
-    Args:
-        name: Skill name.
-        metadata: Skill metadata dict.
-        body: Markdown body text.
-
-    Returns:
-        dict: {"success": bool, "output": str, "error": str|None}
-    """
+    """Run a markdown-only skill by returning its body content."""
     if not body:
         return {
             "success": True,

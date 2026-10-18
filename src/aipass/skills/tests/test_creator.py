@@ -3,7 +3,7 @@
 # Description: Tests for creator module orchestration layer
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
@@ -16,11 +16,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.skills.apps.modules.creator import create_skill, handle_command, print_introspection
-
-
-# ===================================================================
-# 1. handle_command — command routing
-# ===================================================================
 
 
 class TestHandleCommand:
@@ -39,9 +34,7 @@ class TestHandleCommand:
         assert "creator Module" in output
 
     def test_create_with_valid_name(self, tmp_path, monkeypatch, capsys, bus_recorder):
-        # Mutant killed: the create branch returns True without calling create_skill.
-        # Mutants killed 2026-10-04: the fire() call removed; its event name changed;
-        # its path argument changed with the call kept.
+        # Pins that create_skill runs and fire() carries the right event name and path.
         monkeypatch.chdir(tmp_path)
         result = handle_command("create", ["test-skill"])
         assert result is True
@@ -75,11 +68,6 @@ class TestHandleCommand:
     def test_unknown_command_returns_false(self):
         result = handle_command("nonexistent", ["arg"])
         assert result is False
-
-
-# ===================================================================
-# 2. create_skill — module-level wrapper
-# ===================================================================
 
 
 class TestCreateSkillModule:
@@ -126,11 +114,7 @@ class TestCreateSkillModule:
             result = create_skill("no-trigger", template_type="markdown_only", target_dir=tmp_path)
         assert result["success"] is True
 
-    # json_handler is a MODULE (this branch's bound shim for the fleet json
-    # service), so a bare patch hands back a MagicMock that answers every
-    # attribute - log_operation could be deleted from production and these two
-    # would stay green. autospec makes the mock refuse what the real module
-    # does not have.
+    # autospec: a bare MagicMock answers every attribute, so a deleted log_operation would stay green.
     @patch("aipass.skills.apps.modules.creator.json_handler", autospec=True)
     def test_json_log_on_success(self, mock_jh, tmp_path):
         create_skill("jlog-test", template_type="markdown_only", target_dir=tmp_path)
@@ -151,11 +135,6 @@ class TestCreateSkillModule:
         output = capsys.readouterr().out
         assert "SKILL.md" in output
         assert "handler.py" in output
-
-
-# ===================================================================
-# 3. print_introspection — module info display
-# ===================================================================
 
 
 class TestPrintIntrospection:
