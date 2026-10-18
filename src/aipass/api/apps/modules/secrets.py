@@ -3,7 +3,7 @@
 # Description: Secrets Module — cross-branch in-process door
 # Version: 1.0.0
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -56,11 +56,7 @@ def print_help():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle secrets commands (module discovery hook).
-
-    Owns no commands (get-secret routes through api_key.py); exists for seedgo module discovery.
-    """
+    """Handle secrets commands (module discovery hook): owns none, get-secret routes through api_key.py."""
     return False
 
 
@@ -74,7 +70,8 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
 def set_secret(provider: str, slug: str, value: Union[str, dict], *, as_json: bool = False) -> Path:
     """Write a secret to the provider store."""
     result = _handler.set_secret(provider, slug, value, as_json=as_json)
-    json_handler.log_operation("secrets_set", {"provider": provider, "slug": slug, "wrote": str(result)})
+    # That it wrote, never where: a path in the secrets base reads as a secret's location.
+    json_handler.log_operation("secrets_set", {"provider": provider, "slug": slug, "wrote": True})
     return result
 
 

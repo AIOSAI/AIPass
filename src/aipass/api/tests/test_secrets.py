@@ -3,7 +3,7 @@
 # Description: Tests for secrets handler and get_secret_cmd orchestrator
 # Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -303,6 +303,20 @@ class TestSecretsModule:
 
         assert result == data
         mock_handler.get_secret.assert_called_once_with("telegram", "bot", as_json=True)
+
+    def test_set_secret_logs_that_it_wrote_never_where(self, tmp_path: Path) -> None:
+        """A path in the secrets base reads as a secret's location: the operations log gets a boolean."""
+        mock_jh = MagicMock()
+
+        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
+            with patch(PATCH_MOD_JSON_HANDLER, mock_jh):
+                written = secrets_module.set_secret("telegram", "bot", "my-token-value")
+
+        assert written.exists()
+        operation, data = mock_jh.log_operation.call_args[0]
+        assert operation == "secrets_set"
+        assert data == {"provider": "telegram", "slug": "bot", "wrote": True}
+        assert all(tmp_path.name not in str(value) for value in data.values())
 
     def test_get_secret_not_found_logs(self) -> None:
         """Module get_secret logs even when handler returns None."""

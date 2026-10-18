@@ -31,6 +31,7 @@ Code never stores, logs, or exposes raw keys. The `api` branch provides authenti
 - `get_cache_stats()` returns count only, never cache keys
 - Credential files are created with `0o600` (owner-only read/write)
 - Secret directories use `0o700` permissions
+- The store lives at `~/.secrets/aipass/<provider>/<slug>.json`, file `0o600` and directory `0o700`, and the operations log records the provider and slug of a read or write, never a value and never a path inside the store
 
 ## Provider Key Formats
 
