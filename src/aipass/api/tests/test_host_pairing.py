@@ -3,7 +3,7 @@
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
 # Version: 1.1.0
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair and the host-api pair verb."""
@@ -121,7 +121,7 @@ class TestMintPairing:
     def test_no_server_on_the_bind_refuses_with_the_two_commands_and_stores_nothing(
         self, paired: Path, listener: Any
     ) -> None:
-        """The owner's sandbox, 2026-10-13: a QR minted for a dead server."""
+        """No QR is minted for a dead server: the refusal names the two commands and stores nothing."""
         listener.side_effect = URLError(ConnectionRefusedError(111, "Connection refused"))
 
         with pytest.raises(host_api_module.PairingError) as raised:

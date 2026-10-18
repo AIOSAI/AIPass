@@ -330,7 +330,7 @@ class TestSecretsModule:
 
 
 class TestGetSecretCmd:
-    """Verifies the hardened get_secret_cmd (DPLAN-0211: no raw secrets to stdout)."""
+    """Verifies the hardened get_secret_cmd: no raw secrets to stdout."""
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)

@@ -295,7 +295,7 @@ def test_store_usage_data_stores_into_a_data_leg_with_no_data_key(mock_dir: Magi
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
 def test_store_usage_data_writes_back_the_keys_it_does_not_own(mock_dir: MagicMock, tmp_path: Path):
-    """A store after the service bumped the document keeps the bump (FPLAN-0542)."""
+    """A store after the service bumped the document keeps the bump."""
     # The json service keeps lifetime operations_total and last_operation in the same document.
     mock_dir.__truediv__ = lambda self, other: tmp_path / other
     mock_dir.mkdir = MagicMock()

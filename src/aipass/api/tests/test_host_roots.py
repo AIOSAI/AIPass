@@ -234,7 +234,7 @@ class TestKindsThatNameNothingRefuseAName:
     """
 
     def test_a_nameless_root_may_name_itself(self, world: dict) -> None:
-        """THE CARVE-OUT (@devpulse's ruling, 2026-08-18), measured not guessed.
+        """THE CARVE-OUT, measured not guessed.
 
         @baud's picker sends `name: root.name || root.kind` (PhoneApp.tsx), so the wire
         carries branch=home&root=home; that name is accepted, any OTHER stays refused.

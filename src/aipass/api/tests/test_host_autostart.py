@@ -155,7 +155,7 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
 
     def test_a_probe_that_cannot_run_refuses_rather_than_answering_zero(self, has_systemd: None) -> None:
         """
-        REVERSED 2026-08-27, deliberately, from "is zero" to "refuses".
+        A probe that cannot run refuses; it never answers zero.
 
         Zero means no unit holds the server; an unrunnable probe answered nothing."""
         with patch.object(host_autostart.subprocess, "run", side_effect=OSError("cannot exec")):
@@ -288,7 +288,7 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
             assert step in printed, f"the operator was not shown the step they have to run: {step}"
 
     def test_lingering_being_off_is_a_warning_not_a_dim_note(self, quiet_serve: dict, tmp_path: Path) -> None:
-        """The one report field whose absence is the original 08-27 failure."""
+        """Lingering off is the one report field shown as a warning, not a dim note."""
         with patch.object(host_serve_module, "warning") as warned:
             with patch.object(
                 host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path, linger=False)
@@ -343,7 +343,7 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
 
 
 class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
-    """FPLAN-0642: host_api.install_unit and enable_unit RUN the steps the verb prints."""
+    """The installer doors host_api.install_unit and enable_unit RUN the steps the verb prints."""
 
     @pytest.fixture
     def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -436,7 +436,7 @@ class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
         assert report["rendered"] is True and report["running"] == 0
 
     def test_the_serve_detached_door_is_the_handler_with_the_same_refusals(self, quiet: None) -> None:
-        """DPLAN-0407: where no user systemd exists the install starts the server
+        """Where no user systemd exists the install starts the server
         through this door instead of printing the command."""
         record = {"pid": 7, "host": "100.64.0.9", "port": 9100, "log": "/l", "started": "t"}
         with patch.object(host_lifetime, "serve_detached", return_value=record) as start:

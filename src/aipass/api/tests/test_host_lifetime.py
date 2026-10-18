@@ -261,7 +261,7 @@ class TestFindingTheRunningServer:
 
     def test_stop_leaves_an_unreadable_record_where_it_is(self, runtime: Path) -> None:
         """
-        The defect the old None hid (api, fleet green leg 9).
+        stop() raises on an unreadable record and leaves the file where it is.
 
         A record nobody can read is not a record anybody may clear."""
         host_lifetime.record_path().write_text("{ not json", encoding="utf-8")
@@ -286,7 +286,7 @@ class TestFindingTheRunningServer:
 @pytest.mark.skipif(sys.platform == "win32", reason="zombies and os.kill(pid, 0) are POSIX")
 class TestADeadChildIsDead:
     """
-    The defect the first LIVE start/stop found, on 2026-08-19.
+    A dead child, reaped or not, is never reported as a running server.
 
     os.kill(pid, 0) answers yes to an unreaped child; only a real process shows it."""
 
@@ -530,7 +530,7 @@ class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
 
 class TestTheServerRunsOnItsHomesInterpreter:
     """
-    DPLAN-0408: `aipass install` runs these doors in the uv tool venv, which has no
+    `aipass install` runs these doors in the uv tool venv, which has no
     fastapi; the server it spelled as itself died on start. It is the home's server."""
 
     @pytest.fixture(params=[("linux", "bin", "python"), ("win32", "Scripts", "python.exe")])
@@ -628,7 +628,7 @@ class TestTwoServersAreNeverStartedByAccident:
 
 class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     """
-    The 2026-08-27 ruling, at the three places that act on it.
+    An unreachable supervisor refuses at the three places that act on it, never reads as empty.
 
     None would send every caller down the record path, which a unit never writes."""
 

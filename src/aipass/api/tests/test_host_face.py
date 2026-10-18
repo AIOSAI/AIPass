@@ -144,7 +144,7 @@ class TestLocatingTheBundle:
 
 
 class TestWhereTheFaceLives:
-    """FPLAN-0587: a configured face_dir wins, the checkout build is the default."""
+    """A configured face_dir wins, the checkout build is the default."""
 
     def test_the_checkout_build_when_nothing_is_configured(self, built_face: Path, quiet_face: None) -> None:
         """No face_dir stored: what the checkout built, exactly as before."""

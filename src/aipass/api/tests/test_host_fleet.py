@@ -1256,7 +1256,7 @@ PATCH_LOCK_DOOR = "aipass.skills.lib.screen_lock.handler.lock_state"
 
 
 def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
-    """An answer in the skill's published shape. The unlocked default is this laptop's, read live 2026-09-13."""
+    """An answer in the skill's published shape. The unlocked default is this laptop's, read live."""
     source = f"logind session {session}" if method == screen_lock.METHOD_LOGINCTL else "GNOME ScreenSaver"
     return {
         "ok": True,

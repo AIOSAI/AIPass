@@ -100,7 +100,7 @@ class TestKinAndTheDoorPass:
         assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
 
     def test_the_apps_package_does_not_import_its_handlers(self):
-        """The 2026-04-25 line. With it, every foreign import sees this branch's own
+        """apps/__init__.py imports no handlers. With that import, every foreign import sees this branch's own
         apps/__init__.py as the caller and the fence is decorative."""
         apps_init = KIN_PROBE.parents[1] / "apps" / "__init__.py"
         source = apps_init.read_text(encoding="utf-8")

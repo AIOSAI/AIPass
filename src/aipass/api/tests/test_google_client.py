@@ -3,7 +3,7 @@
 # Description: Tests for Google API client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -655,7 +655,7 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
 def test_cmd_reauth_shows_the_flow_reason(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
-    """reauth google shows the consent flow's own reason (api, fleet green leg 10)."""
+    """reauth google shows the consent flow's own reason."""
     mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
@@ -677,7 +677,7 @@ def test_cmd_reauth_shows_the_flow_reason(_warn, mock_err, _succ, _hdr, mock_jso
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
 def test_cmd_validate_shows_the_reason(mock_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
-    """validate google names an unreadable file or a failed refresh instead of "invalid" (api, fleet green leg 10)."""
+    """validate google names an unreadable file or a failed refresh instead of "invalid"."""
     mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
@@ -895,7 +895,7 @@ class _FakeTransportError(Exception):
 @patch(f"{_AUTH}.Request")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_transport_error_is_named_transient(mock_request_cls, mock_save):
-    """A network failure during refresh raises naming itself transient (api, fleet green leg 10)."""
+    """A network failure during refresh raises naming itself transient."""
     mock_creds = MagicMock()
     mock_creds.expired = True
     mock_creds.refresh_token = "tok_refresh"
@@ -989,7 +989,7 @@ def test_run_oauth_flow_no_client_secret(mock_secret_path):
 @patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save):
-    """A failed consent flow raises GoogleAuthUnavailable with the reason (api, fleet green leg 10)."""
+    """A failed consent flow raises GoogleAuthUnavailable with the reason."""
     mock_secret_path.exists.return_value = True
     mock_flow_cls.from_client_secrets_file.side_effect = ValueError("bad secret file")
 

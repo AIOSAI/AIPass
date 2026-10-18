@@ -91,7 +91,7 @@ class TestGetOverallStats:
         assert result["models_used"] == ["claude-3", "gpt-4"]
 
     def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """A malformed store raises: {} is the no-data answer, so a failure may not wear it (api, fleet green leg 3)."""
+        """A malformed store raises: {} is the no-data answer, so a failure may not wear it."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("not valid json", encoding="utf-8")
@@ -143,7 +143,7 @@ class TestGetCallerUsage:
         assert result["models_used"] == ["claude-3"]
 
     def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """A malformed store raises rather than answering 'no such caller' (api, fleet green leg 3)."""
+        """A malformed store raises rather than answering 'no such caller'."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("{invalid", encoding="utf-8")
@@ -186,7 +186,7 @@ class TestGetSessionSummary:
         assert result["total_tokens"] == 8000
 
     def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """A malformed store raises rather than answering 'no session yet' (api, fleet green leg 3)."""
+        """A malformed store raises rather than answering 'no session yet'."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("broken json!", encoding="utf-8")

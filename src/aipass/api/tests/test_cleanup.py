@@ -56,7 +56,7 @@ class TestWriteJson:
         assert loaded == data
 
     def test_write_failure(self, tmp_path: Path):
-        """Raises when the write fails, so no caller reports a cleanup that never landed (api, fleet green leg 3).
+        """Raises when the write fails, so no caller reports a cleanup that never landed.
 
         The target is a directory; the platform is asked which error replacing one raises.
         """
@@ -72,7 +72,7 @@ class TestWriteJson:
         assert sorted(p.name for p in tmp_path.iterdir()) == ["fail.json", "probe.json"]
 
     def test_a_dump_that_fails_leaves_the_store_whole(self, tmp_path: Path):
-        """The text is built before the store is touched, so a failed dump cuts nothing (api, fleet green leg 4)."""
+        """The text is built before the store is touched, so a failed dump cuts nothing."""
         store = tmp_path / "usage.json"
         store.write_text('{"kept": 1}', encoding="utf-8")
 
@@ -95,7 +95,7 @@ class TestCleanupOldData:
         assert result == 0
 
     def test_a_store_that_does_not_parse_raises_and_is_left_alone(self, tmp_path: Path):
-        """0 means 'nothing to clean', so a store that does not parse raises instead (api, fleet green leg 3)."""
+        """0 means 'nothing to clean', so a store that does not parse raises instead."""
         file_path = tmp_path / "usage.json"
         file_path.write_text("{truncated", encoding="utf-8")
 
@@ -226,7 +226,7 @@ def _cleaned(tmp_path: Path, tracking: dict) -> tuple:
 
 
 class TestIdentifyOldGenerations:
-    """Which entries are old, asked through cleanup_old_data (api, fleet green leg 9)."""
+    """Which entries are old, asked through cleanup_old_data."""
 
     def test_entries_with_valid_timestamps(self, tmp_path: Path):
         """Identifies entries older than cutoff date."""

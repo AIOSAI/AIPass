@@ -67,7 +67,7 @@ class TestValidateBind:
         assert "not available" in str(exc.value).lower()
 
     def test_the_loopback_gate_is_open(self) -> None:
-        """Opened 2026-08-14 by the owner's ruling on the Phase 5 security review."""
+        """The loopback-only gate is open: LOOPBACK_ONLY is False."""
         assert host_config.LOOPBACK_ONLY is False
 
     def test_closing_the_gate_still_refuses_non_loopback(self) -> None:
@@ -290,7 +290,7 @@ posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.acces
 
 
 class TestBaudBin:
-    """FPLAN-0589 row 2: the baud binary the host lanes exec, stored beside face_dir."""
+    """The baud binary the host lanes exec, stored beside face_dir."""
 
     def test_unset_by_default(self, store: Path) -> None:
         """No baud_bin stored is None — the automatic lookup is fleet.py's call."""
