@@ -69,7 +69,7 @@ def setup_handlers():
     from .memory_pool import handle_memory_pool_auto_processed
 
     trigger.on("startup", handle_startup)
-    # Unwired on purpose: cli_header_displayed, plan_file_* and pr_* (pr_status_sync, decommissioned).
+    # Unwired on purpose: cli_header_displayed, plan_file_* and pr_* (handlers archived).
     trigger.on("error_detected", handle_error_detected)
     trigger.on("warning_logged", handle_warning_logged)
     trigger.on("memory_template_updated", handle_memory_template_updated)

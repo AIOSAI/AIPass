@@ -41,8 +41,8 @@ event.)
 | `plan_file_deleted` | `.archive/plan_file.py` | **Retired** — same |
 | `plan_file_moved` | `.archive/plan_file.py` | **Retired** — same |
 | `bulletin_created` | `.archive/bulletin_created.py` | **Retired** — never imported |
-| `pr_created` | `pr_status_sync.py` | **Decommissioned** — file kept, not registered in `registry.py` |
-| `pr_merged` | `pr_status_sync.py` | **Decommissioned** — same |
+| `pr_created` | `.archive/pr_status_sync.py` | **Retired** — never imported, not registered in `registry.py` |
+| `pr_merged` | `.archive/pr_status_sync.py` | **Retired** — same |
 
 **`error_logged` is not an event.** No handler file, no registration, and no
 `Trigger.fire("error_logged")` anywhere in the fleet. The watchers fire `error_detected`

@@ -113,15 +113,6 @@
       "reason": "setup_handlers() is wiring, not an event handler — it handles no event, it calls trigger.on() to register the handle_{event} callbacks. Naming it handle_something would misdescribe it."
     },
     {
-      "file": "apps/handlers/events/pr_status_sync.py",
-      "standard": "unused_function",
-      "functions": [
-        "handle_pr_created",
-        "handle_pr_merged"
-      ],
-      "reason": "NAME-SCOPED AND HONOURED: unused_function_check passes the function name to is_bypassed(). TDPLAN-0007 decommissioned status-sync — registry.py's trigger.on() calls are commented out, so both handlers are unreferenced by design while the module and its tests are kept for revival. Candidate for .archive/ if revival is off the table."
-    },
-    {
       "file": "apps/handlers/medic_state.py",
       "standard": "unused_function",
       "functions": [
