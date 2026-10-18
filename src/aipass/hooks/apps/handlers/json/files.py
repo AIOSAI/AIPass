@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: files.py
-# Description: Atomic read/write for hooks arbitrary-path JSON documents
-# Version: 1.1.0
+# Description: Atomic read/write for hooks arbitrary-path JSON documents, and their directories
+# Version: 1.2.0
 # Created: 2026-09-03
 # Modified: 2026-10-17
 # =============================================
@@ -59,6 +59,11 @@ def _atomic_write_json(target_path: Path, data: Any) -> None:
 def read_json_file(path: Path) -> Any:
     """Read and parse a JSON file at an arbitrary path."""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def make_directory(path: Path) -> None:
+    """Create *path* and its parents; an existing directory is left as it is."""
+    path.mkdir(parents=True, exist_ok=True)
 
 
 def write_json_file(path: Path, data: Any) -> None:

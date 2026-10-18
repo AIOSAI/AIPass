@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Portable hook test runner — fires every hook with mock data
 # Branch: hooks
 # Layer: apps/modules
@@ -24,6 +24,7 @@ from pathlib import Path
 from aipass.hooks.apps.modules.engine import dispatch
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 
@@ -94,7 +95,7 @@ def _build_skeleton(real_branch: Path, destination: Path) -> Path:
     """
     branch = destination / real_branch.name
     trinity = branch / ".trinity"
-    trinity.mkdir(parents=True, exist_ok=True)
+    json_files.make_directory(trinity)
 
     for name in _SKELETON_MEMORY_FILES:
         source = real_branch / ".trinity" / name

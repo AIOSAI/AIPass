@@ -465,7 +465,7 @@
     {
       "file": "apps/modules/wire_verify.py",
       "standard": "json_structure",
-      "reason": "Reads ~/.claude/settings.json (external provider settings) with stdlib json — not branch data storage needing json_handler."
+      "reason": "Reads ~/.claude/settings.json (external provider settings) through handlers/json/files; stdlib json only names the decode error — not branch data storage needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
@@ -1182,7 +1182,7 @@
     {
       "file": "apps/modules/context_window.py",
       "standard": "json_structure",
-      "reason": "Reads external state (session transcript JSONL via tail, branch .claude/settings.local.json) with stdlib json — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
+      "reason": "Reads external state (session transcript JSONL via tail with stdlib json, branch .claude/settings.local.json through handlers/json/files) — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
     },
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
@@ -1272,7 +1272,7 @@
     {
       "file": "apps/modules/testgate_policy.py",
       "standard": "json_structure",
-      "reason": "Reads the operator-owned .aipass/test_write_policy.json with stdlib json — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
+      "reason": "Reads the operator-owned .aipass/test_write_policy.json through handlers/json/files, stdlib json naming the decode error — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
     },
     {
       "file": "apps/modules/release_notice.py",
@@ -1391,7 +1391,7 @@
     {
       "file": "apps/modules/testgate_policy.py",
       "standard": "logged_fallback",
-      "lines": [63, 72],
+      "lines": [64, 73],
       "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
     },
     {
@@ -1421,7 +1421,7 @@
     {
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
-      "lines": [57],
+      "lines": [58],
       "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write."
     },
     {
@@ -1624,7 +1624,7 @@
     {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
-      "lines": [838],
+      "lines": [857],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {

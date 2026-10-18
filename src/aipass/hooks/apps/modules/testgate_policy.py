@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: testgate_policy.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Reads .aipass/test_write_policy.json — the switch behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -131,7 +132,7 @@ def load(start: str | Path) -> Policy:
     if path is None:
         return _missing(start)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json_files.read_json_file(path)
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         return _unreadable(path, f"{type(exc).__name__}: {exc}")
     return _validated(data, path)
