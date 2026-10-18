@@ -3,7 +3,7 @@
 # Description: Subprocess executor - capture, stream, timeout and kill paths
 # Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/executor.py, the subprocess executor."""
@@ -32,9 +32,7 @@ from aipass.drone.apps.handlers.executor import (
 )
 from aipass.drone.apps.handlers.router_handler import execute_branch_command
 
-# A child that talks forever and never exits on its own. Used wherever the
-# question is "does output buy more life", so the ONLY thing that can end it
-# is the executor's own kill path.
+# Never exits on its own: only the executor's kill path can end it.
 FOREVER_CHATTER = textwrap.dedent(
     """\
     import sys, time
@@ -45,15 +43,8 @@ FOREVER_CHATTER = textwrap.dedent(
     """
 )
 
-# An arbitrary env VALUE, deliberately not a POSIX path: this test asserts that
-# an override reaches the child, and a real-looking /tmp path would read as a
-# platform assumption the test does not actually make.
+# Deliberately not a path: the test makes no platform assumption.
 _OVERRIDE_SENTINEL = "aipass-env-override-sentinel"
-
-
-# ---------------------------------------------------------------------------
-# 1. Captured mode — returns stdout/stderr as strings
-# ---------------------------------------------------------------------------
 
 
 class TestCapturedMode:
@@ -87,11 +78,6 @@ class TestCapturedMode:
         assert "err" in result.stderr
 
 
-# ---------------------------------------------------------------------------
-# 2. Captured mode — timeout enforcement
-# ---------------------------------------------------------------------------
-
-
 class TestTimeout:
     """Timeout enforcement in captured mode."""
 
@@ -116,16 +102,9 @@ class TestTimeout:
             )
         cause = exc_info.value.__cause__
         assert isinstance(cause, subprocess.TimeoutExpired)
-        # The TYPE alone says nothing about WHICH timeout fired. Pin the
-        # deadline this call passed and the command it was watching, so a wrapper
-        # that chained some other TimeoutExpired would not pass.
+        # The type alone does not say WHICH timeout fired.
         assert cause.timeout == 1
         assert cause.cmd[0] == sys.executable
-
-
-# ---------------------------------------------------------------------------
-# 3. Interactive mode — no capture
-# ---------------------------------------------------------------------------
 
 
 class TestInteractiveMode:
@@ -162,11 +141,6 @@ class TestInteractiveMode:
         assert result.exit_code == 7
 
 
-# ---------------------------------------------------------------------------
-# 4. Interactive mode — no timeout
-# ---------------------------------------------------------------------------
-
-
 class TestInteractiveNoTimeout:
     """Interactive mode must not pass a timeout to subprocess.run."""
 
@@ -182,11 +156,6 @@ class TestInteractiveNoTimeout:
             )
             call_kwargs = mock_run.call_args.kwargs
             assert "timeout" not in call_kwargs
-
-
-# ---------------------------------------------------------------------------
-# 5. FileNotFoundError wraps to CommandExecutionError
-# ---------------------------------------------------------------------------
 
 
 class TestFileNotFoundWrapping:
@@ -211,19 +180,8 @@ class TestFileNotFoundWrapping:
             )
         cause = exc_info.value.__cause__
         assert isinstance(cause, FileNotFoundError)
-        # Which file was not found is the whole claim; the type is shared with
-        # every missing cwd and every missing script. `.filename` is the
-        # platform's own attribute on the raised error, and subprocess on
-        # Windows raises FileNotFoundError for a missing executable with
-        # filename=None ([WinError 2]) — POSIX fills it, Windows does not.
-        # The name is the wrapper's to guarantee on every platform, so assert
-        # it in the wrapper's own message instead.
+        # Not cause.filename: Windows leaves it None for a missing executable.
         assert "this_executable_does_not_exist_xyz" in str(exc_info.value)
-
-
-# ---------------------------------------------------------------------------
-# 6. OSError wraps to CommandExecutionError
-# ---------------------------------------------------------------------------
 
 
 class TestOSErrorWrapping:
@@ -256,14 +214,8 @@ class TestOSErrorWrapping:
                 )
             cause = exc_info.value.__cause__
             assert isinstance(cause, OSError)
-            # The chained object is the one Popen raised, not a fresh OSError
-            # built by the wrapper — only its message can tell those apart.
+            # Only the message tells the raised OSError from a fresh one.
             assert str(cause) == "mock OS failure"
-
-
-# ---------------------------------------------------------------------------
-# 7. KeyboardInterrupt in interactive mode returns exit code 130
-# ---------------------------------------------------------------------------
 
 
 class TestKeyboardInterrupt:
@@ -302,7 +254,6 @@ class TestKeyboardInterrupt:
     def test_captured_mode_kills_the_child_before_reraising(self, temp_test_dir: Path):
         """Ctrl+C during the wait loop must not leave the child running.
 
-        The executor now owns the process object, so it also owns the orphan.
         Mutants: the interrupt handler's _stop_process removed; the loop pausing via time.sleep.
         """
         spawned = []
@@ -313,9 +264,7 @@ class TestKeyboardInterrupt:
             spawned.append(proc)
             return proc
 
-        # Ctrl+C lands in the poll loop's own pause. That pause is the executor's
-        # seam, not time.sleep, so the sleeps inside Popen.wait() — the very
-        # reaping under test — run for real.
+        # Patch _poll_pause, not time.sleep, so the reaping in Popen.wait() runs for real.
         with patch("aipass.drone.apps.handlers.executor._spawn", side_effect=_spy):
             with patch("aipass.drone.apps.handlers.executor._poll_pause", side_effect=KeyboardInterrupt):
                 with pytest.raises(KeyboardInterrupt):
@@ -328,11 +277,6 @@ class TestKeyboardInterrupt:
 
         assert spawned, "no child was spawned"
         assert spawned[0].poll() is not None, "child outlived the interrupt — orphaned"
-
-
-# ---------------------------------------------------------------------------
-# 8. Exit codes propagate correctly
-# ---------------------------------------------------------------------------
 
 
 class TestExitCodes:
@@ -376,11 +320,6 @@ class TestExitCodes:
         assert "SyntaxError" in result.stderr
 
 
-# ---------------------------------------------------------------------------
-# 9. Custom env vars are merged with os.environ
-# ---------------------------------------------------------------------------
-
-
 class TestEnvMerging:
     """Custom env dict merges with the process environment."""
 
@@ -422,7 +361,6 @@ class TestEnvMerging:
 
     def test_custom_env_overrides_existing(self, temp_test_dir: Path):
         """Custom env values override existing environment variables."""
-        # We pick a var that definitely exists, then override it
         result = execute_command(
             sys.executable,
             ["-c", "import os; print(os.environ['HOME'])"],
@@ -432,20 +370,11 @@ class TestEnvMerging:
         assert result.stdout.strip() == _OVERRIDE_SENTINEL
 
 
-# ---------------------------------------------------------------------------
-# 10. shell=False is always used (security)
-# ---------------------------------------------------------------------------
-
-
 class TestShellSecurity:
     """Verify shell=False is always passed to subprocess.run."""
 
     def test_captured_mode_shell_false(self, temp_test_dir: Path):
-        """Captured mode spawns the child with shell=False.
-
-        `wraps` rather than a stub: the real Popen still runs, so this asserts
-        the flag on a call that actually happened end to end.
-        """
+        """Captured mode spawns the child with shell=False (wraps, so the real Popen runs)."""
         with patch(
             "aipass.drone.apps.handlers.executor._spawn",
             wraps=subprocess.Popen,
@@ -473,42 +402,19 @@ class TestShellSecurity:
 
     def test_shell_injection_prevented(self, temp_test_dir: Path):
         """Shell metacharacters are NOT interpreted (shell=False)."""
-        # If shell=True were used, this would execute `echo pwned` too.
-        # With shell=False, the entire string is passed as one arg and
-        # Python will fail to parse it — confirming no shell expansion.
         result = execute_command(
             sys.executable,
             ["-c", "import sys; print(sys.argv[1])", "hello; echo pwned"],
             cwd=str(temp_test_dir),
         )
-        # The semicolon is treated as literal text, not a shell separator
         assert result.stdout.strip() == "hello; echo pwned"
         assert result.exit_code == 0
-
-
-# ---------------------------------------------------------------------------
-# 11. resolve_timeout — policy resolution
-# ---------------------------------------------------------------------------
 
 
 class TestDefaultTimeoutValue:
     """The default is 600s, pinned in every layer that can express it.
 
-    The owner's ruling 2026-08-27: *"it is configured wrong — it should not be
-    timing out before it completes; processing time is fine, increase the
-    allowed timeout so things can actually complete."* Two live kills in one
-    morning: a fleet-wide trinity push died at the 60s default mid-alphabet
-    (it needs ~5 minutes), and an `@all` mail broadcast was killed AFTER
-    delivering all 18 messages.
-
-    The history that got us here: 30 → 60 on 2026-08-13 (two runners finishing
-    around 31s), itself echoing a 30s UserPromptSubmit timeout that silently
-    discarded a hooks context for weeks (DPLAN-0285). Each raise was measured
-    against work that legitimately took longer.
-
-    Every assertion here names the NUMBER, not the constant. The pre-existing
-    tests in TestResolveTimeout compare against DEFAULT_TIMEOUT itself, so they
-    stay green at any value — they prove resolution order, not the default.
+    Assertions name the NUMBER: TestResolveTimeout compares to the constant and passes at any value.
     """
 
     def test_default_timeout_is_600(self):
@@ -518,12 +424,7 @@ class TestDefaultTimeoutValue:
         assert resolve_timeout("unknown", "whatever") == 600
 
     def test_execute_command_signature_default_is_600(self):
-        """The signature default must not drift from the constant.
-
-        This layer hardcoded 30 while the constant said 30 — agreeing by
-        coincidence, not by reference. Raising the constant alone would have
-        left every caller relying on the signature default still at 30.
-        """
+        """The signature default must not drift from the constant."""
         import inspect
 
         sig = inspect.signature(execute_command)
@@ -548,26 +449,11 @@ class TestDefaultTimeoutValue:
         assert len(set(defaults.values())) == 1, f"layers disagree on the default: {defaults}"
 
     def test_policy_table_is_empty(self):
-        """The three entries were REMOVED with the 60 → 600 raise, not dropped.
-
-        `memory process-plans` 120, `memory rollover` 100 and `flow close` 90
-        were all written to RAISE above the old 60s default. Against a 600s
-        base they invert into CAPS: the three commands we know are slow would
-        get the LEAST time of anything in the fleet — the exact failure this
-        ruling exists to end.
-
-        The mechanism stays (a policy value is a decision, not a floor — see
-        test_policy_below_new_default_still_wins). Only the now-harmful data
-        is gone.
-        """
+        """The policy table ships empty: a "raise" entry below a 600s base becomes a cap."""
         assert TIMEOUT_OVERRIDES == {}
 
     def test_policy_below_new_default_still_wins(self):
-        """A policy value is a decision, not a floor — it wins even if lower.
-
-        Nothing is below 60 today, but the resolution order must not quietly
-        become max(policy, default) as the default rises.
-        """
+        """A policy value is a decision, not a floor — it wins even if lower (no max())."""
         original = executor.TIMEOUT_OVERRIDES.get("probe")
         executor.TIMEOUT_OVERRIDES["probe"] = {"quick": 5}
         try:
@@ -583,10 +469,7 @@ class TestDefaultTimeoutValue:
 def synthetic_policy():
     """Inject one throwaway policy entry, then remove it.
 
-    The shipped table is EMPTY (see test_policy_table_is_empty), so every test
-    that iterates it would now pass without executing a single assertion. A
-    vacuously-passing test is worse than no test: it reports coverage it does
-    not have. These tests exercise the MECHANISM, so they bring their own data.
+    The shipped table is empty, so tests of the mechanism bring their own data or pass vacuously.
     """
     original = executor.TIMEOUT_OVERRIDES.get("probe")
     executor.TIMEOUT_OVERRIDES["probe"] = {"quick": 5, "slow": 777}
@@ -641,11 +524,6 @@ class TestResolveTimeout:
         assert executor.resolve_timeout(branch.upper(), cmd) == expected
 
 
-# ---------------------------------------------------------------------------
-# 12. Timeout error message includes --timeout hint
-# ---------------------------------------------------------------------------
-
-
 class TestTimeoutErrorMessage:
     """Timeout error tells the caller how to override."""
 
@@ -661,19 +539,8 @@ class TestTimeoutErrorMessage:
         assert "--drone-timeout" in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# 13. Output extends life — the hang guard, not a performance budget
-# ---------------------------------------------------------------------------
-
-
 class TestOutputExtendsLife:
-    """The owner's ruling 2026-08-27: legitimate work completes, hung work dies.
-
-    The shape: generous base + output-extends-life + hard ceiling. Nothing is
-    killed before the base. A child still talking when the base expires buys
-    another IDLE_GRACE, repeatedly, up to MAX_TIMEOUT. Silence never SHORTENS
-    anything — a long quiet computation still gets its full base.
-    """
+    """Legitimate work completes, hung work dies: base + output-extends-life + hard ceiling."""
 
     def test_silent_child_is_not_killed_before_the_base(self, temp_test_dir: Path):
         """A child that says nothing for most of its base still finishes."""
@@ -685,11 +552,7 @@ class TestOutputExtendsLife:
         assert time.monotonic() - started >= 1.5
 
     def test_chattering_child_survives_past_its_base(self, temp_test_dir: Path):
-        """Output at the deadline buys an extension instead of a kill.
-
-        This is the @ai_mail broadcast case in miniature: real work, still
-        producing, killed mid-flight by a clock that measured nothing.
-        """
+        """Output at the deadline buys an extension instead of a kill."""
         code = (
             "import sys, time\n"
             "end = time.time() + 2.5\n"
@@ -706,13 +569,7 @@ class TestOutputExtendsLife:
     def test_extension_never_exceeds_the_ceiling(self, temp_test_dir: Path, monkeypatch):
         """A forever-chattering child is still killed — AT the ceiling, not past it.
 
-        The numbers are chosen so the ceiling is not a whole number of grace
-        quanta above the base (base 1 + 2 + 2 would land on 5, the ceiling is
-        4). That is the only arrangement in which the final clamp is visible:
-        with an evenly-divisible ceiling, an implementation that forgets to
-        clamp lands on exactly the same second and the test proves nothing.
-        A missing clamp overshoots by up to one full IDLE_GRACE — two minutes
-        past a "hard" ceiling in production.
+        Ceiling 4 is deliberately not base 1 + whole grace quanta (5): only then is a missing clamp visible.
         """
         monkeypatch.setattr(executor, "IDLE_GRACE", 2)
         monkeypatch.setattr(executor, "MAX_TIMEOUT", 4)
@@ -724,13 +581,7 @@ class TestOutputExtendsLife:
         assert elapsed < 4.6, f"killed at {elapsed:.1f}s — the ceiling was overshot by an extension"
 
     def test_a_base_above_the_ceiling_is_still_honoured_in_full(self, temp_test_dir: Path, monkeypatch):
-        """The ceiling caps EXTENSION, never the base itself.
-
-        A policy or an operator may legitimately ask for more than MAX_TIMEOUT.
-        The ceiling must not quietly become a maximum — that would kill work
-        earlier than the number that was actually asked for, which is the exact
-        failure this whole build exists to end.
-        """
+        """The ceiling caps EXTENSION, never the base itself."""
         monkeypatch.setattr(executor, "MAX_TIMEOUT", 1)
         started = time.monotonic()
         with pytest.raises(CommandExecutionError, match="timed out"):
@@ -756,11 +607,7 @@ class TestOutputExtendsLife:
         assert time.monotonic() - started < 8
 
     def test_stale_output_does_not_buy_an_extension(self, temp_test_dir: Path, monkeypatch):
-        """Output OLDER than IDLE_GRACE is not 'recent' — the child still dies.
-
-        The ceiling is lowered too, so a regression that ignores the recency
-        window fails in seconds instead of running to MAX_TIMEOUT.
-        """
+        """Output OLDER than IDLE_GRACE is not 'recent' — the child still dies."""
         monkeypatch.setattr(executor, "IDLE_GRACE", 1)
         monkeypatch.setattr(executor, "MAX_TIMEOUT", 6)
         code = "import sys, time; sys.stdout.write('early\\n'); sys.stdout.flush(); time.sleep(30)"
@@ -772,10 +619,7 @@ class TestOutputExtendsLife:
     def test_silence_is_never_treated_as_recent_output(self, temp_test_dir: Path, monkeypatch):
         """A child that never spoke cannot claim to have spoken recently.
 
-        This is the case a timestamp alone gets WRONG. With a base shorter than
-        IDLE_GRACE (base 1 < grace 5 here), the silence since start is itself
-        inside the recency window — so an implementation that only compares
-        `now - last_output_at` hands a mute child an extension it never earned.
+        Base 1 < grace 5: comparing `now - last_output_at` alone would extend a mute child.
         """
         monkeypatch.setattr(executor, "IDLE_GRACE", 5)
         monkeypatch.setattr(executor, "MAX_TIMEOUT", 6)
@@ -791,11 +635,7 @@ class TestOutputExtendsLife:
         assert elapsed < 4, f"a mute child bought {elapsed:.1f}s — silence is not output"
 
     def test_extend_on_output_false_kills_a_chatterer_at_its_base(self, temp_test_dir: Path):
-        """extend_on_output=False means the number is the number.
-
-        This is what an explicit --drone-timeout buys: a deliberate tight cap
-        that extension would make unpredictable.
-        """
+        """extend_on_output=False (an explicit --drone-timeout) means the number is the number."""
         started = time.monotonic()
         with pytest.raises(CommandExecutionError, match="timed out"):
             execute_command(
@@ -806,11 +646,6 @@ class TestOutputExtendsLife:
                 extend_on_output=False,
             )
         assert time.monotonic() - started < 8
-
-
-# ---------------------------------------------------------------------------
-# 14. Partial output survives the kill (the @ai_mail defect)
-# ---------------------------------------------------------------------------
 
 
 SENTINEL_CODE = (
@@ -826,11 +661,7 @@ SENTINEL_CODE = (
 def _script(directory: Path, body: str) -> str:
     """Write a child program to a FILE rather than passing it as -c.
 
-    Not cosmetic: the error message echoes the command line, so a sentinel
-    living in a -c argument would appear in the message whether or not the
-    child's output was ever replayed. Every sentinel assertion below would
-    pass against the old, output-discarding code. A test that cannot fail is
-    not a test.
+    The error message echoes the command line, so a -c sentinel would appear whether or not output was replayed.
     """
     path = directory / "child_program.py"
     path.write_text(body, encoding="utf-8")
@@ -838,20 +669,11 @@ def _script(directory: Path, body: str) -> str:
 
 
 class TestPartialOutputReplay:
-    """A killed child's output is EVIDENCE. The old path discarded it.
-
-    An @all broadcast delivered all 18 messages and then reported nothing but
-    'Command timed out after 60s' — because TimeoutExpired.stdout/.stderr were
-    never read. Work that happened must still be visible.
-    """
+    """A killed child's output is evidence and is replayed in the timeout error."""
 
     @pytest.fixture(autouse=True)
     def _tight_guard(self, monkeypatch):
-        """These children SPEAK, so they would earn extensions at real values.
-
-        The point here is what the kill REPORTS, not when it lands — so the
-        window and the ceiling are shrunk to keep every case a few seconds.
-        """
+        """These children SPEAK, so shrink grace and ceiling to keep each kill a few seconds."""
         monkeypatch.setattr(executor, "IDLE_GRACE", 1)
         monkeypatch.setattr(executor, "MAX_TIMEOUT", 6)
 
@@ -912,15 +734,8 @@ class TestPartialOutputReplay:
         assert "truncated" not in str(exc_info.value).lower()
 
 
-# ---------------------------------------------------------------------------
-# 15. Both pipes drain concurrently (the classic Popen deadlock)
-# ---------------------------------------------------------------------------
-
-
 class TestConcurrentPipeDraining:
-    """Reading one pipe to EOF while the other fills is a deadlock, not a bug
-    you find in review. Pinned because the executor now owns the pipes itself.
-    """
+    """Reading one pipe to EOF while the other fills is a deadlock: both pipes drain concurrently."""
 
     def test_large_volume_on_both_pipes_does_not_deadlock(self, temp_test_dir: Path):
         code = (
@@ -934,11 +749,6 @@ class TestConcurrentPipeDraining:
         assert len(result.stdout) == 500000
         assert len(result.stderr) == 500000
         assert result.exit_code == 0
-
-
-# ---------------------------------------------------------------------------
-# 16. The extension constants
-# ---------------------------------------------------------------------------
 
 
 class TestExtensionConstants:
@@ -961,17 +771,10 @@ class TestExtensionConstants:
         assert sig.parameters["extend_on_output"].default is True
 
 
-# ---------------------------------------------------------------------------
-# 17. The stop ladder — terminate, insist, reap, and say so when it fails
-# ---------------------------------------------------------------------------
-
-
 class _FakeProc:
     """A stand-in for Popen that scripts how a child responds to signals.
 
-    A real child that ignores SIGKILL cannot be built portably, and that is
-    precisely the branch worth pinning: it is the only one that leaves
-    something behind.
+    A real child that ignores SIGKILL cannot be built portably.
     """
 
     def __init__(self, *, dies_on_terminate: bool, dies_on_kill: bool = True, unsignalable: bool = False):

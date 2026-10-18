@@ -3,16 +3,12 @@
 # Description: Bring origin/main into dev with a merge commit, never a rewrite
 # Version: 1.0.0
 # Created: 2026-10-01
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """Bring origin/main into dev with a merge commit: never a rebase, a push, a force or a stash.
 
-Dev and main diverge whenever main takes a commit that did not come through dev:
-a README edit made on GitHub, a dependabot bump. ``sync`` is fast-forward only and
-refuses then. ``smart-sync`` would rebase pushed history, which needs a force
-push, and the fleet never forces. A merge commit keeps both histories as they
-are, and ``dev-pr`` pushes it with everything else.
+``sync`` is fast-forward only, and rebasing pushed history needs a force push, which the fleet never does.
 """
 
 from __future__ import annotations
@@ -69,19 +65,7 @@ def _refused(message: str) -> dict:
 def merge_main(repo_root: Path) -> dict:
     """Merge origin/main into dev with ``git merge --no-ff --no-edit``.
 
-    Refuses with nothing touched when HEAD is not dev, or when a merge is
-    already in progress (aborting a conflict would throw that merge away). It
-    also refuses when the fetch fails, or when the index holds staged changes:
-    git refuses those itself, so the merge commit never sweeps them in. And it
-    refuses when a file main changes is also changed, or untracked, in the
-    working tree; that list is named. On conflict the merge is aborted and the
-    conflicted files are named, which leaves the tree as it was.
-
-    Args:
-        repo_root: The repository to merge in.
-
-    Returns:
-        Dict with success (bool) and message (str).
+    Refuses untouched on a merge already in progress: aborting a conflict would throw that merge away.
     """
     try:
         return _merge_main(repo_root)

@@ -3,17 +3,13 @@
 # Description: The tracked tree at a ref, written into an empty directory
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """The tracked tree at a ref, written into an empty directory: the twin of ``git archive | tar -x``.
 
-seedgo's CI-versus-local audits need a clean tracked tree (DPLAN-0195), and
-with raw git blocked for every seat (git_gate 5.0.0) nothing else makes one.
-It reads the repo and writes only the named directory, which must be empty
-and sit under the host temp dir or the caller's own ``docs.local``. The
-archive is unpacked with tarfile's ``data`` filter: no shell, no absolute or
-escaping member, no device file.
+The destination must be empty and under the host temp dir or the caller's
+``docs.local``; tarfile's ``data`` filter refuses escaping members and devices.
 """
 
 from __future__ import annotations
@@ -44,14 +40,7 @@ def _refused(message: str) -> dict:
 def export_tree(repo_root: Path, ref: str, dest: Path, docs_local: Path | None) -> dict:
     """Write the tracked tree at *ref* into *dest*.
 
-    Args:
-        repo_root: The repository to read.
-        ref: Any name git resolves to a commit. A flag-shaped ref is refused.
-        dest: An absolute directory. It is created if absent and must be empty.
-        docs_local: The caller's own docs.local, the second allowed home, or None.
-
-    Returns:
-        Dict with success (bool) and message (str).
+    *dest* is absolute, created if absent, must be empty; *docs_local* (or None) is the second allowed home.
     """
     if ref.startswith("-"):
         return _refused(f"{ref} is not a commit")

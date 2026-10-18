@@ -3,14 +3,10 @@
 # Description: Module orchestrator for custom command shortcuts
 # Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
 
-"""Module orchestrator for custom command shortcuts.
-
-Thin orchestrator that delegates to the command_registry handler package
-for all CRUD and lookup operations on user-defined command aliases.
-"""
+"""Module orchestrator for custom command shortcuts."""
 
 from __future__ import annotations
 
@@ -51,21 +47,8 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Standard module interface
-# ---------------------------------------------------------------------------
-
-
 def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
-    """Route commands subcommands to handler functions.
-
-    Args:
-        command: The subcommand string (e.g. ``"add"``, ``"remove"``, ``"list"``).
-        args: List of arguments for the subcommand.
-
-    Returns:
-        True if the command succeeded, False otherwise.
-    """
+    """Route commands subcommands to handler functions."""
     if not args:
         if command is None:
             print_introspection()
@@ -86,7 +69,6 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         cmd = args[2]
         extra = args[3:]
 
-        # Extract optional --desc= and --branch= flags
         description = ""
         source_branch = ""
         cmd_args: list[str] = []
@@ -188,11 +170,6 @@ def print_help() -> None:
     console.print("  lookup <name>                        Look up a command by name")
 
 
-# ---------------------------------------------------------------------------
-# Delegated operations
-# ---------------------------------------------------------------------------
-
-
 def add(
     name: str,
     target: str,
@@ -201,62 +178,28 @@ def add(
     description: str = "",
     source_branch: str = "",
 ) -> bool:
-    """Add a custom command shortcut.
-
-    Args:
-        name: Shortcut name.
-        target: Target branch (e.g. ``"@seedgo"``).
-        command: Command to run on the target.
-        args: Extra arguments.
-        description: Human-readable description.
-        source_branch: Originating branch name.
-
-    Returns:
-        True if added successfully.
-    """
+    """Add a custom command shortcut."""
     return _add_command(name, target, command, args, description, source_branch)
 
 
 def remove(name: str) -> bool:
-    """Remove a custom command shortcut.
-
-    Args:
-        name: Shortcut name to remove.
-
-    Returns:
-        True if removed successfully.
-    """
+    """Remove a custom command shortcut."""
     return _remove_command(name)
 
 
 def list_all() -> list[dict[str, Any]]:
-    """List all registered custom commands sorted by name.
-
-    Returns:
-        List of command dicts.
-    """
+    """List all registered custom commands sorted by name."""
     return _list_commands()
 
 
 def lookup(name: str) -> dict[str, Any] | None:
-    """Look up a custom command by exact name.
-
-    Args:
-        name: Shortcut name.
-
-    Returns:
-        Command dict if found, None otherwise.
-    """
+    """Look up a custom command by exact name."""
     return _lookup_command(name)
 
 
 def match(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
     """Match user input to a registered command using greedy multi-word matching.
 
-    Args:
-        args: Whitespace-split user input tokens.
-
-    Returns:
-        Tuple of (command_dict, remaining_args) on match, None otherwise.
+    Returns (command_dict, remaining_args), or None when nothing matches.
     """
     return _match_command(args)

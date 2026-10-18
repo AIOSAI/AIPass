@@ -3,19 +3,13 @@
 # Description: Take tracked files out of the index, leaving the working tree as it is
 # Version: 1.0.0
 # Created: 2026-10-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Take tracked files out of the index, leaving the working tree as it is.
 
-The twin of ``git rm --cached``. A ``.gitignore`` line never untracks a file
-that is already in the index, so four seedgo ratchet artifacts carrying a home
-path rode every clone after their directory was ignored, and with raw git
-blocked for every seat there was no door to take them out (DPLAN-0409 C1).
-
-Each path is classified first, by the same rule ``tracked`` uses. Only a
-TRACKED path is touched; every other class is refused by name and nothing is
-done for it. Nothing here commits.
+The ``git rm --cached`` door: a ``.gitignore`` line never untracks an indexed file, and raw git
+is blocked for every seat. Only a TRACKED path (``tracked``'s rule) is touched; nothing commits.
 """
 
 from __future__ import annotations
@@ -49,14 +43,8 @@ def _remove_cached(repo_root: Path, path: str, recursive: bool) -> subprocess.Co
 def untrack(repo_root: Path, cwd: Path | None, tokens: list[str], recursive: bool = False) -> dict:
     """Take each TRACKED path out of the index; refuse every other path by name, with its class.
 
-    A directory is refused unless *recursive*, then leaves the index whole. The
-    working tree is never touched and nothing is committed. Refused paths do
-    not stop the accepted ones.
-
-    Returns:
-        Dict with ok (bool: False only when the paths could not be classified),
-        removed (repo-relative paths that left the index), refused (one line
-        per path not handled) and message (str).
+    A directory is refused unless *recursive*. Refused paths do not stop the accepted ones;
+    ok is False only when the paths could not be classified.
     """
     classified = classify(repo_root, cwd, tokens)
     if not classified["ok"]:

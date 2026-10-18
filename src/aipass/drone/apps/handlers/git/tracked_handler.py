@@ -3,14 +3,12 @@
 # Description: Whether git tracks, ignores or has never seen each named path
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Whether git tracks, ignores or has never seen each named path.
 
-The twin of ``git ls-files`` plus ``git check-ignore``. A commit by paths was
-refused because a plan file was gitignored, and with raw git blocked for every
-seat the only way to see that was gone (DPLAN-0356, git_gate 5.0.0).
+Raw git is blocked for every seat, so this is the only way to see why a path commit is refused.
 """
 
 from __future__ import annotations
@@ -71,14 +69,8 @@ def _locate(repo_root: Path, cwd: Path | None, token: str) -> tuple[Path, str]:
 def classify(repo_root: Path, cwd: Path | None, tokens: list[str]) -> dict:
     """Name each path tracked, ignored, untracked, missing (neither on disk nor tracked) or outside the repo.
 
-    A relative path is read against the caller's directory first, then the
-    repo root, the same rule ``log`` and ``blame`` follow. One on disk in
-    neither place is the tracked one if either names a deleted tracked file,
-    else the repo root's. Rows come back in the order given, as repo-relative
-    paths (absolute for one outside).
-
-    Returns:
-        Dict with ok (bool), rows (list of (state, path)) and message (str).
+    A relative path is read against the caller's directory, then the repo root, as ``log`` and ``blame`` do.
+    Rows keep the given order, repo-relative (absolute for one outside).
     """
     rows: list[tuple[str, str]] = []
     try:

@@ -3,7 +3,7 @@
 # Description: Command routing - router module and router_handler
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -32,11 +32,6 @@ from aipass.drone.apps.handlers.router_handler import (
 )
 from aipass.drone.apps.modules.router import handle_command, route_command, route_all
 from aipass.drone.apps.plugins.devpulse_ops.auth import verify_git_access
-
-
-# ---------------------------------------------------------------------------
-# find_entry_point
-# ---------------------------------------------------------------------------
 
 
 class TestFindEntryPoint:
@@ -70,11 +65,6 @@ class TestFindEntryPoint:
 
         assert result.parent.name == "apps"
         assert result.name == "test_branch.py"
-
-
-# ---------------------------------------------------------------------------
-# execute_branch_command
-# ---------------------------------------------------------------------------
 
 
 class TestExecuteBranchCommand:
@@ -119,7 +109,6 @@ class TestExecuteBranchCommand:
             command=None,
         )
 
-        # Args passed to execute_command should only be the relative entry point
         args_list = mock_exec.call_args.kwargs["args"]
         assert args_list == [str(Path("apps") / "fakebranch.py")]
         assert result.command == ""
@@ -197,7 +186,6 @@ class TestExecuteBranchCommand:
         )
 
         args_list = mock_exec.call_args.kwargs["args"]
-        # Verify the args list ends with the command and its arguments in exact order
         assert args_list[-3:] == ["deploy", "--force", "--env=prod"]
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
@@ -243,11 +231,6 @@ class TestExecuteBranchCommand:
             )
 
 
-# ---------------------------------------------------------------------------
-# route_command (integration-level, mocking handler layer)
-# ---------------------------------------------------------------------------
-
-
 class TestRouteCommand:
     """Tests for route_command() in the router module."""
 
@@ -271,11 +254,7 @@ class TestRouteCommand:
     @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_lost_caller_logs_unknown_not_blank(self, mock_resolve, mock_exec, _mock_identity):
-        """An undetected caller routes as UNKNOWN, not as a silently omitted tag.
-
-        A blank tag reads as 'not applicable' and hid the gap that surfaced one
-        second later as a BRANCH DETECTION FAILED in the target branch.
-        """
+        """An undetected caller routes as UNKNOWN, not as a silently omitted tag that reads 'not applicable'."""
         mock_resolve.return_value = "/fake/path/to/branch"
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="ai_mail", command="dispatch")
 
@@ -355,19 +334,8 @@ class TestRouteCommand:
         assert call_kwargs["branch_name"] == "mybranch"
 
 
-# ---------------------------------------------------------------------------
-# route_all
-# ---------------------------------------------------------------------------
-
-
 class TestExtensionIsOnlyForTheDefault:
-    """An explicit --drone-timeout means EXACTLY that number.
-
-    route_command already knows whether the operator supplied one: `timeout`
-    arrives as None when nobody said. Extension is switched off when they did,
-    because a deliberate tight cap that silently stretches is unpredictable —
-    the operator's number is the operator's number.
-    """
+    """An explicit --drone-timeout means EXACTLY that number: extension is only for the default (None)."""
 
     @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
@@ -392,11 +360,7 @@ class TestExtensionIsOnlyForTheDefault:
     @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_routing_line_states_the_extension_state(self, mock_resolve, mock_exec):
-        """The routing log says whether this call can stretch.
-
-        The timeout is already logged; a number without its policy is half the
-        fact, and the missing half is what made a 60s kill look like a hang.
-        """
+        """The routing log says whether this call can stretch: a timeout without its policy reads as a hang."""
         mock_resolve.return_value = "/fake/path"
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
 
@@ -476,11 +440,6 @@ class TestRouteAll:
         assert "boom" in results["bad_branch"].stderr
 
 
-# ---------------------------------------------------------------------------
-# detect_caller_signal
-# ---------------------------------------------------------------------------
-
-
 class TestDetectCallerBranchName:
     """Tests for detect_caller_signal().name in router_handler."""
 
@@ -552,12 +511,7 @@ class TestDetectCallerBranchName:
 
 
 class TestDetectCallerFallsBackToRegistry:
-    """An unusable passport must not dead-end detection.
-
-    The old code returned None the moment a passport was found but unreadable,
-    silently skipping the registry fallback its own docstring promises — so an
-    external project with a valid registry still lost its caller identity.
-    """
+    """An unusable passport must not dead-end detection: the registry fallback still answers."""
 
     @staticmethod
     def _write_registry(root: Path, name: str) -> None:
@@ -602,22 +556,15 @@ class TestDetectCallerFallsBackToRegistry:
         assert detect_caller_signal(child).name != "parent_branch"
 
     def test_total_failure_logs_cwd(self, temp_test_dir: Path):
-        """No passport and no registry logs the cwd — without it the failure is invisible.
+        """No passport and no registry logs the cwd, at INFO: an anonymous caller is not a fault.
 
-        The downstream error names the TARGET branch's directory, which sends
-        investigation to the wrong branch entirely (see @ai_mail send-fail 47f50fdb).
-
-        INFO since DPLAN-0283 — an anonymous caller is a correct outcome, not a
-        fault. The breadcrumb is what matters and it is unchanged; only the
-        severity moved. See TestIdentityMessageSeverity for why.
+        The downstream error names the TARGET branch's directory, so the cwd is the only breadcrumb.
         """
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             assert detect_caller_signal(temp_test_dir).name is None
         mock_logger.info.assert_called_once()
         assert mock_logger.warning.call_args_list == []
-        # Compare as Paths, not reprs: on Windows the logged arg renders as
-        # WindowsPath('C:/...') while str(tmp_path) has backslashes, so a
-        # substring match fails on separator style alone.
+        # Compare as Paths: on Windows a substring match fails on separator style alone.
         assert any(
             Path(str(arg)) == temp_test_dir for arg in mock_logger.info.call_args.args if isinstance(arg, (str, Path))
         )
@@ -636,11 +583,7 @@ class TestDetectCallerFallsBackToRegistry:
 class TestNamelessRegistryFallback:
     """A registry with no declared name must still identify its project.
 
-    AIPass's OWN registry carries only version/last_updated/total_branches/id, so
-    requiring metadata.name made the framework repo the single place this
-    fallback could never fire — and it failed silently. Callers at the AIPass
-    root were anonymous all day: six feedback messages arrived From unknown with
-    no reply path, three replies undeliverable for five hours.
+    AIPass's own registry carries no metadata.name, so requiring one made its root callers anonymous.
     """
 
     @pytest.mark.parametrize(
@@ -669,11 +612,7 @@ class TestNamelessRegistryFallback:
         assert detect_caller_signal(temp_test_dir).name == "vera-studio"
 
     def test_passport_still_outranks_the_registry(self, temp_test_dir: Path):
-        """Project-level attribution must never shadow a citizen standing in their branch.
-
-        This is the whole safety boundary of the fallback: it fires only when
-        nobody identifiable is home.
-        """
+        """Project-level attribution must never shadow a citizen standing in their branch."""
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "drone"}}), encoding="utf-8")
@@ -684,12 +623,7 @@ class TestNamelessRegistryFallback:
         assert detect_caller_signal(temp_test_dir).name == "drone"
 
     def test_unreadable_registry_says_so(self, temp_test_dir: Path):
-        """Found-but-rejected must never be silent — that silence cost the diagnosis.
-
-        The old code logged nothing when a registry was found and turned down, so
-        the log showed 'no passport or registry found' while the registry was
-        sitting in the very directory named by the message.
-        """
+        """Found-but-rejected must never be silent, or the log claims no registry where one sits."""
         (temp_test_dir / "PROJ_REGISTRY.json").write_text("{{{not json", encoding="utf-8")
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             detect_caller_signal(temp_test_dir).name
@@ -699,11 +633,7 @@ class TestNamelessRegistryFallback:
     def test_bare_suffix_registry_is_refused_and_named(self, temp_test_dir: Path):
         """'_REGISTRY.json' leaves nothing to derive — refuse, and SAY which file.
 
-        Asserting the warning, not just the None: the caller's truthiness check
-        already discards an empty name, so returning None proves nothing about
-        the guard. The log line is the part that only this guard can produce, and
-        it is the whole point — a registry turned down in silence is exactly the
-        failure being fixed here.
+        The warning is asserted, not just None: the caller's truthiness check already discards an empty name.
         """
         (temp_test_dir / "_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}), encoding="utf-8")
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
@@ -711,12 +641,7 @@ class TestNamelessRegistryFallback:
         assert any("no usable project name" in str(c) for c in mock_logger.warning.call_args_list)
 
     def test_derived_name_cannot_earn_git_authority(self, temp_test_dir: Path, monkeypatch):
-        """A project name is identity for routing, never a credential.
-
-        Filename derivation means any directory with a *_REGISTRY.json now yields
-        a caller name. Owner-tier reads passports directly and must stay unmoved
-        by that — otherwise this convenience would be an escalation path.
-        """
+        """A project name is identity for routing, never a credential: owner-tier reads passports only."""
         (temp_test_dir / "AIPASS_REGISTRY.json").write_text(
             json.dumps({"metadata": {"id": "x"}, "branches": []}), encoding="utf-8"
         )
@@ -725,11 +650,6 @@ class TestNamelessRegistryFallback:
         monkeypatch.chdir(temp_test_dir)
         with pytest.raises(PermissionError):
             verify_git_access("commit")
-
-
-# ---------------------------------------------------------------------------
-# Caller identity precedence
-# ---------------------------------------------------------------------------
 
 
 def _plant_passport(directory: Path, branch_name: str) -> Path:
@@ -743,9 +663,7 @@ def _plant_passport(directory: Path, branch_name: str) -> Path:
 class TestCallerIdentityPrecedence:
     """Assigned identity (AIPASS_BRANCH_NAME) outranks the cwd passport.
 
-    Every test here sets or deletes AIPASS_BRANCH_NAME explicitly. The var is
-    live in any dispatched agent's shell, so a test that reads it from the
-    ambient environment passes or fails on who ran pytest.
+    Every test sets or deletes AIPASS_BRANCH_NAME: it is live in any dispatched agent's shell.
     """
 
     def test_assigned_identity_beats_cwd_passport(self, temp_test_dir: Path, monkeypatch):
@@ -771,11 +689,7 @@ class TestCallerIdentityPrecedence:
         assert resolve_caller_identity(nowhere) == "commons"
 
     def test_conflict_is_logged_naming_both_signals(self, temp_test_dir: Path, monkeypatch):
-        """This process is the only place both signals coexist.
-
-        ai_mail cannot see the conflict downstream — it receives the winner
-        only — so an unlogged disagreement is unrecoverable.
-        """
+        """This process is the only place both signals coexist; ai_mail receives only the winner."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 
@@ -786,11 +700,7 @@ class TestCallerIdentityPrecedence:
         assert "commons" in warnings and "AIPASS" in warnings
 
     def test_agreement_is_not_logged(self, temp_test_dir: Path, monkeypatch):
-        """Passports carry display casing; the env var carries the directory name.
-
-        'AIPASS' and 'aipass' are the same citizen — comparing them exactly
-        would warn on every well-behaved call.
-        """
+        """Passports carry display casing; the env var carries the directory name: 'AIPASS' is 'aipass'."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "aipass")
 
@@ -812,11 +722,7 @@ class TestCallerIdentityPrecedence:
 
 
 class TestIdentityMessageSeverity:
-    """A resolution that SUCCEEDS must not page anyone (DPLAN-0283).
-
-    Two escalation digests fired off these sites in eight minutes. Every fact
-    below was true of the live logs before the fix.
-    """
+    """A resolution that SUCCEEDS must not page anyone."""
 
     def _plant_registry(self, directory: Path, filename: str = "AIPASS_REGISTRY.json") -> Path:
         """Write a registry with no declared name — AIPass's own shape."""
@@ -827,12 +733,7 @@ class TestIdentityMessageSeverity:
         return directory
 
     def test_project_root_caller_does_not_warn(self, temp_test_dir: Path, monkeypatch):
-        """THE BUG: a service launched at a repo root warned on every call.
-
-        AIPASS_BRANCH_NAME=prax + cwd=<repo root> is the ordinary shape of every
-        long-lived process in the system. 103 of the 105 logged 'conflicts' were
-        this, and none of them was one.
-        """
+        """A service launched at a repo root (the shape of every long-lived process) must not warn."""
         root = self._plant_registry(temp_test_dir / "AIPass")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "prax")
 
@@ -843,12 +744,7 @@ class TestIdentityMessageSeverity:
         assert mock_logger.warning.call_args_list == []
 
     def test_project_root_message_does_not_claim_a_passport(self, temp_test_dir: Path, monkeypatch):
-        """The old line named evidence that was never there.
-
-        It said 'the passport at cwd <repo-root> says aipass'.
-        That directory holds no .trinity/passport.json — the name came from the
-        registry. The owner's ruling: say plainly what happened.
-        """
+        """The message names the registry, not a passport the directory does not hold."""
         root = self._plant_registry(temp_test_dir / "AIPass")
         assert not (root / ".trinity" / "passport.json").exists()
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "prax")
@@ -886,11 +782,7 @@ class TestIdentityMessageSeverity:
         assert "anonymous" in " ".join(str(c) for c in mock_logger.info.call_args_list)
 
     def test_repeat_calls_in_one_process_log_once(self, temp_test_dir: Path, monkeypatch):
-        """resolve_caller_identity runs TWICE per route — router.py, then here.
-
-        That alone doubled every line in the digest. Neither signal can change
-        under a running process, so the second is the first restated.
-        """
+        """resolve_caller_identity runs twice per route; neither signal changes within a process."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 
@@ -915,12 +807,7 @@ class TestIdentityMessageSeverity:
         assert "commons" in warnings and "trigger" in warnings
 
     def test_dedupe_does_not_leak_across_processes(self, temp_test_dir: Path, monkeypatch):
-        """Suppression is per-process, so a real conflict still escalates.
-
-        A recurring conflict across separate drone invocations SHOULD reach the
-        digest threshold. Muting it globally would trade a noisy bug for a
-        silent one.
-        """
+        """Suppression is per-process, so a conflict recurring across invocations still escalates."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 
@@ -969,12 +856,7 @@ class TestIdentityMessageSeverity:
     def test_log_tag_names_the_same_caller_that_is_stamped(
         self, mock_resolve, mock_exec, temp_test_dir: Path, monkeypatch
     ):
-        """router.py logs the CALLER: tag from its own lookup.
-
-        Two copies of the precedence means the tag can name one branch while
-        the work is stamped with another — the log would exonerate the very
-        caller under investigation.
-        """
+        """router.py's CALLER: tag must name the same branch the work is stamped with."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         mock_resolve.return_value = str(temp_test_dir)
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
@@ -988,11 +870,6 @@ class TestIdentityMessageSeverity:
         assert "CALLER:COMMONS" in routing
 
 
-# ---------------------------------------------------------------------------
-# AIPASS_CALLER_BRANCH env var
-# ---------------------------------------------------------------------------
-
-
 class TestCallerBranchEnvVar:
     """Tests that execute_branch_command sets AIPASS_CALLER_BRANCH."""
 
@@ -1000,18 +877,14 @@ class TestCallerBranchEnvVar:
     def test_sets_caller_branch_from_passport(self, mock_exec, temp_test_dir: Path, monkeypatch):
         """AIPASS_CALLER_BRANCH is set when passport.json exists in cwd.
 
-        The delenv is load-bearing: AIPASS_BRANCH_NAME now outranks the passport
-        and is set in every dispatched agent's shell, so without it this test
-        asserts on whoever ran pytest rather than on the fixture.
+        The delenv is load-bearing: AIPASS_BRANCH_NAME outranks the passport and is live in agent shells.
         """
         monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
-        # Set up branch entry point
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry = apps_dir / "testbranch.py"
         entry.write_text("# stub", encoding="utf-8")
 
-        # Set up passport in cwd
         cwd_dir = temp_test_dir / "caller_cwd"
         cwd_dir.mkdir()
         trinity = cwd_dir / ".trinity"
@@ -1039,7 +912,6 @@ class TestCallerBranchEnvVar:
         entry = apps_dir / "testbranch.py"
         entry.write_text("# stub", encoding="utf-8")
 
-        # Use a cwd with no passport
         cwd_dir = temp_test_dir / "empty_cwd"
         cwd_dir.mkdir()
 
@@ -1057,31 +929,14 @@ class TestCallerBranchEnvVar:
         assert "AIPASS_CALLER_BRANCH" not in env
 
 
-# ---------------------------------------------------------------------------
-# handle_command
-# ---------------------------------------------------------------------------
-
-
 class TestHandleCommand:
     """Tests for handle_command() in the router module."""
 
     def test_route_no_args_returns_false(self):
         """handle_command('route', []) returns False — not enough args.
 
-        The TYPE is asserted beside the value. Every module in the fleet must
-        expose ``handle_command(command, args) -> bool``, and drone is the
-        router that reads the answer: a module returning None, an exit code or
-        a truthy result object sends drone down the wrong branch. ``is False``
-        alone pins this one path; ``isinstance(result, bool)`` pins the
-        declared contract, which is what other modules are held to.
-
-        Added with the pair-7 sweep (DPLAN-0325): the DPLAN-0059 stamp file
-        that used to carry this assertion was archived as subsumed by seedgo's
-        cross-branch contract, and it had already stopped RUNNING — it skipped
-        at module level once the handler became the shim, because it looked for
-        a JSON_DIR the shim does not have. A skipped file still reads as
-        covered to a text scan, so the assertion moved here, into a test that
-        actually runs.
+        The type is asserted too: every module exposes ``handle_command(command, args) -> bool``,
+        and a None, exit code or truthy object sends the router down the wrong branch.
         """
         result = handle_command("route", [])
         assert result is False

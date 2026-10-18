@@ -3,15 +3,11 @@
 # Description: Safe subprocess execution for branch command routing
 # Version: 1.1.2
 # Created: 2026-03-09
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Safe subprocess execution for branch command routing.
-
-Wraps subprocess with safety guards: a hang guard sized for the worst
-legitimate case, no shell injection, captured output that survives a kill, and
-consistent error wrapping via CommandExecutionError.
 """
 
 import os
@@ -26,82 +22,38 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
-# Raised 30 -> 60 on 2026-08-13 (The owner's ruling). Two known runners finish
-# around 31s and were tripping the old default. The evening before showed
-# fleet-wide what a quiet default costs: a 30s UserPromptSubmit timeout
-# discarded a hooks context for weeks because the real work legitimately took
-# longer (DPLAN-0285). A default that kills work at N when work takes N+1 fails
-# silently, which is the expensive way to fail.
-#
-# Raised 60 -> 600 on 2026-08-27 (The owner's ruling: "it is configured wrong —
-# it should not be timing out before it completes; processing time is fine,
-# increase the allowed timeout so things can actually complete"). Two live
-# kills in one morning made the same point twice:
-#   1. the fleet-wide trinity push died at 60s mid-alphabet; re-fired with
-#      --drone-timeout 900 it completed in about five minutes;
-#   2. an @all mail broadcast to 18 recipients was killed at 60s AFTER every
-#      message had already been delivered — and the caller was told only
-#      "Command timed out", because the child's captured output was discarded
-#      with the exception.
-#
-# THE DESIGN POSITION, so the next raise argues with the right thing: this is a
-# HANG GUARD sized for the worst legitimate case, NOT a per-verb performance
-# budget. Per-verb integers were considered and rejected — they cannot tell
-# `email @seedgo` from `email @all`, which is one command with two very
-# different worst cases. Legitimate work completes; hung work still dies.
+# A HANG GUARD sized for the worst legitimate case, not a per-verb budget: one
+# verb (`email @seedgo` vs `email @all`) has very different worst cases.
 DEFAULT_TIMEOUT = 600
 
-# The extension quantum, and the window that counts as "recent output". A child
-# still talking when its deadline arrives buys another IDLE_GRACE, repeatedly,
-# up to MAX_TIMEOUT. Silence never SHORTENS anything: a long SILENT computation
-# still gets its full base, so this adds no false-kill mode that a flat base
-# did not already have.
+# A child still talking at its deadline buys another IDLE_GRACE, up to MAX_TIMEOUT.
 IDLE_GRACE = 120
 
-# The hard ceiling. Extension can never pass it — a process that chatters
-# forever is exactly what the guard exists to kill.
+# Hard ceiling: a process that chatters forever is what the guard exists to kill.
 MAX_TIMEOUT = 1800
 
-# Kept as a MECHANISM, deliberately empty as DATA.
-#
-# It held three entries — memory process-plans 120, memory rollover 100, flow
-# close 90 — every one of them written to RAISE above the old 60s default.
-# Against a 600s base the same numbers invert into CAPS: the three commands we
-# know are slow would get the LEAST time in the fleet, which is the failure
-# this ruling exists to end. The rule that put them here ("a policy value is a
-# decision, not a floor" — it wins even when lower than the default) is still
-# the rule, and resolve_timeout still honours it. Only the now-harmful data is
-# gone.
+# Kept empty on purpose: a policy value wins even when LOWER than the default,
+# so a "raise" entry against a 600s base becomes a cap on a slow command.
 TIMEOUT_OVERRIDES: dict[str, dict[str, int]] = {}
 
-# How often the wait loop checks for exit. Small enough that a fast command is
-# not held at the door, large enough not to spin a core.
 _POLL_INTERVAL = 0.1
 
-# Between terminate() and kill(), and again before we stop waiting to reap.
 _TERMINATE_GRACE = 1.0
 
-# Reader threads are joined so buffered output is not lost. Longer on a clean
-# exit (there is at most a pipe buffer left to drain); short on the kill path,
-# where the point is to report what we have, not to wait on a dying child.
+# Short on the kill path: report what we have, do not wait on a dying child.
 _READER_JOIN_ON_EXIT = 5.0
 _READER_JOIN_ON_KILL = 2.0
 
 _READ_CHUNK = 65536
 
-# Partial output is replayed tail-first: the newest lines say where the work
-# got to. Truncation is ALWAYS announced — a silent trim is the same species
-# of lie as a silent kill.
+# Replayed tail-first; truncation is always announced, never silent.
 _PARTIAL_REPLAY_CHARS = 4000
 
 
 def resolve_timeout(branch: str, command: str | None, explicit: int | None = None) -> int:
     """Resolve subprocess timeout for a branch command.
 
-    Priority: explicit flag > per-command policy > DEFAULT_TIMEOUT.
-
-    Order, not magnitude: a policy value wins even when it is LOWER than the
-    default. There is deliberately no max() here.
+    Order, not magnitude: a policy value wins even when LOWER than the default; no max() here.
     """
     if explicit is not None:
         return explicit
@@ -125,48 +77,29 @@ class CommandResult:
 
 
 def _poll_pause(seconds: float) -> None:
-    """The hang guard's pause between polls: the one place the wait loop yields.
-
-    Named apart from time.sleep because the loop spends nearly all its time
-    here, so this is where Ctrl+C lands, while the reaping that follows
-    (Popen.wait in _stop_process) sleeps on its own and must run to the end.
-    """
+    """The hang guard's pause between polls: the one place the wait loop yields."""
     time.sleep(seconds)
 
 
 def _spawn(full_cmd: List[str], **kwargs: Any) -> "subprocess.Popen[bytes]":
     """Start the captured child: subprocess.Popen with the caller's arguments, nothing else.
 
-    A seam, and the tests are the reason: they replace the spawn here. Patching
-    subprocess.Popen through this module's attribute replaced it for every
-    reader in the process while the patch stood (drone, fleet green leg 6).
+    A test seam: patching subprocess.Popen instead replaces it for the whole process.
     """
-    # cast: with **kwargs typed Any the checker picks Popen's text overload;
-    # the caller passes no text/encoding flag, so the pipes are bytes.
+    # cast: no text/encoding flag is passed, so the pipes are bytes.
     return cast("subprocess.Popen[bytes]", subprocess.Popen(full_cmd, **kwargs))
 
 
 def _run_interactive(full_cmd: List[str], **kwargs: Any) -> "subprocess.CompletedProcess[bytes]":
-    """Run the interactive child: subprocess.run with the caller's arguments, nothing else.
-
-    A seam for the same reason as _spawn: the tests replace the run here
-    instead of subprocess.run for the whole process.
-    """
+    """Run the interactive child: subprocess.run with the caller's arguments, nothing else."""
     return subprocess.run(full_cmd, **kwargs)
 
 
 def _stop_process(proc: "subprocess.Popen[bytes]") -> None:
-    """Ask the child to stop, insist if it does not, and reap it either way.
-
-    terminate() first so a child with a signal handler can flush; kill() only
-    when it will not go. The final wait() is the reaping — an unreaped child is
-    a zombie held by this process for as long as it lives.
-    """
+    """Ask the child to stop, insist if it does not, and reap it either way."""
     try:
         proc.terminate()
     except OSError as exc:
-        # Already gone (it exited in the race between the poll and here), or
-        # never ours to signal. Either way there is nothing left to stop.
         logger.debug("Hang guard: terminate on pid %s failed, treating as already exited: %s", proc.pid, exc)
         return
     try:
@@ -181,10 +114,7 @@ def _stop_process(proc: "subprocess.Popen[bytes]") -> None:
     try:
         proc.wait(timeout=_TERMINATE_GRACE)
     except subprocess.TimeoutExpired:
-        # WARNING, not debug: this is the one branch that leaves something
-        # behind. A child that has not been reaped after SIGKILL is a zombie
-        # held for the lifetime of this process, and it is invisible unless
-        # said here.
+        # WARNING, not debug: an unreaped child is a zombie, invisible unless said here.
         logger.warning("Hang guard: pid %s not reaped after kill — it may remain a zombie", proc.pid)
 
 
@@ -213,38 +143,20 @@ def _capture_with_hang_guard(
 ) -> tuple[bytes, bytes]:
     """Drain both pipes concurrently and enforce the hang guard.
 
-    Each pipe is drained in its own daemon thread. Reading one to EOF while the
-    other fills is the classic Popen deadlock: the child blocks writing to a
-    full pipe, we block reading the pipe it has stopped writing to, and neither
-    side ever moves again.
-
-    Returns the captured (stdout, stderr) bytes. Raises CommandExecutionError
-    if the child outlives its deadline, chaining a TimeoutExpired that CARRIES
-    the partial output rather than discarding it.
+    One thread per pipe (else the classic Popen deadlock); a timeout's TimeoutExpired carries the partial output.
     """
     start = time.monotonic()
     lock = threading.Lock()
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
 
-    # Initialised to the start, not to 0: nothing has been measured yet, and a
-    # fabricated epoch of silence is still a fabrication.
-    #
-    # `saw_output` is what actually makes "no output, no extension" true. A
-    # timestamp alone cannot: with a base SHORTER than IDLE_GRACE (every test
-    # here, and any tight --drone-timeout), silence-since-start is itself
-    # inside the recent-output window, so a child that never said a word would
-    # buy an extension on the strength of never having spoken. Output extends
-    # life; the absence of output is not output.
+    # saw_output, not the timestamp alone: with a base shorter than IDLE_GRACE a
+    # silent child would otherwise look "recent" and buy an extension.
     last_output_at = start
     saw_output = False
 
     def drain(stream: IO[bytes], sink: list[bytes]) -> None:
-        """Read one pipe to EOF into *sink*, stamping the arrival of each chunk.
-
-        Runs in its own thread. The stamp is what output-extends-life reads;
-        nothing here decides the deadline.
-        """
+        """Read one pipe to EOF into *sink*, stamping the arrival of each chunk."""
         nonlocal last_output_at, saw_output
         try:
             while True:
@@ -256,8 +168,6 @@ def _capture_with_hang_guard(
                     last_output_at = time.monotonic()
                     saw_output = True
         except (OSError, ValueError) as exc:
-            # The pipe was closed under us on the kill path. What was already
-            # collected is still evidence and is still reported.
             logger.debug("Hang guard: reader stopped early, reporting what was captured: %s", exc)
         finally:
             try:
@@ -274,13 +184,7 @@ def _capture_with_hang_guard(
         readers.append(reader)
 
     deadline = start + timeout
-    # Two guards were tried here and both proved to be the same rule written
-    # twice — mutations of each survived, which is what an equivalent mutant
-    # means. Neither `if extend_on_output` (the flag already gates the only
-    # read, below) nor `max(MAX_TIMEOUT, timeout)` (a base ABOVE the ceiling is
-    # already honoured in full: `deadline` starts at start+timeout and only
-    # ever moves outward, so the comparison below is false from the first
-    # check and nothing is ever cut short) changes any outcome.
+    # No max(MAX_TIMEOUT, timeout): a base above the ceiling is honoured, `deadline` only grows.
     hard_deadline = start + MAX_TIMEOUT
     timed_out = False
 
@@ -296,14 +200,12 @@ def _capture_with_hang_guard(
                 quiet_for = now - last_output_at
                 spoke = saw_output
             if extend_on_output and spoke and quiet_for < IDLE_GRACE and deadline < hard_deadline:
-                # Still talking at the deadline: this is work, not a hang.
                 deadline = min(deadline + IDLE_GRACE, hard_deadline)
                 continue
             timed_out = True
             break
     except KeyboardInterrupt:
-        # Ctrl+C belongs to the operator, but the child is ours — leaving it
-        # running would orphan it to nobody's terminal.
+        # The child is ours: leaving it running would orphan it.
         _stop_process(proc)
         for reader in readers:
             reader.join(timeout=_READER_JOIN_ON_KILL)
@@ -348,19 +250,10 @@ def execute_command(
 ) -> CommandResult:
     """Execute a command via subprocess with safety guards.
 
-    Never uses shell=True to prevent shell injection attacks.
-
-    Args:
-        interactive: If True, inherit stdio (no capture, no timeout).
-                     Used for long-running commands like prax monitor.
-        extend_on_output: If True (the default), a child still producing output
-                     when its deadline arrives is granted another IDLE_GRACE,
-                     up to MAX_TIMEOUT. Passed False when an operator named an
-                     explicit timeout — their number is their number.
+    *interactive* inherits stdio (no capture, no timeout); *extend_on_output* is False for an explicit timeout.
     """
     full_cmd = [executable] + list(args)
 
-    # Merge custom env vars with current environment
     run_env = None
     if env:
         run_env = os.environ.copy()
@@ -368,7 +261,6 @@ def execute_command(
 
     if interactive:
         try:
-            # Inherit stdin/stdout/stderr for live interaction
             result = _run_interactive(
                 full_cmd,
                 cwd=cwd,
@@ -376,9 +268,7 @@ def execute_command(
                 env=run_env,
             )
         except KeyboardInterrupt:
-            # Clean exit on Ctrl+C — no traceback. An interactive child shares
-            # this terminal and got the same SIGINT; there is nothing to kill
-            # and nothing has failed, so 130 is reported, not raised.
+            # The child shares this terminal and got the same SIGINT: report 130, do not raise.
             logger.info("Interactive command interrupted by operator (exit 130): %s", " ".join(full_cmd))
             return CommandResult(stdout="", stderr="", exit_code=130, branch="", command="")
         except FileNotFoundError as e:
@@ -394,9 +284,7 @@ def execute_command(
         )
 
     try:
-        # bufsize=0 so each read returns whatever is available NOW: the ARRIVAL
-        # TIME of output is what buys an extension, and a buffered reader would
-        # hold a trickling child's output back until a block filled.
+        # bufsize=0: output ARRIVAL time buys an extension; buffering would hide a trickle.
         proc = _spawn(
             full_cmd,
             cwd=cwd,

@@ -54,11 +54,6 @@ def _failing_resolve(target: Path, failure: type[Exception]) -> Callable[[Path],
     return resolve
 
 
-# ===========================================================================
-# 1. GIT_ACCESS_TIERS config structure
-# ===========================================================================
-
-
 class TestGitAccessTiers:
     """Verify the tier config is correctly structured."""
 
@@ -85,22 +80,11 @@ class TestGitAccessTiers:
         assert "fix" in cmds
 
     def test_owner_tier_names_no_branch(self) -> None:
-        """Owner-tier must not carry a hardcoded allowlist any more (DPLAN-0281).
-
-        A name in this table was authority-by-string. Authority is now earned per
-        repo from the caller's passport and that project's registry, which is what
-        lets a project's own manager hold git without AIPass knowing their name.
-        """
+        """Owner-tier must not carry a hardcoded allowlist: authority is earned per repo, not by name."""
         assert "allowed_callers" not in GIT_ACCESS_TIERS["owner"]
 
     def test_prune_temp_in_owner_tier(self) -> None:
-        """prune-temp deletes merged remote citizen/* branches — delete-branch class.
-
-        It shipped in neither tier, so verify_git_access fell through to
-        'Unknown git command' for every caller including the owner, while the
-        help screen advertised it as global. Found in the APLAN-0003 audit,
-        tier ruled by @devpulse 2026-08-13.
-        """
+        """prune-temp deletes merged remote citizen/* branches — delete-branch class."""
         cmds = GIT_ACCESS_TIERS["owner"]["commands"]
         assert "prune-temp" in cmds
         assert "prune-temp" not in GIT_ACCESS_TIERS["global"]["commands"]
@@ -108,11 +92,7 @@ class TestGitAccessTiers:
     def test_every_registered_command_holds_a_tier(self) -> None:
         """No command may be dispatchable without a tier — the class-level guard.
 
-        This is the invariant prune-temp broke. Registering a verb in _COMMANDS
-        and wiring it to a handler makes it *dispatchable*, never *reachable*:
-        auth runs first and refuses anything it cannot find in a tier. Asserting
-        the specific verb would only have caught the one instance, so assert the
-        rule instead — the next verb added without a tier fails here.
+        Auth runs first and refuses anything in no tier, so an untiered verb is unreachable.
         """
         tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
         orphaned = sorted(set(_registered_verbs()) - tiered)
@@ -123,11 +103,6 @@ class TestGitAccessTiers:
         tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
         phantom = sorted(tiered - set(_registered_verbs()))
         assert phantom == [], f"granted but not registered: {phantom}"
-
-
-# ===========================================================================
-# 2. verify_git_access — tier enforcement
-# ===========================================================================
 
 
 class TestVerifyGitAccessGlobal:
@@ -205,10 +180,7 @@ class TestVerifyGitAccessUnknown:
         ],
     )
     def test_rerouted_verbs_point_at_replacement(self, devpulse_dir: Path, command: str, pointer: str) -> None:
-        """Real git verbs drone folds into higher-level commands name their replacement.
-
-        The refusal is correct — without the pointer it was a dead end (ERROR 26b225d3).
-        """
+        """Real git verbs drone folds into higher-level commands name their replacement."""
         with pytest.raises(PermissionError) as exc_info:
             verify_git_access(command)
         assert pointer in str(exc_info.value)
@@ -223,8 +195,7 @@ class TestVerifyGitAccessUnknown:
 class TestOwnerTierIsEarnedPerRepo:
     """Owner-tier authorization: manager + tenancy + owner flag + path-binding.
 
-    DPLAN-0281 / F59 6.3. Each test breaks exactly ONE of the four facts and
-    proves the gate bites, so a future regression names which check it broke.
+    Each test breaks exactly ONE of the four facts, so a regression names its check.
     """
 
     def test_manager_at_home_is_authorized(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,11 +205,7 @@ class TestOwnerTierIsEarnedPerRepo:
         assert verify_git_access("commit") == "devpulse"
 
     def test_no_branch_is_hardcoded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A project's own manager holds git even when AIPass never heard of them.
-
-        This is the whole point of the ruling — VERA in Vera-Studio authorizes by
-        the same rule that authorizes devpulse here, with no entry in any list.
-        """
+        """A project's own manager holds git even when AIPass never heard of them."""
         make_owner_project(tmp_path, branch="VERA", registry_name="VERA-STUDIO_REGISTRY.json")
         monkeypatch.chdir(tmp_path)
         assert verify_git_access("commit") == "VERA"
@@ -253,17 +220,9 @@ class TestOwnerTierIsEarnedPerRepo:
     def test_wrong_tenancy_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """T-C: a manager of another project, holding a passport for a different registry.
 
-        Asserts the SHARED loader's wording specifically. Both this layer and the
-        explicit check below say "belongs to registry", so a loose match passed no
-        matter which one fired — and proved neither.
-
-        The AIPASS_REGISTRY pin is load-bearing: find_registry's cwd walk SKIPS
-        registries that fail the credential check, so without it the mismatched
-        fixture is passed over and resolution falls through to whatever exists
-        outside the fixture — the real AIPass registry locally (mismatch, right
-        wording, wrong reason) but nothing in a clean CI checkout (not-found, a
-        different refusal). The env pin is priority 2, ahead of the walk, so the
-        loader is forced to read THIS registry and raise its own mismatch.
+        Matches the SHARED loader's wording, which the explicit check does not share.
+        The AIPASS_REGISTRY pin is load-bearing: the cwd walk SKIPS a mismatched registry,
+        so unpinned the test reads whatever lies outside the fixture (differs local vs CI).
         """
         make_owner_project(tmp_path, passport_registry_id="some-other-project-id")
         monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
@@ -274,16 +233,8 @@ class TestOwnerTierIsEarnedPerRepo:
     def test_tenancy_rechecked_when_loader_stays_silent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The explicit tenancy check is the backstop, and must refuse on its own.
 
-        ``load_registry`` normally raises on a mismatch — but its credential check
-        swallows its own exceptions and returns a silent pass, so a passport it
-        fails to read reaches here unverified. Patching it to return mismatched
-        data without raising is the only way to stand in that gap: with the shared
-        layer quiet, this check alone decides, and it must still fail closed.
-
-        Pinned for the same reason as test_wrong_tenancy_denied (CI 2922a685):
-        this fixture's passport deliberately mismatches, so find_registry's cwd
-        walk skips it and get_registry_path — which is NOT patched here — would
-        otherwise resolve to whatever lives outside the fixture.
+        The loader's credential check can pass silently, so it is patched quiet here.
+        Pinned for the same reason as test_wrong_tenancy_denied.
         """
         make_owner_project(tmp_path, passport_registry_id="some-other-project-id")
         monkeypatch.chdir(tmp_path)
@@ -297,7 +248,7 @@ class TestOwnerTierIsEarnedPerRepo:
                 verify_git_access("commit")
 
     def test_missing_tenancy_id_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Migration boundary (F59 sec 5, row 4): a passport predating registry_id."""
+        """Migration boundary: a passport predating registry_id."""
         make_owner_project(tmp_path, passport_registry_id="")
         monkeypatch.chdir(tmp_path)
         with pytest.raises(PermissionError, match="no citizenship.registry_id"):
@@ -305,8 +256,7 @@ class TestOwnerTierIsEarnedPerRepo:
 
     def test_not_listed_in_registry_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A manager passport for a branch this project's registry does not carry."""
-        # Mint ghost's passport first, then overwrite the registry so it lists only
-        # devpulse — ghost's credentials survive, their registry entry does not.
+        # The second call overwrites the registry: ghost keeps a passport, loses the entry.
         ghost = make_owner_project(tmp_path, branch="ghost", branch_dir=tmp_path / "ghost")
         make_owner_project(tmp_path, branch="devpulse")
         monkeypatch.chdir(ghost)
@@ -323,9 +273,7 @@ class TestOwnerTierIsEarnedPerRepo:
     def test_passport_outside_recorded_home_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """T-A, the escalation that mattered: a forged passport in a directory the attacker controls.
 
-        Name, class, tenancy and owner flag are ALL correct — the registry id is
-        readable off local disk, so a same-machine attacker can copy it. Only the
-        location refuses, which is exactly why path-binding is the load-bearing check.
+        Every other fact is correct (the registry id is copyable); only the location refuses.
         """
         rogue = tmp_path / "tmp_workdir"
         make_owner_project(tmp_path, branch_dir=rogue, record_path=str(tmp_path / "real_devpulse"))
@@ -339,8 +287,7 @@ class TestOwnerTierIsEarnedPerRepo:
     ) -> None:
         """Mutant: _recorded_home's except returns None — an unresolvable path is refused as "records no path".
 
-        RuntimeError is Python 3.12's answer to a symlink loop in a non-strict resolve; mutant: the except
-        narrowed back to OSError, and the loop escapes the owner gate as a traceback.
+        Mutant: the except narrowed to OSError — a 3.12 symlink-loop RuntimeError escapes as a traceback.
         """
         marker = tmp_path / "unresolvable_home"
         make_owner_project(tmp_path)
@@ -406,11 +353,9 @@ class TestOwnerTierIsEarnedPerRepo:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
     ) -> None:
         """The refusal is of the species authority: it stands under enforcement, and the
-        warn-mode rollback lifts it as it lifts every other owner-tier authority refusal.
-        The warning names the directory that could not be resolved.
+        warn-mode rollback lifts it; the warning names the directory.
 
-        Green on the tree from its first run; its proof is its mutants: the species
-        changed to capability (warn raises "cannot run"), and the warning removed."""
+        Mutants: species changed to capability (warn raises "cannot run"); the warning removed."""
         make_owner_project(tmp_path)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
@@ -438,11 +383,7 @@ class TestOwnerTierIsEarnedPerRepo:
     ) -> None:
         """Binding anchors to where the PASSPORT is, not where the caller stands.
 
-        The forgery sits at the repo root and the caller stands inside the real
-        manager's directory, which is empty of any passport — so the walk-up
-        reaches the forgery. Checking CWD would authorize it, because CWD really
-        is under the recorded path. Checking the passport's own home refuses:
-        standing somewhere does not make a passport found elsewhere valid there.
+        Checking CWD would authorize the walked-up forgery, since CWD is under the recorded path.
         """
         recorded = tmp_path / "devpulse"
         recorded.mkdir()
@@ -467,11 +408,7 @@ class TestOwnerTierIsEarnedPerRepo:
     def test_dict_shaped_registry_binds(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A registry authored as a dict skips the loader's normalization entirely.
 
-        ``_load_registry_data`` lowercases keys and absolutizes paths only for the
-        LIST shape; dicts pass through as written. So this is the shape where
-        case-insensitive lookup and relative-path resolution actually earn their
-        keep — with a list registry the loader has already done both, and a broken
-        implementation here would still pass.
+        Only this shape exercises auth's own case-insensitive lookup and relative-path resolution.
         """
         home = tmp_path / "src" / "vera"
         home.mkdir(parents=True)
@@ -499,15 +436,9 @@ class TestOwnerTierIsEarnedPerRepo:
         assert verify_git_access("commit") == "VERA"
 
     def test_passport_under_recorded_ancestor_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Path-binding is at-OR-UNDER (F59 4.2a), not exact match.
+        """Path-binding is at-OR-UNDER, not exact match.
 
-        A registry may record an ancestor of the passport's home — a small project
-        whose manager is recorded at the repo root, say. Exact-match would refuse
-        them for a reason that has nothing to do with authority.
-
-        Note this is the weaker end of the binding: the broader the recorded path,
-        the more of the tree can host a forged passport. Recording the repo root
-        degrades path-binding to repo-wide (reported to @devpulse for P2).
+        Trap: a recorded repo root degrades path-binding to repo-wide.
         """
         home = tmp_path / "agents" / "devpulse"
         make_owner_project(tmp_path, branch_dir=home, record_path=str(tmp_path))
@@ -515,7 +446,7 @@ class TestOwnerTierIsEarnedPerRepo:
         assert verify_git_access("commit") == "devpulse"
 
     def test_unreadable_registry_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fresh clone / no registry: fail CLOSED, never silent-pass (F59 4.1)."""
+        """Fresh clone / no registry: fail CLOSED, never silent-pass."""
         make_owner_project(tmp_path)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "does_not_exist.json"))
@@ -526,7 +457,7 @@ class TestOwnerTierIsEarnedPerRepo:
     def test_global_tier_never_acquires_the_gate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
     ) -> None:
-        """Regression (F59 6.3 #7): read-only stays open to any citizen."""
+        """Regression: read-only stays open to any citizen."""
         make_owner_project(tmp_path, branch="seedgo", citizen_class="builder", owner=False)
         monkeypatch.chdir(tmp_path)
         assert verify_git_access(command) == "seedgo"
@@ -573,23 +504,13 @@ class TestExternalRepoVerbTranslation:
     def test_warn_mode_does_not_lift_an_untranslated_verb(
         self, vera_home: Path, monkeypatch: pytest.MonkeyPatch, command: str
     ) -> None:
-        """Warn-mode rolls back the AUTHORITY migration (F59 6.1), never this refusal.
-
-        The two were entangled: warn-mode tested one flag for every refusal, so the
-        authority rollback also re-armed a half-run of OUR dev→PR→main flow inside
-        someone else's repo — the exact mess _AIPASS_FLOW_VERBS exists to prevent.
-        Third scope limit on warn-mode, beside identification.
-        """
+        """Warn-mode rolls back the AUTHORITY migration, never this refusal."""
         monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
         with pytest.raises(PermissionError, match="not translated for external repos"):
             verify_git_access(command)
 
     def test_untranslated_refusal_does_not_call_a_proven_owner_unauthorized(self, vera_home: Path) -> None:
-        """VERA cleared all four authority checks — 'not authorized' would be a false trail.
-
-        The wording decides where the reader goes next: audit a passport that is
-        fine, or wait for the verb to be translated.
-        """
+        """VERA cleared all four authority checks — 'not authorized' would be a false trail."""
         with pytest.raises(PermissionError) as exc_info:
             verify_git_access("pr")
         assert "not authorized" not in str(exc_info.value)
@@ -597,7 +518,7 @@ class TestExternalRepoVerbTranslation:
 
 
 class TestGitAuthWarnMode:
-    """One env var is the rollback (F59 6.1): warn logs the refusal and allows."""
+    """One env var is the rollback: warn logs the refusal and allows."""
 
     def test_warn_mode_allows_and_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         make_owner_project(tmp_path, citizen_class="builder")
@@ -620,11 +541,7 @@ class TestGitAuthWarnMode:
             verify_git_access("commit")
 
     def test_unset_env_enforces(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The DEFAULT is enforce (F59 6.1 decision).
-
-        Separate from the parametrized test above, which only proves that *set*
-        values other than 'warn' enforce — flipping the default would sail past it.
-        """
+        """The DEFAULT is enforce; the parametrized test above only covers set values."""
         make_owner_project(tmp_path, citizen_class="builder")
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("AIPASS_GIT_AUTH_MODE", raising=False)
@@ -643,10 +560,7 @@ class TestRegistryIdIsNotASecret:
     """The registry id is readable off local disk, so it cannot carry authority alone."""
 
     def test_correct_tenancy_alone_does_not_authorize(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """F59 6.3 #1: a non-owner passport with the RIGHT registry id is still governed.
-
-        Proves the tenancy check did not become a backdoor — it narrows, it never grants.
-        """
+        """A non-owner passport with the RIGHT registry id is still governed: tenancy never grants."""
         make_owner_project(tmp_path, branch="devpulse")
         rogue = tmp_path / "rogue"
         rogue.mkdir()
@@ -667,12 +581,7 @@ class TestRegistryIdIsNotASecret:
 
 
 class TestGitAccessLogSeverity:
-    """Severity is owned by auth.py: designed refusals warn, real denials error.
-
-    One refusal used to log ERROR in both auth.py and git_module.py, so a single
-    event produced two @trigger fingerprints 0.12s apart — suppressing one left
-    the twin paging. See @trigger log-fix 906263c8ff2e / 1c8a86e955c1.
-    """
+    """Severity is owned by auth.py: designed refusals warn, real denials error."""
 
     def test_missing_passport_logs_warning_not_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Failing closed on a non-branch CWD is designed behaviour, not a fault."""
@@ -691,12 +600,7 @@ class TestGitAccessLogSeverity:
         mock_logger.error.assert_called_once()
 
     def test_untranslated_verb_warns_instead_of_paging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A proven owner meeting an untranslated verb is a capability gap, not a fault.
-
-        Live incident (@trigger error 38439475, 2026-08-24): BAUD ran `pr` in its own
-        repo, cleared every authority check, hit the untranslated-verb wall — and the
-        refusal logged ERROR, paging @drone about a gate working exactly as designed.
-        """
+        """A proven owner meeting an untranslated verb is a capability gap, not a fault."""
         home = make_owner_project(tmp_path, branch="BAUD", registry_name="BAUD_REGISTRY.json")
         monkeypatch.chdir(home)
         with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:

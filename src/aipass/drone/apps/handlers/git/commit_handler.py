@@ -3,7 +3,7 @@
 # Description: Commit handler with scoped staging
 # Version: 1.2.1
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -15,20 +15,15 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-# A commit subject and a plan subject are the same glance — the dashboard's
-# last_commit_msg, the oneline log, the PR list — so they are the same number.
-# Read prax's cap here; never copy the digits into drone (DPLAN-0347).
+# Commit and plan subjects are the same glance, so one number: read prax's, never copy it.
 from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
-# Per-branch pytest budget. The largest suite in the fleet (@api, 1298 tests)
-# runs ~202s — a cap below a green suite's real runtime turns the gate into a
-# false red that blocks every commit touching that branch.
+# Per-branch pytest budget; below the largest green suite's runtime (~200s) it blocks every commit.
 TEST_GATE_TIMEOUT = 600
 
-# The refusal IS the rule, in plain words. Every commit door renders this one
-# text, so the shape is taught the same way wherever it is refused.
+# Every commit door renders this one text.
 SUBJECT_REFUSAL = (
     "Commit subject is {length} chars; the cap is {cap}.\n"
     "\n"
@@ -47,15 +42,7 @@ SUBJECT_REFUSAL = (
 def commit_subject(message: str) -> str:
     """The subject line of *message* — what the oneline log and dashboards show.
 
-    Leading blank lines are stripped first, which is what git's own message
-    cleanup does before it takes line one, and what prax's ``cap_subject``
-    reads: the same line is measured here and rendered there.
-
-    Args:
-        message: The full commit message; may be empty or body-only.
-
-    Returns:
-        The first non-empty line, stripped; "" when there is no such line.
+    Leading blank lines are stripped as git does, so the line measured is the one prax renders.
     """
     stripped = (message or "").strip()
     if not stripped:
@@ -64,14 +51,7 @@ def commit_subject(message: str) -> str:
 
 
 def subject_refusal(message: str) -> str | None:
-    """Refusal text when *message*'s subject is over the cap, else ``None``.
-
-    Args:
-        message: The full commit message about to be handed to git.
-
-    Returns:
-        The rendered refusal, or ``None`` when the subject fits.
-    """
+    """Refusal text when *message*'s subject is over the cap, else ``None``."""
     subject = commit_subject(message)
     if len(subject) <= SUBJECT_CAP:
         return None
@@ -148,10 +128,7 @@ def _run_test_gate(repo_root: Path) -> dict | None:
 
 
 def stage_branch_dir(branch_dir: Path, repo_root: Path | None = None) -> dict:
-    """Stage all changes under branch_dir.
-
-    Shared utility used by both commit_handler and pr_handler.
-    """
+    """Stage all changes under branch_dir; pr_handler shares it."""
     if repo_root is None:
         repo_root = find_repo_root()
 
@@ -190,19 +167,8 @@ def commit_changes(
 ) -> dict:
     """Commit changes. With --all, stages the entire repo (not CWD-scoped).
 
-    Post-DPLAN-0173: only devpulse commits, agents don't PR. Repo-wide
-    staging is the correct default since dispatched agents work across
-    multiple branch directories.
-
-    With file paths, stages only those specific files (selective commit).
-
-    *repo_root* defaults to the repo the caller stands in. The external-repo door
-    names another one, and gets exactly the commit that repo's own seat gets —
-    same staging, same lint and test gate on --all. Commit never pushes.
-
-    An over-cap subject is refused FIRST, before any staging, lint or test run:
-    the shape of the message is knowable without touching the repo, and a
-    refusal that has already spent three minutes of pytest teaches nothing.
+    Repo-wide because dispatched agents work across branch directories. Never pushes.
+    An over-cap subject is refused FIRST, before minutes of lint and pytest are spent.
     """
     refusal = subject_refusal(message)
     if refusal is not None:

@@ -3,7 +3,7 @@
 # Description: Tests for devpulse_ops plugin — git module routing for pr/system-pr
 # Version: 2.0.1
 # Created: 2026-03-30
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/git_module.py routing of the pr verb and the retired system-pr."""
@@ -23,11 +23,6 @@ _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
 def _available_verbs(stderr: str) -> list[str]:
     """The verb roster an unknown-command refusal prints after 'Available: '."""
     return stderr.split("Available: ", 1)[1].split(", ")
-
-
-# ===========================================================================
-# git_module routing for pr command (replaced system-pr in S151)
-# ===========================================================================
 
 
 class TestGitModulePrRouting:

@@ -3,7 +3,7 @@
 # Description: Tests for the registry module orchestrator
 # Version: 1.0.2
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/registry.py: introspection, help, and the load, branches and lookup commands."""
@@ -19,11 +19,6 @@ from aipass.cli.apps.modules import display
 from aipass.drone.apps.modules.registry import handle_command, print_help, print_introspection
 
 _REG = "aipass.drone.apps.modules.registry"
-
-
-# ===========================================================================
-# print_introspection
-# ===========================================================================
 
 
 class TestPrintIntrospection:
@@ -51,11 +46,6 @@ class TestPrintIntrospection:
         log.warning.assert_called_once_with("CLI console not available, using fallback")
 
 
-# ===========================================================================
-# print_help
-# ===========================================================================
-
-
 class TestPrintHelp:
     """print_help() output."""
 
@@ -67,11 +57,6 @@ class TestPrintHelp:
         assert "load" in captured.out
         assert "branches" in captured.out
         assert "lookup" in captured.out
-
-
-# ===========================================================================
-# handle_command — introspection and help
-# ===========================================================================
 
 
 class TestHandleCommandIntrospection:
@@ -110,11 +95,6 @@ class TestHandleCommandIntrospection:
         mock_help.assert_called_once()
 
 
-# ===========================================================================
-# handle_command — load
-# ===========================================================================
-
-
 class TestHandleCommandLoad:
     """handle_command('load') path."""
 
@@ -136,11 +116,6 @@ class TestHandleCommandLoad:
         log.info.assert_called_once_with("Registry loaded: %d branches", 0)
 
 
-# ===========================================================================
-# handle_command — branches
-# ===========================================================================
-
-
 class TestHandleCommandBranches:
     """handle_command('branches') path."""
 
@@ -160,11 +135,6 @@ class TestHandleCommandBranches:
             result = handle_command("branches", ["library"])
         assert result is True
         mock_gab.assert_called_once_with(branch_type="library")
-
-
-# ===========================================================================
-# handle_command — lookup
-# ===========================================================================
 
 
 class TestHandleCommandLookup:
@@ -191,11 +161,6 @@ class TestHandleCommandLookup:
         with patch(f"{_REG}.get_branch_by_name", return_value=None):
             result = handle_command("lookup", ["ghost"])
         assert result is False
-
-
-# ===========================================================================
-# handle_command — unknown
-# ===========================================================================
 
 
 class TestHandleCommandUnknown:

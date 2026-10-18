@@ -3,22 +3,13 @@
 # Description: Registry CRUD operations for custom command shortcuts
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
 
-Core operations for loading, saving, and managing the drone command registry.
-The registry maps shortcut names to full drone commands so users can type
-``audit`` instead of ``drone @seedgo audit aipass``.
-
-Usage:
-    from aipass.drone.apps.handlers.command_registry.ops import (
-        load_registry, save_registry, add_command, remove_command,
-    )
-
-    registry = load_registry()
-    add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
+The registry maps shortcut names to full drone commands (``audit`` for
+``drone @seedgo audit aipass``).
 """
 
 from __future__ import annotations
@@ -33,20 +24,11 @@ from aipass.drone.apps.handlers.exceptions import RegistryError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_root import module_file
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MODULE_NAME = "command_registry"
 
 # ops.py -> command_registry/ -> handlers/ -> apps/ -> drone/
 _BRANCH_ROOT: Path = module_file(__file__).parents[3]
 REGISTRY_FILE: Path = _BRANCH_ROOT / "drone_command_registry.json"
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _today() -> str:
@@ -68,31 +50,15 @@ def _empty_registry() -> dict[str, Any]:
 
 
 def _registry_path() -> Path:
-    """Return the current registry file path.
-
-    Wrapped in a function so tests can monkeypatch ``ops.REGISTRY_FILE``.
-    """
+    """Return the current registry file path, read at call time so tests can monkeypatch ``ops.REGISTRY_FILE``."""
     return REGISTRY_FILE
-
-
-# ---------------------------------------------------------------------------
-# Core CRUD
-# ---------------------------------------------------------------------------
 
 
 def load_registry() -> dict[str, Any]:
     """Load the command registry from disk, auto-creating if missing.
 
-    Returns:
-        Registry dict with ``commands`` and ``metadata`` keys.
-
-    Raises:
-        RegistryError: the file exists and could not be read (fleet green
-            leg 7), or it is not JSON, or its JSON is not an object (leg 8;
-            both drone's decisions). Nothing is written: recreating would put
-            an empty registry over commands that are damaged, not gone, and a
-            corrupt registry is one somebody can repair. Only a missing file
-            is created.
+    Raises RegistryError for an unreadable, non-JSON or non-object file, and
+    writes nothing: recreating would bury damaged commands someone could repair.
     """
     path = _registry_path()
 
@@ -113,7 +79,6 @@ def load_registry() -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RegistryError(f"command registry {path} is not a JSON object ({type(data).__name__})")
 
-    # Auto-heal missing keys
     if "commands" not in data:
         data["commands"] = {}
     if "metadata" not in data:
@@ -127,21 +92,13 @@ def load_registry() -> dict[str, Any]:
 
 
 def save_registry(data: dict[str, Any]) -> bool:
-    """Save the command registry to disk with validation.
-
-    Args:
-        data: Registry dict to persist.
-
-    Returns:
-        True if saved successfully, False on error.
-    """
+    """Save the command registry to disk with validation: True if written, False on error."""
     path = _registry_path()
 
     if not isinstance(data, dict) or "commands" not in data:
         logger.error("[%s] Cannot save invalid registry structure", MODULE_NAME)
         return False
 
-    # Refresh metadata
     data.setdefault("metadata", {})
     data["metadata"]["last_updated"] = _today()
     data["metadata"]["command_count"] = len(data["commands"])
@@ -169,19 +126,7 @@ def add_command(
     description: str = "",
     source_branch: str = "",
 ) -> bool:
-    """Add a new custom command to the registry.
-
-    Args:
-        name: Shortcut name (e.g. ``"audit"``).
-        target: Target branch (e.g. ``"@seedgo"``).
-        command: Actual command to run on the target.
-        args: Extra arguments for the command.
-        description: Human-readable description.
-        source_branch: Branch the command originated from.
-
-    Returns:
-        True if added, False if name already exists or save fails.
-    """
+    """Add a new custom command to the registry; False if the name exists or the save fails."""
     registry = load_registry()
 
     if name in registry["commands"]:
@@ -209,14 +154,7 @@ def add_command(
 
 
 def remove_command(name: str) -> bool:
-    """Remove a custom command from the registry.
-
-    Args:
-        name: Shortcut name to remove.
-
-    Returns:
-        True if removed, False if not found or save fails.
-    """
+    """Remove a custom command from the registry; False if not found or the save fails."""
     registry = load_registry()
 
     if name not in registry["commands"]:
@@ -236,15 +174,7 @@ def remove_command(name: str) -> bool:
 
 
 def update_command(name: str, **kwargs: Any) -> bool:
-    """Update fields of an existing custom command.
-
-    Args:
-        name: Shortcut name to update.
-        **kwargs: Fields to update (e.g. ``target="@prax"``, ``description="..."``).
-
-    Returns:
-        True if updated, False if not found or save fails.
-    """
+    """Update fields of an existing custom command; False if not found or the save fails."""
     registry = load_registry()
 
     if name not in registry["commands"]:
@@ -267,13 +197,6 @@ def update_command(name: str, **kwargs: Any) -> bool:
 
 
 def command_exists(name: str) -> bool:
-    """Check whether a custom command exists in the registry.
-
-    Args:
-        name: Shortcut name to check.
-
-    Returns:
-        True if the command exists, False otherwise.
-    """
+    """Check whether a custom command exists in the registry."""
     registry = load_registry()
     return name in registry["commands"]

@@ -3,21 +3,12 @@
 # Description: Broker client — sends delete requests over inherited fd
 # Version: 2.0.1
 # Created: 2026-06-09
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Broker client — sends delete requests over an inherited socket fd.
 
-When ``AIPASS_BROKER_FD`` is set, ``drone rm`` uses this client to send
-delete requests to the out-of-sandbox broker daemon instead of calling
-``Path.unlink`` directly. The fd was pre-opened by the launch wrapper
-before the sandbox locked.
-
-Launcher contract (Phase 6a):
-    ``create_identified_connection()`` connects to the broker socket,
-    reads the per-start secret, computes the HMAC, sends the identify
-    preamble, and returns the authenticated socket.  The caller passes
-    the socket's fd to the sandboxed child via AIPASS_BROKER_FD.
+Reference: docs/broker.md
 """
 
 from __future__ import annotations
@@ -44,8 +35,7 @@ def is_sandboxed() -> bool:
 def _get_broker_fd() -> int | None:
     """Return the inherited broker socket fd, or None if not set.
 
-    Raises ValueError when the variable is set but is not a non-negative
-    integer, so an invalid fd is never reported as an unset one.
+    Raises ValueError for a set-but-invalid value, so it is never reported as unset.
     """
     raw = os.environ.get(BROKER_FD_ENV)
     if raw is None:
@@ -68,20 +58,7 @@ def create_identified_connection(
 ) -> socket.socket:
     """Connect to the broker, authenticate via HMAC, return the identified socket.
 
-    This is the launcher contract for dispatch_monitor.  The returned
-    socket fd should be passed to the sandboxed child via AIPASS_BROKER_FD.
-
-    Args:
-        socket_path: Path to the broker's unix socket.
-        secret_path: Path to the broker's per-start secret file (mode 0600).
-        branch: Branch name to identify as.
-
-    Returns:
-        A connected, identified ``socket.socket``.
-
-    Raises:
-        RuntimeError: If identification fails (bad HMAC, broker error).
-        OSError: If the socket or secret file cannot be accessed.
+    Launcher contract: the caller passes this socket's fd to the sandboxed child via AIPASS_BROKER_FD.
     """
     secret = Path(secret_path).read_bytes()
     mac = hmac_mod.new(secret, branch.encode(), hashlib.sha256).hexdigest()

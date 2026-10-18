@@ -3,7 +3,7 @@
 # Description: Git log handler
 # Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Git log handler."""
@@ -21,13 +21,9 @@ from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 def resolve_log_path(token: str, repo_root: Path, cwd: Path | None, must_exist: bool) -> str | None:
     """A path filter for git log, made absolute so it means the same from the repo root git runs in.
 
-    A relative token is read against the caller's directory first, then the
-    repo root. With *must_exist* False (a token after ``--``), a path found in
-    neither place is still a pathspec, such as the history of a deleted file,
-    and is read against the caller's directory the way git itself reads it.
-
-    Returns the absolute path, or None only when *must_exist* is True and the
-    path is in neither place: the caller then refuses the token by name.
+    A relative token is read against the caller's directory, then the repo root. After ``--``
+    (*must_exist* False) an unfound path stays a pathspec (a deleted file's history), caller-relative.
+    None only when *must_exist* and found nowhere: the caller refuses the token by name.
     """
     path = Path(token)
     if path.is_absolute():
@@ -73,11 +69,8 @@ def get_git_log(
 ) -> dict:
     """Get recent git log entries from *repo_root* (default: the standing repo).
 
-    *paths* keeps only the commits that touch them (``git log -- <paths>``).
-    *rev_range* (``origin/dev..HEAD``) lists the commits in it, read-only;
-    the caller verifies it with :func:`is_commit_range` first. A *count* of
-    None lists them all. ``success`` is False when git could not answer; an
-    empty history is a success with no entries.
+    The caller verifies *rev_range* (``origin/dev..HEAD``) with :func:`is_commit_range` first.
+    *count* None lists all; an empty history is a success with no entries.
     """
     if repo_root is None:
         repo_root = find_repo_root()

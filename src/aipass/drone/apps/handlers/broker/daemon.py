@@ -3,23 +3,13 @@
 # Description: Broker daemon — privileged deleter for sandboxed agents
 # Version: 2.1.3
 # Created: 2026-06-09
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
 
-A long-lived process that listens on a unix socket, accepts delete requests
-from sandboxed ``drone rm`` clients, re-resolves paths via openat2
-RESOLVE_BENEATH (never trusting agent-supplied strings), applies
-identity-bound allowlist policy, performs the delete, and audit-logs
-every attempt.
-
-Identity model (Phase 6a):
-    The launcher pre-connects, authenticates with an HMAC derived from a
-    per-start secret, declares the branch identity, then passes the
-    connected fd to the sandboxed child.  The child inherits an already-
-    identified connection.  Connections that never identify get the
-    narrowest scope (/tmp only).
+The launcher authenticates (per-start HMAC), declares the branch, and hands the identified fd
+to the sandboxed child. Connections that never identify get the narrowest scope (/tmp only).
 """
 
 from __future__ import annotations
@@ -55,12 +45,8 @@ _TMP_BASES = (Path(tempfile.gettempdir()),)
 def _find_project_root() -> Path | None:
     """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
 
-    A byte-for-byte twin of ``rm_handler._find_project_root`` and it carried the
-    identical unguarded read. Left as two functions rather than merged: the
-    broker is a long-lived daemon and the rm lane is a one-shot command, so a
-    shared root-finder would couple their lifetimes for the sake of six lines.
-    They are pinned together by ``TestTheSweepIsComplete`` instead, which is
-    what actually keeps them from drifting apart again.
+    Twin of ``rm_handler._find_project_root``, kept separate (daemon vs one-shot lifetimes);
+    ``TestTheSweepIsComplete`` pins them together.
     """
     cwd = caller_cwd()
     if cwd is not None:
@@ -121,14 +107,7 @@ class BrokerDaemon:
         audit_path: Path | None = None,
         secret_path: Path | None = None,
     ) -> None:
-        """Initialize the broker.
-
-        Args:
-            repo_root: Project root directory. Auto-discovered if not set.
-            socket_path: Where to bind the unix socket.
-            audit_path: Where to write the JSONL audit log.
-            secret_path: Where to write the per-start HMAC secret.
-        """
+        """Initialize the broker; *repo_root* is auto-discovered when not set."""
         self._repo_root = repo_root.resolve() if repo_root else _find_project_root()
         self.socket_path = socket_path or _default_socket_path()
         self.audit_path = audit_path or _default_audit_path()
@@ -185,15 +164,8 @@ class BrokerDaemon:
     def _resolve_branch_dir(self, identity: str) -> Path | None:
         """Find a branch directory by name via .trinity/ marker walk.
 
-        The walk never enters a dropbox or an .archive: both are sandboxes
-        (owner ruling), and an archived or dropped copy of a branch carries
-        its .trinity/ too. Found there, it would hand the identity a base that
-        is not its branch.
-
-        Raises:
-            OSError: the branch was not found and part of the tree could not be
-                read, so "absent" is unproven. A found branch proves itself; an
-                unread folder only matters when the answer would be None.
+        Never enters a dropbox or .archive: a copied branch there carries its .trinity/ too.
+        Raises OSError when not found and part of the tree was unreadable ("absent" unproven).
         """
         if self._repo_root is None:
             return None
@@ -336,8 +308,7 @@ class BrokerDaemon:
                     error_code="ROOT_DELETE",
                 )
 
-            # Before the delete, for the same reason rm measures early: a tree
-            # cannot be sized once it is gone.
+            # A tree cannot be sized once it is gone.
             measurement = deletion_log.measure(resolved)
 
             try:

@@ -3,7 +3,7 @@
 # Description: Shared fixtures for the drone suite
 # Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -11,8 +11,7 @@
 import os
 import tempfile
 
-# Redirect prax logs to temp directory during tests
-# Must be set before any prax imports to catch logger initialization
+# Must be set before any prax import, which initializes the logger.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -29,22 +28,16 @@ from aipass.cli.apps.modules import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.json import json_handler
 
-# Directories no source walk of this suite enters, written here rather than imported
-# from seedgo's handlers (whose guard refuses another branch's caller). dropbox and
-# .archive: the project owner's ruling of 2026-09-27 20:37/20:42, a dropbox is ignored
-# by all and is a sandbox like .archive. __pycache__: bytecode, never source.
+# Not imported from seedgo: its guard refuses another branch's caller.
 SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
-# Never discover out of .archive/: it holds verbatim disposal copies (the old
-# handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
-# not be collected or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+# .archive/ holds verbatim disposal copies of old tests that must never be collected.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Pin Rich's width: unpinned it is 80 on POSIX, 79 on Windows, or the terminal's."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -58,32 +51,13 @@ def clean_command_state() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def _clean_identity_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give every test a fresh caller-identity dedupe set.
-
-    router_handler suppresses repeated identity messages for the life of the
-    PROCESS, and pytest is one process. Without this, whether a test sees its
-    log line depends on which tests ran before it — the exact order-dependent
-    flake that only surfaces when someone runs a single test in isolation.
-
-    Hands the module a new empty set, the state a fresh process starts in, and
-    monkeypatch puts the original back after. Production never needs to forget
-    what it has already logged, so exporting a reset() just to serve this
-    fixture would put a test-only function in the shipped API (drone's decision,
-    DPLAN-0354 fleet green leg 3).
-    """
+    """Give every test a fresh caller-identity dedupe set (dedupe is per process; pytest is one)."""
     monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
 
 
 @pytest.fixture(autouse=True)
 def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
-    """Point the deletion record at tmp for every test.
-
-    Without this, any test that exercises a delete path writes a real record
-    into the live project's ``.ai_central/deletions.jsonl`` — the suite would
-    quietly forge entries in the fleet's audit trail, which is worse than the
-    usual test-pollution because the whole value of that file is that its
-    contents happened.
-    """
+    """Point the deletion record at tmp, so tests never forge entries in the live audit trail."""
     os.environ["AIPASS_DELETION_LOG"] = str(tmp_path / "deletions.jsonl")
     yield
     os.environ.pop("AIPASS_DELETION_LOG", None)
@@ -93,23 +67,14 @@ def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after.
 
-    Teardown steps OUT of the sandbox before removing it. Tests chdir into it
-    with ``monkeypatch.chdir``, and ``monkeypatch`` is one shared instance per
-    test: once an autouse fixture takes it (``mock_infrastructure`` below,
-    DPLAN-0325), it is set up before this fixture and therefore torn down
-    AFTER it — so the cwd is still inside the sandbox when ``rmtree`` runs.
-    Linux deletes a cwd without complaint; Windows holds it open and fails with
-    ``WinError 32`` (Windows Test on 804ab5d9: two teardown errors in
-    test_router.py, both tests chdir'd into this directory). The chdir here is
-    to a neutral place; monkeypatch's own undo restores the real cwd afterwards.
+    Teardown steps OUT first: autouse monkeypatch undoes its chdir after this runs,
+    and Windows cannot rmtree the cwd (WinError 32).
     """
     test_dir = Path(tempfile.mkdtemp())
     yield test_dir
     try:
         inside = Path.cwd().resolve().is_relative_to(test_dir.resolve())
     except FileNotFoundError as exc:
-        # The cwd itself was deleted by the test; there is nowhere to stand, so
-        # step out regardless.
         logging.getLogger(__name__).debug("temp_test_dir: cwd already gone (%s)", exc)
         inside = True
     if inside:
@@ -135,16 +100,8 @@ def make_owner_project(
 ) -> Path:
     """Mint a project in which *branch* genuinely holds owner-tier, and return its home.
 
-    Owner-tier is earned from four independent facts (DPLAN-0281), so a fixture
-    that forges only a branch name no longer proves anything. This writes all
-    four — manager class, matching tenancy, owner flag, recorded path — and every
-    keyword exists so a test can break exactly ONE of them and watch the gate bite.
-
-    Args:
-        branch_dir: where the passport lives; defaults to *root*.
-        record_path: what the registry records as the branch path. Defaults to
-            the real branch_dir; pass a different value to test path-binding, or
-            a relative string to exercise external-project style registries.
+    Writes all four owner-tier facts (manager class, tenancy, owner flag, recorded path);
+    each keyword breaks exactly one. *record_path* may be relative (external-project style).
     """
     home = branch_dir if branch_dir is not None else root
     home.mkdir(parents=True, exist_ok=True)
@@ -179,13 +136,7 @@ def make_owner_project(
 
 @pytest.fixture()
 def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Create a temp project in which devpulse genuinely holds owner-tier.
-
-    This fixture used to forge a branch name and nothing else, which is precisely
-    the escalation DPLAN-0281 closed — so it now mints all four facts the gate
-    checks. Tests that need one of them broken build their own via
-    make_owner_project(...).
-    """
+    """Create a temp project in which devpulse genuinely holds owner-tier."""
     make_owner_project(tmp_path)
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -235,10 +186,6 @@ def sample_registry(temp_test_dir: Path) -> Path:
     return registry_path
 
 
-# ---------------------------------------------------------------------------
-# The deletable-cwd marker
-# ---------------------------------------------------------------------------
-
 DELETABLE_CWD_MARKER = "deletable_cwd"
 
 WINDOWS_CWD_REASON = (
@@ -254,13 +201,7 @@ WINDOWS_CWD_REASON = (
 
 
 def pytest_configure(config):
-    """Register the marker here rather than in pytest.ini.
-
-    The composed CI run loads this suite from the repository root with a
-    different inifile, so a marker declared in drone's own pytest.ini would be
-    unknown there — and --strict-markers turns an unknown marker into a
-    collection error. A conftest travels with the tests that use it.
-    """
+    """Register the marker here, not pytest.ini: the root CI run uses another inifile with --strict-markers."""
     config.addinivalue_line(
         "markers",
         f"{DELETABLE_CWD_MARKER}: needs a process to delete the directory it stands in (POSIX only)",
@@ -268,22 +209,15 @@ def pytest_configure(config):
 
 
 def python_sources(root: Path) -> list[Path]:
-    """Every ``.py`` under *root*, sorted: the walk both source sweeps share.
+    """Every ``.py`` under *root*, sorted, skipping SANDBOX_DIRS judged only BELOW *root*.
 
-    Never from a directory SANDBOX_DIRS names, judged on the parts BELOW *root*, so a
-    root that itself stands inside a dropbox is still walked. A dropbox and an
-    .archive are sandboxes (owner ruling): nothing looks into them.
+    A root that itself stands inside a dropbox is still walked.
     """
     return sorted(p for p in root.rglob("*.py") if not SANDBOX_DIRS.intersection(p.relative_to(root).parts[:-1]))
 
 
 def host_platform() -> str:
-    """The platform the collection hook branches on: ``sys.platform``.
-
-    Its own name for the test and no other reason: the hook's Windows answer is
-    checked from a machine that is not Windows by supplying the platform here,
-    rather than by replacing ``sys.platform`` for the whole process.
-    """
+    """``sys.platform``, as a seam so the Windows branch is testable without patching sys."""
     return sys.platform
 
 
@@ -301,12 +235,7 @@ def pytest_collection_modifyitems(config, items):
 def _seal_home_fallbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Close the two AIPass-home fallbacks behind AIPASS_HOME for every test.
 
-    This suite runs on the AIPass venv, so ``Path(sys.prefix).parent`` IS the
-    live AIPass home and ``~/.aipass/trusted_projects.json`` enrolls it: a test
-    that unsets AIPASS_HOME to stand in a stranger's project would quietly see
-    every real citizen again. The interpreter points into an empty tmp tree and
-    the enrolment file at one that does not exist. A test of the fallbacks
-    builds its own and patches over these.
+    The suite runs on the AIPass venv, so both fallbacks would otherwise find the live home.
     """
     monkeypatch.setattr(registry_handler, "_interpreter_home", lambda: tmp_path / "_no_aipass_home")
     monkeypatch.setattr(
@@ -318,32 +247,12 @@ def _seal_home_fallbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect drone's json writes into a temp dir.
+    """Redirect drone's json writes into a temp dir; returns the measured sandbox.
 
-    autouse=True on purpose: drone's handler is a shim that binds the fleet json
-    service (DPLAN-0325), whose names write into the real drone_json/ unless the
-    seam is set, so a test that forgets to redirect pollutes the branch. The
-    guard belongs on every test, not on the ones that remember. Measured before
-    this existed: 4189 of this branch's 7652 audit-tests hygiene records were
-    these writes.
-
-    The service recomputes its directory on every call, so setting the variable
-    here — after import — still takes effect. That call-time resolution is the
-    whole point, and it is what the archived test_json_dir_seam.py pinned when
-    the resolution was drone's own: a value captured at import cannot be
-    redirected by a conftest that runs afterwards. The property now belongs to
-    the service and is pinned once for the fleet by seedgo's contract.
-
-    The sandbox is MEASURED off the shim rather than spelled out, so it cannot
-    drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
+    Autouse: the fleet json service writes to the real drone_json/ unless the seam is set,
+    and resolves it per call, so setting it after import still works.
     """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/drone/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    # Own subdirectory: a seam AT tmp_path creates tmp_path/drone/, colliding with tests' own dirs.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)

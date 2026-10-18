@@ -3,15 +3,11 @@
 # Description: Full PR workflow with atomic lockfile
 # Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Full PR workflow with atomic lockfile.
-
-Orchestrates the complete PR creation lifecycle: lock acquisition,
-branch creation, scoped staging, commit, push, PR creation via gh,
-and cleanup (checkout main + release lock) in a finally block.
 """
 
 from __future__ import annotations
@@ -50,13 +46,7 @@ def _has_credential_helper() -> bool:
 
 
 def _diagnose_push_failure(stderr: str, branch: str) -> str:
-    """Produce an actionable error message for a failed git push.
-
-    Distinguishes between:
-    - No credential helper (most common on fresh setups)
-    - Expired or invalid token
-    - Actual permission / fork issues
-    """
+    """Produce an actionable error message for a failed git push: no helper, bad token, or no permission."""
     lower = stderr.lower()
     auth_indicators = ["403", "could not read username", "terminal prompts disabled"]
     permission_indicators = ["permission", "denied"]
@@ -112,30 +102,8 @@ def _resolve_git_branch(branch_name: str, branch_dir: Path, slug: str = "") -> s
 def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
     """Execute the full PR creation workflow.
 
-    Changes are committed on main locally first, so they never disappear
-    from the working tree. A feature branch is created as a pointer to
-    the same commit (without checkout) and pushed for GitHub's PR system.
-
-    Steps:
-        0. Refuse an over-cap subject (before the lock — see below)
-        1. Verify we are on main
-        2. Acquire lock
-        3. Stage only files under branch_dir (on main)
-        4. Check if anything staged
-        5. Commit on main (local only — not pushed to origin/main)
-        6. Create feature branch pointing to same commit (no checkout)
-        7. Push feature branch to origin
-        8. Create PR via gh
-        9. Delete local feature branch (remote copy is what matters)
-        10. Release lock
-
-    Args:
-        branch_name: The calling branch name (e.g. "api").
-        description: Short description for the PR.
-        branch_dir: Absolute path to the caller's branch directory.
-
-    Returns:
-        Dict with success, pr_url, feature_branch, and message.
+    Changes are committed on main locally first, so they never disappear from
+    the working tree; the feature branch is a pointer to that commit, never checked out.
     """
     repo_root = find_repo_root()
     slug = _slugify(description)
@@ -149,10 +117,7 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         "message": "",
     }
 
-    # Step 0: the message this workflow will commit, composed once and measured
-    # BEFORE the lock. A PR commit lands in the same oneline log as any other,
-    # so it obeys the same subject cap — and a refusal that has taken the
-    # repo-wide PR lock blocks every other citizen while it teaches.
+    # Measured BEFORE the lock: a refusal holding the repo-wide PR lock blocks every other citizen.
     commit_msg = f"feat({branch_name}): {description}\n\nCo-Authored-By: @{branch_name} <{branch_name}@aipass>"
     refusal = subject_refusal(commit_msg)
     if refusal is not None:
@@ -161,7 +126,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         return result
 
     try:
-        # Step 1: Check we're on main
         current = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
@@ -175,14 +139,12 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 2: Acquire lock
         lock_result = acquire_lock(branch_name)
         if not lock_result["success"]:
             result["message"] = lock_result["message"]
             return result
         lock_acquired = True
 
-        # Step 3: Stage only files under branch_dir (on main)
         stage_result = stage_branch_dir(branch_dir, repo_root)
         if not stage_result["success"]:
             result["message"] = stage_result["message"]
@@ -190,7 +152,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             return result
         rel_dir = stage_result["rel_dir"]
 
-        # Step 4: Check if anything was staged
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             capture_output=True,
@@ -202,12 +163,8 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.warning(result["message"])
             return result
 
-        # Step 5: Commit on main (changes stay local)
-        # Pathspec ('-- rel_dir/') scopes the commit to branch_dir only,
-        # preventing pre-staged files from other concurrent PRs from being
-        # swept in. The staging step already scoped git add, but another
-        # drone @git pr could stage its own files into the shared index
-        # between our add and our commit.
+        # The pathspec matters: another drone @git pr can stage into the shared
+        # index between our add and our commit.
         commit = subprocess.run(
             ["git", "commit", "-m", commit_msg, "--", str(rel_dir) + "/"],
             capture_output=True,
@@ -219,7 +176,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 6: Create/update feature branch pointing to same commit (no checkout)
         branch_create = subprocess.run(
             ["git", "branch", "-f", feature_branch],
             capture_output=True,
@@ -231,7 +187,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 7: Push feature branch
         push = subprocess.run(
             ["git", "push", "-u", "origin", feature_branch],
             capture_output=True,
@@ -243,7 +198,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 8: Create PR via gh
         pr_body = f"## Summary\n\n- {description}\n\n## Branch\n\nCreated by @{branch_name} via `drone @git pr`\n"
         pr_create = subprocess.run(
             [
@@ -262,7 +216,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             cwd=str(repo_root),
         )
         if pr_create.returncode != 0:
-            # Check if PR already exists for this branch
             existing = subprocess.run(
                 ["gh", "pr", "list", "--head", feature_branch, "--json", "url", "--limit", "1"],
                 capture_output=True,
@@ -280,7 +233,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             else:
                 result["message"] = f"PR creation failed: {pr_create.stderr.strip()}"
                 logger.error(result["message"])
-                # Clean up local feature branch before returning
                 subprocess.run(
                     ["git", "branch", "-D", feature_branch],
                     capture_output=True,
@@ -291,7 +243,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         else:
             pr_url = pr_create.stdout.strip()
 
-        # Step 9: Clean up local feature branch (remote copy is what matters)
         subprocess.run(
             ["git", "branch", "-D", feature_branch],
             capture_output=True,
@@ -308,7 +259,7 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         )
         logger.info(result["message"])
 
-        # Fire pr_created event (non-blocking — never fail the PR workflow)
+        # The event must never fail the PR workflow.
         try:
             from aipass.trigger.apps.modules.core import trigger
 
@@ -324,6 +275,5 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         return result
 
     finally:
-        # Always release lock — no checkout needed, we never left main
         if lock_acquired:
             release_lock(force=True)

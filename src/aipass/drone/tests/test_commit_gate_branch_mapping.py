@@ -3,7 +3,7 @@
 # Description: Commit gate maps changed files to real citizens, never template trees
 # Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py's commit test gate: which branch a changed file belongs to."""
@@ -18,13 +18,8 @@ from unittest.mock import MagicMock, patch
 
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes
 
-# DPLAN-0291 round close finding. Spawn's templates ship full branch skeletons
-# including .trinity/, so a bottom-up walk that stops at the FIRST .trinity/
-# ancestor declares the template a branch. The gate then ran pytest on the
-# template's tests, and pytest (finding the template's pytest.ini) wrote
-# .pytest_cache INTO the template tree, which spawn's own hygiene tests correctly
-# reject, wedging every subsequent commit. Citizens never nest, so the outermost
-# .trinity/ ancestor is the real owner.
+# Spawn's templates ship .trinity/, and pytest run in one writes .pytest_cache into
+# the template, wedging every commit. Citizens never nest: the outermost .trinity/ owns.
 
 _RUN = "aipass.drone.apps.handlers.git.commit_handler.subprocess.run"
 
@@ -37,10 +32,7 @@ def _mk_branch(root: Path, rel: str) -> Path:
 
 
 def _gate_runs(repo_root: Path, changed: str) -> tuple[dict, list[list[str]]]:
-    """Commit --all with *changed* as the one dirty path; every git, ruff and pytest call is recorded, none runs.
-
-    The recorded pytest fails, so the gate refuses and the commit stops before git add.
-    """
+    """Commit --all with *changed* dirty; calls are recorded, none runs, and pytest fails so the gate refuses."""
     calls: list[list[str]] = []
 
     def _run(cmd: list[str], **_kwargs: object) -> MagicMock:

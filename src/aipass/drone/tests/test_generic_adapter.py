@@ -3,7 +3,7 @@
 # Description: Tests for generic_adapter.capture_main()
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/generic_adapter.py, capture_main()."""
@@ -23,25 +23,12 @@ import pytest
 from aipass.drone.apps.handlers.generic_adapter import capture_main
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_log_operation():
     """Prevent json_handler.log_operation from touching disk, and hand back the mock.
 
-    ``autospec=True`` so the stand-in carries the real module's attribute set:
-    a bare ``patch`` answers every name, so a test asserting on a function
-    production no longer has stays green. Measured with ``log_operation``
-    renamed in the handler shim: this file's module-patching unit passed on the
-    invented attribute; with the spec it raises AttributeError.
-
-    Yields the mock rather than nothing so a test that needs the handle asks for
-    this fixture instead of patching the same attribute a second time — the
-    double patch is what made ``autospec=True`` impossible here
-    (``InvalidSpecError: ... has already been mocked out``).
+    ``autospec=True``: a bare patch answers every name, so a renamed function would stay green.
+    Tests take this fixture's mock; a second patch of the same attribute raises InvalidSpecError.
     """
     with patch(
         "aipass.drone.apps.handlers.generic_adapter.json_handler",
@@ -62,11 +49,6 @@ def _fake_module_factory(
         monkeypatch.setitem(sys.modules, module_name, mod)
 
     return _make
-
-
-# ---------------------------------------------------------------------------
-# stdout capture
-# ---------------------------------------------------------------------------
 
 
 class TestStdoutCapture:
@@ -90,11 +72,6 @@ class TestStdoutCapture:
         assert result["stdout"] == "line1\nline2\n"
 
 
-# ---------------------------------------------------------------------------
-# stderr capture
-# ---------------------------------------------------------------------------
-
-
 class TestStderrCapture:
     """Verify that output written to stderr is captured."""
 
@@ -108,11 +85,6 @@ class TestStderrCapture:
         assert result["stderr"] == "warning msg"
         assert result["stdout"] == ""
         assert result["exit_code"] == 0
-
-
-# ---------------------------------------------------------------------------
-# exit_code handling
-# ---------------------------------------------------------------------------
 
 
 class TestExitCode:
@@ -165,11 +137,6 @@ class TestExitCode:
         assert result["exit_code"] == 1
 
 
-# ---------------------------------------------------------------------------
-# Exception handling
-# ---------------------------------------------------------------------------
-
-
 class TestExceptionHandling:
     """Exceptions inside main() should be captured on stderr."""
 
@@ -187,11 +154,6 @@ class TestExceptionHandling:
         result = capture_main("totally.nonexistent.module", "prog")
         assert result["exit_code"] == 1
         assert result["stderr"] != ""
-
-
-# ---------------------------------------------------------------------------
-# sys.argv construction
-# ---------------------------------------------------------------------------
 
 
 class TestArgvConstruction:
@@ -242,11 +204,6 @@ class TestArgvConstruction:
         assert captured_argv[0] == ["myprog", "--flag"]
 
 
-# ---------------------------------------------------------------------------
-# Restoration of sys.argv / stdout / stderr
-# ---------------------------------------------------------------------------
-
-
 class TestRestoration:
     """sys.argv, sys.stdout, sys.stderr must be restored after call."""
 
@@ -294,11 +251,6 @@ class TestRestoration:
         assert sys.argv is orig_argv
         assert sys.stdout is orig_stdout
         assert sys.stderr is orig_stderr
-
-
-# ---------------------------------------------------------------------------
-# json_handler.log_operation call
-# ---------------------------------------------------------------------------
 
 
 class TestLogOperation:

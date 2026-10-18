@@ -3,7 +3,7 @@
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
 # Version: 1.0.4
 # Created: 2026-06-02
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -40,21 +40,10 @@ from aipass.drone.apps.handlers.rm_handler import (
 )
 from aipass.drone.apps.modules.rm import handle_command, print_help, print_introspection
 
-# Red-team containment tests: paths outside the allowed roots are refused,
-# symlink escapes and traversal included. Carve-out tests: .git, .trinity,
-# .aipass, .codex, .agents and sibling branches stay protected even inside an
-# allowed root. Stale-mode tests (DPLAN-0338) sit at the bottom.
-
-#: The canonical POSIX temp root, SPELLED BY THE RUNNING PLATFORM rather than
-#: written down. ``rm_handler.get_allowed_roots`` carves it out on POSIX only
-#: (``Path("/tmp")`` behind a ``sys.platform != "win32"`` gate), so it genuinely
-#: is the subject of the three tests below — but a rooted literal is
-#: DRIVE-RELATIVE under ntpath, where ``Path("/tmp").resolve()`` is ``D:\tmp``,
-#: so a written-down root claims something different on the other half of the
-#: matrix. ``os.sep`` is "/" wherever these tests are allowed to run.
+#: The POSIX temp root, spelled by the running platform: a rooted literal is drive-relative
+#: under ntpath (``D:\tmp``). ``os.sep`` is "/" wherever these tests run.
 POSIX_TMP = Path(os.sep, "tmp")
 
-#: Why the POSIX-only units skip. Spelled once: three tests share the reason.
 _POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win32 platforms only"
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not on
@@ -62,14 +51,9 @@ _POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win
 _PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
 _PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
 
-#: Windows makes a symlink only with Developer Mode or elevation (template item 23).
+#: Windows makes a symlink only with Developer Mode or elevation.
 _NO_SYMLINKS = sys.platform == "win32"
 _NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -111,11 +95,6 @@ def _patch_roots(project_dir):
         yield
 
 
-# ---------------------------------------------------------------------------
-# get_allowed_roots
-# ---------------------------------------------------------------------------
-
-
 class TestGetAllowedRoots:
     def test_includes_temp_dir(self):
         roots = get_allowed_roots()
@@ -126,12 +105,7 @@ class TestGetAllowedRoots:
     def test_includes_slash_tmp(self, tmp_path, monkeypatch):
         """The POSIX carve-out puts the canonical tmp root in roots by itself.
 
-        $TMPDIR IS MOVED OFF THE CARVE-OUT FIRST, and that is the whole test.
-        Measured with the carve-out deleted from ``get_allowed_roots`` and this
-        machine's default $TMPDIR (which IS /tmp): the unit stayed GREEN, because
-        the system-temp candidate was quietly supplying the root the carve-out
-        was being credited for. Pointed somewhere else, only the carve-out can
-        put /tmp in the list.
+        $TMPDIR is moved off /tmp first: left there, the system-temp root hides a deleted carve-out.
         """
         monkeypatch.setenv("TMPDIR", str(tmp_path))
         tempfile.tempdir = None
@@ -173,11 +147,6 @@ class TestGetAllowedRoots:
         assert len(roots) == len(set(roots))
 
 
-# ---------------------------------------------------------------------------
-# check_containment
-# ---------------------------------------------------------------------------
-
-
 class TestCheckContainment:
     def test_allows_child_of_root(self, tmp_path):
         root = tmp_path.resolve()
@@ -194,10 +163,7 @@ class TestCheckContainment:
 
     def test_refuses_outside_path(self, tmp_path):
         root = tmp_path.resolve()
-        # A SIBLING of the root, not a rooted literal. /etc/passwd stood in for
-        # "somewhere outside the fence" and was never the subject here; written
-        # down it is also drive-relative under ntpath, so the line meant a
-        # different thing on the other half of the matrix.
+        # A sibling of the root, not a rooted literal (drive-relative under ntpath).
         outside = (tmp_path.parent / f"{tmp_path.name}_outside" / "secret.txt").resolve()
         allowed, reason = check_containment(outside, [root])
         assert allowed is False
@@ -214,11 +180,6 @@ class TestCheckContainment:
         child = (tmp_path / "file.txt").resolve()
         allowed, _reason = check_containment(child, [])
         assert allowed is False
-
-
-# ---------------------------------------------------------------------------
-# ALLOW: valid deletions
-# ---------------------------------------------------------------------------
 
 
 class TestAllowDeletion:
@@ -337,11 +298,6 @@ class TestAllowDeletion:
                 shutil.rmtree(target)
 
 
-# ---------------------------------------------------------------------------
-# REFUSE: red-team containment
-# ---------------------------------------------------------------------------
-
-
 class TestRefuseDeletion:
     @pytest.mark.usefixtures("_patch_roots")
     def test_refuse_home_dir(self):
@@ -411,11 +367,6 @@ class TestRefuseDeletion:
         """/var/tmp is NOT in the default allowed set (Codex excludes it)."""
         results = safe_delete(["/var/tmp"])
         assert results[0][1] is False
-
-
-# ---------------------------------------------------------------------------
-# Carve-outs: .git, .trinity, .aipass, .codex, .agents, siblings
-# ---------------------------------------------------------------------------
 
 
 class TestCarveouts:
@@ -528,17 +479,8 @@ class TestCarveouts:
         assert ".git" in reason
 
 
-# ---------------------------------------------------------------------------
-# Template skeletons are not citizens — outermost .trinity wins
-#
-# @spawn ships a full branch skeleton under templates/, .trinity/ and all, so
-# shape-based branch detection reads it as a citizen. The innermost-wins walk
-# named that skeleton in refusals ("sibling branch aipass_framework/") and —
-# worse — locked @spawn out of its own templates, because the skeleton's name
-# never matches the branch you are standing in. The same mimicry sent the
-# commit gate running pytest inside the template (fixed there in e934099f with
-# outermost-citizen-wins); this is that rule, applied to the delete guard.
-# ---------------------------------------------------------------------------
+# A template skeleton under templates/ carries its own .trinity/, so the outermost .trinity wins:
+# innermost-wins named the skeleton in refusals and locked @spawn out of its own templates.
 
 
 class TestTemplateSkeletonIsNotACitizen:
@@ -638,15 +580,8 @@ class TestGitWorktreePointerUnchanged:
         assert git_file.read_text(encoding="utf-8") == f"gitdir: {real_git}"
 
 
-# ---------------------------------------------------------------------------
-# A folder that CONTAINS a citizen — the fence above the branches
-#
-# The sibling fence walks UP from the target, so `drone rm ..` from a branch
-# (src/aipass) and `drone rm ../..` (src) found no .trinity above them and
-# passed every guard: rmtree would have taken the fleet. Measured 2026-09-11
-# with the guards alone, no delete (DPLAN-0338 follow-up). The cure walks DOWN
-# and stops at the first foreign citizen, which the refusal names.
-# ---------------------------------------------------------------------------
+# A folder that CONTAINS a citizen: the sibling fence walks UP, so `drone rm ..` from a branch
+# passes it. The contains-fence walks DOWN and stops at the first foreign citizen.
 
 
 class TestContainedCitizens:
@@ -691,11 +626,8 @@ class TestContainedCitizens:
         """The caller's tree is pruned whole — its template skeleton included,
         which is spawn's by outermost-wins and must not read as a stranger.
 
-        Marked: standing in your own tree while deleting its parent IS deleting
-        the directory you stand in, and Windows refuses that (run 34686193857,
-        WinError 32 — see WINDOWS_CWD_REASON in conftest). The recipe is what
-        that host lacks, not the verdict; the two cases below make the verdict
-        on every OS.
+        Marked: deleting the parent deletes the cwd, which Windows refuses (WinError 32, see
+        WINDOWS_CWD_REASON in conftest); the two cases below make the verdict on every OS.
         """
         ((_path, ok, message),) = safe_delete([".."])
         assert ok is True, message
@@ -713,12 +645,8 @@ class TestContainedCitizens:
         """The Windows half of the case above, manufactured here rather than
         asked of this host.
 
-        The rule is injected at the seam: rmtree refuses to remove a directory
-        the process stands in, which is all WinError 32 is. What that shows is
-        whose refusal it is — every drone guard passed, the message is the
-        host's own and carries the way out of it, the ledger says failed, and
-        the tree is still standing. It models the refusal only; a real rmtree
-        empties what it can reach before raising.
+        The host's refusal, not a guard's: the message carries the way out and the ledger says failed.
+        It models the refusal only; a real rmtree empties what it can reach before raising.
         Mutant killed: the `_standing_inside` suffix dropped from the failure message.
         """
 
@@ -791,14 +719,7 @@ class TestContainedCitizens:
         assert "contains citizen api/" in message
 
 
-# ---------------------------------------------------------------------------
-# A symlink is judged and reported where the LINK lives
-#
-# Found 2026-09-30 in the live ledger: rm unlinked the link correctly, but
-# guarded and reported it by its RESOLVED target. A link to @devpulse printed
-# "Deleted: .../src/aipass/devpulse", and a link inside canary/ was deleted
-# from the devpulse seat while a file beside it was refused as canary's.
-# ---------------------------------------------------------------------------
+# A symlink is guarded and reported where the LINK lives, never by its resolved target.
 
 
 @pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
@@ -888,11 +809,6 @@ class TestASymlinkIsJudgedWhereItLives:
         assert (outside / "keep.txt").exists()
 
 
-# ---------------------------------------------------------------------------
-# Carve-outs via safe_delete (integration)
-# ---------------------------------------------------------------------------
-
-
 class TestCarveoutIntegration:
     @pytest.mark.usefixtures("_patch_roots")
     def test_safe_delete_refuses_dot_git(self, project_dir):
@@ -929,11 +845,6 @@ class TestCarveoutIntegration:
         assert not build.exists()
 
 
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestEdgeCases:
     @pytest.mark.usefixtures("_patch_roots")
     def test_relative_path_resolved_from_cwd(self, project_dir, monkeypatch):
@@ -956,11 +867,6 @@ class TestEdgeCases:
     def test_empty_paths_list(self):
         results = safe_delete([])
         assert results == []
-
-
-# ---------------------------------------------------------------------------
-# Module orchestrator (rm.py)
-# ---------------------------------------------------------------------------
 
 
 class TestRmModule:
@@ -997,20 +903,8 @@ class TestRmModule:
     def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
         """A refusal is an error: handle_command reports False, the CLI exits 1.
 
-        @seedgo's 2026-09-07 report was that ``drone rm`` on paths outside every
-        allowed root printed the red refusal and exited 0 — a script reading
-        ``$?`` would read a delete that never happened as done. Measured from
-        every door reachable here (built-in lane, @drone routing, multi-path,
-        sibling-branch refusal, projectless cwd) the exit was already 1, so this
-        pins the mapping rather than fixing it: the boolean handle_command
-        returns is the only thing standing between a refusal and exit 0.
-
-        The root and the target are SIBLINGS under tmp_path, and the roots list
-        is narrowed by hand. Two earlier drafts of this test passed the delete
-        instead of the refusal: the shared ``_patch_roots`` fixture leaves /tmp
-        allowed, and ``project_dir`` IS ``tmp_path``, so a target under either
-        one sits inside a root. A containment test whose subject is inside the
-        fence proves nothing about the fence.
+        The root and target are siblings under tmp_path with roots narrowed by hand: ``_patch_roots``
+        allows /tmp and ``project_dir`` IS ``tmp_path``, so either would put the target inside a root.
         """
         root = tmp_path / "the_only_allowed_root"
         root.mkdir()
@@ -1047,15 +941,8 @@ class TestRmModule:
         assert calls == [(target, None), (target, None)]
 
 
-# ---------------------------------------------------------------------------
-# Stale mode — drone rm --stale AGE [--dry-run] DIR [DIR...]  (DPLAN-0338)
-#
-# A narrower lane on the same verb: it unlinks only *.tmp regular files sitting
-# directly inside a *_json folder and older than AGE, keeps the carve-outs, and
-# crosses the sibling-branch fence on purpose. The fixture stands in @drone and
-# sweeps @api's tree, so every sweep below crosses the fence — a lost crossing
-# turns the whole block red, not one test.
-# ---------------------------------------------------------------------------
+# Stale mode crosses the sibling fence on purpose: the fixture stands in @drone and sweeps @api,
+# so a lost crossing turns the whole block red, not one test.
 
 _DAY = 86_400
 

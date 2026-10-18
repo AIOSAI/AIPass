@@ -3,7 +3,7 @@
 # Description: module_registry orchestrator - handle_command routing
 # Version: 1.0.4
 # Created: 2026-04-05
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/module_registry.py and apps/handlers/module_registry_handler.py."""
@@ -25,16 +25,8 @@ from aipass.drone.apps.handlers.module_registry_handler import ModuleInfo
 from aipass.drone.apps.modules.module_registry import handle_command
 
 
-# ---------------------------------------------------------------------------
-# Module path prefix for patching
-# ---------------------------------------------------------------------------
 _MOD = "aipass.drone.apps.modules.module_registry"
 _HANDLER = "aipass.drone.apps.handlers.module_registry_handler"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_module_info(
@@ -55,11 +47,6 @@ def _make_module_info(
 def _ext(name: str) -> SimpleNamespace:
     """An external-module entry as routing_config.json declares one: name, entry point, description, version."""
     return SimpleNamespace(name=name, entry_point="fake.entry", description=f"{name} test", version="1.0")
-
-
-# ===========================================================================
-# 1. No command (None) — introspection
-# ===========================================================================
 
 
 class TestHandleCommandNone:
@@ -88,11 +75,6 @@ class TestHandleCommandNone:
 
         assert result is True
         mock_intro.assert_called_once()
-
-
-# ===========================================================================
-# 2. Help routing (--help / -h)
-# ===========================================================================
 
 
 class TestHandleCommandHelp:
@@ -129,11 +111,6 @@ class TestHandleCommandHelp:
 
         assert result is True
         mock_help.assert_called_once()
-
-
-# ===========================================================================
-# 3. list command
-# ===========================================================================
 
 
 class TestHandleCommandList:
@@ -202,11 +179,6 @@ class TestHandleCommandList:
         assert capsys.readouterr().out == ""
 
 
-# ===========================================================================
-# 4. info command
-# ===========================================================================
-
-
 class TestHandleCommandInfo:
     """'info' command shows module metadata."""
 
@@ -239,7 +211,7 @@ class TestHandleCommandInfo:
         """A registered module whose adapter cannot import is not "not found": info names it
         on stderr as registered but not loadable, and answers False.
 
-        Red first: info logged "not found" for it. Mutant killed: the registered check removed."""
+        Mutant killed: the registered check removed."""
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"broken": "fake.broken.mod"})
         with patch(f"{_MOD}.json_handler", autospec=True):
             result = handle_command("info", ["broken"])
@@ -266,11 +238,6 @@ class TestHandleCommandInfo:
         assert "seedgo" in printed
         assert "2.1.0" in printed
         assert "Seedgo audit system" in printed
-
-
-# ===========================================================================
-# 5. check command
-# ===========================================================================
 
 
 class TestHandleCommandCheck:
@@ -314,11 +281,6 @@ class TestHandleCommandCheck:
         assert "False" in printed
 
 
-# ===========================================================================
-# 6. Unknown command
-# ===========================================================================
-
-
 class TestHandleCommandUnknown:
     """Unrecognized commands log a warning and return False."""
 
@@ -336,11 +298,6 @@ class TestHandleCommandUnknown:
         assert "unknown command" in warning_msg.lower()
 
 
-# ===========================================================================
-# 7. The audit line — one claim, every verb
-# ===========================================================================
-
-
 class TestTheAuditLine:
     """Every verb is audited before it is dispatched."""
 
@@ -348,17 +305,7 @@ class TestTheAuditLine:
     def test_the_verb_is_audited_before_it_is_dispatched(self, command: str) -> None:
         """log_operation names the verb it received, whatever the verb is.
 
-        One test, four cases — it used to be four tests, one per verb, sitting
-        in four different classes. There is only one call site: it sits ABOVE
-        the verb branch in handle_command, so list / info / check / an unknown
-        string are the same line of code reached four ways. Four copies read as
-        four claims and all four die to the same edit.
-
-        The verb still has to be parametrized rather than dropped to one case:
-        the payload's ``command`` key comes from the argument, and a hardcoded
-        ``"list"`` there is a real mutant that a single-verb test cannot see.
-        The unknown verb is a case and not an afterthought — a command that is
-        about to be REFUSED is the one most worth having written down.
+        One call site above the verb branch; parametrized because a hardcoded ``"list"`` is a mutant.
         """
         with (
             patch(f"{_MOD}.list_modules", return_value=[]),
@@ -372,11 +319,6 @@ class TestTheAuditLine:
         mock_jh.log_operation.assert_called_once_with(
             "handle_command", {"module": "module_registry", "command": command}
         )
-
-
-# ===========================================================================
-# 8. route_module_command (handler-level)
-# ===========================================================================
 
 
 class TestRouteModuleCommand:
@@ -410,10 +352,7 @@ class TestRouteModuleCommand:
             "stderr": "",
             "exit_code": 0,
         }
-        # The stand-in module is registered under its own fake name, so the
-        # handler's real import_module finds it there. Patching
-        # importlib.import_module through the handler replaced it for the
-        # whole process, `patch`'s own name resolution included.
+        # Via sys.modules: patching importlib.import_module breaks `patch`'s own name resolution.
         monkeypatch.setitem(sys.modules, "fake.internal.mod", mock_mod)
         with patch(f"{_HANDLER}.json_handler", autospec=True):
             result = mrh.route_module_command("fakeint", "status", ["--all"])
@@ -456,11 +395,6 @@ class TestRouteModuleCommand:
         ):
             mrh.route_module_command("logext", "ping")
         mock_jh.log_operation.assert_called_once_with("route_module_command", {"module": "logext", "command": "ping"})
-
-
-# ===========================================================================
-# 9. get_module_help (handler-level)
-# ===========================================================================
 
 
 class TestGetModuleHelp:

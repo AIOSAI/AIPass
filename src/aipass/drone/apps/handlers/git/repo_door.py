@@ -3,31 +3,14 @@
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
 # Version: 1.5.0
 # Created: 2026-09-13
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
 
-The owner, 2026-09-13 23:13 (DPLAN-0344): git write into a repo that is not
-AIPass — projects/baud inside the tree, Vera-Studio outside it — goes ONLY
-through @devpulse's admin grant. Project managers keep exactly the CWD-bound
-owner tier they already had; nobody gains anything else.
-
-Four answers live here so the orchestrator cannot drift from them:
-
-* the flag — ``--repo <path>`` or ``--repo=<path>``, in any slot;
-* who may use it — @ai_mail's verified-caller rail, the 5-leg admin grant,
-  asked fresh on every use and never cached;
-* which repo it names — an existing git top level that is not AIPass;
-* the record — one JSONL line per use, refusals included, beside drone rm's
-  deletion log in ``.ai_central``.
-
-NO LOCK. The AIPass PR lock serialises AIPass's own merge train; taking it for
-someone else's repo stalls that train for nothing. A lock file inside the target
-is worse: it is an untracked file in another project's worktree, and the next
-``commit --all`` there stages it into their history. Git holds ``index.lock``
-for the length of every write it makes in that repo, which is all the
-serialisation a single-holder door needs.
+No lock: the AIPass PR lock would stall AIPass's train, and a lock file in the
+target is an untracked file the next ``commit --all`` there stages. Git's
+``index.lock`` is all the serialisation a single-holder door needs.
 """
 
 from __future__ import annotations
@@ -48,15 +31,8 @@ from aipass.drone.apps.handlers.router_handler import caller_cwd, resolve_caller
 
 REPO_FLAG = "--repo"
 
-# The verbs the door serves. Reads so the writer can see the tree it is about to
-# commit; commit, push and tag to land it; fetch and a fast-forward-only sync so
-# a push the remote rejects can be caught up first (2026-10-13, FPLAN-0642).
-# Nothing that encodes AIPass's own dev->PR->main train (merge, pr, smart-sync,
-# ...) — a project's PR flow is the project's later choice, not this door's
-# (DPLAN-0344 design table). The door's sync is not AIPass's sync: it never
-# rebases, never merges, and refuses a diverged branch. tracked and untrack so a
-# file a catch-all commit or a soft reset left in the index can be taken out
-# again, the working tree untouched (2026-10-15, projects/aipass-site).
+# Nothing that encodes AIPass's own dev->PR->main train (merge, pr, smart-sync):
+# a project's PR flow is the project's choice, not this door's.
 DOOR_VERBS = (
     "status",
     "diff",
@@ -72,10 +48,7 @@ DOOR_VERBS = (
     "run",
 )
 
-# gh's run, read side only, so a release build pushed through the door can be
-# watched through it (2026-10-13). rerun, cancel, delete and download stay
-# home-only. Only a --repo value naming a directory is the door's: anything
-# else is gh's own OWNER/NAME and passes through untouched.
+# gh's run, read side only; rerun, cancel, delete and download stay home-only.
 RUN_READS = ("list", "view", "watch")
 _GITHUB_HOST = "github.com"
 
@@ -86,8 +59,7 @@ OUTCOME_REFUSED = "refused"
 
 UNKNOWN_CALLER = "unknown"
 
-# Refusal texts, printed exactly as written here. --help renders these same
-# constants, so the page cannot promise a sentence the door no longer says.
+# Printed exactly; --help renders these same constants, so the page cannot drift.
 REFUSE_NOT_ADMIN = (
     "--repo is an admin-seat door; {caller} holds no admin grant. "
     "Git in an external repo goes through @devpulse's verified admin grant only (DPLAN-0344)."
@@ -132,15 +104,11 @@ REFUSE_NO_GITHUB = (
     "so there is no OWNER/NAME to hand gh."
 )
 
-# The remote fetch reads, and push writes to.
 _REMOTE = "origin"
 
-# fetch talks to the remote and merge may run a merge driver over every file,
-# so a slow link or a large history gets two minutes before the door gives up.
+# fetch talks to the remote and merge may run a merge driver over every file.
 GIT_NETWORK_TIMEOUT = 120
-# Every other call the door's runner makes is a local read (symbolic-ref,
-# rev-parse, status, diff, log, remote get-url): seconds on any tree, so a
-# minute is a hang, not a slow answer.
+# Every other call is a local read: a minute is a hang, not a slow answer.
 GIT_LOCAL_TIMEOUT = 60
 _NETWORK_VERBS = ("fetch", "merge")
 
@@ -149,11 +117,7 @@ _STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENT
 
 
 def help_block() -> str:
-    """The door's block of the @git help page, its refusals rendered from the constants above.
-
-    Lives beside the constants it renders; it moved here from git_module when
-    that file reached its 1,500-line cap (2026-10-01).
-    """
+    """The door's block of the @git help page, its refusals rendered from the constants above."""
     placeholders = {
         "caller": "<caller>",
         "path": "<path>",
@@ -243,14 +207,8 @@ class RepoTarget(NamedTuple):
 def extract_repo_flag(args: list[str]) -> RepoFlag:
     """Lift ``--repo <path>`` / ``--repo=<path>`` out of *args*, from any slot.
 
-    Args:
-        args: The verb's arguments exactly as routed.
-
-    Returns:
-        RepoFlag. ``present`` is True whenever the flag was typed at all — a
-        bare ``--repo`` with no path still means the caller aimed at the door,
-        and silently running the verb in the standing repo instead would be the
-        one outcome they did not ask for.
+    ``present`` is True whenever the flag was typed at all: a bare ``--repo``
+    must refuse, never run the verb in the standing repo.
     """
     remaining: list[str] = []
     values: list[str] = []
@@ -283,14 +241,9 @@ def extract_repo_flag(args: list[str]) -> RepoFlag:
 def _drone_caller_stamp() -> Iterator[None]:
     """Stamp this process the way drone's router stamps every command it routes.
 
-    @git runs INSIDE drone rather than as a routed child, so the variables the
-    rail reads were never set for this process — asked bare, it would answer
-    "unprovable" for every seat alike. They are written here from the same two
-    sources, by the same resolver, as ``router_handler`` writes them for a
-    child: the assigned identity first, the cwd passport after it.
-
-    Always fresh: an inherited stamp was written by another hop for another
-    process and proves nothing about this one. Every prior value is put back.
+    @git runs inside drone, not as a routed child, so the rail's variables were
+    never set here. Always fresh: an inherited stamp proves nothing about this
+    process. Every prior value is put back.
     """
     saved = {key: os.environ.get(key) for key in _STAMP_KEYS}
     cwd = caller_cwd()
@@ -319,19 +272,11 @@ def _drone_caller_stamp() -> Iterator[None]:
 def admin_verdict() -> AdminVerdict:
     """Ask @ai_mail's verified-caller rail whether this caller holds the admin grant.
 
-    The rail, not a name: a directory called devpulse proves nothing, and the
-    rail is what hooks' edit_gate and testwrite_gate already trust. Asked on
-    every use — a revoked grant must bite on the next call. Fails closed on an
-    unimportable rail and on any raise.
-
-    Returns:
-        AdminVerdict with the verified caller (``@name``, or ``unknown``) and,
-        when refused, the exact refusal text.
+    Asked on every use, never cached: a revoked grant must bite on the next call.
+    Fails closed on an unimportable rail and on any raise.
     """
     try:
-        # Through @ai_mail's door (DPLAN-0404): the admin contract has one home
-        # and this door consumes it rather than mirroring it. Lazy, so a dark
-        # lane refuses instead of breaking @git.
+        # Lazy, so a dark lane refuses instead of breaking @git.
         from aipass.ai_mail.apps.modules import door_verified_caller as rail
     except Exception as exc:
         logger.warning("git repo door: admin lane dark — verified-caller rail unavailable: %s", exc)
@@ -359,8 +304,7 @@ def admin_verdict() -> AdminVerdict:
 def _git_toplevel(directory: Path) -> Path | None:
     """The top level of the git work tree *directory* is in, or None if it is in none.
 
-    Raises OSError or SubprocessError when git itself cannot run: that is a
-    failure to report, never an answer of "not a repository".
+    Raises when git itself cannot run: a failure to report, never "not a repository".
     """
     try:
         result = subprocess.run(
@@ -380,17 +324,8 @@ def _git_toplevel(directory: Path) -> Path | None:
 def resolve_repo(raw: str, aipass_root: Path) -> RepoTarget:
     """Resolve what ``--repo`` names into a repo the door may run in.
 
-    Args:
-        raw: The path exactly as typed.
-        aipass_root: The project root drone resolves for the caller. Relative
-            paths join to it, never to the cwd, so the same call means the same
-            repo from anywhere in the seat.
-
-    Returns:
-        RepoTarget with the resolved top level, or the refusal. AIPass is
-        refused two ways — by its registry at the top level, and by being the
-        caller's own root — because a clean clone carries no registry, and
-        either alone would let ``--repo`` walk around AIPass's own guards.
+    Relative paths join *aipass_root*, never the cwd. AIPass is refused both by
+    its registry and by being the caller's root: a clean clone carries no registry.
     """
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
@@ -430,11 +365,7 @@ def head_sha(repo_root: Path) -> str:
 
 
 def push_current_branch(repo_root: Path) -> dict:
-    """Push the branch checked out in *repo_root* to its ``origin``, same name, never forced.
-
-    The project's own branch model decides what that branch is; a rejected
-    non-fast-forward comes back as git's own refusal, untouched.
-    """
+    """Push the branch checked out in *repo_root* to its ``origin``, same name, never forced."""
     try:
         branch = subprocess.run(
             ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -483,8 +414,7 @@ class Standing(NamedTuple):
 def _run_git(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
     """Run git in *repo_root*; raise _GitFailed when git cannot run or does not finish in time.
 
-    The child never prompts: with GIT_TERMINAL_PROMPT=0 a credential prompt
-    fails at once instead of waiting on a terminal nobody is at.
+    GIT_TERMINAL_PROMPT=0: a credential prompt fails at once instead of waiting on nobody.
     """
     timeout = GIT_NETWORK_TIMEOUT if argv[0] in _NETWORK_VERBS else GIT_LOCAL_TIMEOUT
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
@@ -515,8 +445,7 @@ def _commit_lines(repo_root: Path, rev_range: str) -> list[str]:
 def _fetch_standing(repo_root: Path, verb: str) -> Standing:
     """Fetch origin, then read where the checked-out branch stands against its upstream.
 
-    Moves only the remote-tracking refs. Raises _DoorRefusal for a detached HEAD
-    or a branch with no upstream, _GitFailed when git cannot do what was asked.
+    Raises _DoorRefusal for a detached HEAD or no upstream, _GitFailed when git fails.
     """
     branch = _run_git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
     name = branch.stdout.strip() if branch.returncode == 0 else ""
@@ -559,10 +488,7 @@ def _door_failure(verb: str, repo_root: Path, exc: Exception) -> dict:
 
 
 def fetch_report(repo_root: Path) -> dict:
-    """``fetch --repo``: fetch origin, then show ahead/behind and the commits on each side.
-
-    Changes no working tree and no local branch; only the remote-tracking refs move.
-    """
+    """``fetch --repo``: fetch origin, then show ahead/behind and the commits on each side."""
     try:
         standing = _fetch_standing(repo_root, "fetch")
     except _DoorRefusal as refusal:
@@ -575,9 +501,7 @@ def fetch_report(repo_root: Path) -> dict:
 def sync_fast_forward(repo_root: Path) -> dict:
     """``sync --repo``: fetch, then fast-forward the checked-out branch onto its upstream.
 
-    Refuses a tracked change in the working tree (before fetching), and refuses a
-    branch that has diverged, printing both lists. Never rebases, never makes a
-    merge commit, never stashes or resets: ``git merge --ff-only`` or nothing.
+    ``git merge --ff-only`` or nothing: never rebases, merges, stashes or resets.
     """
     try:
         if _git_out(repo_root, "status", "--porcelain", "--untracked-files=no"):
@@ -613,8 +537,7 @@ def sync_fast_forward(repo_root: Path) -> dict:
 def _merge_or_abort(repo_root: Path, standing: Standing) -> str:
     """Merge the upstream with a merge commit and return its short sha; on a conflict, abort and refuse.
 
-    The conflicted paths are read BEFORE the abort, which is what puts HEAD,
-    index and tree back exactly as they were.
+    The conflicted paths must be read BEFORE the abort, which clears them.
     """
     merge = _run_git(repo_root, "merge", "--no-edit", standing.upstream)
     if merge.returncode == 0:
@@ -634,10 +557,7 @@ def _merge_or_abort(repo_root: Path, standing: Standing) -> str:
 def merge_upstream(repo_root: Path) -> dict:
     """``merge-upstream --repo``: bring the upstream into a diverged branch with one merge commit.
 
-    The ordinary cure when the owner merged on GitHub while this seat committed
-    locally. Refuses a tracked change first (sync's check), fast-forwards when
-    only behind, does nothing when nothing is behind, and on a conflict aborts and
-    names the paths. Never rebases, resets, stashes or pushes.
+    Never rebases, resets, stashes or pushes.
     """
     try:
         if _git_out(repo_root, "status", "--porcelain", "--untracked-files=no"):
@@ -671,9 +591,7 @@ def merge_upstream(repo_root: Path) -> dict:
 def run_aims_at_door(flag: RepoFlag, aipass_root: Path) -> bool:
     """Whether a ``run`` --repo value is the door's path rather than gh's OWNER/NAME.
 
-    ``projects/baud`` reads as either, so the disk decides: a value naming a
-    directory (absolute, or relative to the AIPass root) is the door's, and
-    anything else reaches gh untouched, as it always has.
+    ``projects/baud`` reads as either, so the disk decides: a directory is the door's.
     """
     if not flag.path:
         return False
@@ -686,9 +604,8 @@ def run_aims_at_door(flag: RepoFlag, aipass_root: Path) -> bool:
 def github_slug(url: str) -> str | None:
     """OWNER/NAME from a github.com remote URL, https or ssh, with or without ``.git``.
 
-    None for any other host and for a local path: gh's --repo OWNER/NAME means
-    github.com, so naming another host's repo that way would aim at a stranger.
-    The URL is parsed, never printed: an https remote can carry a token.
+    None for any other host: gh's OWNER/NAME means github.com, so another host's
+    repo would aim at a stranger. Never printed: an https remote can carry a token.
     """
     url = url.strip()
     if "://" in url:
@@ -711,13 +628,7 @@ def github_slug(url: str) -> str | None:
 
 
 def gh_run_args(args: list[str], repo_root: Path) -> tuple[list[str], str]:
-    """The ``gh run`` args aimed at *repo_root*'s GitHub repo, or the refusal.
-
-    Returns:
-        ``(args + ["--repo", "OWNER/NAME"], "")`` for a read subcommand, or
-        ``([], refusal)``. The write subcommands are refused here, after the
-        admin grant and the repo were checked, and before gh is called.
-    """
+    """The ``gh run`` args aimed at *repo_root*'s GitHub repo, or ``([], refusal)``."""
     if not args or args[0] not in RUN_READS:
         return [], REFUSE_RUN_SUB.format(sub=args[0] if args else "")
     # gh's only -R short flag is --repo: -R VALUE, -R=VALUE and the attached -RVALUE all name a repo.
@@ -753,10 +664,8 @@ def record_use(
 ) -> dict:
     """Write one door record to prax and the ledger, and return it.
 
-    Prax first, so the event reaches the logs even if the store cannot be
-    written. Refusals are recorded too: a refused attempt at another repo
-    leaves no other trace, which is what makes it worth finding later.
-    Never raises — losing the record must not turn into losing the result.
+    Prax first, so the event is logged even if the store cannot be written.
+    Never raises: losing the record must not turn into losing the result.
     """
     cwd = caller_cwd()
     record = {

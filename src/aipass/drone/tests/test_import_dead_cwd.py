@@ -3,7 +3,7 @@
 # Description: Every drone module imports without a readable working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/ and apps/handlers/json/json_handler.py: every drone module imports and logs with no cwd."""
@@ -21,71 +21,17 @@ import pytest
 
 import aipass.drone.apps as drone_apps
 
-# The three skipped names live in conftest (dropbox and .archive: the owner's ruling of
-# 2026-09-27; __pycache__), never imported from seedgo's handlers.
+# Sandbox names (dropbox, .archive, __pycache__) come from conftest, never from seedgo's handlers.
 from .conftest import SANDBOX_DIRS
 
-# Drone must import, and must keep logging, with no working directory.
-#
-# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-# relayed by @devpulse). ``ntpath.realpath`` calls ``os.getcwd()``
-# UNCONDITIONALLY — on its first lines, before it even asks whether the path is
-# absolute — where ``posixpath`` only reads the cwd for a relative one. And
-# ``Path.resolve()`` routes through ``os.path.realpath``. So on Windows every
-# module-level ``Path(__file__).resolve()`` is an import-time working-directory
-# dependency, and a process whose cwd is gone cannot import the module at all.
-# Guarding INSIDE that module's functions changes nothing: the import died before
-# any of them existed.
-#
-# ``inspect.stack()`` carries the same defect one layer down and needs a
-# different world to convict it. It builds a ``FrameInfo`` per frame, and for a
-# frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
-# ``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
-# the equivalent raise happens EARLIER, inside ``getabsfile()``, where
-# ``inspect`` catches it — which is exactly why a call on drone's every-import
-# path survived years of Linux CI carrying this.
-#
-# TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
-#
-# * **World A** emulates ntpath — ``os.path.realpath`` is wrapped to read
-#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
-#   ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
-#   ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
-#   reached.
-# * **World B** denies ``os.path.realpath`` outright while ``abspath`` keeps
-#   working. This is what reaches ``getmodule``'s unguarded call and convicts
-#   ``inspect.stack()``.
-#
-# THIRD INGREDIENT for world B (@hooks): the frame must be ``<string>`` —
-# an interpreter ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A heredoc-fed
-# child puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile`` early-returns,
-# and the probe reports green while the same world kills imports for real. Every
-# assertion below is preceded by a control that states whether its world is armed,
-# so a probe that quietly stopped biting cannot pass itself off as a cure.
-#
-# WHAT DRONE CARRIED, measured not estimated. Before this build, 63 of 63 drone
-# modules died on import in BOTH worlds — every one of them at
-# ``handlers/__init__.py:57``, the module-level ``_BRANCH_ROOT`` resolve. That
-# line MASKED everything under it, which is why the count only became true as
-# cures landed: curing the guard took it to 56/63 and revealed
-# ``json_handler.py:41``, and curing the three module-level sites took it to 0.
-# Session 74's inner ``try/except OSError`` around the frame-filename resolve was
-# below both crash lines the whole time — decorative, exactly as @trigger and
-# @prax found in their own trees.
-#
-# And one live site that no import probe reaches: ``log_operation`` is the audit
-# line drone writes on essentially every operation, and its
-# ``_get_caller_module_name`` called ``inspect.stack()``. Under world B, called
-# across a ``<string>`` frame, it raised ``FileNotFoundError`` — drone's logging
-# taking down the caller it was logging for, on the very recovery lane (``drone
-# rm`` from a directory that was just deleted) sessions 68 and 77 exist to keep
-# alive.
+# ntpath.realpath reads os.getcwd() unconditionally (posixpath only for a relative path) and
+# Path.resolve() routes through it, so a module-level resolve() kills the import with no cwd.
+# inspect.stack() reaches getmodule()'s unguarded os.path.realpath for a pseudo-file frame.
+# World A (ntpath emulation) convicts resolve(); only world B (realpath denied) convicts
+# inspect.stack(), and only from a <string> frame: <stdin> sits in linecache and goes green.
 
-# Other branches' import-time code is held CONSTANT: preloaded in the healthy
-# world, before any denial. Their cure is their own build; this file measures
-# drone's sites and must not go red in someone else's name. These are drone's
-# only cross-branch module-level imports, and they are TEMPORARY — delete a
-# line once that branch's own dead-cwd pin is green.
+# Other branches' import-time code is preloaded in the healthy world: their cure is their own.
+# Delete a line once that branch's own dead-cwd pin is green.
 _PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
@@ -93,50 +39,11 @@ import aipass.cli.apps.modules  # noqa: F401
 import aipass.api  # noqa: F401
 """
 
-# THE ACCESSOR PATCH, and it is the difference between a world and a costume.
-#
-# CI found this on the Python 3.10 leg of 8550ed10: the arming probe below
-# printed RESOLVE_DIES: NO and the pin REFUSED rather than passing vacuously.
-# @devpulse relayed the mechanism and @memory corrected the first diagnosis by
-# reading CPython's source, so this is the corrected version:
-#
-#     CPython 3.10 Lib/pathlib.py
-#       358:  realpath = staticmethod(os.path.realpath)       # _NormalAccessor
-#       1077: s = self._accessor.realpath(self, strict=strict)  # Path.resolve
-#
-# 3.10 DOES delegate resolve() to os.path.realpath — it simply took its COPY
-# when pathlib was first imported. So a world that rebinds ``os.path.realpath``
-# afterwards rebinds a name nothing will read again, and every pin under it is
-# green while asserting nothing. 3.11 deleted the accessor and calls
-# os.path.realpath at use, which is why exactly one interpreter reddened.
-#
-# The cure patches the captured accessor as well, which also makes the world
-# ORDER-INDEPENDENT: a child may import pathlib before or after installing it.
-# No version table and no skipif — the same text arms on every interpreter.
-#
-# TWO EDGES, both @memory's, both honoured:
-#   * ``staticmethod`` AND ``*a`` are redundant with each other on purpose. A
-#     plain function stored on a class arrives BOUND through an instance, so it
-#     would eat the accessor as its first positional argument. staticmethod
-#     prevents the binding; ``*a`` survives it if a future edit drops the
-#     staticmethod. Keeping one and deleting the other is how the remaining half
-#     silently becomes load-bearing.
-#   * a bound wrapper that ate the path would still call os.getcwd() first and
-#     still raise, so a raise-shaped probe stays green FOR THE WRONG REASON.
-#     test_the_ntpath_wrapper_resolves_the_path_not_the_accessor pins the value
-#     it returns, through a sentinel so the answer is the wrapper's and not the
-#     host path module's.
-#
-# THE PATCH IS CLASS-LEVEL ONLY, AND THAT IS A MEASUREMENT RATHER THAN A COPY.
-# The first cut here also assigned ``_pathlib._normal_accessor.realpath`` on the
-# INSTANCE. It looked like harmless belt-and-braces and it was not: an instance
-# attribute is never bound, so it SHADOWED the class attribute and made the
-# class-level ``staticmethod`` unfalsifiable — mutant M24b dropped it and all 16
-# pins stayed green. Removing the instance line turns that same mutant red. 3.10
-# stores no per-instance ``realpath``, so the class patch is what its
-# ``self._accessor.realpath(...)`` actually reaches; the extra line bought
-# nothing and cost the only pin that watches the binding. @memory has adopted the
-# same refusal, crediting drone's M24b, against @spawn's belt-and-braces form.
+# 3.10's pathlib._NormalAccessor copies os.path.realpath at import, so the accessor class is
+# patched too; that arms every interpreter in either import order.
+# staticmethod AND *a are redundant on purpose: staticmethod stops the accessor binding, *a
+# survives its removal. A bound wrapper still raises, so only a return-value pin catches it.
+# Class only: an instance attribute shadows it and left staticmethod unfalsifiable (mutant M24b).
 _NTPATH_WRAPPER = """
 import os
 
@@ -182,10 +89,8 @@ if hasattr(_pathlib_dr, "_NormalAccessor"):
     _pathlib_dr._NormalAccessor.realpath = staticmethod(_dead_realpath)
 """
 
-# 3.10's pathlib reduced to the two lines that matter, installed ON PURPOSE so
-# the accessor row is falsifiable on an interpreter that no longer has one. It
-# captures the REAL os.path.realpath BEFORE the world is installed, which is
-# exactly the ordering 3.10 produces by importing pathlib early.
+# 3.10's accessor shape, so the accessor rows are falsifiable on 3.11+; it captures the real
+# os.path.realpath before any world is installed, the ordering 3.10 produces.
 _FAKE_ACCESSOR = """
 import os
 import pathlib as _p
@@ -199,24 +104,9 @@ _p._NormalAccessor = _NormalAccessor
 _p._normal_accessor = _NormalAccessor()
 """
 
-# @memory's SENTINEL, and it is the cure for drone's one windows-setup red on
-# c82c3d34. The return-value pin below asked "did the wrapper receive the PATH or
-# the accessor?" and answered it by reading what came back from the real
-# ``os.path.realpath``. On Linux that discriminates. On nt it does not, because
-# ``ntpath.realpath('/tmp')`` returns ``D:\\tmp`` — a POSIX-absolute literal is
-# DRIVE-RELATIVE there — so the pin reported "it is arriving bound and resolving
-# the accessor" about a wrapper that had worked perfectly. The mechanism it
-# guards was right; the string it compared was a POSIX fact asserted as
-# universal, which is the species this whole file exists to catch, committed
-# inside the instrument built to catch it.
-#
-# @memory's rule, paid for by four of their own reds the same night: when a probe
-# asks "did my patch reach X", let X have captured a SENTINEL rather than the
-# real function — otherwise the original's own platform behaviour answers the
-# question for you. This one returns its argument and touches no filesystem, no
-# cwd and no path module, so whatever comes back afterwards is the wrapper's
-# doing on any platform. It also subsumes the drive-relative symptom entirely:
-# with nothing resolving the literal, there is no spelling to disagree about.
+# A probe asking "did my patch reach X" lets X capture a sentinel, not the real function, or
+# the platform answers: ntpath.realpath('/tmp') is D:\\tmp (a POSIX literal is drive-relative).
+# This returns its argument and touches no filesystem, cwd or path module.
 _SENTINEL_REALPATH = """
 import os
 
@@ -228,17 +118,9 @@ def _sentinel_realpath(path, *a, **kw):
 os.path.realpath = _sentinel_realpath
 """
 
-# The OPPOSITE platform, for the litmus @devpulse requires: run the probe under
-# an nt emulation and require the verdict not to move.
-#
-# @flow's M3 TRAP, honoured rather than repeated: do NOT alias ``ntpath.realpath``
-# on this host. CPython's ntpath.py cannot import ``nt`` on POSIX and falls back
-# to ``realpath = abspath``, and ``ntpath.abspath`` reads the cwd only for a
-# RELATIVE path — so the alias emulates THIS host wearing an nt label and proves
-# nothing. The win32 branch is built by name instead: read the cwd
-# UNCONDITIONALLY (ntpath.py:678), and spell the answer the way nt does, where a
-# POSIX-absolute literal is drive-relative. ``D:`` is CI's own drive, from the
-# failure log.
+# The opposite platform, for the litmus: the verdict must not move under an nt emulation.
+# Trap: never alias ntpath.realpath here; on POSIX it falls back to abspath, which reads the cwd
+# only for a relative path, so the alias emulates this host. The win32 branch is built by name.
 _NT_EMULATION = """
 import os
 
@@ -265,10 +147,7 @@ except OSError:
     print("RESOLVE_DIES: YES")
 """
 
-# The control for world B, and it MUST ride a <string> frame — see the module
-# docstring. compile(..., "<string>") gives the frame a pseudo-filename with
-# nothing in linecache, which is the shape getmodule's unguarded realpath is
-# reached for.
+# World B's control; it must ride a <string> frame (nothing in linecache) to reach getmodule.
 _STACK_CONTROL = """
 import inspect
 
@@ -288,12 +167,7 @@ print("STACK_DIES: " + _ns["out"])
 
 
 def _drone_modules(root: Path | None = None) -> list[str]:
-    """Every importable module under ``aipass.drone.apps``, by walking the tree.
-
-    Named from the filesystem rather than from a hand-written list: the whole
-    species this file is about is a fix landing on some of N identical paths,
-    and a list in a test is one more place for N to be undercounted.
-    """
+    """Every importable module under ``aipass.drone.apps``, by walking the tree, never a hand list."""
     root = root or Path(drone_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
@@ -376,9 +250,7 @@ print("SWEPT: " + str(len({names!r})))
 class TestTheAuditLineSurvivesTheWorldItLogsIn:
     """``log_operation`` is reached at runtime, so no import probe covers it.
 
-    The stack it walks is the CALLER'S, so the shape that convicts it is a
-    ``<string>`` frame — a routed subprocess, a hook, anything exec'd — which is
-    precisely what drone's own router produces.
+    It walks the caller's stack, so a ``<string>`` frame (what drone's router produces) convicts it.
     """
 
     BODY = """
@@ -431,35 +303,14 @@ print("DOCUMENTS: " + ",".join(written))
         assert "router_probe_log.json" in result.stdout, (
             "the caller name stopped being read from the frame: " + result.stdout
         )
-        # And the pseudo-frame is answered "unknown" BY DESIGN, not by accident.
-        # drone's old handler wrote the literal "<string>" here; the service
-        # refuses to, because a log that attributes work to <string> asserts
-        # something false about who did it — and that name became a DIRECTORY
-        # once (2026-08-31). drone is the branch that produces those frames, so
-        # this is its own router's audit line being pinned, not a hypothetical.
+        # A pseudo-frame is answered "unknown" by design: a log naming <string> asserts a false author.
         assert "unknown_log.json" in result.stdout, "a pseudo-frame is no longer answered 'unknown': " + result.stdout
 
 
 class TestTheWorldArmsOnEveryInterpreter:
     """The 3.10 row, made falsifiable on an interpreter that is not 3.10.
 
-    STATED PLAINLY BECAUSE IT LIMITS WHAT THIS FILE PROVES: no Python 3.10
-    exists on this machine (3.12 only, checked). So the 3.10 row is DERIVED from
-    CI's red and REPRODUCED under the emulated accessor below — it is not a live
-    measurement on a real 3.10, and this file should not be read as one. What is
-    measured live here is the accessor SHAPE and the cure's behaviour against it,
-    which is the part a future edit can break.
-
-    CI's failure was not a bug in drone's code — it was the world failing to
-    arm, and the arming probe REFUSING instead of passing vacuously is the only
-    reason anyone found out. That is the discipline working, and it is also the
-    limit of it: a probe can only tell you the world is dead on the interpreter
-    that runs it. Nothing here could have said so from a 3.12 laptop.
-
-    So the accessor shape is BUILT rather than waited for. Each test below states
-    which half of the cure it measures, and the middle one reproduces CI's
-    failure exactly — a bare module-attribute patch, a pre-captured accessor, and
-    a denial that never lands.
+    The row is reproduced under an emulated accessor, not measured on a real 3.10.
     """
 
     PROBE = """
@@ -492,10 +343,7 @@ os.path.realpath = _bare
     def test_a_bare_module_patch_does_not_reach_a_pre_captured_accessor(self):
         """CI's Python 3.10 failure, reproduced here. This is the red-first half.
 
-        The accessor captured the real function before the patch, so rebinding
-        ``os.path.realpath`` rebinds a name nothing reads again. If this test
-        ever goes green, the interpreter stopped being able to express the bug
-        and the two below prove less than they claim.
+        If this ever fails, the bug is no longer expressible and the two below prove less.
         """
         result = self._run(_FAKE_ACCESSOR + self.BARE_PATCH_ONLY + self.PROBE)
 
@@ -517,11 +365,7 @@ os.path.realpath = _bare
         )
 
     def test_world_a_also_reaches_a_pre_captured_accessor(self):
-        """Both worlds carry the cure, so both are measured against the shape.
-
-        World A is the one CI actually reddened, and patching only world B would
-        leave the exact failure in place while the test named after it passed.
-        """
+        """Both worlds carry the cure, so both are measured against the shape (A is the one CI reddened)."""
         result = self._run(_FAKE_ACCESSOR + _WORLD_A + self.PROBE)
 
         assert result.returncode == 0, result.stdout + result.stderr
@@ -546,19 +390,8 @@ print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
     def test_the_ntpath_wrapper_resolves_the_path_not_the_accessor(self):
         """@memory's return-value pin, cured of the platform it was importing.
 
-        THE CLAIM is unchanged and it is still not decoration: every other
-        assertion about world A is RAISE-shaped, and a wrapper that arrived bound
-        would eat the real path into ``*a``, resolve the accessor object instead,
-        and STILL call ``os.getcwd()`` first — so it would still raise and every
-        raise-shaped probe would stay green for entirely the wrong reason. Only
-        the return value separates the two, so it is checked with the denial OFF.
-
-        WHAT CHANGED is what the accessor captured. This pin used to read the
-        answer back through the host's real ``os.path.realpath``, which made the
-        verdict a fact about the host's path module — and on nt it returned
-        ``D:\\tmp`` and the pin accused a wrapper that was working. It reads
-        through a sentinel now, so the only thing that can change the answer is
-        the wrapper's own argument handling, which is the thing under test.
+        A bound wrapper eats the path into ``*a`` and still raises, so only the return value
+        (denial off) tells them apart; a sentinel keeps the host's path module from answering.
         """
         result = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
 
@@ -571,12 +404,7 @@ print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
     def test_the_nt_emulation_reproduces_the_ci_red_without_the_sentinel(self):
         """Red-first, locally: the failure @devpulse relayed, rebuilt on this host.
 
-        Without the sentinel the probe resolves a POSIX literal through whatever
-        path module the host has. Under the nt emulation that is ``D:\\tmp`` —
-        CI's exact string, from a wrapper doing exactly the right thing.
-
-        If this ever stops producing ``D:\\tmp``, the emulation has stopped being
-        able to express the bug and the litmus below proves nothing.
+        If this stops producing ``D:\\tmp``, the emulation cannot express the bug and the litmus proves nothing.
         """
         result = self._run(_NT_EMULATION + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
 
@@ -590,19 +418,8 @@ print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
         """@devpulse's litmus: run the probe under the OPPOSITE platform's
         emulation and require the verdict not to move.
 
-        This is the test that would have caught the original red on Linux. The
-        two runs differ only in which path module the host appears to have, and a
-        pin about argument handling must not be able to notice that.
-
-        THE COMPARISON IS THE PIN, not the ``RESOLVED: /tmp`` line under it, and
-        that was measured rather than assumed. Neutering the comparison alone is
-        an INVALID mutant by @daemon's round-5 rule — an assertion that currently
-        holds cannot be killed by deleting it, so of course it stays green. The
-        valid form is the compound: revert the sentinel AND neuter the
-        comparison, and the whole file passes. So the cross-platform equality is
-        the only thing here that catches CI's actual defect. Do not delete it as
-        redundant with the literal check below; the literal check is what CI was
-        already doing when it went red.
+        The comparison is the pin: revert the sentinel AND neuter it and the whole file passes
+        (compound mutant). Do not delete it as redundant with the literal check below.
         """
         here = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
         as_nt = self._run(_NT_EMULATION + _SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
@@ -619,15 +436,8 @@ print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
 class TestTheFenceLetsKinThroughWithNoCwd:
     """The fence (handlers/__init__.py, v2) survives a dead cwd and still lets kin in.
 
-    Its two resolve() sites, _THIS_FILE at import and _frame_path per frame, each
-    fall back to the raw spelling on OSError; a kin seat must still read as kin
-    when every resolve() dies. The probe is tests/support_fence.py run in-process
-    from a <string> frame, which the fence reads as transport, so the first real
-    frame it meets is the kin probe.
-
-    TWO ARMING PROBES. RESOLVE_DIES proves the world bites. FENCE_FRESH proves no
-    preload already imported the handlers: a cached package is invisible to the
-    fence and the pin would pass having never run it.
+    Both resolve() sites fall back to the raw spelling on OSError; a kin seat must still read as kin.
+    FENCE_FRESH proves no preload cached the handlers, which would let the pin pass unrun.
     """
 
     BODY = """
@@ -652,19 +462,9 @@ print("FENCE: " + support_fence._run("pkg"))
 class TestNoModuleLevelLocationCallSurvives:
     """The structural half, because behaviour cannot reach every reintroduction.
 
-    @hooks (M7), reproduced here as M3: restoring ``inspect.stack()`` in
-    ``_guard_branch_access``'s caller-is-None branch left every IMPORT-shaped pin
-    green, because ``apps/__init__.py`` always supplies a real-file frame so no
-    import probe enters that branch. A parse sees it without a subprocess.
-
-    The claim was narrowed 2026-08-31 (@spawn via @devpulse) and the narrowing is
-    above: a direct call from a ``-c`` child does reach it. "Unreachable from
-    import-shaped pins" is the true sentence, not "unreachable".
-
-    The ban is on the CALL — ``ast.Call`` whose func is ``inspect.stack`` — never
-    on the string, because this file and the cured modules SPELL the defect in
-    their docstrings to explain it, and a string ban would convict the
-    explanation along with the thing.
+    Mutant M3: ``inspect.stack()`` restored in ``_guard_branch_access``'s caller-is-None branch
+    left every import-shaped pin green. The ban is on the call, never the string, so docstrings
+    that spell the defect stay legal.
     """
 
     BANNED_ATTRS = frozenset({"resolve", "cwd", "getcwd", "realpath", "abspath"})
@@ -687,9 +487,7 @@ class TestNoModuleLevelLocationCallSurvives:
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:
         """Calls that infer a location and are evaluated when the module loads.
 
-        The body of a module-level try that catches OSError is guarded: the
-        raise is caught there and cannot kill the import (the fence's
-        _THIS_FILE, DPLAN-0404). Its handlers, else and finally are not.
+        The body of a module-level try catching OSError is guarded; its handlers, else and finally are not.
         """
         found = []
         for node in tree.body:
@@ -749,11 +547,8 @@ class TestNoModuleLevelLocationCallSurvives:
             "walk sys._getframe over f_code.co_filename instead: " + ", ".join(offenders)
         )
 
-    # -- negative controls, both directions -------------------------------
-    #
-    # A checker that convicts nothing and a checker that convicts everything
-    # look identical in a green summary. Both detectors are run against source
-    # they MUST flag and source they must NOT.
+    # Negative controls: a detector that convicts nothing and one that convicts everything look
+    # identical in a green summary, so both run against source they must and must not flag.
 
     def test_the_module_level_detector_convicts_a_module_level_resolve(self):
         tree = ast.parse("from pathlib import Path\nROOT = Path(__file__).resolve().parents[3]\n")
@@ -799,14 +594,7 @@ class TestNoModuleLevelLocationCallSurvives:
     def test_the_stack_detector_clears_a_docstring_that_names_the_defect(self):
         """The reason this is an AST ban and not a grep.
 
-        The source is a SYNTHETIC literal on purpose, and it must stay one.
-        @spawn's control here asserted the whole LIVE guard file clean, which
-        made it a second copy of the ban wearing a control's name — restoring
-        the walk redded the control too, so it could never have told them the
-        detector had gone blind. This one cannot fail for the ban's reason:
-        the string it parses has no call in it at all, so it fails only if the
-        detector starts convicting prose, which is the single thing it exists
-        to rule out.
+        The source stays a synthetic literal: a live file would make this a second copy of the ban.
         """
         tree = ast.parse('"""Walks sys._getframe rather than inspect.stack() — see the cure."""\n')
         assert self._inspect_stack_calls(tree) == [], (

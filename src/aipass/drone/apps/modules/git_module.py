@@ -3,14 +3,11 @@
 # Description: Git workflow module — PR, status, sync, lock management
 # Version: 1.9.0
 # Created: 2026-03-17
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Git workflow module and drone adapter.
-
-Serves as BOTH the drone adapter (registered in _MODULE_REGISTRY) and
-the module orchestrator, routing git commands to the appropriate handlers.
 """
 
 from __future__ import annotations
@@ -95,10 +92,8 @@ _COMMANDS = (
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
 
-# gh's default `issue view` render asks GitHub for repository.issue.projectCards
-# — a Projects-classic field the API now rejects outright, so the call returns the
-# deprecation notice and no issue at all.  Rendering from pinned --json fields never
-# requests it.  Callers who already chose a rendering keep their own invocation.
+# gh's default `issue view` requests projectCards, which the API now rejects;
+# pinned --json fields never request it.
 _ISSUE_VIEW_RENDER_FLAGS = ("--json", "-q", "--jq", "-t", "--template", "-w", "--web")
 _ISSUE_VIEW_COMMENT_FLAGS = ("-c", "--comments")
 
@@ -116,37 +111,24 @@ _ISSUE_VIEW_COMMENTS_TEMPLATE = _ISSUE_VIEW_TEMPLATE + (
     "{{range .comments}}\n--- {{.author.login}} · {{.createdAt}}\n\n{{.body}}\n{{end}}"
 )
 
-# `run view --log` / `--log-failed` in gh 2.45 (this machine's packaged gh) finds
-# each step's log by file name inside the run's log archive. GitHub's archive now
-# holds job-level files only — measured on run 34730939542: `0_seedgo-audit.txt`,
-# `1_test (3.10).txt` and no per-step files — so gh matches nothing, prints nothing
-# and exits 0. An empty answer with a clean exit is read from the jobs API instead.
+# gh 2.45 `run view --log` looks for per-step files the archive no longer holds,
+# so it prints nothing and exits 0; that empty answer is read from the jobs API.
 _RUN_LOG_FLAGS = ("--log", "--log-failed")
 _FAILED_CONCLUSIONS = ("failure", "timed_out")
 _RUN_VIEW_VALUE_FLAGS = ("-R", "--repo", "-j", "--job", "-a", "--attempt", "-q", "--jq", "-t", "--template", "--json")
 _JOB_ROW_JQ = '"\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
 _GH_TIMEOUT = 60
 
-# The flags diff takes; any other flag before `--` is refused by name
 _DIFF_FLAGS = ("--staged", "--all", "--stat")
 
-# Count flags whose value lives in the following arg — skipped, not warned about
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
 
 
 def _detect_branch_dir() -> tuple[str, Path] | None:
     """Detect caller's branch from CWD via passport lookup.
 
-    Walks up from CWD looking for ``.trinity/passport.json`` and extracts
-    the branch name + directory.  Works for any registered branch regardless
-    of where it lives on disk (commons, skills, aipass sub-dirs, etc.).
-
-    Returns None when the process has no CWD — this detects the branch from
-    LOCATION, and there is nothing to detect from. Identity assigned at spawn
-    is a different question, answered elsewhere and unaffected.
-
-    Raises ValueError when a passport is found but cannot be read: a corrupt
-    passport is a failure to report, never "not inside a branch".
+    Returns None when the process has no CWD. Raises ValueError on an unreadable
+    passport: corrupt is a failure to report, never "not inside a branch".
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -176,16 +158,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
 def handle_command(command: str | None = None, args: list[str] | None = None) -> dict:
     """Route a git command to the appropriate handler.
 
-    Auth is centralized: verify_git_access() is called once at the top,
-    before any routing. Global-tier commands pass for all callers;
-    owner-tier commands require devpulse.
-
-    Args:
-        command: The subcommand (status, diff, log, commit, checkout, etc.).
-        args: Optional list of arguments.
-
-    Returns:
-        Dict with stdout, stderr, and exit_code.
+    Auth is centralized: verify_git_access() runs once, before any routing.
     """
     if not args:
         if command is None:
@@ -200,12 +173,9 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         print_introspection()
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
-    # The external-repo door is decided BEFORE the tier gate. Its question is not
-    # "does this caller own the repo it stands in" but "does this caller hold the
-    # admin grant", and a flag aimed at another repo must never fall through and
-    # run the verb in the standing one. On the gh passthroughs --repo OWNER/NAME
-    # is gh's own flag and reaches gh untouched, as ever; only `run` with a value
-    # naming a directory is the door's (its read side, 2026-10-13). release's --repo is OWNER/NAME too.
+    # The external-repo door is decided BEFORE the tier gate: a flag aimed at another
+    # repo must never fall through and run in the standing one. On gh passthroughs and
+    # release, --repo OWNER/NAME is gh's own; only `run` naming a directory is the door's.
     repo_flag = repo_door.extract_repo_flag(args)
     if repo_flag.present and (
         command not in (*_GH_PASSTHROUGH_COMMANDS, "release")
@@ -219,8 +189,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     from aipass.drone.apps.plugins.devpulse_ops.auth import GH_SUBCOMMANDS, gh_access_key, verify_git_access
 
     if command in _GH_PASSTHROUGH_COMMANDS:
-        # Reads stay global, writes ask the owner tier, and an unknown subcommand
-        # is refused here, before the gate and before gh (DPLAN-0356 leg 3).
+        # An unknown subcommand is refused here, before the gate and before gh.
         gh_key = gh_access_key(command, args)
         if gh_key is None:
             table = GH_SUBCOMMANDS[command]
@@ -233,9 +202,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
-        # WARNING, not ERROR: auth.py already logged this same denial with the
-        # authoritative severity. Re-logging at ERROR made one refusal surface as
-        # two ERROR fingerprints 0.12s apart, so suppressing one left the twin loud.
+        # WARNING, not ERROR: auth.py already logged this denial at ERROR.
         logger.warning("git access denied: %s", exc)
         return {"stdout": "", "stderr": str(exc), "exit_code": 1}
 
@@ -337,13 +304,10 @@ def _refuse_repo_door(verdict: repo_door.AdminVerdict, flag: repo_door.RepoFlag,
 
 
 def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
-    """Run one verb in another repo through the admin seat's door (DPLAN-0344).
+    """Run one verb in another repo through the admin seat's door.
 
-    The order is the contract. WHO first, so a seat without the grant learns
-    nothing about the path it named; then the flag's own shape; then WHICH verb;
-    then WHICH repo. ``verify_git_access`` is not consulted: its owner tier
-    answers for the repo the caller stands in, and the admin grant is the
-    stronger check for a repo they do not. Every exit writes one record.
+    Order is the contract: WHO first (a seat without the grant learns nothing about
+    the path), then flag shape, verb, repo. Every exit writes one record.
     """
     verb = "tag-list" if command == "tag" and (not flag.args or flag.args[0] == "--list") else command
     verdict = repo_door.admin_verdict()
@@ -411,9 +375,7 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
 def _rewrite_issue_view(args: list[str]) -> list[str]:
     """Render ``issue view`` from pinned JSON fields instead of gh's default view.
 
-    Returns args untouched for every other issue subcommand, and for callers who
-    already picked a rendering — their flags conflict with ``--json`` and their
-    choice is theirs to keep.
+    Callers who already picked a rendering keep it: their flags conflict with ``--json``.
     """
     if not args or args[0] != "view":
         return args
@@ -456,10 +418,7 @@ def _run_view_id(args: list[str]) -> str | None:
 def _run_log_via_job_api(args: list[str]) -> dict:
     """Answer ``run view --log`` / ``--log-failed`` from the jobs API after gh printed nothing.
 
-    The API has no per-step slice, so each job's log comes back whole, every line
-    led by its job name and a tab — the column gh's own rendering leads with. For
-    --log-failed that is the full log of each failed job, and the notice on stderr
-    says so rather than letting it pass for gh's step-filtered view.
+    No per-step slice exists: each job's log comes back whole, and stderr says so.
     """
     failed_only = "--log-failed" in args
     named_repo = _flag_value(args, ("-R", "--repo"))
@@ -629,9 +588,7 @@ def _handle_close_pr(args: list[str]) -> dict:
 def _terminal_answer(prompt: str) -> str | None:
     """The typed answer to *prompt* on a real terminal, or None when stdin is not one.
 
-    Its body is the two calls the merge gate made inline. It has a name of its
-    own for the tests: they hand the gate a terminal through this name instead of
-    replacing sys.stdin for the whole process (drone's decision, DPLAN-0354 leg 5).
+    A test seam: tests hand the gate a terminal here instead of replacing sys.stdin.
     """
     if not sys.stdin.isatty():
         return None
@@ -639,11 +596,9 @@ def _terminal_answer(prompt: str) -> str | None:
 
 
 def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
-    """Joint-decision gate: merges must never happen accidentally (DPLAN-0256).
+    """Joint-decision gate: merges must never happen accidentally.
 
-    Returns None when the merge may proceed, or a refusal/abort result dict.
-    Order matters: an explicit --confirm always passes; otherwise a real
-    terminal gets an interactive y/N prompt; headless callers are refused.
+    Returns None to proceed. --confirm passes; a terminal gets y/N; headless is refused.
     """
     if confirmed:
         json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
@@ -750,16 +705,8 @@ def _handle_fix(args: list[str], caller: str) -> dict:
 def _json_document(payload: dict, *, ok: bool) -> dict:
     """Render *payload* as the one JSON document a machine caller reads.
 
-    Args:
-        payload: The document body. ``ok`` is stamped into it here so every
-            machine answer on every read door carries the same verdict field.
-        ok: Whether the door answered the question.
-
-    Returns:
-        A routing result whose stdout is the document. A refusal travels on
-        stdout too — a caller that asked for JSON must be able to parse what
-        comes back, including the reason it failed — while the exit code still
-        goes non-zero so a shell script reading only that is told the truth.
+    A refusal travels on stdout too (a JSON caller must parse the reason), while
+    the exit code still goes non-zero.
     """
     return {
         "stdout": json.dumps({"ok": ok, **payload}, indent=2),
@@ -771,9 +718,7 @@ def _json_document(payload: dict, *, ok: bool) -> dict:
 def _handle_status(args: list[str] | None = None, repo_root: Path | None = None) -> dict:
     """Handle the status subcommand (global tier). --all for repo-wide, --json for machines.
 
-    *repo_root* is set only by the external-repo door, which names the repo
-    outright: there is no branch to detect and nothing narrower than the whole
-    repo to scope to.
+    *repo_root* is set only by the external-repo door: no branch, whole-repo scope.
     """
     args = args or []
     as_json = wants_json(args)
@@ -794,9 +739,7 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
             detected, message = None, str(exc)
         if detected is None:
             if as_json:
-                # This refusal fires BEFORE the branch is known, which is how a
-                # machine caller ends up parsing a bare sentence. Every exit from a
-                # --json call is a document, early ones included.
+                # Every exit from a --json call is a document, early ones included.
                 return _json_document(
                     {"branch": "", "scope": "branch", "files": [], "total": 0, "message": message}, ok=False
                 )
@@ -810,8 +753,6 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
             if result.get("ok", True):
                 # only reword the success message — an error message must survive verbatim
                 result["message"] = f"{result['total']} file(s) changed in repo"
-                # The twin of `git rev-list --count` both ways: how far this branch
-                # is from its origin twin, as of the last fetch (DPLAN-0356).
                 counts = status_handler.get_ahead_behind(standing_root)
                 if not counts["ok"]:
                     result = {**result, "ok": False, "message": counts["message"]}
@@ -819,9 +760,6 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
             result = status_handler.get_branch_status(branch_dir)
 
     if as_json:
-        # The scope footer and the header sentence are prose. A machine caller
-        # asked for facts, so it gets the scope as a field instead of a line it
-        # would have to recognise and strip.
         document = {
             "branch": branch_name,
             "scope": "repo" if show_all else "branch",
@@ -834,18 +772,14 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         return _json_document(document, ok=result.get("ok", True))
 
     if not result.get("ok", True):
-        # a failed git status must FAIL the command — exit 0 here false-greened
-        # scripts and CI into reading an error as a clean tree
+        # exit 0 here would let scripts and CI read a git error as a clean tree
         return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     lines = [result["message"]]
     if counts is not None:
         lines.append(counts["message"])
     for f in result["files"]:
-        # STRIPPED FOR THE SCREEN ONLY. The handler now reports porcelain's two
-        # columns verbatim; this rendering has always shown one right-aligned
-        # letter and keeps doing so, byte for byte, so every current reader of
-        # this surface is untouched. Machine callers take --json and get both.
+        # Stripped for the screen only; --json carries porcelain's two columns verbatim.
         lines.append(f"  {f['status'].strip():>2} {f['path']}")
 
     if not show_all:
@@ -935,17 +869,7 @@ def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
 
 
 def _split_log_entry(entry: str) -> dict:
-    """Split one ``--oneline`` row into its sha and its subject.
-
-    Args:
-        entry: A row as git prints it — a short sha, a space, the subject.
-
-    Returns:
-        {sha, subject}. Split ONCE on the first space: a subject contains
-        spaces of its own, and splitting on all of them is how a consumer ends
-        up rebuilding the message it was handed. A row with no subject keeps
-        its sha and reports an empty one rather than vanishing.
-    """
+    """Split one ``--oneline`` row into its sha and its subject (once, on the first space)."""
     sha, _, subject = entry.strip().partition(" ")
     return {"sha": sha, "subject": subject.strip()}
 
@@ -953,13 +877,8 @@ def _split_log_entry(entry: str) -> dict:
 def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the log subcommand (global tier).
 
-    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`, and paths that
-    keep only the commits touching them: `log src/aipass/drone`, or after `--`
-    for a path that no longer exists (`log -n 5 -- old/file.py`). A path is read
-    against the caller's directory, then the repo root. One range of commits,
-    `log origin/dev..HEAD`, lists every commit in it unless a count caps it;
-    each side must name a commit. *repo_root* is set only by the external-repo
-    door, where paths are read against that repo alone.
+    A path is read against the caller's directory, then the repo root; after `--`
+    it need not exist. One `a..b` range lists every commit unless a count caps it.
     """
     as_json = wants_json(args)
     # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
@@ -977,7 +896,6 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
             continue
         if arg in _LOG_COUNT_FLAGS:
             continue
-        # git shorthand: -20 means 20 commits
         candidate = arg[1:] if arg.startswith("-") and arg[1:].isdigit() else arg
         if count is None and candidate.isdigit():
             count = int(candidate)
@@ -1055,9 +973,7 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
 def _handle_show(args: list[str]) -> dict:
     """Handle the show subcommand (global tier).
 
-    `show <ref>` shows the commit; `show <ref> <path>` reads that file AT the
-    commit. Repo-wide by design — see show_handler for why it is not scoped to
-    the caller's own branch.
+    Repo-wide by design — see show_handler for why it is not branch-scoped.
     """
     as_json = wants_json(args)
     # Stripped BEFORE args[0] is read as the ref: left in, `show --json HEAD`
@@ -1175,8 +1091,7 @@ def _handle_export(args: list[str]) -> dict:
 def _handle_remote(args: list[str]) -> dict:
     """Handle the remote subcommand (global tier) — where this repository points.
 
-    Read-only: it lists what is configured and changes nothing. Credentials are
-    redacted in the handler, before any value reaches this rendering.
+    Credentials are redacted in the handler, before any value reaches this rendering.
     """
     as_json = wants_json(args)
     result = remote_handler.list_remotes()
@@ -1196,8 +1111,7 @@ def _handle_remote(args: list[str]) -> dict:
     lines = [result["message"]]
     for entry in result["remotes"]:
         lines.append(f"  {entry['name']}  {entry['fetch']} (fetch)")
-        # Push is printed only when it DIFFERS. Two identical rows is what git
-        # itself prints, and it reads as two remotes at a glance.
+        # Push only when it differs: two identical rows read as two remotes.
         if entry["push"] and entry["push"] != entry["fetch"]:
             lines.append(f"  {entry['name']}  {entry['push']} (push)")
 
@@ -1239,10 +1153,7 @@ def _handle_commit(args: list[str], repo_root: Path | None = None) -> dict:
 def _handle_untrack(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the untrack subcommand (owner tier): `untrack [--recursive] <path ...>`, out of the index only.
 
-    The twin of `git rm --cached`. Paths are read as `tracked` reads them; the
-    working tree is untouched and nothing is committed. Exit 1 when any path was
-    refused, after the accepted ones left the index. *repo_root* is set only by
-    the external-repo door: paths are then repo-relative.
+    Exit 1 when any path was refused, after the accepted ones left the index.
     """
     recursive = "--recursive" in args
     paths = [arg for arg in args if arg != "--recursive"]
@@ -1411,9 +1322,7 @@ def _tier_commands(tier: str) -> list[str]:
         tier: "global" or "owner".
 
     Returns:
-        The tier's command list, or an empty list if the gate cannot be
-        imported — an introspection line is not worth failing a command over,
-        and an empty tier reads as unknown rather than as a confident lie.
+        An empty list if the gate cannot be imported: unknown, not a confident lie.
     """
     try:
         from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
@@ -1482,15 +1391,6 @@ def print_introspection() -> None:
 def print_help(command: str | None = None) -> None:
     """Print help (seedgo compliance).
 
-    Args:
-        command: The verb to explain. None prints the top-level page; an
-            unknown verb falls through to it inside ``get_help``.
-
-    ``markup=False``: this page is documentation, not styled output, and its
-    argument placeholders are literal. Rendered as markup, Rich read ``[count]``
-    and ``[path]`` as style tags and deleted them silently — ``log [count]``
-    reached the terminal as ``log``. Measured 2026-09-15, with the Rich_Markup
-    standard scoring 100, because the literal is returned by ``get_help()``
-    rather than written at the print site.
+    ``markup=False``: Rich would read ``[count]``/``[path]`` placeholders as style tags and delete them.
     """
     _get_console().print(get_help(command), markup=False)

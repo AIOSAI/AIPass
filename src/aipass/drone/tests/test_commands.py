@@ -3,7 +3,7 @@
 # Description: Tests for the custom command registry
 # Version: 1.0.4
 # Created: 2026-03-17
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -20,11 +20,6 @@ import pytest
 from aipass.drone.apps.handlers.command_registry import ops, lookup
 from aipass.drone.apps.modules import RegistryError
 from aipass.drone.apps.modules.commands import handle_command, list_all
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -92,11 +87,6 @@ class TestUnreadableRegistry:
         assert json.loads(isolated_registry.read_bytes())["commands"] == {}
 
 
-# ===================================================================
-# 1. Registry auto-creation
-# ===================================================================
-
-
 class TestRegistryAutoCreation:
     def test_load_creates_file_when_missing(self, isolated_registry: Path) -> None:
         """load_registry() creates a new file when none exists."""
@@ -111,11 +101,9 @@ class TestRegistryAutoCreation:
         assert registry["metadata"]["command_count"] == 0
 
     def test_a_registry_that_is_not_json_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
-        """Not JSON raises naming the path and the parser's own text; the file is byte-equal after (fleet green leg 8).
+        """Not JSON raises naming the path and the parser's own text; the file is byte-equal after.
 
-        The parser's text (with its line and column) is asked of this interpreter
-        here, never written down. Red first against the old recreate; its mutant
-        is the proof.
+        The parser's text is asked of this interpreter, never written down.
         """
         broken = b'{"commands": {"audit": '
         isolated_registry.write_bytes(broken)
@@ -130,10 +118,7 @@ class TestRegistryAutoCreation:
         assert isolated_registry.read_bytes() == broken
 
     def test_a_registry_that_is_not_a_dict_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
-        """JSON that is a list raises naming the path and the type; the file is byte-equal after (fleet green leg 8).
-
-        Red first against the old recreate; its mutant is the proof.
-        """
+        """JSON that is a list raises naming the path and the type; the file is byte-equal after."""
         listed = json.dumps([{"name": "audit"}]).encode("utf-8")
         isolated_registry.write_bytes(listed)
 
@@ -152,11 +137,6 @@ class TestRegistryAutoCreation:
 
         assert "commands" in registry
         assert "metadata" in registry
-
-
-# ===================================================================
-# 2. CRUD operations
-# ===================================================================
 
 
 class TestCRUDOperations:
@@ -267,11 +247,6 @@ class TestCRUDOperations:
         assert registry["metadata"]["command_count"] == 1
 
 
-# ===================================================================
-# 3. Lookup (exact match)
-# ===================================================================
-
-
 class TestLookup:
     def test_lookup_found(self, isolated_registry: Path) -> None:
         """lookup_command returns the command dict for an exact match."""
@@ -288,11 +263,6 @@ class TestLookup:
         result = lookup.lookup_command("nonexistent")
 
         assert result is None
-
-
-# ===================================================================
-# 4. Multi-word greedy matching
-# ===================================================================
 
 
 class TestMultiWordMatching:
@@ -380,11 +350,6 @@ class TestMultiWordMatching:
         assert remaining == []
 
 
-# ===================================================================
-# 5. List and filter by branch
-# ===================================================================
-
-
 class TestListAndFilter:
     def test_list_commands_sorted(self, isolated_registry: Path) -> None:
         """list_commands returns all commands sorted by name."""
@@ -426,11 +391,6 @@ class TestListAndFilter:
         assert result == []
 
 
-# ===================================================================
-# 6. Save validation
-# ===================================================================
-
-
 class TestSaveValidation:
     def test_save_rejects_non_dict(self, isolated_registry: Path) -> None:
         """save_registry rejects data that is not a dict."""
@@ -443,11 +403,6 @@ class TestSaveValidation:
         result = ops.save_registry({"metadata": {}})
 
         assert result is False
-
-
-# ===================================================================
-# 7. Module orchestrator
-# ===================================================================
 
 
 class TestModuleOrchestrator:
@@ -494,11 +449,6 @@ class TestModuleOrchestrator:
         result = handle_command("unknown_sub", ["arg"])
 
         assert result is False
-
-
-# ===================================================================
-# 8. list_all module function
-# ===================================================================
 
 
 class TestListAll:

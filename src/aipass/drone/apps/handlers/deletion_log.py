@@ -3,33 +3,12 @@
 # Description: Durable record of every delete drone performs
 # Version: 1.2.3
 # Created: 2026-08-14
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Durable record of every delete drone performs.
 
-The owner's ruling: "if something deletes, there should be a record of it."
-``drone rm`` is the fleet's only sanctioned delete path — raw recursive rm is
-gate-blocked — so this is the choke point where the record belongs.
-
-Two channels, deliberately:
-
-  - a JSONL store under the project's ``.ai_central/``, machine-readable and
-    findable months later;
-  - a prax INFO line, so a deletion flows through normal observability without
-    anyone having to know this file exists.
-
-The prax line is emitted FIRST. If the store write fails, the event still
-reached the logs — a deletion that leaves no trace anywhere is the one outcome
-worth engineering against.
-
-Refusals are recorded too. A blocked delete leaves no other trace of what was
-attempted, which makes it exactly the kind of event worth finding later.
-
-Severity is INFO on both channels (compass #273): a deletion through the
-sanctioned path is chosen behaviour, not a fault. The guards keep their own
-WARNING when they refuse — that is the guard speaking, and it is separate from
-the record.
+Reference: docs/rm_and_the_record.md
 """
 
 from __future__ import annotations
@@ -52,20 +31,14 @@ from aipass.drone.apps.handlers.router_handler import (
 _LOG_DIR_NAME = ".ai_central"
 _LOG_NAME = "deletions.jsonl"
 
-# Redirects the durable store only. The prax INFO line is emitted before the
-# store is touched and this cannot silence it — so pointing the store somewhere
-# else relocates the record, it does not erase the event. Exists because a test
-# run and a container both need somewhere other than the live project's log.
+# Relocates the durable store only; the prax line is emitted first and cannot be silenced.
 _PATH_ENV_VAR = "AIPASS_DELETION_LOG"
 
-# Bounded on purpose. A delete log that grows without limit becomes the runaway
-# log the monitoring lane exists to catch, and the newest records — the ones
-# anyone actually reaches for — are the first thing a full disk costs you.
+# Bounded: an unbounded delete log becomes the runaway log monitoring exists to catch.
 _MAX_BYTES = 2 * 1024 * 1024
 _ROTATIONS = 1
 
-# Measuring a tree means walking it. A delete of something enormous should not
-# pay an unbounded walk before it starts, so the count stops here and says so.
+# A delete of something enormous must not pay an unbounded walk before it starts.
 _MEASURE_ENTRY_CAP = 10_000
 
 OUTCOME_DELETED = "deleted"
@@ -78,21 +51,15 @@ LANE_BROKER = "broker"
 
 UNKNOWN_CALLER = "unknown"
 
-# What the cwd field records when the process has no working directory left.
-# Deleting the directory you are standing in is an ordinary thing to do with a
-# scratch dir, and every os.getcwd() after it raises ENOENT. A defined value
-# for "there is none" is not a substitute answer — inventing "/" or reusing the
-# deleted path would be, and both would read as a real location months later.
+# The cwd field after a delete removed the process's own cwd; "/" or the deleted
+# path would read as a real location months later.
 NO_CURRENT_DIRECTORY = "<none: deleted during this operation>"
 
 
 def _find_project_root() -> Path | None:
     """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
 
-    No cwd means no walk — and the ENOENT used to raise here, past the two
-    homes that could still have answered. AIPASS_HOME and the tempdir below
-    do not need a cwd, so a delete that removes its own directory keeps the
-    durable half of its record instead of surviving as a prax line alone.
+    No cwd must still reach AIPASS_HOME, so a delete of its own cwd keeps its durable record.
     """
     cwd = caller_cwd()
     for parent in [cwd, *cwd.parents] if cwd is not None else []:
@@ -109,18 +76,7 @@ def _find_project_root() -> Path | None:
 def _resolve_citizen_caller(cwd: Path | None) -> str:
     """Name the CITIZEN who deleted, or say ``unknown`` — never a directory.
 
-    The shared resolver's last resort before nothing is the PROJECT: with no
-    assigned ``AIPASS_BRANCH_NAME`` and no passport up the tree, it derives a
-    name from the registry that answered, so a delete run from the repo root
-    recorded ``caller: "aipass"`` — a directory, not a person. The live store
-    holds 33 such rows, one of them a deletion inside @devpulse's own tree.
-
-    A record is read months later by someone asking WHO. ``unknown`` tells them
-    the truth and sends them to the cwd and the prax line; a project name that
-    looks like a citizen sends them after the wrong actor, and @ai_mail's CLI
-    entry was fenced for exactly this species (6be0da57). So the ``project``
-    source is refused here even though the shared resolver returns it happily:
-    it is a true answer to "where", and this field asks "who".
+    The resolver's ``project`` source is refused: it answers "where", and this field asks "who".
     """
     signal = resolve_caller_identity_signal(cwd)
     if signal.name and signal.source in ("assigned", "passport"):
@@ -131,10 +87,7 @@ def _resolve_citizen_caller(cwd: Path | None) -> str:
 def _temp_dir() -> Path:
     """The host's temp directory, where a deletion outside any project is recorded.
 
-    Its body is the call deletion_log_path made inline. It has a name of its own
-    for the tests: they hand the ledger a temp home under tmp_path through this
-    name instead of replacing tempfile.tempdir for the whole process (drone's
-    decision, DPLAN-0354 leg 5).
+    Named so tests can patch it instead of replacing tempfile.tempdir process-wide.
     """
     return Path(tempfile.gettempdir())
 
@@ -142,22 +95,8 @@ def _temp_dir() -> Path:
 def deletion_log_path(project_root: Path | None = None) -> Path:
     """Return the deletion log path for the project the deletion belongs to.
 
-    One log per project, not one per branch: ``drone rm`` runs from whichever
-    branch is deleting, and a record split across seventeen mailboxes is not a
-    record. Falls back to the temp dir when there is no project — a deletion
-    outside any project still gets written down somewhere.
-
-    Args:
-        project_root: The project the deleted path lives in, when the lane
-            already knows it. The broker is handed its ``repo_root`` at
-            construction and may serve a repository the daemon is not standing
-            in; resolving from cwd there files the record under whichever
-            project the process happens to sit in, which is how a deletion in
-            one repo lands in another repo's ledger. Left unset, the cwd walk
-            answers — correct for ``rm``, where the operator IS standing in the
-            project they are deleting from.
-
-    ``AIPASS_DELETION_LOG`` overrides the location outright, ahead of both.
+    One log per project, temp dir when there is none; ``AIPASS_DELETION_LOG`` overrides both.
+    The broker passes ``project_root`` because it may serve a repo it is not standing in.
     """
     override = os.environ.get(_PATH_ENV_VAR)
     if override:
@@ -172,10 +111,7 @@ def deletion_log_path(project_root: Path | None = None) -> Path:
 def measure(path: Path) -> dict:
     """Describe *path* before it is deleted: kind, size, entry count.
 
-    Must be called BEFORE the delete — afterwards there is nothing left to ask.
-
-    Symlinks are measured, never followed: the link is what is being removed,
-    and following it would report the size of a file that survives.
+    Symlinks are measured, never followed: following would report a file that survives.
     """
     try:
         if path.is_symlink():
@@ -207,8 +143,7 @@ def _measure_tree(path: Path) -> dict:
     total = 0
     unreadable = 0
     measured = "exact"
-    # A folder the walk cannot list is not walked; without the hook it drops out
-    # silently and the size of a tree never read goes into the record as exact.
+    # Without onerror an unlistable folder drops out silently and the size reads as exact.
     unlisted: list[OSError] = []
 
     for dirpath, dirnames, filenames in os.walk(path, onerror=unlisted.append):
@@ -221,11 +156,7 @@ def _measure_tree(path: Path) -> dict:
             try:
                 st = (here / name).lstat()
             except OSError as exc:
-                # Normal in a live tree — an entry can vanish between the walk
-                # and the stat. Two levels on purpose: which entry at DEBUG,
-                # for whoever is actually chasing one, and the TOTAL once after
-                # the walk at INFO. An INFO line per file would bury the very
-                # signal it is meant to raise on a large directory.
+                # DEBUG per entry, one INFO total after the walk: per-file INFO buries the signal.
                 logger.debug("deletion record: cannot stat %s: %s", here / name, exc)
                 unreadable += 1
                 continue
@@ -251,16 +182,13 @@ def _measure_tree(path: Path) -> dict:
 def _rotate_if_needed(log_path: Path) -> None:
     """Roll the log over once it passes the cap, keeping _ROTATIONS generations.
 
-    Uses ``replace`` rather than unlink so the oldest generation is overwritten
-    in one step — nothing here ever calls a delete of its own.
+    Uses ``replace``, never unlink: the delete ledger performs no delete of its own.
     """
     try:
         if not log_path.exists() or log_path.stat().st_size < _MAX_BYTES:
             return
     except OSError as exc:
-        # Skipping rotation silently is how a bounded log stops being bounded:
-        # every future append would take this same path and the file would grow
-        # without limit, which is the failure this function exists to prevent.
+        # Loud: a silently skipped rotation is how the bounded log grows without limit.
         logger.warning("deletion record: cannot check size of %s, skipping rotation: %s", log_path, exc)
         return
 
@@ -282,11 +210,7 @@ def _append_record(record: dict, log_path: Path) -> None:
 def ledger_beside(name: str, project_root: Path | None = None) -> Path:
     """Path for another of drone's ledgers, kept in the same folder as this one.
 
-    ``.ai_central`` is the one place the owner looks for who did a consequential
-    thing, so a second ledger (the external-repo git door, DPLAN-0344) sits
-    beside this one rather than inventing a home — and follows it wherever
-    ``AIPASS_DELETION_LOG`` points, which keeps a test run out of the live store
-    through the same one variable.
+    It follows ``AIPASS_DELETION_LOG``, so one variable keeps a test run out of every live store.
     """
     return deletion_log_path(project_root).parent / name
 
@@ -312,36 +236,9 @@ def record_deletion(
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
-    Args:
-        lane: Which delete path this came through — ``rm`` or ``broker``.
-        outcome: One of deleted / refused / failed / not_found.
-        requested: Exactly what the caller typed, before resolution.
-        resolved: The absolute path the request actually pointed at.
-        reason: Human-readable outcome detail (the guard's own message).
-        measurement: Result of :func:`measure`, taken before the delete.
-        caller: An identity the lane already established more strongly than
-            cwd can. The broker authenticates its requester over HMAC and then
-            deletes on their behalf, so resolving from cwd there would record
-            the daemon's own location instead of whoever asked. Left unset,
-            the shared resolver answers.
-        project_root: The project whose ledger this record belongs in, for the
-            same reason and from the same lane: a broker serving one repository
-            while standing in another would otherwise write its record into the
-            standing project's store. Left unset, the cwd walk answers.
-        mode: A lane's sub-mode, when it has one — ``stale`` for
-            ``rm --stale``. Given, the record gains ``mode`` and ``age`` keys
-            and the prax line names both. Left unset, the record keeps exactly
-            the twelve keys it always had, so a plain delete writes the same
-            bytes it did before stale mode existed.
-        age: The age limit the mode ran with, exactly as typed (``10d``).
-        target: What a symlink pointed at, when the deleted path is a link.
-            ``path`` is then the link itself, where it lived, so the record
-            never reads as if the target went. Given, the record gains a
-            ``target`` key and the prax line names it; a plain delete gains
-            nothing.
-
-    Never raises. A failed record is reported at ERROR and the caller carries
-    on: losing the log must not turn into losing the delete.
+    ``caller``/``project_root``: the broker passes its HMAC-authenticated requester and served repo.
+    ``mode``/``age``/``target`` add keys only when given; a plain delete keeps its twelve.
+    Never raises: losing the log must not turn into losing the delete.
     """
     cwd = caller_cwd()
     caller = caller or _resolve_citizen_caller(cwd)
@@ -385,10 +282,7 @@ def record_deletion(
     try:
         _append_record(record, deletion_log_path(project_root))
     except Exception as exc:
-        # Loud, because the durable half of the record is the half that
-        # survives to be searched. The prax line above already landed, so the
-        # event is not lost — but the store being unwritable is its own fault
-        # to fix and must not pass in silence.
+        # The prax line already landed, but an unwritable store is its own fault to fix.
         logger.error("deletion record: failed to write store for %s: %s", record["path"], exc)
 
     return record

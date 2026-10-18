@@ -3,7 +3,7 @@
 # Description: A module target is routed as a module — never via a failed branch lookup
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/drone.py: a module target never detours through branch routing."""
@@ -18,13 +18,8 @@ import pytest
 from aipass.drone.apps.drone import main
 from aipass.drone.apps.modules import BranchNotFoundError
 
-# `git` is an internal module and never a branch, but "status" sits in
-# INTERACTIVE_COMMANDS, so `drone @git status` used to skip the module fast path,
-# take a guaranteed BranchNotFoundError and fall back to module routing: 1335 of
-# 1337 lines in drone_drone.log, a fallback on the happy path (DPLAN-0315).
-# Two things it concealed, both asserted here: interactive mode belongs to branch
-# (subprocess) routing only, and a BranchNotFoundError from resolve_branch's
-# path-escape security check must stay a refusal, never a detour to the module.
+# Interactive mode belongs to branch (subprocess) routing only, and a resolve_branch
+# security refusal stays a refusal, never a detour to the module.
 
 _DRONE = "aipass.drone.apps.drone"
 
@@ -79,7 +74,6 @@ class TestModuleTargetNeverDetours:
 
     def test_non_interactive_module_command_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`drone @git diff` pays no registry read (mutant: branch_exists evaluated first)."""
-        # `drone @git diff` was always silent: the fast path stays exactly as it was.
         with (
             patch(f"{_DRONE}.is_module", return_value=True),
             patch(f"{_DRONE}.branch_exists") as mock_exists,
@@ -121,9 +115,7 @@ class TestNoFallbackHidesAFailure:
 
     def test_branch_resolution_failure_is_loud_not_rerouted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A resolve_branch security refusal fails loud, never runs the module (mutant: lane `is_module` only)."""
-        # branch_exists() only checks the registry entry; resolve_branch additionally
-        # validates the path. The old handler caught that refusal and ran the module
-        # instead, so a blocked branch quietly got service by another door.
+        # branch_exists() only checks the registry entry; resolve_branch also validates the path.
         with (
             patch(f"{_DRONE}.is_module", return_value=True),
             patch(f"{_DRONE}.branch_exists", return_value=True),

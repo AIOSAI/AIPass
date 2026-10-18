@@ -3,14 +3,11 @@
 # Description: Command routing logic for the drone module
 # Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-10-17
 # =============================================
 
 """
 Command routing logic for the AIPass drone module.
-
-Thin orchestrator that resolves targets and delegates execution
-to the handler layer.
 """
 
 import sys
@@ -23,9 +20,7 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
     caller_cwd,
-    # Re-exported, not used here: apps/drone.py reaches handlers through this
-    # module rather than importing them directly (the same route caller_cwd
-    # already takes), so the entry point keeps one seam into the handler layer.
+    # Re-exported for apps/drone.py: the entry point keeps one seam into handlers.
     registries_in,  # noqa: F401
     resolve_caller_identity,
 )
@@ -36,15 +31,7 @@ logger = system_logger
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
-    """Route router commands to handler functions.
-
-    Args:
-        command: The command string (e.g. "route", "route_all")
-        args: List of arguments for the command
-
-    Returns:
-        True if command succeeded, False otherwise
-    """
+    """Route router commands to handler functions."""
     if not args:
         if command is None:
             print_introspection()
@@ -99,29 +86,17 @@ def route_command(
 ) -> CommandResult:
     """Route a command to a branch's entry point.
 
-    Resolves @target to a path, then delegates to the handler for execution.
-    When command is None, runs the branch with no args (introspection).
-
-    Timeout resolution: explicit value > per-command policy > DEFAULT_TIMEOUT.
-
-    Output-extends-life applies only when NOBODY named a number. ``timeout`` is
-    None exactly when the operator left it alone, which makes this the one place
-    that can tell "the system's generous default" from "the operator's cap" — the
-    handler below sees only an integer. An explicit ``--drone-timeout N`` means
-    exactly N: extension would turn a deliberate tight cap into an unpredictable
-    one, and an operator who asks for 5 seconds is usually probing, not waiting.
+    Output-extends-life applies only when ``timeout`` is None: this is the one place
+    that can tell the default from an operator's cap, which means exactly N.
     """
     branch_path = resolve_branch(target)
     branch_name = target.lstrip("@").lower()
     resolved_timeout = resolve_timeout(branch_name, command, timeout)
     extend_on_output = timeout is None
 
-    # Same resolver execute_branch_command uses — logging its own precedence
-    # here would let the CALLER: tag name someone other than the branch actually
-    # stamped on the work.
+    # Same resolver execute_branch_command uses, so the tag names who is stamped on the work.
     caller = resolve_caller_identity(caller_cwd())
-    # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
-    # hides the gap. detect_caller_signal already logged the cwd.
+    # UNKNOWN, not an empty tag: an omitted caller hides the gap.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds, extend_on_output=%s)",

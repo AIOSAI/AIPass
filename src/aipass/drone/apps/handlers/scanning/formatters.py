@@ -3,14 +3,10 @@
 # Description: Rich output formatting for scan results
 # Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""Rich output formatting for scan results.
-
-Renders discovered-command lists as clean Rich tables or informational
-messages when no commands are found.
-"""
+"""Rich output formatting for scan results."""
 
 from __future__ import annotations
 
@@ -30,12 +26,7 @@ from aipass.drone.apps.handlers.json import json_handler
 
 
 def format_scan_results(branch_name: str, commands: list[dict]) -> None:
-    """Display scan results as a Rich table.
-
-    Args:
-        branch_name: Branch name (with or without ``@`` prefix) for the title.
-        commands: List of command dicts with ``name``, ``description``, ``source``.
-    """
+    """Display scan results (dicts of name, description, source) as a Rich table; ``@`` optional."""
     display_name = branch_name if branch_name.startswith("@") else f"@{branch_name}"
 
     json_handler.log_operation(
@@ -68,11 +59,7 @@ def format_scan_results(branch_name: str, commands: list[dict]) -> None:
 
 
 def format_no_commands(branch_name: str) -> None:
-    """Display a message when no commands are found for a branch.
-
-    Args:
-        branch_name: Branch name (with or without ``@`` prefix).
-    """
+    """Display a message when no commands are found for a branch."""
     display_name = branch_name if branch_name.startswith("@") else f"@{branch_name}"
 
     console.print()
@@ -84,12 +71,7 @@ def format_no_commands(branch_name: str) -> None:
 def format_help_scan_failure(branch_name: str, help_errors: list[str]) -> None:
     """Name a failed --help scan on stderr, after the results; nothing when the list is empty.
 
-    Loud where the caller is (drone scan / drone activate): the results shown
-    before are real but partial. Exit stays 0 (drone's decision, DPLAN-0354 leg 3).
-
-    Args:
-        branch_name: Branch name without the ``@`` prefix.
-        help_errors: What scan_branch collected; the first entry is named.
+    The results shown are real but partial, so exit stays 0. *branch_name* carries no ``@``.
     """
     if not help_errors:
         return
