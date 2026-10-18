@@ -5,16 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
 
-Crash isolation is split since 2.0.0 (DPLAN-0356 item 2). An injector that fails
-to import, raises or times out is skipped, as it always was. A GATE
-(handlers/config/gates.FAIL_CLOSED) that does the same is answered with a block
-and one fixed text, and logged at ERROR: what it guards does not run until it is
-fixed. Which hooks are gates is code, never config.
+An injector that fails to import, raises or times out is skipped; a GATE (gates.FAIL_CLOSED) doing the
+same is answered with a block and logged at ERROR. Which hooks are gates is code, never config.
 """
 
 import importlib
@@ -40,9 +37,6 @@ BRANCH_ROOT = module_file(__file__).parent.parent.parent
 
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),
-    # Live since the module router existed and named nowhere but the README,
-    # which the diet deletes (FPLAN-0593 Phase 4): --help is the reference, so a
-    # verb the README was the only witness to belongs here or nowhere.
     ("engine", "Show the engine's handler map (every handler it dispatches, by category)"),
 ]
 
@@ -52,16 +46,8 @@ VERBOSE_LOG_ENV = "AIPASS_HOOKS_VERBOSE_LOG"
 def _log_detail(message: str, *args) -> None:
     """Per-hook narration — DEBUG-tier detail, suppressed by default.
 
-    Every hook execution is already recorded in full (agent, exit code, timing,
-    stderr, cwd) in logs/engine.jsonl, which is the source of truth for hook
-    diagnostics. These lines are the human-readable echo of that, and at ~3 per
-    tool call they dominated system_logs/hooks_engine.log — enough to trip
-    prax's runaway detector on ordinary multi-agent operation.
-
-    prax's SystemLogger exposes only info/warning/error, so there is no DEBUG
-    level to demote to; the switch lives here instead. Set
-    AIPASS_HOOKS_VERBOSE_LOG=1 to restore them. Read per call so tests and live
-    sessions can toggle it without re-importing.
+    logs/engine.jsonl holds the full record, and at ~3 lines per tool call these trip prax's runaway
+    detector. prax has no DEBUG level, so AIPASS_HOOKS_VERBOSE_LOG=1 (read per call) restores them.
     """
     if os.environ.get(VERBOSE_LOG_ENV) == "1":
         logger.info(message, *args)
@@ -101,9 +87,7 @@ def _run_hook(hook_cmd: str, stdin_data: str, timeout_s: int = 30) -> dict:
 def _import_handler_module(module_path: str):
     """Import the module of one handler.
 
-    A seam: the tests are the reason it exists. They replace this function by name
-    in place of patching importlib.import_module, which replaces it process-wide.
-    It changes no verdict. The decision is hooks', leg 4.
+    A seam tests replace by name, instead of patching importlib.import_module process-wide.
     """
     return importlib.import_module(module_path)
 
@@ -111,10 +95,7 @@ def _import_handler_module(module_path: str):
 def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dict:
     """Call a handler function directly (no subprocess). Module imports handler.
 
-    Runs the handler on a daemon thread and joins with a timeout so a hung
-    handler can never stall the event — the calling thread returns control
-    on expiry instead of blocking forever. The orphaned thread (if any) is
-    left to die with the process; it never blocks interpreter exit.
+    A daemon thread joined with a timeout: a hung handler never stalls the event nor blocks exit.
     """
     start = time.monotonic()
     try:
@@ -218,11 +199,7 @@ def _save_budget_state(state: dict, session_id: str = "") -> None:
 def _open_budget_window(hook_name: str, hs: dict, hook_data: dict) -> None:
     """Zero a handler's counts when a new context window has opened since it last counted.
 
-    The budget file is keyed by session id, and the session id survives every
-    compaction: a max_per_session spent in the morning held compass_recall
-    silent all day (FPLAN-0588). cadence.reset_counter() stamps the window on
-    PreCompact (compact.py) and on startup/clear (session_start.py). No stamp
-    means no signal, and the count stands.
+    The budget file is keyed by session id, which survives compaction. No window stamp, and the count stands.
     """
     window = cadence.window_opened_at(hook_data)
     if window is None or hs.get("window") == window:
@@ -260,9 +237,7 @@ def _check_budget(hook_name: str, budget_cfg: dict, budget_state: dict) -> tuple
 def _gate_failure(result: dict, timeout_s: int) -> str | None:
     """Why a fail-closed gate did not answer, or None when it did (DPLAN-0356 item 2).
 
-    Three ways a gate goes silent, each of which used to read as "allow": it
-    timed out, it could not be imported or raised (exit -1 from _run_handler),
-    or it exited 2 without a decision (a crash, not a block).
+    Silent means timed out, failed to import or raised (exit -1), or exit 2 with no decision: never "allow".
     """
     if result.get("stderr") == "TIMEOUT":
         return f"timed out after {timeout_s}s"
@@ -299,8 +274,7 @@ def _refuse_broken_gate(event_type: str, hook_name: str, handler: str, why: str,
 def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     """Core dispatch — run hooks for event, return (merged_stdout, exit_code)."""
     if not config.get("hooks_enabled", True):
-        # DPLAN-0356 phase 3, R1c: the master switch is the injectors' alone. A config
-        # file must never switch the gate set off, so its gates still run.
+        # The master switch is the injectors' alone: a config file must never switch the gates off.
         logger.info("[HOOKS] hooks disabled — gates still run")
         _log({"ts": time.time(), "event": event_type, "action": "hooks_disabled_gates_run"})
         config = gates.gate_config(config)
@@ -472,7 +446,6 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             except Exception as exc:
                 logger.info("[HOOKS] sound playback failed for %s.%s: %s", event_type, hook_name, exc)
 
-        # Exit code 2: crash vs intentional block
         if result["exit_code"] == 2:
             is_intentional_block = False
             decision: dict = {}
@@ -484,19 +457,8 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
             if is_intentional_block:
                 total_ms = (time.monotonic() - total_start) * 1000
-                # INFO, not WARNING: a gate that blocks is the gate WORKING — the branch
-                # above is literally is_intentional_block, and the crash case below is the
-                # one that signals something wrong. Measured before reclassing: 373 blocks
-                # spread over all 10 logged days, every working day, not one stuck session.
-                # INFO still lands in the log file, so the record survives; it just stops
-                # escalating into @trigger digests. The reason rides along because neither
-                # severity is diagnostic without knowing WHAT was blocked.
-                #
-                # "dispatch", not "gate": total_start is set before the whole hook loop, so
-                # this is every PreToolUse hook that ran up to the block, summed — NOT this
-                # gate's cost. Measured: pre_edit_gate's own elapsed_ms is median 4ms / p90
-                # 123ms, while total here is median 1076ms / p90 4045ms. The old wording
-                # read as gate latency and sent a 3305ms sample to the wrong owner.
+                # INFO: a block is the gate working (and must not escalate into @trigger digests).
+                # "dispatch" ms is every hook that ran up to the block, summed, not this gate's cost.
                 block_reason = str(decision.get("reason", "")).strip().splitlines()
                 logger.info(
                     "[HOOKS] %s blocked by %s (%dms dispatch): %s",
@@ -565,9 +527,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 def run_event(arg: str, stdin_data: str) -> tuple[str, int]:
     """One provider hook call: ``Event`` or ``Event:hook_name``, resolved and dispatched.
 
-    The bridges' whole job past argv and stdin. It lives here, in the promoted
-    copy, so the bridge scripts (which run from the source tree) never change
-    when config resolution does (DPLAN-0356 item 3).
+    Lives here, in the promoted copy, so the source-tree bridge scripts never change with config resolution.
     """
     from aipass.hooks.apps.handlers.config.loader import resolve_config
 
@@ -589,11 +549,6 @@ def _record_injection(event_type: str, outputs: list, merged: str, payload: dict
         injection_ledger.record(event_type, outputs, merged, payload)
     except Exception as exc:  # crash isolation: the ledger must never break a dispatch
         logger.warning("[HOOKS] injection_ledger failed, %s injection unrecorded: %s", event_type, exc)
-
-
-# =============================================================================
-# MODULE INTERFACE (drone @hooks routing)
-# =============================================================================
 
 
 def print_introspection():

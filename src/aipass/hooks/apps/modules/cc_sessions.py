@@ -5,21 +5,12 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-09-07
+# Modified: 2026-10-17
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
 
-CC maintains one JSON file per running session at ~/.claude/sessions/<pid>.json.
-These are resume-aware (sessionId updated on /resume), exit-aware (deleted on
-clean exit, stale-swept by CC itself), and the authoritative source of which
-sessions are live for a given working directory.
-
-Used by presence_gate to source truth instead of PRESENCE.central.json, and owns
-session-PID resolution (resolve_session_pid) since presence.py was retired.
-
-Exposed as `drone @hooks sessions` (list) and
-`drone @hooks sessions reclaim [@branch]` (proper-stop cleanup).
+CC keeps them resume- and exit-aware: the authoritative source of which sessions are live for a cwd.
 """
 
 import json
@@ -38,19 +29,7 @@ CONSOLE = err_console
 def _claude_home() -> Path:
     """Home directory for Claude's state, or an unusable sentinel if unknown.
 
-    `Path.home()` RAISES RuntimeError("Could not determine home directory.")
-    when expanduser cannot answer — on POSIX only if the pwd lookup also fails,
-    but on Windows whenever %USERPROFILE% is absent, since ntpath has no pwd to
-    fall back on. Evaluated at module scope, that turns an unresolvable home
-    into an IMPORT-time crash: the whole module dies, not the one call that
-    wanted a path.
-
-    A missing home is not an emergency here — it means there is no
-    ~/.claude to read, which is the same answer as an empty one. So resolution
-    degrades to a path that cannot exist, letting the `.is_dir()` / `.exists()`
-    checks downstream report "nothing here" instead of raising. The fallback is
-    logged, never silent: a machine that cannot name its own home is worth a
-    line in the log even though it does not stop us.
+    Path.home() raises when home is unresolvable (Windows without %USERPROFILE%); at module scope that is an import crash.
     """
     try:
         return Path.home()
@@ -88,10 +67,7 @@ def _get_ppid_portable(pid: int) -> int | None:
 def _has_session_file(pid: int) -> bool:
     """Check whether CC holds a session file for this PID.
 
-    Reads through CC_SESSIONS_DIR rather than Path.home() directly: on a machine
-    that cannot name its own home, _claude_home() already degraded to a path that
-    cannot exist, so this answers False instead of raising RuntimeError up into
-    the caller's except-and-allow.
+    Through CC_SESSIONS_DIR, not Path.home(), so an unresolvable home answers False instead of raising.
     """
     return (CC_SESSIONS_DIR / f"{pid}.json").is_file()
 
@@ -99,10 +75,7 @@ def _has_session_file(pid: int) -> bool:
 def resolve_session_pid() -> int | None:
     """Walk the parent process chain to find the persistent claude session PID.
 
-    The hook runs as an ephemeral subprocess — os.getpid() gives a PID that dies
-    in milliseconds. The owning claude session is an ancestor that owns a
-    ~/.claude/sessions/<pid>.json file (CC binary is version-named, so comm
-    matching is unreliable).
+    Matched by session file, not comm: the CC binary is version-named.
     """
     pid = os.getpid()
     ancestors = []
@@ -151,18 +124,12 @@ def _proc_start_ticks(pid: int) -> str | None:
     """Read a live process's start time (field 22 of /proc/<pid>/stat), in
     clock ticks since boot. Linux only — returns None elsewhere or on any
     read failure, so callers can fall back to liveness-only checking.
-
-    This is the identity half of the occupant check: os.kill(pid, 0) proves
-    *a* process holds this PID right now, not that it's the *same* process
-    that wrote the session file. A PID recycled by the kernel after the
-    original session died would otherwise pass silently.
     """
     if sys.platform != "linux":
         return None
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        # comm (field 2) is parenthesized and may itself contain ')' or
-        # whitespace — split on the LAST ')' to get past it safely.
+        # comm (field 2) may itself contain ')' or whitespace: split on the last ')'.
         fields_after_comm = raw.rsplit(")", 1)[1].split()
         return fields_after_comm[19]  # field 22 overall, starttime
     except (OSError, IndexError) as exc:
@@ -173,11 +140,6 @@ def _proc_start_ticks(pid: int) -> str | None:
 def _session_pid_matches(session: dict) -> bool:
     """Verify the live PID is still the same process that wrote this session
     file — not an unrelated process that later reused the same PID number.
-
-    Compares the session's recorded procStart (written by CC at session
-    start) against the live process's current start time. Sessions without
-    a recorded procStart (older/malformed files) or non-Linux hosts can't be
-    checked — falls back to liveness-only, the pre-hardening behavior.
     """
     recorded = session.get("procStart")
     if not recorded:
@@ -266,13 +228,7 @@ def read_all_sessions() -> list[dict]:
 
 
 def find_live_for_cwd(cwd: str) -> list[dict]:
-    """Find all live CC sessions whose cwd matches the given directory.
-
-    Compares resolved paths for robustness (symlinks, trailing slashes).
-    Only returns sessions whose PID is both alive and identity-checked
-    against procStart, so a PID recycled after the original session died
-    is never mistaken for a live occupant.
-    """
+    """Find all live CC sessions whose cwd matches the given directory."""
     target = str(Path(cwd).resolve())
     live = []
     for session in read_all_sessions():
@@ -304,8 +260,6 @@ def session_start(session: dict) -> float | None:
     """Epoch seconds a session began, or None when it cannot be told.
 
     CC writes startedAt as epoch milliseconds; older files carry an ISO string.
-    An unreadable clock answers None so callers can decline to rank rather than
-    rank wrongly.
     """
     started = session.get("startedAt") or session.get("started", "")
     if not started:
@@ -324,30 +278,17 @@ def session_start(session: dict) -> float | None:
 def _occupant_rank(session: dict) -> tuple[int, float]:
     """Order occupants so the one that MATTERS is first: seats before jobs, oldest first.
 
-    A bg session is a job, not a seat (ruling a, DPLAN-0310). Returning one
-    ahead of a live interactive seat let a caller that skips bg allow what it
-    should have blocked — the shadowing seam. Ranking, not filtering, keeps a
-    bg-only branch answerable: the bg session is still returned when it is the
-    only occupant.
+    Ranking, not filtering: a bg-only branch still answers with its bg session.
     """
     is_job = 1 if session.get("kind") in ("bg", "background") else 0
     started = session_start(session)
-    # Unknown start sorts last within its kind — it can never displace a seat
-    # whose age is actually known.
     return (is_job, started if started is not None else float("inf"))
 
 
 def find_occupant(cwd: str, exclude_pid: int | None = None) -> dict | None:
     """Find the live CC session occupying the given cwd, excluding our own PID.
 
-    Returns the occupant that matters — the oldest interactive seat if any
-    exists, otherwise the oldest background job — or None if the branch is
-    free. Ordering is deliberate: a caller ranking itself against "the
-    occupant" is really asking about the incumbent, and a caller skipping jobs
-    must not be handed a job while a seat sits behind it.
-
-    This is resume-aware: /resume keeps the same PID, so exclude_pid correctly
-    identifies re-entry.
+    A caller skipping jobs must never be handed a job while a seat sits behind it.
     """
     candidates = [
         session for session in find_live_for_cwd(cwd) if exclude_pid is None or session.get("pid") != exclude_pid
@@ -360,8 +301,7 @@ def find_occupant(cwd: str, exclude_pid: int | None = None) -> dict | None:
 def _stop_session(session: dict) -> str:
     """Stop a session. Returns description of action taken.
 
-    bg sessions: no per-job stop exists in the CLI. Returns an honest
-    message — never SIGTERMs bg (daemon respawns it).
+    Never SIGTERMs a bg session: the daemon respawns it.
     """
     pid = session.get("pid")
     kind = session.get("kind", "unknown")
@@ -394,11 +334,6 @@ def reclaim(branch_filter: str | None = None) -> list[str]:
         actions.append(action)
         logger.info("[CC_SESSIONS] reclaim: %s", action)
     return actions
-
-
-# =============================================================================
-# MODULE INTERFACE (drone @hooks routing)
-# =============================================================================
 
 
 def _print_sessions_list():

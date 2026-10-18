@@ -5,28 +5,14 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
 
 Every hook process imports ``aipass.hooks.apps`` from a promoted copy
-(handlers/bridges/mount.py), so editing the source tree changes no seat's
-behaviour. This module is how a copy becomes live:
-
-1. ruff, for the defects that killed three gates (F821 undefined name, F823,
-   E9 syntax) — each was a NameError a half-done edit left behind;
-2. every source file compiles;
-3. the branch's whole test suite passes, run against the source;
-4. ``apps/`` is copied to ``<branch>/.live-<stamp>/``;
-5. the real bridge runs against that copy: a raw ``rm`` must be refused and a
-   Read allowed, or the copy is not a gate;
-6. ``<branch>/.live-current`` is rewritten atomically to name the copy.
-
-Any failure stops there and the last promoted copy stays live. The newest
-:data:`KEEP` copies are kept; older ones are rotated out.
-
-The workflow: edit, test, ``drone @hooks promote``.
+(handlers/bridges/mount.py), so saving the source changes no seat. Any failed
+check leaves the last promoted copy live.
 """
 
 import compileall
@@ -76,10 +62,7 @@ def live_name(root: Path = BRANCH_ROOT) -> str | None:
 def _hook_env(**extra: str) -> dict:
     """This process's environment minus drone's caller stamps (AIPASS_CALLER_*).
 
-    drone stamps the caller for the verb it routes; a hook process never carries
-    them, and the suite pins the gates as a hook process sees them. Measured: run
-    under `drone @hooks promote` with the stamps inherited, the admin-seat pin
-    read hooks' cwd in place of the session's and failed.
+    A hook process never carries them; inherited, they make the admin-seat pin read hooks' cwd and fail.
     """
     env = {key: value for key, value in os.environ.items() if not key.startswith("AIPASS_CALLER_")}
     env.update(extra)
@@ -210,14 +193,7 @@ def promote(
 ) -> tuple[bool, list[str]]:
     """Check, copy, smoke, point. Returns (promoted, report lines); refuses on the first failure.
 
-    Args:
-        root: The hooks branch root.
-        checks: The source checks, in order. A seam for the tests, which cannot
-            run the suite from inside the suite.
-
-    Returns:
-        (True, lines) once the pointer names the new copy; (False, lines) with
-        the pointer untouched otherwise.
+    *checks* is a seam: the tests cannot run the suite from inside the suite.
     """
     report: list[str] = []
     for check in checks:

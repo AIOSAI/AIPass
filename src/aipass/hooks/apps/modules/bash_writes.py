@@ -5,35 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
 
-Why this exists: `edit_gate` is a PreToolUse hook on Edit/Write/MultiEdit/
-NotebookEdit, so every fence it draws is invisible to a write made through the
-shell. @devpulse measured the gap live on 2026-08-30 — their Edit into a sibling
-project was correctly blocked, and `sed -i` on the same file went straight
-through. The tool lane was fenced; the scripted lane was open to every seat.
-
-THE BAR, set in the dispatch and kept here: a perfect shell parser is not the
-goal and is not achievable. Catching the obvious write-verbs aimed at a foreign
-project root is. Everything this parser deliberately cannot see is listed in
-:data:`NOT_CAUGHT` — a residual that is documented is a known gap; a residual
-that is discovered is a defect.
-
-Two reading modes, because shell commands are two different things:
-
-- **Directed verbs** — redirection, `tee`, in-place `sed`, `cp`, `mv`, `dd of=`.
-  The write target is known from the verb's own grammar, so only the target is
-  reported and reading a foreign path stays legal (`cat /other/x > ./mine`
-  names ./mine, not /other/x).
-- **Interpreters** — the set in :data:`_INTERPRETERS`, whether invoked with an
-  inline script or a heredoc. These run arbitrary code, so no grammar tells us
-  the target. Every path they are handed is reported. This deliberately catches
-  a read-only invocation that merely opens a foreign file: an interpreter
-  holding a foreign path cannot be distinguished from one writing to it, and
-  the caller is told exactly that.
+Edit/Write hooks never see a shell write. The bar is the obvious write verbs; every gap is in :data:`NOT_CAUGHT`.
+Directed verbs (redirection, tee, sed -i, cp, mv, dd of=) report their target; interpreters, every path held.
 """
 
 import re
@@ -45,124 +23,47 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-# Shell operators that end one command and start the next.
 _SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "\n"})
 
-# The lexer's operator characters. The newline is one of them ON PURPOSE: shlex
-# counts it as blank space by default, so until 2026-09-10 "\n" sat in
-# _SEPARATORS and never arrived. Every command after the first line of a
-# multi-line Bash call was glued onto line one as extra operands: a write on
-# line two was invisible to both gates, and a cd on line two never moved the
-# ground (found measuring devpulse's 213c64fd).
+# The newline is an operator on purpose: shlex counts it as blank, gluing every later line onto line one.
 _PUNCTUATION = "();<>|&\n"
 
 # A subshell's cd ends with the subshell; the parentheses scope it.
 _SUBSHELL_OPEN, _SUBSHELL_CLOSE = "(", ")"
 
-# The lexer glues a run of operator characters into ONE token: ");", "&&\n",
-# "\n\n". These are the pieces that end a command, pulled out of such a run.
-# Redirections (">>", ">&", "2>&1"'s ">&") contain none of them and stay whole.
+# The lexer glues an operator run into one token (");", "&&\n"); these split it. Redirections stay whole.
 _OPERATOR_SPLIT = re.compile(r"(\n|&&|\|\||;|\(|\))")
 
-# Every operand is a write target.
 _ALL_OPERANDS = frozenset({"tee", "touch", "mkdir", "truncate"})
 
-# The LAST operand is the destination; the ones before it are sources.
 _LAST_OPERAND = frozenset({"cp", "mv", "ln", "install", "rsync"})
 
-# Writes in place, but only with the in-place flag. Without it sed is a filter
-# and names nothing — treating every `sed` operand as a target would refuse
-# reading a foreign file through a pipe, which is not what the fence is for.
+# Only with the in-place flag: without it sed is a filter, and reading a foreign file is legal.
 _INPLACE_FLAGS = frozenset({"-i", "--in-place"})
 
-# Runs arbitrary code. No grammar names the target, so every path counts.
 _INTERPRETERS = frozenset(
     {"python", "python3", "node", "nodejs", "perl", "ruby", "php", "bash", "sh", "zsh", "awk", "gawk"}
 )
-#: The interpreters whose program text is shell grammar.
 _SHELLS = frozenset({"bash", "sh", "zsh"})
 
-# The executable half of Windows' PATHEXT. `git.exe`, `RM.EXE` and `git.cmd` are
-# the SAME invocation as the bare name on a Windows host, and a gate that reads
-# only the bare spelling is one rename away from being bypassed silently — the
-# command runs, the fence simply never saw it (measured 2026-09-19: git_gate,
-# rm_gate and this parser all read `git.exe` and `RM` as some other program).
-# Only executable extensions are stripped: stripping any suffix would read
-# `some/path/git.py` as git, a file nobody runs and one the gates leave alone
-# on purpose.
+# Windows runs git.exe, RM.EXE, git.cmd as the bare name; only executable extensions strip (git.py is not git).
 _EXEC_EXTENSIONS = frozenset({".exe", ".com", ".bat", ".cmd", ".ps1"})
 
-# Program text that can CREATE or overwrite a file, asked in the grammar the
-# text is actually written in. Split in two because the same characters mean
-# different things in each: `>` is a redirection in a shell and a comparison in
-# python, and handing one matcher both grammars is how a read-only awk filter
-# came to be refused on a live turn (2026-09-16, learning 245).
-#
-# Read by a caller asking the NARROW question "is a file being created". The
-# ownership fence does not read it and must not: a path an interpreter holds
-# still cannot be told from one it writes, and that breadth is what fences a
-# foreign project.
+# Apart from _SHELL_WRITE_SHAPES (`>` compares in python); only the narrow "is a file created" caller reads them.
 _SOURCE_WRITE_SHAPES = (
-    # open(p, "w") / Path.open("a") — a mode string carrying a writing letter.
     re.compile(r"""open\s*\([^)]*['"][rbt+]*[wax][rbt+]*['"]"""),
-    # The write half of pathlib, io and os, by method name.
     re.compile(r"\.\s*(write|write_text|write_bytes|writelines|truncate|touch|mkdir|rename|replace|unlink)\s*\("),
-    # Module-level writers: shutil, os, json, pickle, tempfile, pandas.
     re.compile(
         r"\b(makedirs|mkstemp|mkdtemp|copyfile|copytree|copy2|copy|move|rename|replace|remove|dump|savefig|to_csv|to_json)\s*\("
     ),
-    # Node, php, perl and ruby spellings of the same act.
     re.compile(
         r"\b(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdirSync|renameSync"
         r"|copyFileSync|file_put_contents|fwrite|fputs|fopen)\s*\("
     ),
-    # Shelling out. The write verb is then inside a string this parser does not
-    # read as code, so the invocation itself has to count as the evidence. Four
-    # readings, the first three before the fourth:
-    #  1. a word followed by a call bracket (white space or a line continuation
-    #     between) is a call, whatever touches its front: `0-system(`, `1/popen(`.
-    #     Reading 1 alone also holds the names of compass 480 (devpulse, leg 3): the
-    #     exec and spawn families of python's os, posix_spawn(p), startfile, asyncio's
-    #     create_subprocess_exec/_shell, Popen, popen2/3, node's execFile(Sync) and
-    #     spawnSync, php's shell_exec, passthru and proc_open, ruby's capture2/3. They
-    #     never enter the path reading, so no path is newly refused. Left out: fork and
-    #     pty.fork (a fork alone runs no new program), and open with a pipe mode, qx,
-    #     %x and the grave accent of perl and ruby (no word stands before a bracket);
-    #  2. a word inside the quoted module name handed to a loader is a module:
-    #     require('cross-spawn'), require.resolve(...), import(...), each also with
-    #     the template quote (require(`cross-spawn`)), and the ES keywords
-    #     `from '...'` / `import '...'`. The name ends at the quote that opened it:
-    #     another quote inside it (require("x`y-spawn"), require('a"b-spawn'))
-    #     does not end it;
-    #  2b. a program that names createRequire makes a loader under a name of its
-    #     choice, which no reading of a quoted name can follow, so there every whole
-    #     word counts, as the pattern read before compass 460. A regex cannot tell
-    #     which quote opens a string, so "inside a quoted string" would be "after
-    #     some quote" anyway; the whole word is the honest rule. It errs toward
-    #     refusing a createRequire program that also names such a path, the right
-    #     side; hooks' choice, leg 3, compass 479;
-    #  3. otherwise the word is a NAME in a path, not code, only where a separator
-    #     (slash, hyphen, backslash single or doubled) joins it to a path character
-    #     (a word character or a dot) on the separator's far side: `x/spawn`,
-    #     `popen-gw0`, `aipass\\spawn\\tests`. A continuation, a comment opener or a
-    #     quote beside the separator excuses nothing: `system\` + newline, `exec/**/`,
-    #     `'-popen'`. xdist's popen-gw0 temp dir read as shelling out before this.
-    # Known residue, both ways. Refused although only a path: the word alone after a
-    # slash with nothing before it ('/spawn'), and a bare file name ('system.md'); both
-    # err toward refusing, like reading 1 on 'system (copy).md'. Let through although
-    # code, two families: an alias through an overloaded operator on either side of
-    # the word (`a-system`, `a/system`, `system-a`, `system/a`), and the word taken
-    # out of a path-shaped string (`'a/system'[2:]`, `'./system'.strip('./')`). Each
-    # is path-shaped text no pattern over the text can tell from a path that is only
-    # named, and each takes deliberate disguise; the edit gate keeps its full breadth.
-    # That residue is the decision of devpulse, leg 2d, compass 478. A third family,
-    # disguise too: require assigned to another name and called under it
-    # (`const r=require;r('cross-spawn')`), and a comment between the bracket and the
-    # quoted name (`require(/**/'cross-spawn')`); the decision of devpulse, leg 3,
-    # compass 479.
-    # Compass 460 (2026-09-27); readings 1 and 2 are the decision of hooks, leg 2b; the
-    # narrowing of reading 3 is hooks', leg 2c; the widening of reading 2 hooks', leg 2d;
-    # the template quote and reading 2b hooks', leg 3; the closing quote hooks', leg 3b.
+    # Shelling out: the verb sits in a string, so the call is the evidence. A word before a call bracket is
+    # a call; one in a quoted module name handed to a loader is a module (with createRequire, every whole
+    # word counts); one joined by / - or \ to a path character is a path (xdist's popen-gw0). Disguise
+    # (`a-system`, `const r=require`) passes, '/spawn' and 'system.md' are refused; edit_gate stays broad.
     re.compile(
         r"\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess"
         r"|execl|execle|execlp|execlpe|execv|execve|execvp|execvpe"
@@ -180,94 +81,53 @@ _SOURCE_WRITE_SHAPES = (
     ),
 )
 
-# The flags that put an interpreter's whole program INSIDE the command, next
-# to the heredoc that does the same. Their absence means the program is a FILE
-# on disk: its text was never read, so there is no evidence either way and the
-# broad reading stands. Answering "no write verb" about text nobody read would
-# be inventing evidence — pinned by test_a_real_creation_is_still_refused.
-#
-# awk and gawk take their program as a bare operand rather than behind a flag,
-# so they land on the unseen side and keep the broad reading. That is why there
-# is no awk redirection pattern above: it would have been dead for awk and
-# alive for python, where `>` is a comparison — `print(3 > 2, path)` was read
-# as a write while this cure was being measured.
+# Flags that put the program inside the command. Without one it is a file nobody read and the broad
+# reading stands (test_a_real_creation_is_still_refused); awk's bare-operand program stays on that side.
 _INLINE_SOURCE_FLAGS = frozenset({"-c", "-e", "-E", "--eval", "--exec"})
 
-#: The same question asked of a shell program — `bash -c "..."` or `sh <<EOF`.
 _SHELL_WRITE_SHAPES = (
     re.compile(r">"),
     re.compile(r"(^|[\s;&|])(tee|touch|cp|mv|ln|install|rsync|dd|mkdir|truncate|sed)\b"),
 )
 
-#: Program text that DELETES, read in an interpreter's own inline source or heredoc
-#: (rm_gate's interpreter lane, the owner 2026-09-30: "rm is a big no no; only devpulse
-#: deletes"). Python's list.remove is not os.remove, so remove counts only on os; the
-#: other names have no harmless twin worth sparing. A shell program is not read here —
-#: modules/shell_reader reads it as shell, where rmdir and friends are verbs.
+#: rm_gate's interpreter lane. remove counts only on the os module; shell programs are shell_reader's.
 _SOURCE_DELETE_SHAPES = (
-    # python: os.remove / os.unlink / os.rmdir / os.removedirs, shutil.rmtree, Path.unlink / rmdir.
     re.compile(r"\bos\s*\.\s*(remove|unlink|rmdir|removedirs)\b"),
     re.compile(r"\b(rmtree|removedirs)\b"),
     re.compile(r"\.\s*(unlink|rmdir)\s*\("),
-    # perl and php unlink / rmdir; node fs.rm / fs.unlink / fs.rmdir and their Sync twins.
     re.compile(r"\b(unlink|rmdir)\b"),
     re.compile(r"\.\s*(rm|rmSync|unlinkSync|rmdirSync)\s*\("),
-    # ruby: File.delete, FileUtils.rm / rm_r / rm_rf / remove_dir.
     re.compile(r"\b(File\s*\.\s*delete|FileUtils\s*\.\s*(rm|rm_r|rm_rf|rm_f|remove_dir|remove_entry))\b"),
-    # Shelling out to a delete verb: a shell-out call, then the verb opening a quoted string
-    # (os.system("rm -rf x"), subprocess.run(['rm', p])). Without the call it is data: print('rm x').
+    # A delete verb counts only after a shell-out call; without the call it is data: print('rm x').
     re.compile(
         r"""\b(system|popen|Popen|subprocess|spawn\w*|exec\w*|check_call|check_output|call|run|shell_exec)\b"""
         r"""[\s\S]*?['"`](rm|rmdir|unlink|shred)\b"""
     ),
 )
 
-# NOTE ON TOOLING THAT CARRIES ITS OWN FENCE — `drone`, `aipass`, `git`, `gh`.
-# This module first held an explicit skip-list for them. A mutation run killed
-# it: removing the skip changed no result, because none of those commands is a
-# verb this parser reads a target from, so the list suppressed nothing. A rule
-# that has stopped suppressing anything is indistinguishable from a load-bearing
-# one (@seedgo's bypass-rot species, mailed 2026-08-29), so it is gone and the
-# fact is written here instead. Their fences stay theirs: `drone rm` refuses
-# outside its own project and git/gh are git_gate's lane. A redirection they
-# carry (`drone x > /foreign/f`) IS still caught — the shell does that write,
-# not the tool.
+# drone, aipass, git, gh need no skip-list: no verb read here is theirs; a redirection they carry is caught.
 
 # Redirection tokens. `>&` is a descriptor dup (`2>&1`), never a filename.
 _REDIRECT_OPS = frozenset({">", ">>", ">|"})
 
-# A run of characters containing a separator — how a path looks inside
-# interpreter source, where quoting has already been stripped or mangled by the
-# lexer. BOTH separators count: a regex that only knew "/" returned nothing at
-# all for a Windows-spelled path, so the interpreter mode was not merely
-# degraded on Windows, it was blind (measured 2026-08-31).
+# Both separators: a run that knew only "/" was blind to Windows paths in interpreter source.
 _PATH_RUN = re.compile(r"[~\w.@+\-]*[/\\][~\w./\\@+\-]*")
 
-# The opening of a heredoc: << or <<-, an optionally quoted delimiter word.
 _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 
-# Trailing syntax that rides along when a path is lifted out of source code.
 _TRAILING_JUNK = ",;:)]}'\"`"
 
-# Git Bash's own spelling of a drive: /c/Users/me is C:\Users\me. Its pwd prints
-# it and every command it runs accepts it, so an agent on Windows copies it
-# into the next command.
+# Git Bash spells C:\Users\me as /c/Users/me, and agents copy it from its pwd.
 _GIT_BASH_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
 
 #: How an interpreter's held path is labelled. write_ownership reads it: a held path
 #: cannot be told from a read, so the branch fence never convicts on one.
 HELD_BY_INTERPRETER = "(interpreter — may write any path it holds)"
 
-#: Appended to that label when the interpreter's own text names no verb that
-#: creates a file. A caller asking "is a NEW file being created" reads this and
-#: stands down; a caller asking "could this write here" ignores it, because an
-#: interpreter can still write through a shape no matcher knows. Read from this
-#: module rather than restated in the caller — a marker spelled twice is a
-#: marker that drifts (auto_fix learned that one the hard way).
+#: Narrow callers ("is a NEW file created") stand down on this, broad ones ignore it. Spelled once, here.
 NO_WRITE_VERB = " — no write verb in its own text"
 
-# What this parser does NOT see. Stated as data so the reply, the README and the
-# tests all quote the same list instead of three drifting prose copies.
+# The residual, as data so the reply, the README and the tests quote one list.
 NOT_CAUGHT: tuple[str, ...] = (
     "paths built from shell or program variables ($DIR/x, os.environ-derived) — nothing to resolve",
     "paths reached through a symlink that points into another project",
@@ -282,12 +142,10 @@ NOT_CAUGHT: tuple[str, ...] = (
     "a path spelled for the OTHER operating system's filesystem — 'C:\\Proj\\x' read on Linux "
     "names no drive that exists here, so it resolves relative and reads as local. Separators are "
     "understood on every OS; ROOTS are only walkable on the OS that has them.",
-    # Measured 2026-09-13 for DPLAN-0342 row 3, the shell lane into .trinity memory files.
     "a file name with no separator inside interpreter source — a bare 'local.json' after a cd. A "
     "bare word cannot be told from json.load, so it is not read as a path; './local.json' is",
     "a path joined in program text — Path('.trinity') / 'local.json' is two strings, neither a path",
     "write verbs this parser has no grammar for: sponge, ed / ex, an interactive editor",
-    # Measured 2026-09-19 for DPLAN-0352 finding 2, the interpreter false-positive class.
     "a WRITE an interpreter makes through a shape _SOURCE_WRITE_SHAPES has no pattern for — the "
     "path is still reported, but without the write-verb evidence a narrow caller (testwrite_gate) "
     "stands down on it. The broad callers, edit_gate's fences, are unaffected",
@@ -296,10 +154,8 @@ NOT_CAUGHT: tuple[str, ...] = (
     "what a SCRIPT FILE does — its text is on disk, never in the command, so an interpreter "
     "handed a path instead of inline source keeps the broad reading and no write-verb evidence "
     "is claimed about it",
-    # The owner, 2026-09-30 (DPLAN-0356, mail dab4e222): every delete verb, read by rm_gate.
     "a delete an interpreter makes through a name its delete shapes do not list — an alias "
     "(from os import remove as r), getattr(os, 'remove'), a delete built from strings",
-    # DPLAN-0356 phase 3 (the red team's R3-R6), read by modules/shell_reader for rm_gate and git_gate.
     "a script file that changes after the check — shell_reader reads it at decision time (R4); "
     "whatever is on disk when the shell opens it is what runs. Time of check is not time of use",
     "a script a command creates and runs in one breath through a verb the reader cannot parse "
@@ -310,7 +166,6 @@ NOT_CAUGHT: tuple[str, ...] = (
     "function or alias) — the wrapped program is read as the launcher's argument, not as a program",
     "the working directory of a subshell, a pipeline stage or a backgrounded job is approximated "
     "by the last literal cd; after a cd to an expansion the cwd is unknown and relative paths read from the old one",
-    # DPLAN-0356 phase 4: the final review's out-of-scope rows, the kernel sandbox's to enforce.
     "an interpreter's delete reached through aliasing or data flow (a name bound at runtime, a "
     "function chosen from a table) — text gates teach; the sandbox enforces",
     "GitHub writes to hosts other than api.github.com (uploads, raw git over https) — egress is the sandbox's",
@@ -321,19 +176,13 @@ NOT_CAUGHT: tuple[str, ...] = (
     "GitHub writes without gh are a TEXT gate's reach only (R6): a token pasted into a file, a client "
     "the gate has no grammar for, a program that reads the keyring by another name. The kernel "
     "sandbox (sandbox.py: the gh credential deny-read off the admin seat) is the real boundary",
-    # devpulse's decision C, leg 4: a tilde word that does not expand is read literally.
     "an operand that neither expands nor reads as a literal path under the working directory "
     "— dropped and logged, so no fence judges it",
 )
 
 
 def print_introspection() -> None:
-    """Print module structure for drone routing.
-
-    The residual is printed, not just stored: a gap you can read from a
-    terminal is one an agent can plan around. A gap that lives only in a
-    constant gets discovered instead.
-    """
+    """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]bash_writes[/bold cyan] — write targets a shell command can be seen to name")
     CONSOLE.print("[dim]Consumed by handlers/security/edit_gate.py for the scripted cross-project lane.[/dim]")
     CONSOLE.print()
@@ -345,22 +194,7 @@ def print_introspection() -> None:
 def verb_name(token: str) -> str:
     """The program a command token names, spelled one way on every host.
 
-    Three spellings of one invocation reach a gate: a path (``/usr/bin/git``),
-    a Windows executable extension (``git.exe``, ``git.cmd``) and any casing of
-    either (``RM``, ``Git``). Windows runs all of them, so a gate comparing the
-    raw token is bypassed by a rename — see :data:`_EXEC_EXTENSIONS`.
-
-    Reading every host the same way is deliberate. A lowercase read of ``TEE``
-    on Linux names a program that is not installed, so the parser reports a
-    target for a command that would fail: broader than the truth, which is the
-    safe direction for a fence. The reverse — reading ``RM.EXE`` as some other
-    program — is how a real deletion goes unseen.
-
-    Args:
-        token: A command-position token, path-spelled or bare.
-
-    Returns:
-        The lowercase basename with any executable extension removed.
+    Every host reads alike: over-reading TEE on Linux is the safe side; misreading RM.EXE misses a delete.
     """
     name = Path(token.replace("\\", "/")).name.lower()
     stem, dot, ext = name.rpartition(".")
@@ -370,21 +204,7 @@ def verb_name(token: str) -> str:
 def _program_writes(verb: str, segment: list[str], raw: str) -> bool:
     """True when an interpreter can be SEEN to create a file, or was never read.
 
-    Two questions in order, and the order is the whole point:
-
-     1. Is the program even in this command? Inline source and a heredoc are;
-        a script path is not. A file's text lives on disk, so a parser that
-        reported "no write verb" about it would be stating a fact it never
-        checked — and that is exactly how a real creation would walk past.
-     2. Only then, does the text show a write shape for ITS OWN grammar?
-
-    Args:
-        verb: The interpreter, already through :func:`verb_name`.
-        segment: That invocation's tokens, where the inline flags show up.
-        raw: That interpreter's own text — its tokens and its heredoc.
-
-    Returns:
-        True when a write shape matches, and True whenever the text was unseen.
+    A script path's text was never read, so it counts as writing rather than claim "no write verb" unseen.
     """
     inline = "<<" in segment or any(token in _INLINE_SOURCE_FLAGS for token in segment)
     if not inline:
@@ -396,31 +216,14 @@ def _program_writes(verb: str, segment: list[str], raw: str) -> bool:
 def _strip_heredoc_bodies(command: str) -> str:
     """Blank out heredoc bodies before the command is read as shell syntax.
 
-    A heredoc body is DATA, not shell. The lexer cannot know that, so a mail
-    body or a doc that merely QUOTES a shell command had its quoted text read as
-    real syntax — found live within minutes of shipping, when this gate blocked
-    the reply describing its own proof. That is the "gate that blocks its own
-    audit" pattern, and a fence nobody can write about is one people route
-    around rather than report.
-
-    The lines are replaced with blanks rather than deleted so nothing shifts:
-    the opening line keeps its own tokens (the verb, its flags, any redirection
-    that really is shell), and only the body stops being syntax.
-
-    This does NOT weaken the interpreter rule. ``_interpreter_targets`` scans the
-    ORIGINAL command text, so a heredoc handed to python still surrenders every
-    path it holds — that catch was the point of the interpreter mode and it is
-    pinned by its own test.
+    A heredoc body is data: read as syntax, a reply quoting a command blocked itself. Lines are blanked,
+    not deleted, so nothing shifts; _interpreter_targets still reads the original text.
     """
     return _split_heredocs(command)[0]
 
 
 def _split_heredocs(command: str) -> tuple[str, list[str]]:
-    """The command with heredoc bodies blanked, and the bodies, in opener order.
-
-    The bodies are kept so an interpreter can be handed the heredoc IT opened
-    and no one else's text (see :func:`write_targets_by_segment`).
-    """
+    """The command with heredoc bodies blanked, and the bodies, in opener order."""
     if "<<" not in command:
         return command, []
     lines = command.split("\n")
@@ -440,20 +243,14 @@ def _split_heredocs(command: str) -> tuple[str, list[str]]:
             continue
         out.append(line)
         pending.extend(match.group(2) for match in _HEREDOC_OPEN.finditer(line))
-    # An unterminated body is not returned: its opener then has no partner, and
-    # the pairing falls back to the whole-command read, which still holds it.
+    # An unterminated body is dropped: its opener goes unpaired and the whole-command read holds it.
     return "\n".join(out), bodies
 
 
 def _strip_comments(command: str) -> str:
     """Drop shell comments, keeping the newline that ends each one.
 
-    shlex's own comment handling was wrong twice over for this reader: it
-    treated ``#`` as a comment ANYWHERE in a word (``curl host/#x && touch f``
-    lost everything after the ``#``), and it swallowed the newline with the
-    comment, which would merge the next line back into this one. The shell's
-    rule is narrower: ``#`` opens a comment only where a word starts, and never
-    inside quotes.
+    shlex reads ``#`` anywhere in a word; the shell opens a comment only at a word start, never in quotes.
     """
     if "#" not in command:
         return command
@@ -483,12 +280,7 @@ def _strip_comments(command: str) -> str:
 def _tokenize(command: str) -> list[str]:
     """Split a command into tokens, keeping shell operators as their own tokens.
 
-    ``punctuation_chars`` makes shlex emit ``&&``/``||``/``;``/``|``/``>`` as
-    tokens instead of gluing them to words, and posix mode strips quotes so a
-    quoted path arrives as a path. An unbalanced quote is a lexer error, not a
-    reason to give up: fall back to whitespace splitting and say so, because
-    silently returning no tokens would read exactly like a command with no
-    write targets.
+    An unbalanced quote falls back to whitespace splitting, logged: no tokens would read as no writes.
     """
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=_PUNCTUATION)
@@ -511,31 +303,10 @@ def _tokenize(command: str) -> list[str]:
 def _readings(command: str) -> list[list[str]]:
     """Every token stream this command could honestly be. Usually one.
 
-    THE BUG THIS EXISTS FOR (@devpulse, windows-test.yml, 2026-08-31): in POSIX
-    mode a backslash is an ESCAPE, so shlex ate every separator of a Windows
-    path — ``C:\\Users\\me\\Vera-Studio\\f.json`` arrived as the single token
-    ``C:UsersmeVera-Studiof.json``. That is not a degraded reading, it is the
-    dangerous one: a drive-absolute foreign path became one relative filename,
-    resolved under the CALLER'S OWN project, and read as a local write. Every
-    catch category the fleet closed on 08-30 returned exit 0 on Windows. The
-    class had never been green there.
-
-    A fence must not have to guess which dialect it is reading. Both readings
-    are produced and their results are UNIONED, so neither spelling can be used
-    to slip past the other:
-
-    - escape reading — shlex's own, correct for POSIX ``cp a\\ b.txt dest``
-    - separator reading — backslashes doubled so the lexer emits them literally,
-      correct for a Windows path
-
-    Where they agree (no backslash anywhere) there is one reading and no cost.
-    Where they disagree the union is strictly safer: reading ``\\`` as a
-    separator only ever adds path components, so a local write can never become
-    foreign by it — while the reverse, the escape reading, is exactly how a
-    foreign write became local on Windows.
+    POSIX escapes eat Windows separators (``C:\\Users\\x`` reads as one local name), so both readings
+    are unioned: ``\\`` as a separator only adds components, never making a foreign write local.
     """
-    # A backslash-newline is a line continuation: the shell joins the lines, so
-    # the reader must too, before a newline starts meaning "next command".
+    # A backslash-newline is a continuation: join the lines before a newline means "next command".
     shell = _strip_comments(_strip_heredoc_bodies(command).replace("\\\n", ""))
     readings = [_tokenize(shell)]
     if "\\" in shell:
@@ -546,11 +317,7 @@ def _readings(command: str) -> list[list[str]]:
 
 
 def _segments(tokens: list[str]) -> list[list[str]]:
-    """Group tokens into individual commands, split on shell separators.
-
-    Subshell parentheses split too and are kept as one-token segments, so the
-    caller can scope a cd to the subshell it was made in.
-    """
+    """Group tokens into individual commands, split on shell separators."""
     out: list[list[str]] = []
     current: list[str] = []
     for token in tokens:
@@ -574,8 +341,7 @@ def _segments(tokens: list[str]) -> list[list[str]]:
 def _looks_like_path(token: str) -> bool:
     """True for operands that could name a file on disk.
 
-    A token carrying an unexpanded variable is excluded, not guessed at: half a
-    path resolved against the wrong root would name a project nobody addressed.
+    An unexpanded variable is excluded: half a path on the wrong root names a project nobody addressed.
     """
     if not token or token.startswith("-"):
         return False
@@ -593,32 +359,16 @@ def _resolve(word: str, cwd: Path) -> Path | None:
     word = word.strip().strip(_TRAILING_JUNK)
     if not word:
         return None
-    # A Windows path cannot hold a Git Bash drive (FPLAN-0537, measured under a
-    # Windows flavour): WindowsPath("/c/Users/me") has a root but no drive, so
-    # it joined the seat's drive and named C:\c\Users\me. That directory holds
-    # no registry, so edit_gate let a foreign write spelled that way through,
-    # and testwrite_gate called an edit of an existing test a creation. Read
-    # only on a Windows cwd, because on POSIX /c is an ordinary directory.
-    # Paths lifted out of interpreter source get the same reading, though python
-    # itself would not translate them. That reading is broader than the write,
-    # the safe way for a fence to be wrong.
+    # Git Bash drives, on a Windows cwd only (on POSIX /c is a directory): WindowsPath("/c/x") joins the
+    # seat's drive as C:\c\x and lets a foreign write through.
     if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(word)):
         word = f"{drive.group(1).upper()}:/{word[drive.end() :].lstrip('/')}"
-    # Separators are normalised on EVERY OS, not just Windows. pathlib accepts
-    # "/" natively on Windows (WindowsPath("C:/a/b") is absolute and correct),
-    # so one spelling reaches Path from both dialects and the parser's reading
-    # of a command stops depending on which machine happens to run it. What
-    # does NOT become portable is the ROOT: a drive letter names nothing on
-    # Linux, so it resolves relative and reads as local — published in
-    # NOT_CAUGHT rather than left to be discovered.
+    # Separators normalise on every OS; a drive ROOT still names nothing on Linux (NOT_CAUGHT).
     word = word.replace("\\", "/")
     try:
         candidate = Path(word).expanduser()
     except (OSError, ValueError, RuntimeError) as exc:
-        # The shell leaves a tilde word it cannot expand (~nosuchuser) as it is, so
-        # the write lands under the working directory in a directory of that literal
-        # name, and both fences judge it there (devpulse's decision C, leg 4). Only a
-        # word that cannot be read literally either is dropped: NOT_CAUGHT says so.
+        # The shell keeps an unexpandable tilde word (~nosuchuser) literal; only one unreadable both ways drops.
         logger.info("[HOOKS] bash_writes: operand %r not expandable (%s), read literally", word, exc)
         try:
             candidate = Path(word)
@@ -659,10 +409,8 @@ def _sed_short_letters(flag: str) -> str:
 def _sed_in_place_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
     """Every file `sed -i` edits, never its script (pad row 87, devpulse 953c8a70).
 
-    In place is any short cluster holding i (-i, -ni, -Ei, -i.bak) or --in-place[=suffix].
-    The script is the first plain word, read before the path filter: `68,90p` does not look
-    like a path, and filtering first dropped the real file in its place. A script given by
-    -e, -f, --expression or --file leaves every path-looking word a target, as before.
+    The script is the first plain word, taken before the path filter (``68,90p`` is not path-shaped).
+    With -e, -f, --expression or --file every path-looking word is a target.
     """
     flags = [token for token in segment[1:] if token.startswith("-") and token != "-"]
     longs = {flag.split("=", 1)[0] for flag in flags if flag.startswith("--")}
@@ -705,24 +453,12 @@ def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
 def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[Path, str]]:
     """Collect every path an interpreter invocation is handed.
 
-    *raw* is the interpreter's OWN text — its command and the heredoc it opened
-    — scanned as text, not just tokens, so a path glued into source code by the
-    lexer (an open-call with its quotes stripped) still comes out whole.
-
-    Until 2026-09-10 the caller passed the WHOLE command here, although this
-    docstring already said "the segment". So an interpreter claimed every path
-    the command held and resolved it against its OWN directory. A python step
-    standing before ``cd ../../..`` took the later pytest argument, resolved it
-    from the wrong place, and named a doubled path that does not exist, which
-    testwrite_gate refused as a new test (devpulse 213c64fd, @aipass hit it
-    twice while curing PR #761).
+    *raw* is its OWN text (its command and its heredoc), scanned as text so a path the lexer glued into
+    source comes out whole. Never the whole command: a later segment's path resolves from the wrong cwd.
     """
     verb = verb_name(segment[0])
     if verb not in _INTERPRETERS:
         return []
-    # Asked once per interpreter, not once per path: the evidence is a property
-    # of the program's text, and which held path a write shape belongs to is
-    # published in NOT_CAUGHT rather than guessed at.
     writes = _program_writes(verb, segment, raw)
     why = f"{verb} {HELD_BY_INTERPRETER}" if writes else f"{verb} {HELD_BY_INTERPRETER}{NO_WRITE_VERB}"
     seen: set[str] = set()
@@ -731,11 +467,7 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
         token = match.strip(_TRAILING_JUNK)
         if not token or token in seen or "$" in token:
             continue
-        # Separators alone are not a path. Widening the run to accept "\\" made
-        # every escaped quote inside a python -c body (\\") match as one, which
-        # would have put filesystem root in a refusal that named a real target
-        # elsewhere. Harmless to the verdict — root holds no registry — but a
-        # refusal listing paths the command never named is one nobody believes.
+        # Separators alone are not a path: an escaped quote (\\") would put filesystem root in a refusal.
         if not any(char.isalnum() for char in token):
             continue
         seen.add(token)
@@ -748,30 +480,9 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
 def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], list[tuple[Path, str]]]]:
     """Same reading as :func:`write_targets`, but grouped by the segment that earned it.
 
-    A caller asking a NARROWER question than "can this write" needs to know
-    which segment a target came from — ``pytest x && touch y`` is one command
-    with two very different halves, and a verdict that cannot tell them apart
-    must refuse both or neither. testwrite_gate is that caller: a test RUN
-    creates nothing, so it drops interpreter-attributed targets from runner
-    segments while leaving every other segment's targets alone.
-
-    Split out so there is still exactly ONE shell reader in this branch.
-    :func:`write_targets` flattens this and is unchanged in behaviour, dedupe
-    included — the seam exists to avoid a second parser, not to add one.
-
-    Args:
-        command: The raw Bash command string from the tool input.
-        cwd: The session working directory relative paths resolve against.
-
-    Returns:
-        (segment tokens, hits) pairs, in command order. Segments that name no
-        target are included with an empty hit list, so a caller can see the
-        shape of the whole command rather than only its writing half.
-
-    Raises:
-        OSError: No cwd was handed in and the process has none (2.2.0, fleet green
-            leg 5). It answered [] here, "writes nothing", and every gate let the
-            relative write through; now each gate's crash refusal refuses the call.
+    For narrower callers (testwrite_gate drops interpreter targets from runner segments only); a segment
+    naming no target comes with an empty list.
+    Raises OSError when no cwd is given and the process has none: [] would read as "writes nothing".
     """
     if not command or not command.strip():
         return []
@@ -781,9 +492,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
         logger.warning("[HOOKS] bash_writes: no usable cwd, the command cannot be read: %s", exc)
         raise
 
-    # Two texts, deliberately: heredoc bodies are stripped for the SYNTAX read
-    # (a quoted command in a mail body is not a command) and kept for the
-    # interpreter read (a heredoc handed to python really can write anything).
+    # Heredoc bodies are stripped for the syntax read and kept for the interpreter read.
     grouped: list[tuple[list[str], list[tuple[Path, str]]]] = []
     seen: set[tuple[Path, str]] = set()
     bodies = _split_heredocs(command)[1]
@@ -803,10 +512,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
                 continue
             verb = verb_name(segment[0])
 
-            # `cd` inside a chain moves the ground the next segment stands on.
-            # Not tracking it would let `cd ../Other && sed -i s/a/b/ f.json`
-            # resolve f.json against the caller's own project and read as a
-            # local write.
+            # cd moves the ground: untracked, `cd ../Other && sed -i s/a/b/ f.json` reads as a local write.
             if verb == "cd" and len(segment) > 1:
                 moved = _resolve(segment[1], current)
                 if moved is not None:
@@ -819,8 +525,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
                 *_verb_targets(segment, current),
                 *_interpreter_targets(segment, owned.get(index, command), current),
             ):
-                # The two readings overlap heavily; a caller told the same
-                # thing twice would see a refusal that names one write as two.
+                # The two readings overlap; one write must not be named twice.
                 if hit in seen:
                     continue
                 seen.add(hit)
@@ -833,11 +538,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
 def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[int, str]:
     """Each segment's own text: its tokens plus the heredoc bodies it opened.
 
-    Openers and bodies are matched in order. If they do not pair up one to one
-    (a ``<<`` the lexer and the heredoc reader disagree on), nothing is returned
-    and every interpreter falls back to reading the whole command, which is the
-    old, broader reading: a fence that cannot tell whose text is whose keeps
-    all of it.
+    Paired in order; on a mismatch nothing is returned and every interpreter keeps the whole command.
     """
     openers = [sum(1 for token in segment if token == "<<") for segment in segments]
     if sum(openers) != len(bodies):
@@ -856,15 +557,5 @@ def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[i
 
 
 def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
-    """Return every (path, why) this command can be seen to write.
-
-    Args:
-        command: The raw Bash command string from the tool input.
-        cwd: The session working directory relative paths resolve against.
-
-    Returns:
-        A list of (resolved path, human-readable reason) pairs. Empty when the
-        command names no write target this parser can see — which is not the
-        same as "writes nothing"; see :data:`NOT_CAUGHT`.
-    """
+    """Return every (path, why) this command can be seen to write."""
     return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]

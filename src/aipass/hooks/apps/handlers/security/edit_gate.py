@@ -6,15 +6,14 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
 state. Reports a shell memory write the reader could not see, after the call.
 
 Failure mode: handle() refuses the call it was checking when it crashes; the tripwire pair report and never block,
-so a crash there leaves one call unwatched, logged. The engine refuses on import error and timeout for all three.
-"""
+so a crash there leaves one call unwatched, logged. The engine refuses on import error and timeout for all three."""
 
 import importlib
 import json
@@ -33,44 +32,23 @@ GATE_CRASHED = (
     "does not let it through.\n"
     'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: edit_gate" "<what you ran, and this text>"'
 )
-# Who may write whose files (the project marker, the registry rows, the admin grant)
-# lives in modules/write_ownership since the owner's ruling of 2026-09-18.
-# The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
-# entry 322: "It is only you who can reach outwards. Nobody else." The cross-
-# project fence stays for every other agent, tool lane and scripted lane alike.
-# Named here for the log line only — WHO is decided by modules/admin_seat's
-# verified rail, never by this string matching a directory. Spelled rather than
-# imported because a handler reaches modules through importlib at call time, not
-# at import time (the branch's own architecture rule); modules/admin_seat holds
-# the same literal and admin_seat_name() below is what keeps the two honest.
+# Named for the log line only: WHO is decided by modules/admin_seat's verified rail. Spelled, not imported:
+# a handler reaches modules at call time. It must equal modules/admin_seat.ADMIN_SEAT; no test pins that.
 ADMIN_SEAT = "devpulse"
-# passport.json joined these on 2026-09-15 (DPLAN-0347 rows 4 and 6). It is a
-# .trinity file every bit as much as the other two, and until then it was
-# writable by any lane at any size: the identity block renders on every cadence
-# beat, so a passport that grows is a standing tax on the session. @spawn owns
-# its schema, so it is measured by SIZE only — @memory's check_file_budget,
-# 6,000 chars per file and 600 per string, never a field shape.
+# @spawn owns passport's schema, so it is measured by SIZE only (@memory's check_file_budget).
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json", "passport.json"})
 _FILE_BUDGET_FILES = frozenset({"passport.json"})
-# How deep under the project root a .trinity can sit: src/<pkg>/<branch>/.trinity
-# is four. Bounded on purpose — a full walk of a repo this size on every Bash
-# call is a cost no report is worth (24 dirs, 72 stats, ~19 ms measured 09-15).
+# src/<pkg>/<branch>/.trinity is four deep; bounded, as a full repo walk on every Bash call costs too much.
 _TRINITY_SCAN_DEPTH = 4
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
-# todos roll (DPLAN-0345, the owner 2026-09-14): over the pad count is legal on disk,
-# and the oldest roll off to the branch's backlog FILE at its next rollover, never
-# to vectors. The path is @memory's (todo_roll.backlog_path_for), spelled here.
+# Over the pad count is legal on disk; the oldest roll to @memory's backlog file (todo_roll.backlog_path_for).
 _TODOS_COUNT_FALLBACK = 10
 _TODO_BACKLOG = ".backup/todo/{branch}/backlog.json"
-# The shell-memory tripwire (DPLAN-0342 row 3). One snapshot file per session in
-# the temp dir, the home cadence's guard files already use. It holds the last few
-# calls, keyed by tool_use_id, because a call whose PostToolUse never fires (a later
-# gate refused it, the command failed) must not grow it.
+# Pending snapshots keyed by tool_use_id and capped: a call whose PostToolUse never fires must not grow it.
 _TRIPWIRE_DIR = Path(tempfile.gettempdir())
 _TRIPWIRE_PENDING_MAX = 8
-# A refusal reason runs to a screen; the log line is the diagnostic, not the copy.
-# The head names the rule and the target, and prax rotates at 50KB.
+# The log line is the diagnostic, not the copy: the head names the rule and the target.
 _REFUSAL_LOG_CHARS = 500
 # The sanctioned writers of memory files from a shell: drone verbs, not raw writes.
 _MEMORY_VERB_TARGETS = frozenset({"@memory", "@spawn"})
@@ -80,11 +58,7 @@ _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 def _entry_number(entry: dict) -> int | None:
     """Read an entry's ordinal, tolerating legacy schemas.
 
-    Older .trinity files number sessions with 'session_number' rather than
-    'number', and the rest of the fleet still honours it (@memory's rollover
-    fixtures, @daemon's latest_session). A guard that reads only 'number' locks
-    those branches out of their own memory with no way to comply.
-    """
+    Older .trinity files use 'session_number'; reading only 'number' locks those branches out of their memory."""
     for key in _NUMBER_KEYS:
         value = entry.get(key)
         if isinstance(value, int):
@@ -95,10 +69,7 @@ def _entry_number(entry: dict) -> int | None:
 def _import_module(name: str) -> Any:
     """Import a module this gate reads at call time.
 
-    A seam: the tests are the reason it exists. They replace this function by name
-    in place of patching importlib.import_module, which replaces it process-wide.
-    It changes no verdict. The decision is hooks', leg 4.
-    """
+    A seam for the tests: they replace it by name instead of patching importlib.import_module process-wide."""
     return importlib.import_module(name)
 
 
@@ -110,17 +81,8 @@ def _ownership() -> Any:
 def _refuse(reason: str) -> dict:
     """Build the one refusal shape every gate in this file returns — and write the line that says why.
 
-    engine.jsonl records exit 2 and a stdout length, never the reason, and two
-    generations hold well under an hour of fleet traffic: a live block on
-    2026-09-22 04:37:29 left no line in edit_gate.log at all, so by morning
-    nothing on disk could say what had been refused or to whom. The cap refusal
-    was the widest case — _evaluate_limits logged each violation in WARN mode
-    and nothing in the mode that actually blocks.
-
-    Paths carrying detail the reason does not spell (the shell verb, a violation
-    count) log that line first and then call here; two lines is the intended
-    shape there, not a duplicate.
-    """
+    engine.jsonl never records the reason, so this line is the only record of what was refused.
+    Paths with extra detail log their own line first; two lines there is intended."""
     logger.warning("[HOOKS] edit_gate: refused — %s", _one_line(reason))
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
 
@@ -134,24 +96,11 @@ def _one_line(reason: str, cap: int = _REFUSAL_LOG_CHARS) -> str:
 def _is_admin_seat(cwd: str) -> bool:
     """True only when the 5-leg admin grant verifies for this session.
 
-    Delegates to ``modules/admin_seat.is_admin_seat`` — the implementation and
-    its full reasoning moved there on 2026-09-01 when ``testwrite_gate`` needed
-    the same answer. It stays spelled here as a name because a security
-    exemption read two ways can disagree with itself, and the whole point of
-    consuming @ai_mail's rail instead of mirroring it was to have one reading.
-
-    Args:
-        cwd: The session working directory from the hook payload.
-
-    Returns:
-        True when the grant verifies, False on every doubt.
-    """
+    Delegates to ``modules/admin_seat.is_admin_seat``: a security exemption has one reading, never two."""
     try:
         admin = _import_module("aipass.hooks.apps.modules.admin_seat")
     except Exception as exc:
-        # The delegation must not become a way IN. Reaching the rail through a
-        # second module adds a second import that can fail, and an exemption
-        # that opens because a module was missing is worse than no exemption.
+        # A missing module must never open the exemption.
         logger.warning("[HOOKS] edit_gate: admin lane dark — admin_seat unavailable: %s", exc)
         return False
     return bool(admin.is_admin_seat(cwd))
@@ -160,18 +109,7 @@ def _is_admin_seat(cwd: str) -> bool:
 def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -> dict | None:
     """Block a write that crosses out of the caller's project, in any direction.
 
-    Projects nest inside the host tree (projects/<name>). Every fence below this
-    one keys on branch identity, which a project seat had none of before the
-    registry rows were read: GH #733 measured a projects/baud session editing
-    src/aipass/drone unchallenged while its mail to @drone was refused.
-
-    Upward and sideways were always refused. Downward (the host into a project
-    it contains) was trusted until the owner's ruling of 2026-09-18: "an AIPass
-    agent must have no way to touch another project's files". Only the verified
-    admin seat crosses now. *caller* and *landing* are write_ownership Projects.
-
-    Returns a block dict, or None to allow.
-    """
+    Only the verified admin seat crosses. *caller* and *landing* are write_ownership Projects."""
     if not _ownership().is_crossing(caller, landing):
         return None
     if _is_admin_seat(cwd):
@@ -209,16 +147,11 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
 def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
     """Every (path, how) the shell reader can see *command* write, read once for both Bash-lane rules.
 
-    A parser that cannot read a command raises: the gate's crash refusal then
-    refuses the Bash call, because a fence that cannot read a command does not
-    let it through (DPLAN-0356 item 2; until 1.17.0 the answer was no targets,
-    which allowed the call).
-    """
+    A parser that cannot read a command raises, so the gate's crash refusal refuses the call."""
     if not command:
         return []
     targets = _import_module("aipass.hooks.apps.modules.bash_writes").write_targets(command, cwd)
-    # Phase 4, P2: default-deny. Every operand of a program that does not only read
-    # is judged by the same three rules, whatever verb it is (shell_programs).
+    # Default-deny: every operand of a program that does not only read is judged by the same rules.
     invocations = _import_module("aipass.hooks.apps.modules.shell_reader").invocations(command, cwd)
     places = _import_module("aipass.hooks.apps.modules.write_ownership").in_a_branch  # a flag value is no write
     operands = _import_module("aipass.hooks.apps.modules.shell_programs").named_operands(invocations, places)
@@ -228,21 +161,8 @@ def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
 def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path, str]]) -> dict | None:
     """Block a cross-project write made through the shell rather than a tool.
 
-    The tool lane was fenced and this one was not: @devpulse's Edit into a
-    sibling project was refused on 2026-08-30 and ``sed -i`` on the same file
-    went through, for every seat, not just the admin one. Same boundary, same
-    direction rules, same refusal text — only the evidence differs, because a
-    shell command names its targets in grammar rather than in a ``file_path``
-    field.
-
-    Scope is honest by construction: ``bash_writes`` reports only what it can
-    SEE, and what it cannot see is enumerated in ``bash_writes.NOT_CAUGHT`` and
-    repeated in the README. A parser that guessed would refuse correct commands,
-    which is the failure mode that teaches agents to route around a gate.
-
-    A target that cannot be probed on disk is refused first, in one line (729ffaa9).
-    Returns a block dict, or None to allow.
-    """
+    ``bash_writes`` reports only what it can SEE (``bash_writes.NOT_CAUGHT``); a guessing parser would
+    refuse correct commands. A target that cannot be probed on disk is refused first."""
     wo = _ownership()
     if unprobeable := wo.unprobeable(targets):
         return _refuse(unprobeable)
@@ -275,11 +195,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
 def _check_bash_ownership(cwd: str, caller: Any, targets: list[tuple[Path, str]]) -> dict | None:
     """Refuse a shell write into a file this seat does not own, inside its own project.
 
-    The owner's ruling, 2026-09-18: own files only, on this lane as on the tool
-    lane. Until then the shell lane read the project boundary alone, so any
-    citizen could sed another branch. Convicts on write grammar only: an
-    interpreter's held paths are left to the project fence (write_ownership).
-    """
+    Convicts on write grammar only: an interpreter's held paths are left to the project fence."""
     wo = _ownership()
     for target, how in targets:
         reason = wo.ownership_refusal(caller, wo.project_of(target), cwd, target, how)
@@ -292,21 +208,8 @@ def _check_bash_ownership(cwd: str, caller: Any, targets: list[tuple[Path, str]]
 def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
     """Refuse a shell write to a .trinity memory file: every seat, every project, admin included.
 
-    DPLAN-0342 row 3. @memory's caps are measured on the Edit/Write lane, so a
-    write made from a shell landed unmeasured: @baud's 21 of 21 sessions went
-    over cap that way on 08-16, @api 12 sessions and 16 learnings, @hooks 9
-    entries on 2026-09-12. The reader built for the project fence already claims
-    every shape that carried that drift (redirect, tee, sed -i, cp/mv, an
-    interpreter holding the path), so the rule is one comparison on its targets.
-
-    The admin exemption is not consulted. It lets one seat reach another
-    project; it says nothing about how memory is written. An interpreter that
-    only READS a memory path is refused too, because the interpreter rule cannot
-    tell a read from a write. That over-refusal is named in the refusal, with
-    the tools that read, rather than left for an agent to discover.
-
-    Returns a block dict, or None to allow.
-    """
+    The admin exemption is not consulted: it reaches another project, it says nothing about memory.
+    An interpreter that only READS a memory path is refused too; the refusal names that over-refusal."""
     for target, how in targets:
         if target.parent.name != ".trinity" or target.name not in _TRINITY_MEMORY_FILES:
             continue
@@ -324,9 +227,7 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
 def _memory_service_reachable() -> bool:
     """True when @memory's cap module imports from where this hook is running.
 
-    Asked at refusal time, not at import: the same handler serves AIPass seats and
-    `aipass init` projects, which have no @memory (docs/edit_gate.md).
-    """
+    Asked at refusal time, not at import: `aipass init` projects have no @memory."""
     try:
         _import_module("aipass.memory.apps.modules.door_entry_limits")
         return True
@@ -406,15 +307,7 @@ def _entries_of(container: Any, kind: str) -> list[tuple[str, Any]]:
 def _log_carried(entry_type: str, container: str, key: str, field: str) -> None:
     """Record a drifted entry this write carried but did not author.
 
-    Carried debt must not be SILENT — that was the half of my 2026-08-27
-    concern that was right, and @memory kept it when they reversed the rest:
-    their writer logs a CARRIED line too. Not refused, not hidden, and not
-    printed at the agent either: detection belongs to ``drone @memory lint``,
-    which reads whole files on demand, rather than to a write gate that sees
-    only the next write. INFO, because carrying inherited drift is not
-    misbehaviour and a standing condition logged as a warning is what fed
-    @trigger's escalation lane the last time.
-    """
+    Not refused, not printed: detection belongs to ``drone @memory lint``. INFO: carrying is not misbehaviour."""
     logger.info(
         "[HOOKS] edit_gate: CARRIED (not authored, not refused) %s [%s] in %s — no '%s' field. "
         "Cure it with drone @memory lint.",
@@ -428,40 +321,8 @@ def _log_carried(entry_type: str, container: str, key: str, field: str) -> None:
 def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[dict]:
     """Refuse entries whose CANONICAL field is absent (DPLAN-0318 bug B3).
 
-    The cap check reads one field name per entry type, taken from @memory's
-    memory.config.json ``entry_limits`` (file/container/field). A renamed field
-    — ``learning`` where the config says ``value``, the shape ai_mail, api and
-    this branch carried — leaves the extractor with no such key. It answered
-    ``""``, the entry measured as zero characters, and three branches ran 2.7x
-    over cap for the two months AFTER the gate landed while it reported
-    compliance. ``""`` and "cannot read this" are different answers; a field the
-    gate cannot find is named, not measured.
-
-    THE ON-DISK RULE IS NOW UNIVERSAL, not todos-only (2026-08-30, @memory's
-    entry_limits 1.6.0). A write is refused for what it AUTHORS, never for what
-    it CARRIES. I narrowed this to todos on 08-27 because the fleet had
-    converged and "unchanged and over cap passes" looked like it hid new drift
-    rather than protecting old. Both halves of that were wrong about the world,
-    and @memory proved it from the outside: their rollover lane failed
-    identically every 20 minutes for three hours because the extractor removed a
-    tail, wrote the SMALLER document back, and a write gate refused the whole
-    file over an entry in the head the extraction never touched. The archiver is
-    always on the losing side of that trade — the file cannot get smaller
-    because it is too big. My own refusal text is the other half of the
-    evidence: writes made through Bash are not checked, so a write gate is
-    structurally blind to how drift ARRIVES and cannot be the thing that
-    detects it. That job belongs to ``drone @memory lint``, which reads the file.
-
-    So this checker was fixed to match. @memory fixed their half and mine still
-    deadlocked — measured live before this change: a write with an identical
-    before and after still drew a refusal here. Identity is the raw entry, never
-    the index: a prepend shifts every position down, and an index-keyed diff
-    would call the whole file newly authored on exactly the write that authored
-    nothing.
-
-    Carrying a drifted entry still does not license adding another in the same
-    shape — a NEW entry with a missing canonical field is authored, and refused.
-    """
+    A write is refused for what it AUTHORS, never for what it CARRIES: refusing carried drift deadlocks the
+    rollover shrinking the file. Identity is the raw entry, never the index: a prepend shifts every position."""
     hits: list[dict] = []
     for type_name, type_def in limits.get("entry_types", {}).items():
         if not isinstance(type_def, dict):
@@ -477,14 +338,11 @@ def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[d
         carried = [entry for _, entry in _entries_of(before.get(container_key), kind)]
 
         for key, entry in _entries_of(after_container, kind):
-            # Plain-string entries carry their own text — measurable, and
-            # @memory's extractor already handles them.
+            # Plain-string entries carry their own text; @memory's extractor measures them.
             if not isinstance(entry, dict) or field in entry:
                 continue
             if entry in carried:
-                # Byte-identical to disk: this write did not author it. Report,
-                # never refuse — refusing here is what deadlocks the rollover
-                # that is trying to shrink the very file being complained about.
+                # Byte-identical to disk, so not authored here; refusing it deadlocks the rollover.
                 _log_carried(type_name, container_key, key, field)
                 continue
             hits.append(
@@ -506,15 +364,7 @@ def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[d
 def _entry_text(v: dict, after: dict, limits: dict) -> str | None:
     """The authored text behind an over-cap record, read back out of the proposed file.
 
-    @memory's six-key record carries the measurement, not the text, and that
-    shape is a published contract this gate does not get to grow. The text is
-    where the record says it is: the entry type names the container and field,
-    and the key is the dict key or list index in the SAME ``after`` document the
-    extractor measured. Anything that does not resolve to a string of exactly the
-    recorded length answers None — a cut drawn on text the record did not measure
-    would point at the wrong characters, and the measurement line alone is still
-    true without it.
-    """
+    Anything not resolving to a string of exactly the recorded length answers None: no cut on unmeasured text."""
     type_def = limits.get("entry_types", {}).get(v.get("entry_type", ""))
     if not isinstance(type_def, dict):
         return None
@@ -537,15 +387,7 @@ def _entry_text(v: dict, after: dict, limits: dict) -> str | None:
 def _cut_point(text: str, cap: int) -> str:
     """Where the cap fell: the kept prefix, a bar, and the overflow past it (DPLAN-0342).
 
-    The fleet's median overage is 7% of the cap and 88% of overages sit under
-    20% — agents aim AT the line and land a few words past it. A refusal that
-    only says "336/300 (+36)" makes the rewrite a re-guess of the whole entry;
-    showing the 36 characters that crossed makes it a trim of a visible tail.
-    Both halves are JSON-quoted so a trailing space or a newline at the boundary
-    is visible, and ``len`` slices in code points — the unit the cap is measured
-    in — so the bar sits exactly at the cap. Display only: the block is unchanged
-    and nothing is ever truncated for the agent.
-    """
+    Both halves are JSON-quoted so boundary whitespace shows; ``len`` slices in code points, the cap's unit."""
     kept = json.dumps(text[:cap], ensure_ascii=False)
     over = json.dumps(text[cap:], ensure_ascii=False)
     return f"kept: {kept} | over: {over}"
@@ -561,18 +403,7 @@ def _where(v: dict) -> str:
 def _format_violation(v: dict, text: str | None = None, allowed: list[str] | None = None) -> str:
     """Render one violation line, plus the cut point when the text is known.
 
-    A refusal that cannot be measured must not print as a measurement. The
-    unmeasurable and missing-field species carry zeros in length/cap/over_by to
-    keep @memory's published six-key contract, so rendering them through the
-    over-cap format produces "0/300 chars (+0)" — which reads as a bug in the
-    gate rather than as the named refusal it is.
-
-    @memory 1.11.0 (FPLAN-0593) adds two species to that contract —
-    ``unknown_field`` and ``field_over_cap`` — plus ``file_over_budget`` from
-    the passport row. Each carries ``field`` and ``units``; rendering them
-    through the catch-all below would have called an over-cap status
-    "unmeasurable", which is the opposite of what happened.
-    """
+    Non-over-cap species carry zeros (@memory's six-key contract) and must not render as "0/300 chars (+0)"."""
     reason = v.get("reason")
     if reason == "unknown_field":
         shape = ", ".join(allowed) if allowed else "the published shape"
@@ -644,17 +475,7 @@ def _log_violation(v: dict, text: str | None = None) -> None:
 def _dedupe_violations(violations: list[dict]) -> list[dict]:
     """Collapse violations naming the same entry, first record wins.
 
-    Two checkers now find the missing-field species: @memory's extractor (1.4.0,
-    which stopped answering ``""`` for an absent key) and this gate's own
-    ``_missing_field_violations``. The overlap is deliberate — a gate that
-    outsources ALL of its measurement inherits its supplier's blind spots
-    silently, which is how the renamed-field dodge survived two months — but one
-    defect must still read as one defect. Two identical lines in a refusal send
-    the agent hunting for a second problem that does not exist.
-
-    Keyed on (entry_type, container, key): the container matters because two
-    entry types both index their first entry as ``"0"``.
-    """
+    The overlap with @memory's extractor is deliberate; the container is keyed because two types index "0"."""
     seen: set[tuple[str, str, str]] = set()
     unique: list[dict] = []
     for v in violations:
@@ -669,22 +490,16 @@ def _dedupe_violations(violations: list[dict]) -> list[dict]:
 def _allowed_fields(v: dict, limits: dict, el: Any) -> list[str] | None:
     """The entry type's published field names, for an unknown-field refusal.
 
-    Read from @memory through ``fields_for`` rather than the raw key: the shape
-    is memory's to publish and this gate's to render (DPLAN-0347). An
-    unconfigured type answers {} and the refusal then says "the published
-    shape" rather than naming an empty list.
-    """
+    Read through ``fields_for``: the shape is memory's to publish; an unconfigured type answers {}."""
     if v.get("reason") != "unknown_field":
         return None
     try:
         fields = el.fields_for(v.get("entry_type", ""), limits)
     except AttributeError as exc:
-        # An older @memory in the tree has no fields_for. The refusal is still
-        # correct without the allow-list; going dark over a missing helper is not.
+        # An older @memory has no fields_for; the refusal stays correct without the allow-list.
         logger.info("[HOOKS] edit_gate: fields_for unavailable, refusal renders without the shape: %s", exc)
         return None
-    # Declaration order, not alphabetical: the config lists a field's own order
-    # (number, date, summary, status, tags) and that reads as the entry's shape.
+    # Declaration order, not alphabetical: the config's order reads as the entry's shape.
     return list(fields) if isinstance(fields, dict) and fields else None
 
 
@@ -699,14 +514,7 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
         lines = ["Unwritable .trinity entries (fix before saving):"]
         for v, text in zip(over, texts, strict=True):
             lines.append(_format_violation(v, text, _allowed_fields(v, limits, el)))
-        # Say what this gate can actually see. The cap is measured on the
-        # Edit/Write lane. Until DPLAN-0342 row 3 this line said a Bash write was
-        # "not measured" — true, and three branches drifted over cap through that
-        # lane (@baud to 2529/300 for a week, @api to 12 sessions + 16 learnings,
-        # @hooks 9 entries). A shell write the reader can see is now refused
-        # (_check_bash_memory_write); one it cannot see is reported after the
-        # call by tripwire(). The carried-drift rule stays universal: a gate
-        # blind to how drift ARRIVED cannot refuse a file for already carrying it.
+        # A shell write the reader sees is refused (_check_bash_memory_write); one it cannot see, tripwire() reports.
         lines.append(
             "  (Caps are measured on Edit/Write; a write to a memory file made through Bash is refused. "
             "Cure drift already on disk with drone @memory lint.)"
@@ -720,29 +528,13 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
 def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any) -> dict | None:
     """Measure a whole-file budget — the passport row (DPLAN-0347, @memory 1.11.0).
 
-    SIZE only, never a field shape: @spawn owns passport.json's schema, @memory
-    owns the numbers (6,000 chars per file, 600 per string), and this gate does
-    what it is for — enforcing them at the write. The per-entry path above never
-    saw a passport, because a passport carries no entry arrays.
-
-    Warn-mode (``enforce`` false) logs and allows, exactly as the entry caps do.
-
-    Args:
-        file_name: The .trinity file being written, e.g. "passport.json".
-        after_text: The file as it would be on disk after this call.
-        limits: @memory's entry-limits block — read for its enforce switch.
-        el: @memory's entry_limits module.
-
-    Returns:
-        A block dict, or None to allow.
-    """
+    SIZE only: @spawn owns passport's schema, @memory the numbers. Warn mode logs and allows."""
     if file_name not in _FILE_BUDGET_FILES:
         return None
     try:
         violations = el.check_file_budget(file_name, after_text)
     except AttributeError as exc:
-        # An older @memory in the tree publishes no file budgets. Allow, and say
-        # so once: a size rule that cannot be read is not a size rule that failed.
+        # An older @memory publishes no file budgets: a size rule that cannot be read has not failed.
         logger.info("[HOOKS] edit_gate: check_file_budget unavailable, %s unmeasured: %s", file_name, exc)
         return None
     if not violations:
@@ -764,23 +556,8 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
 def _todos_count_advisory(after: dict, branch: str) -> str:
     """Return advisory text if todos exceed rollover count limit, else empty string.
 
-    Throttled to roughly one reminder per 10 turns (the owner's ruling,
-    2026-08-19). Being over the cap is a STANDING condition — it stays true
-    until the next rollover and re-asserts on every local.json edit — so firing
-    per edit turned a correct advisory into 209 identical log lines and tripped
-    @trigger's repeat-signature escalation. The log line throttles with the
-    stdout line, not separately: escalation feeds on log repetition, so a
-    silenced advisory that still writes a warning would fix nothing.
-
-    The count is @memory's one resolver (config_loader.get_todos_count), the
-    number its roll applies. The old per_branch-or-defaults read said a hardcoded
-    10 for a per_branch local block without todos, where memory falls back to
-    the configured default. With no usable count configured memory rolls
-    nothing, and the text says so instead of promising a roll.
-
-    Scope: only this count advisory softens. Hard entry-limit blocks and the
-    newest-first checks are unchanged.
-    """
+    Throttled: over the cap is a STANDING condition and a per-edit line trips @trigger's repeat escalation,
+    so the log line throttles with the stdout line. The count is @memory's config_loader.get_todos_count."""
     try:
         todos = after.get("todos")
         if not isinstance(todos, list):
@@ -804,8 +581,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
             )
         cadence = _import_module("aipass.hooks.apps.modules.cadence")
         if not cadence.should_fire_advisory("todos_count"):
-            # debug, not info: the condition is unchanged and already recorded
-            # by the emission that did fire. Volume is the defect here.
+            # debug: the condition is unchanged and already recorded by the emission that fired.
             logger.debug("[HOOKS] edit_gate: %s (throttled)", msg)
             return ""
         logger.warning("[HOOKS] edit_gate: %s", msg)
@@ -818,28 +594,14 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
 def _is_auto_compact(entry: Any) -> bool:
     """True for auto-compact snapshot entries.
 
-    Must match rollover/extractor.py exactly. This guard and the extractor
-    classifying the same entries differently is what made the warning
-    unsatisfiable, so anything that is not a dict carrying
-    status == "auto-compact" is a regular entry in both places.
-    """
+    Must match rollover/extractor.py exactly, or the warning becomes unsatisfiable."""
     return isinstance(entry, dict) and entry.get("status") == "auto-compact"
 
 
 def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
     """Log one operator-facing line for a section over its rollover budget.
 
-    Every clause is a claim the code keeps: the count is the number rollover
-    itself counts, and @memory's detector marks the file ready at exactly this
-    threshold, so the archival named here really does happen.
-
-    INFO, not WARNING (compass #273, the owner 2026-08-14: severity follows design
-    intent). Over-budget is not wrong behaviour — it is behaviour we chose to
-    have, and the message itself says nothing is lost. As a WARNING this class
-    fed @trigger's escalation lane: 8 signatures, 579 occurrences, 10 of the 62
-    digests the lane has ever sent. The name says "note" so the level is not
-    re-raised to match a verb.
-    """
+    INFO, not WARNING: over-budget is chosen behaviour; as a WARNING it fed @trigger's escalation lane."""
     logger.info(
         "[HOOKS] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
         "The @memory rollover hook archives the %d oldest at the next PreCompact; "
@@ -857,11 +619,7 @@ def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: 
 def _note_todos_over_pad(branch: str, count: int, cap: int) -> None:
     """The todos twin of _note_over_budget: the roll is real, its destination is a file.
 
-    Until DPLAN-0345 todos skipped this lane: they never rolled, so any trim claim
-    was false. They roll now, one branch per call, to the backlog file and never
-    to vectors, so "recall them with drone @memory search" would be the false
-    clause. INFO for the same reason as _note_over_budget.
-    """
+    Todos roll to the backlog file, never to vectors, so "drone @memory search" would be the false clause."""
     logger.info(
         "[HOOKS] edit_gate: @%s .trinity/local.json — todos has %d entries, %d over the pad of %d. "
         "The %d oldest roll to %s at @%s's next PreCompact (or drone @memory rollover run --branch @%s); "
@@ -881,12 +639,7 @@ def _note_todos_over_pad(branch: str, count: int, cap: int) -> None:
 def _check_session_counts(branch: str, file_stem: str, entries: list, section_cfg: dict) -> None:
     """Warn on the sessions section, budgeting auto-compact snapshots separately.
 
-    Snapshots carry their own small cap in the extractor and never count against
-    the regular session budget. Checking the combined array against the regular
-    cap made this warning permanently unsatisfiable: a branch sitting legally at
-    14 regular + 2 snapshots read 16/15 on every .trinity write while rollover
-    correctly archived nothing, so the promised trim could never arrive.
-    """
+    Snapshots carry their own cap in the extractor; counting them against the regular cap is unsatisfiable."""
     auto_cap = section_cfg.get("auto_compact_cap")
     if auto_cap is not None:
         snapshots = [e for e in entries if _is_auto_compact(e)]
@@ -895,8 +648,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
 
     cap = section_cfg.get("count")
     if cap is not None:
-        # Unconditional split, matching the extractor: it excludes snapshots from
-        # the regular count whether or not auto_compact_cap is configured.
+        # Unconditional split, matching the extractor whether or not auto_compact_cap is configured.
         regular = [e for e in entries if not _is_auto_compact(e)]
         if len(regular) > cap:
             _note_over_budget(branch, file_stem, "sessions", len(regular), cap)
@@ -933,16 +685,9 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
 
 def _check_newest_first(before: dict, after: dict) -> dict | None:
     """Reject sessions[]/key_learnings[] edits that add entries anywhere but index 0,
-    or whose number doesn't exceed the max existing number (DPLAN-0278).
+    or whose number doesn't exceed the max existing number.
 
-    These arrays are newest-first: rollover archives the TAIL as "oldest". A new
-    entry appended after existing ones, or numbered <= the current max, gets
-    silently archived as history on the next rollover instead of kept as recent.
-
-    Ordinals are read through _entry_number, and an array where no entry carries a
-    recognized ordinal skips the monotonicity check entirely — see the comment at
-    that branch. The ordering check is schema-independent and always runs.
-    """
+    Newest-first: rollover archives the TAIL as oldest, so a misplaced or low-numbered entry is lost."""
     for key in _NEWEST_FIRST_ARRAYS:
         b = before.get(key)
         a = after.get(key)
@@ -973,9 +718,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
 
         new_numbers = [_entry_number(e) for e in new_entries if isinstance(e, dict)]
 
-        # An unnumbered array is not a newest-first violation, it is a schema this
-        # guard can't read. Blocking it would lock the branch out of its own memory
-        # with no way to comply. The ordering check above still applies.
+        # An unnumbered array is a schema this guard can't read; blocking it locks the branch out of its memory.
         if not existing_numbers and all(n is None for n in new_numbers):
             continue
 
@@ -1003,11 +746,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
 def _unparseable_refusal(fp: Path, exc: ValueError) -> dict:
     """Refuse a memory write whose RESULT does not parse — the file would be broken for every reader.
 
-    Until 2026-09-16 this fell into the catch-all below and was ALLOWED. Every
-    writer is atomic, so an unparseable memory file is a complete file an edit
-    broke; refusing the edit means it never breaks. Why this and not a reader
-    grace window: docs/trinity_memory_gate.md.
-    """
+    Every writer is atomic, so refusing the edit means the file never breaks (docs/trinity_memory_gate.md)."""
     reason = (
         f"{fp.name}: this edit would leave the file unparseable as JSON ({exc}). A memory file that does "
         "not parse is broken for every reader until the next edit lands — @memory, this gate, the tripwire "
@@ -1044,8 +783,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         try:
             before = json.loads(current_text) if current_text is not None else {}
         except ValueError as exc:
-            # Already broken on disk and this edit parses: it is the repair, judged as a new file. Until
-            # leg 5 it returned None here and the repair carried whatever it held past every cap.
+            # Already broken on disk and this edit parses: it is the repair, judged as a new file.
             logger.warning(
                 "[HOOKS] edit_gate: %s did not parse before this %s, which repairs it: %s", fp, tool_name, exc
             )
@@ -1070,15 +808,12 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if fp.name == "local.json":
             advisory = _todos_count_advisory(after, branch)
             if advisory:
-                # Context, not plain stdout: on a PreToolUse exit 0 Claude Code shows
-                # plain stdout in the transcript view and never hands it to the model,
-                # and the model writing the 11th todo is the audience (@canary
-                # measured it, 2026-09-15). No permissionDecision: this never decides.
+                # Context, not plain stdout: on PreToolUse exit 0 plain stdout never reaches the model.
                 output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": advisory}}
                 return {"stdout": json.dumps(output), "exit_code": 0}
 
         return None
-    except Exception as exc:  # fail closed (leg 5): an unreadable memory file passed every cap here
+    except Exception as exc:  # fail closed: an unreadable memory file must not pass every cap
         logger.warning("[HOOKS] edit_gate: .trinity check could not run, refusing: %s", exc)
         return _refuse(
             f"{fp.name} could not be checked against its caps ({type(exc).__name__}: {exc}), so the write is "
@@ -1102,11 +837,7 @@ def _seat_trinity(cwd: str) -> Path | None:
 def _watched_trinity_dirs(cwd: str) -> list[Path]:
     """Every .trinity in the project, the seat's own first; just the seat's when there is no project.
 
-    DPLAN-0347 row 4. The tripwire used to watch the seat alone, so a shell write
-    into ANOTHER branch's memory — the shape the cross-branch fence exists to
-    refuse, arriving by a path the reader cannot see — landed unreported. A stat
-    is all it takes to notice, and no file is read unless something changed.
-    """
+    A stat is all it takes to notice; no file is read unless something changed."""
     seat = _seat_trinity(cwd)
     dirs: list[Path] = [seat] if seat is not None else []
     project = _ownership().project_of(Path(cwd)) if cwd else None
@@ -1127,10 +858,7 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
 def _memory_stats(dirs: list[Path]) -> dict[str, list[int] | None]:
     """(mtime_ns, size) per watched file, keyed by full path.
 
-    None for a missing file, so a creation or a removal reads as a change. Keyed
-    by path rather than name because the tripwire now watches every .trinity in
-    the project and two branches have the same three file names.
-    """
+    None for a missing file, so creation or removal reads as a change; keyed by path, as branches share names."""
     stats: dict[str, list[int] | None] = {}
     for trinity in dirs:
         for name in sorted(_TRINITY_MEMORY_FILES):
@@ -1174,10 +902,7 @@ def _runs_memory_verb(command: str, cwd: str) -> bool:
 def _measure_memory_file(path: Path) -> list[str]:
     """What a memory file holds that fails its caps, rendered as the Edit refusal renders it, cut point included.
 
-    The WHOLE file is measured, not a diff: the snapshot holds stats, not text,
-    so an entry already over cap before the call is listed too. The report says
-    "holds", never "wrote".
-    """
+    The WHOLE file is measured (the snapshot holds stats, not text), so the report says "holds", never "wrote"."""
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
     if path.name in _FILE_BUDGET_FILES:
@@ -1204,26 +929,14 @@ def _measure_memory_file(path: Path) -> list[str]:
 
 
 def handle(hook_data: dict) -> dict:
-    """Apply edit security gates and return block or allow decision.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (block JSON or empty) and exit_code.
-    """
+    """Apply edit security gates and return block or allow decision."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
 
-        # The scripted lane. Three rules run on what the shell reader can see: the
-        # project fence, the memory rule (a .trinity memory file is written where
-        # its caps are measured, never from a shell — DPLAN-0342 row 3), and whose
-        # file it is (the owner's ruling, 2026-09-18). The inbox and daemon checks
-        # read a single named file, and a shell command has no such field. What the
-        # reader cannot see is published in bash_writes.NOT_CAUGHT; a memory write
-        # among it is reported after the call by tripwire().
+        # The scripted lane: project fence, memory rule, ownership. Inbox and daemon checks need a named file;
+        # what the reader cannot see (bash_writes.NOT_CAUGHT) the tripwire reports after the call.
         if tool_name == "Bash":
             cwd = hook_data.get("cwd", "") or os.getcwd()
             targets = _bash_write_targets(cwd, tool_input.get("command", ""))
@@ -1297,14 +1010,14 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
-        # A file the hook engine imports must not be left crashing at import (leg 5, item 2; the 10-03 incident).
+        # A file the hook engine imports must not be left crashing at import.
         home = _import_module("aipass.hooks.apps.handlers.config.loader").aipass_home()
         crash = _import_module("aipass.hooks.apps.modules.engine_closure")
         block = crash.crash_refusal(fp, tool_name, tool_input, _resolve_after_text, home)
         if block:
             return _refuse(block)
 
-        # Each seat reads its own diagnostics state alone (devpulse's decision A, leg 4).
+        # Each seat reads its own diagnostics state alone.
         ds = _import_module("aipass.hooks.apps.modules.diagnostics_state")
         seat = ds.seat_key(hook_data)
         state = ds.load_seat(seat) or {}
@@ -1332,9 +1045,7 @@ def handle(hook_data: dict) -> dict:
         if current_branch and errored_branch and current_branch != errored_branch:
             return {"stdout": "", "exit_code": 0}
 
-        # The block must describe what is true now, not what was true when auto_fix
-        # last ran. Any resolving write the hook did not observe — a Bash heredoc, an
-        # external editor — used to leave the state behind and block forever.
+        # Revalidate: a resolving write the hook did not observe (heredoc, editor) would block forever.
         fresh = ds.of_the_tree(errored, ds.revalidate(errored), 0)  # pyright counts from 0
         if fresh is not None:
             if not fresh:
@@ -1342,9 +1053,7 @@ def handle(hook_data: dict) -> dict:
                 return {"stdout": "", "exit_code": 0}
             errors = fresh
 
-        # An error that can only be fixed in another file cannot justify blocking edits
-        # to other files: that is the red-first deadlock, unsatisfiable by any allowed
-        # action. A single locally-fixable error among them keeps the block.
+        # Only-cross-file errors cannot justify the block: that is the red-first deadlock.
         if ds.all_cross_file(errors):
             logger.info(
                 "[HOOKS] edit_gate: %d cross-file error(s) in %s — not blocking (resolve elsewhere)",
@@ -1357,7 +1066,7 @@ def handle(hook_data: dict) -> dict:
         reason = f"Fix {len(errors)} error(s) in {Path(errored_file).name} before editing other files:\n{error_summary}"
         return _refuse(reason)
 
-    except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
+    except Exception as exc:  # fail closed on what this gate guards
         logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _refuse(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
@@ -1367,10 +1076,7 @@ def handle(hook_data: dict) -> dict:
 def tripwire_snapshot(hook_data: dict) -> dict:
     """PreToolUse (Bash): record the seat's memory-file stats under this call's tool_use_id.
 
-    The first half of the shell-memory tripwire; :func:`tripwire` is the second.
-    Never blocks. A snapshot that cannot be taken leaves the call unwatched and
-    says so in the log.
-    """
+    Never blocks; a snapshot that cannot be taken leaves the call unwatched and logs it."""
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
@@ -1384,8 +1090,7 @@ def tripwire_snapshot(hook_data: dict) -> dict:
         path = _tripwire_path(hook_data)
         pending = _read_pending(path)
         pending.pop(tool_use_id, None)
-        # The dir list is stored, not rescanned at PostToolUse: the comparison must
-        # be against what was measured, and a rescan would also pay the glob twice.
+        # The dir list is stored, not rescanned: the comparison must be against what was measured.
         pending[tool_use_id] = {"trinity": str(dirs[0]), "stats": _memory_stats(dirs)}
         while len(pending) > _TRIPWIRE_PENDING_MAX:
             pending.pop(next(iter(pending)))
@@ -1400,18 +1105,8 @@ def tripwire_snapshot(hook_data: dict) -> dict:
 def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
     """Report one changed memory file — loud when it does not measure clean, a question when it does.
 
-    A clean change is said, not charged, even for the seat's own file: another
-    seat's compaction rolls THIS seat's local.json (measured 2026-09-16). An
-    unclean change keeps the accusation and the cure. Cases: docs/trinity_memory_gate.md.
-
-    Args:
-        path: The changed memory file.
-        seat: The seat's own .trinity directory, from the snapshot.
-
-    Returns:
-        (lines, clean) — lines for the report, already indented where they
-        belong, and whether the file measured clean.
-    """
+    A clean change is said, not charged: another seat's compaction rolls THIS seat's local.json.
+    Cases: docs/trinity_memory_gate.md."""
     findings = _measure_memory_file(path)
     mine = path.parent == seat
     if mine and not findings:
@@ -1443,15 +1138,8 @@ def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
 def tripwire(hook_data: dict) -> dict:
     """PostToolUse (Bash): if the seat's memory changed during the call, measure it on disk and say so loudly.
 
-    DPLAN-0342 row 3, the belt to the Bash-lane refusal's braces. The refusal
-    covers every shell write the reader can SEE; this reports the ones it cannot
-    (a bare file name after cd, a path joined in program text, a path in a shell
-    variable) the moment they land, instead of weeks later in an audit nobody
-    ran. The comparison is against the snapshot :func:`tripwire_snapshot` took
-    for the same tool_use_id, so a memory Edit made just before the call is never
-    blamed on it. A drone @memory or @spawn verb is the sanctioned writer and is
-    not reported. Never blocks: the command has already run.
-    """
+    Compared against the same tool_use_id's snapshot, so a memory Edit just before the call is never blamed.
+    A drone @memory or @spawn verb is the sanctioned writer. Never blocks: the command has already run."""
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}

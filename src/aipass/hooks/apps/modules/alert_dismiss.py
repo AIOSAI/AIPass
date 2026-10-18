@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-09-07
+# Modified: 2026-10-17
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
@@ -30,8 +30,7 @@ HELP_COMMANDS = [
 def _find_aipass_dir() -> Path | None:
     """Walk up from CWD; return the nearest .aipass/ that contains alerts.json.
 
-    Every branch has its own .aipass/ (branch prompt), so stopping at the first
-    .aipass directory would never reach the project root where alerts.json lives.
+    Every branch has its own .aipass/, so stopping at the first would never reach the project's alerts.json.
     """
     search = Path.cwd()
     home = Path.home()
@@ -109,12 +108,8 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("Removes the alert with the given ID from .aipass/alerts.json.")
         return True
 
-    # _dismiss_alert computes the right answer at five sites and every False
-    # used to die on this line: `drone @hooks dismiss nosuchid` printed "not
-    # found" and exited 0, so a script could not tell a dismissal from a miss.
-    # The owner's standing ruling — a refusal exits non-zero and names the reason.
-    # Idiom is wire_verify.py:221-224; sys.exit rather than a return because
-    # handle_command's bool means "I routed this", not "it worked".
+    # A miss exits non-zero so a script can tell a dismissal from a miss; sys.exit, not a return,
+    # because handle_command's bool means "I routed this", not "it worked".
     if not _dismiss_alert(args[0]):
         sys.exit(1)
     return True

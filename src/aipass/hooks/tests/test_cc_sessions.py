@@ -4,7 +4,7 @@
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -26,9 +26,7 @@ from aipass.hooks.apps.modules import cc_sessions
 class TestResolveSessionPid:
     """The ppid walk that answers "which PID is my seat" (moved from presence.py).
 
-    The walk starts from the real os.getpid(): the fixture ancestry is written
-    with the test process's own pid (fleet green leg 7, no os.getpid patch), and
-    the ancestors are numbers no other key in the map can collide with.
+    The fixture ancestry is written with the test process's real pid, never a patched os.getpid.
     """
 
     def test_finds_session_file_ancestor(self):
@@ -66,9 +64,7 @@ class TestResolveSessionPid:
 class TestHasSessionFile:
     """Reads through CC_SESSIONS_DIR, so an unresolvable home answers instead of raising.
 
-    Read through resolve_session_pid (fleet_green leg 4): our own pid is the
-    walk's first step, and the ppid step answers None so no `ps` is started.
-    Proof: a mutant of the file check.
+    Read through resolve_session_pid; the ppid step answers None so no `ps` is started.
     """
 
     def test_true_when_the_file_is_there(self, tmp_path):
@@ -84,10 +80,7 @@ class TestHasSessionFile:
             assert cc_sessions.resolve_session_pid() is None
 
     def test_unresolvable_home_answers_false_not_raises(self):
-        # _claude_home() degrades to a path that cannot exist. The old presence.py
-        # built this path from Path.home() directly, so the same machine raised
-        # RuntimeError into presence_gate's except-and-allow — the gate went dark
-        # rather than reporting "no session files here".
+        # A raise here lands in presence_gate's except-and-allow: the gate goes dark.
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", cc_sessions.Path("<no-home>") / ".claude" / "sessions"),
             patch.object(cc_sessions, "_get_ppid_portable", return_value=None),
@@ -96,12 +89,7 @@ class TestHasSessionFile:
 
 
 class TestGetPpidPortable:
-    # The helper shells out to `ps` and is documented "Linux + macOS. Returns None
-    # on failure". Windows has no `ps`, so None IS the contract there, not a
-    # miss; pinned per platform after the Windows matrix went red on 2c8271a7
-    # (assert None == 5516).
-    # The first two are read through resolve_session_pid (fleet green leg 9): only our
-    # parent holds a session file, so the walk finds it exactly when the lookup answers.
+    # Windows has no `ps`, so None IS the contract there, not a miss: pinned per platform.
     @staticmethod
     def _resolved_with_parent_file(tmp_path):
         (tmp_path / f"{os.getppid()}.json").write_text(json.dumps({"pid": os.getppid()}), encoding="utf-8")
@@ -121,11 +109,7 @@ class TestGetPpidPortable:
 
 
 class TestIsPidAlive:
-    """Liveness as `drone @hooks sessions` reports it: each listing line ends live or stale.
-
-    The first four read the answer through the command (fleet_green leg 4);
-    their proof is a mutant of the pid guard and of the probe.
-    """
+    """Liveness as `drone @hooks sessions` reports it: each listing line ends live or stale."""
 
     @staticmethod
     def _status(tmp_path, capsys, pid: int) -> str:
@@ -159,8 +143,7 @@ class TestIsPidAlive:
 
 class TestProcStartTicks:
     """The first two read the live start through find_live_for_cwd (fleet_green leg 4):
-    our own session file carries a recorded procStart, and the listing keeps it
-    only when the value read back from /proc agrees. Proof: mutants of the read."""
+    the listing keeps a recorded procStart only when /proc agrees."""
 
     @staticmethod
     def _kept(tmp_path, recorded: str) -> bool:
@@ -192,9 +175,7 @@ class TestProcStartTicks:
 
 class TestSessionPidMatches:
     """Four units moved 2026-09-28: their answers are read through find_live_for_cwd
-    (TestFindLiveForCwd), the units archived in tests/.archive. The non-int guard
-    stays: find_live_for_cwd hands the pid to the liveness check first, so no
-    public route reaches it."""
+    (TestFindLiveForCwd). The non-int guard stays: no public route reaches it."""
 
     def test_non_int_pid_passes(self):
         assert cc_sessions._session_pid_matches({"pid": "not-an-int", "procStart": "123"}) is True
@@ -316,12 +297,7 @@ class TestFindLiveForCwd:
         assert result[0]["sessionId"] == "no-procstart"
 
     def test_unreadable_live_start_falls_back_to_liveness(self, tmp_path):
-        """A recorded procStart the host cannot read back is not a mismatch.
-
-        Moved here from the _session_pid_matches unit (fleet_green leg 4) so the
-        fallback is read through find_live_for_cwd. Proof: the mutant that
-        answers False on an unreadable start.
-        """
+        """A recorded procStart the host cannot read back is not a mismatch."""
         s = {
             "pid": os.getpid(),
             "sessionId": "unreadable",
@@ -423,10 +399,7 @@ class TestReclaim:
 class TestSessionHelpers:
     """Branch and short id, read where a caller outside the module meets them: the listing line.
 
-    `drone @hooks sessions` prints one line per session file as
-    PID · branch · short-id · kind · age, so each helper's answer is pinned
-    between its two separators. Green from their first run; their proof is a
-    mutant of each helper (fleet_green leg 4).
+    Each line is PID · branch · short-id · kind · age; each answer is pinned between its separators.
     """
 
     @staticmethod
@@ -464,18 +437,11 @@ class TestSessionHelpers:
 
 class TestIntrospection:
     def test_print_introspection_no_sessions(self, tmp_path, capsys):
-        """With no session files, introspection still names itself and the dir.
-
-        Had no oracle: an introspection that printed nothing passed, which is
-        exactly the failure this unit is positioned to catch - the empty-dir
-        path is the one where a reader has nothing else to check against.
-        """
+        """With no session files, introspection still names itself and the dir."""
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             cc_sessions.print_introspection()
 
-        # stderr, not stdout: this module prints through the cli's err_console,
-        # which is the seam that lets drone pipe a command's real output while
-        # narration still reaches the terminal.
+        # stderr: err_console lets drone pipe a command's real output while narration reaches the terminal.
         err = capsys.readouterr().err
         assert err.startswith("sessions — CC session listing & reclaim")
         assert "No CC session files found" in err
@@ -514,9 +480,7 @@ class TestIntrospection:
 
 class TestOccupantSelectionIsKindAware:
     """The seam named by @devpulse when the gate was flipped on 2026-08-18:
-    find_occupant returned the FIRST non-self match, so a bg occupant could
-    shadow a live interactive seat behind it — and a caller that skips bg
-    (ruling a) would then ALLOW what it should have blocked."""
+    a bg occupant must not shadow a live interactive seat, or a caller that skips bg ALLOWs it."""
 
     @staticmethod
     def _live(*sessions):
@@ -528,14 +492,7 @@ class TestOccupantSelectionIsKindAware:
 
     @staticmethod
     def _occupant_pid(cwd, **kwargs):
-        """The occupant's pid, having first proved there IS an occupant.
-
-        Every row below used to index find_occupant's result inline. It returns
-        dict | None - None is a real answer, pinned by test_free_branch_is_none
-        - so pyright read eight subscripts of None, and a regression that
-        answered None would have surfaced as a TypeError inside the assert
-        rather than as the ranking claim that actually broke.
-        """
+        """The occupant's pid, having first proved there IS an occupant."""
         occupant = cc_sessions.find_occupant(cwd, **kwargs)
         assert occupant is not None
         return occupant["pid"]

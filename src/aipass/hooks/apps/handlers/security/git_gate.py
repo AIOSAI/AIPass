@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -13,36 +13,7 @@
 Failure mode: a crash refuses the call it was checking (Bash and edit tools);
 the engine refuses on import error and timeout.
 
-Since 5.0.0 (DPLAN-0356 follow-up, the owner 2026-10-04: "if drone cannot do
-it, it cannot be done"): raw git, read or write, raw gh (``gh api`` GET
-included) and the R5/R6 lanes below are refused for EVERY seat, the verified
-admin seat included. A git refusal names the drone @git twin of the verb; a
-verb with no twin cannot be done, and the refusal says to mail @devpulse to ask
-@drone for one. Only the protected-file lane still answers to WHO: those files
-are the admin seat's to write (modules/admin_seat's 5-leg grant, never a
-directory name). Agent Bash only: service code that runs git as a subprocess
-never passes through a hook.
-
-Since 3.0.0 (DPLAN-0356 phase 2): the protected files (modules/protected_paths)
-are the admin seat's to write; WHO is the grant alone; no refusal tells an agent
-how to switch a gate off.
-
-Since 4.0.0 (DPLAN-0356 phase 3, the red team's root causes):
-  - R3: the program is read through modules/shell_reader, the branch's one
-    shell-word reader, the way the shell will run it. ``'g'it push``,
-    ``$'\\x67it' push``, ``{git,x} push``, ``eval 'git push'`` and ``uv run git
-    push`` are git. This gate keeps no split or regex of its own.
-  - R5: an interpreter whose readable program launches git or gh (a
-    subprocess call, backticks, GitPython, octokit) is refused.
-  - R6: reading the gh credential (``gh auth token``, the
-    keyring, gh's hosts file) and an HTTP client writing to the GitHub API
-    (curl/wget/httpie with a method other than GET or a body; the same in an
-    interpreter's program) are refused. A text gate cannot close this fully:
-    bash_writes.NOT_CAUGHT says so, and the kernel sandbox is the real boundary.
-  - R1/R2: the protected lane asks shell_reader.mutated_paths, so a delete, a
-    move away, a move over, a recursive copy over and a hard link whose source
-    is a protected file are refused off the admin seat on this lane's own
-    reading; protected_paths matches by file identity as well as by name.
+Reference: docs/git_gate.md
 """
 
 import importlib
@@ -52,8 +23,7 @@ import os
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-# The owner, 2026-10-04: any git command is blocked; if drone cannot do it, it cannot be done.
-# The refusal names the drone @git twin of the verb; a verb missing here has none.
+# A verb missing here has no drone twin, and the refusal says so.
 _GIT_TWINS = {
     "status": "drone @git status [--all]",
     "diff": "drone @git diff [--staged] [--all]",
@@ -71,7 +41,6 @@ _GIT_TWINS = {
     "fetch": "drone @git smart-sync",
     "rebase": "drone @git smart-sync",
     "merge": "drone @git merge-main (dev) or drone @git merge <PR#>",
-    # drone's read twins, 2026-10-04 (devpulse 662be795).
     "ls-files": "drone @git tracked <path ...>",
     "check-ignore": "drone @git tracked <path ...>",
     "rev-list": "drone @git status --all (ahead/behind line)",
@@ -236,8 +205,7 @@ def _extract_git_verb(tokens: list[str] | tuple[str, ...]) -> str | None:
     while i < len(tokens):
         tok = tokens[i]
         if not tok.startswith("-"):
-            # Lowercased for the membership test that follows it: the verb is
-            # read on every host the same way the program name is.
+            # Lowercased so the verb is read on every host the way the program name is.
             return tok.lower()
         if tok in _GIT_OPTS_WITH_ARG:
             i += 2
@@ -389,11 +357,8 @@ def _protected_refusal(path: str, what: str, lane: str, seat: _Seat) -> dict | N
 def _check_bash_protected(cmd: str, cwd: str, invocations: list, seat: _Seat) -> dict | None:
     """Any change to a gate-switching file the command can be seen to make, on this lane's own reading (R1, R2).
 
-    A write, a delete, a move away or over, a recursive copy over and the source
-    of a hard link all count; a directory counts when a protected file is inside
-    it and the command removes, moves or overlays the directory. Since 4.1.0 the
-    lane is default-deny (phase 4, P2): a protected path named as an operand of a
-    program that does not only read is refused, whatever the program is.
+    A directory counts when a protected file is inside it and the command removes, moves or overlays it.
+    Default-deny: a protected path as an operand of a program that does not only read is refused.
     """
     pp = _protected_paths()
     named = _shell_programs().named_paths(invocations, pp.protected)
@@ -441,14 +406,7 @@ def _check_edit(tool_input: dict, cwd: str) -> dict:
 
 
 def handle(hook_data: dict) -> dict:
-    """Block raw git/gh commands, GitHub writes and credential reads, and protected file changes.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (block JSON or empty) and exit_code.
-    """
+    """Block raw git/gh commands, GitHub writes and credential reads, and protected file changes."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})
@@ -459,7 +417,7 @@ def handle(hook_data: dict) -> dict:
         if tool_name in EDIT_TOOLS:
             return _check_edit(tool_input, cwd)
         return _BLOCK_ALLOW
-    except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
+    except Exception as exc:  # fail closed on what this gate guards
         logger.error("[HOOKS] git_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))

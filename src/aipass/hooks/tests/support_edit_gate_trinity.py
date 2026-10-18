@@ -3,13 +3,10 @@
 # Description: Helpers shared by the edit_gate .trinity test files: cap tables, hook data, the import seam routers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Helpers for the edit_gate .trinity tests (no test_ prefix: never collected)."""
-
-# Shared by test_edit_gate_trinity.py and its _write, _edit, _tripwire and
-# _refusals siblings, all of apps/handlers/security/edit_gate.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -109,17 +106,14 @@ _ROLLOVER_CONFIG_10 = {
 }
 
 
-# The real importer the routers below fall through to. While the tests patched
-# importlib.import_module itself, a call by name there re-entered the patch and
-# recursed; the routers now stand at the gate's seam, so importlib stays real.
+# The routers fall through to the real importer: they stand at the gate's seam, so importlib stays real.
 _REAL_IMPORT_MODULE = importlib.import_module
 
 
 def _imports_via_seam(side_effect):
     """Route the gate's call-time imports through its own seam, edit_gate._import_module.
 
-    Patching importlib.import_module replaced it process-wide: every module the
-    handler reached (and pytest itself) drew the mock. The seam is the gate's alone.
+    Patching importlib.import_module would replace it process-wide, pytest included.
     """
     return patch.object(edit_gate, "_import_module", side_effect=side_effect)
 
@@ -130,9 +124,7 @@ _OWNERSHIP_MODULE = "aipass.hooks.apps.modules.write_ownership"
 def _fence_real(mock):
     """Answer *mock* for every import except the ownership fence, which stays real.
 
-    These patches answered one mock for EVERY call-time import. That was harmless
-    while the Edit lane made no other import before the caps; since 2026-09-18 the
-    ownership fence is reached that way first, and a mocked fence is no fence.
+    The Edit lane reaches the ownership fence before the caps, and a mocked fence is no fence.
     """
     return lambda name: _REAL_IMPORT_MODULE(name) if name == _OWNERSHIP_MODULE else mock
 
@@ -144,10 +136,7 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
     entry_limits_mock = MagicMock()
     entry_limits_mock.load_entry_limits.return_value = limits
     entry_limits_mock.changed_entries = el_real.changed_entries
-    # The shape reader and the file budgets stay REAL. A MagicMock answers an
-    # empty iterator for both, which reads as "measures clean" — the one answer
-    # a size gate must never invent (FPLAN-0593: the passport row is measured
-    # against @memory's published 6,000/600, not against a stand-in).
+    # The shape reader and file budgets stay REAL: a MagicMock's empty iterator reads as "measures clean".
     entry_limits_mock.fields_for = el_real.fields_for
     entry_limits_mock.check_file_budget = el_real.check_file_budget
 

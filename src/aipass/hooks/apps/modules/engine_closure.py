@@ -5,31 +5,14 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
 
-The 10-03 incident (14:58 to 15:45): a module the engine imports used a name one
-edit before its import. The engine crashed with a NameError and, failing closed,
-refused every tool fleet-wide, Read included. Two layers already stood: the
-promoted copy (the engine runs from .live-current, not the source tree) and the
-fail-closed crash refusal. Neither covers another branch's module the engine
-imports live, which is where 10-03 struck. This is the third layer, the edit
-gate's (fleet green leg 5, item 2, the owner's question):
-
-  - :func:`closure` is COMPUTED, never a hand list: the roots are the engine, the
-    loader, the bridges and every handler wired in the root ``.aipass/hooks.json``;
-    from each, the ``aipass.*`` imports at module level are followed, with every
-    package ``__init__`` on the way. Files are read and parsed (``ast``), never
-    imported: importing would run them.
-  - :func:`crash_refusal` runs ruff with F821 (undefined name) on the text an edit
-    WOULD leave, before it lands, for a closure file only. Syntax errors come with
-    it: the dispatch named E999, which ruff removed (see CRASH_RULES).
-
-What it cannot see: an import made inside a function, or by importlib at run
-time. The engine's own handler imports are of that kind, which is why the wired
-handlers are roots rather than discovered.
+A crash in an engine-imported module fails closed and refuses every tool fleet-wide.
+Files are parsed, never imported (importing runs them). Function-level and importlib
+imports are invisible, which is why the wired handlers are roots rather than discovered.
 """
 
 import ast
@@ -56,8 +39,7 @@ ROOT_MODULES = (
     "aipass.hooks.apps.handlers.bridges.mount",
 )
 
-#: The rule that turns a module into a crash at import: an undefined name. A syntax error needs no rule:
-#: ruff removed E999 and reports every syntax error as ``invalid-syntax`` (0.15.x refuses ``--select E999``).
+#: Syntax errors need no rule: ruff reports them as ``invalid-syntax`` and refuses ``--select E999``.
 CRASH_RULES = "F821"
 
 REFUSED = (
@@ -132,14 +114,7 @@ def _imports(path: Path, package: str) -> list[str]:
 
 
 def closure(home: Path) -> frozenset[Path]:
-    """Every file the hook engine imports at module level, resolved, from its roots (see the module docstring).
-
-    Args:
-        home: The AIPass install root (holds src/aipass and .aipass/hooks.json).
-
-    Returns:
-        The resolved paths of the closure's files.
-    """
+    """Every file the hook engine imports at module level, resolved, from its roots (see the module docstring)."""
     src = home / "src"
     queue = [*ROOT_MODULES, *_wired_handlers(home)]
     seen_names: set[str] = set()
@@ -153,7 +128,6 @@ def closure(home: Path) -> frozenset[Path]:
             if path in files:
                 continue
             files.add(path)
-            # The package a relative import counts from: an __init__'s own, a module's parent.
             queue.extend(_imports(path, ".".join(path.relative_to(src).parts[:-1])))
     return frozenset(p.resolve() for p in files)
 
@@ -169,14 +143,7 @@ def _ruff(ruff: str | None) -> str | None:
 def crash_hits(path: Path, text: str, ruff: str | None = None) -> list[str] | None:
     """F821 and syntax errors in *text* as ruff reads it for *path*: one line per hit, [] when clean.
 
-    Args:
-        path: The file the text is for (ruff's --stdin-filename).
-        text: The text the edit would leave.
-        ruff: The ruff executable; None finds it (a seam, so no test patches shutil).
-
-    Returns:
-        The hits, or None when ruff could not be run (logged: the promoted copy and
-        the fail-closed engine still stand behind this layer).
+    None when ruff could not run (logged): the promoted copy and fail-closed engine still stand behind.
     """
     exe = _ruff(ruff)
     if not exe:
@@ -202,18 +169,7 @@ def crash_hits(path: Path, text: str, ruff: str | None = None) -> list[str] | No
 
 
 def crash_refusal(path: Path, tool_name: str, tool_input: dict, after_text, home: Path | None) -> str | None:
-    """The refusal for an edit that would leave a file of the engine's import closure crashing, or None.
-
-    Args:
-        path: The file being edited.
-        tool_name: Write, Edit or MultiEdit.
-        tool_input: The tool's input (content, or the edits).
-        after_text: edit_gate's own reader of the text an Edit or MultiEdit leaves.
-        home: The AIPass install root; None skips the check.
-
-    Returns:
-        The refusal text, or None (not a closure file, clean text, or ruff unavailable).
-    """
+    """The refusal for an edit that would leave a file of the engine's import closure crashing, or None."""
     if home is None or path.suffix != ".py" or tool_name not in ("Write", "Edit", "MultiEdit"):
         return None
     target = path.resolve()

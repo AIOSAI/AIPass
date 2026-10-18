@@ -5,25 +5,11 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
-Auto-compact is survivable by design (PreCompact recovery injection + post-
-compact regroup, DPLAN-0276/0278) — the gauge is a calm cue to save state at
-a natural breakpoint, not an alarm.
-
-Reads live transcript usage every prompt (cheap tail read), resolves the
-branch's compact trigger (window * 0.9), and injects a line once fill
-crosses 80%/95% of that trigger. Independent of the cadence system — its own
-per-threshold guard file in tempdir, same idiom as feedback_pulse.py /
-auto_process.py, so it isn't gated by turn count.
-
-The guard is keyed per CONTEXT WINDOW, not per session (DPLAN-0347). A session
-id outlives every compaction, so the old key meant the gauge fired at most twice
-in a session's whole life: after the first compact it went silent for good,
-exactly when the next fill starts climbing again. cadence.window_opened_at()
-changes at each compaction, so each window gets its own pair of nudges."""
+The guard is keyed per context window, not per session: a session id outlives every compaction."""
 
 import importlib
 import os
@@ -39,12 +25,7 @@ _ESCALATE_THRESHOLD_PCT = 95
 
 
 def _window_key(hook_data: dict) -> str:
-    """A tag that changes at every compaction, or 'w0' before the first one.
-
-    cadence stamps the window when it resets the turn counter on PreCompact.
-    No stamp means no compaction has happened in this session yet — the first
-    window, which is a real window and gets its own pair of nudges.
-    """
+    """A tag that changes at every compaction, or 'w0' before the first one."""
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         opened_at = cadence.window_opened_at(hook_data)

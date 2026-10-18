@@ -4,7 +4,7 @@
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -27,32 +27,11 @@ from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.apps.modules import bash_writes
 from aipass.hooks.apps.modules.bash_writes import write_targets
 
-# edit_gate's Edit/Write lane into memory files lives in tests/test_edit_gate.py and
-# tests/test_edit_gate_trinity.py.
-#
-# The owner's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
-# fence stays for every agent and devpulse is the sole exemption — "It is only you
-# who can reach outwards. Nobody else."
-#
-# Two halves, one boundary:
-#
-# 1. The admin seat passes, but only on a VERIFIED grant. Every test that grants
-#    the exemption also has a twin that withholds the grant from the same seat, so
-#    nothing here can pass on a directory name.
-# 2. Every other seat is blocked on BOTH lanes. The tool lane was already fenced;
-#    the shell lane (sed -i, redirection, tee, cp, a python heredoc) was open to
-#    all 18 citizens until this file.
-#
-# POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
-# IS the test data - a command string is what the gate reads, spelled as agents
-# type it.
-#
-# A path put INTO a command string is spelled with as_posix(), the form bash takes
-# on every OS (devpulse 401ee814, PR #762). The Windows backslash spelling is
-# tested on purpose, through _win(), only in the classes that pin it.
+# The cross-project fence holds on both lanes for every seat; only the admin seat passes, on a VERIFIED
+# grant, and each granted test has a withheld twin. POSIX literals are test data; a path put into a
+# command uses as_posix() (bash's form on every OS); backslashes are tested only through _win().
 
 _RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
-# The parser's call-time import, refused for real through a None entry in sys.modules (fleet green leg 8).
 _BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 
 
@@ -60,16 +39,7 @@ _BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 def sibling_projects(tmp_path: Path) -> dict:
     """Two top-level projects side by side — the real Projects/ layout.
 
-    The pre-existing project fixture nests one project inside the other, which
-    exercises the upward direction only. Tonight's blocked case was SIDEWAYS:
-    AIPass and Vera-Studio are siblings, neither contains the other.
-
-        Projects/
-          AIPass/        AIPASS_REGISTRY.json
-            src/aipass/devpulse/     the admin seat
-            src/aipass/hooks/        an ordinary seat
-          Vera-Studio/   VERA-STUDIO_REGISTRY.json
-            .daemon/schedule.json    the file @devpulse was refused
+    Siblings, so the sideways crossing is pinned (the nested fixture covers only upward).
     """
     projects = tmp_path / "Projects"
 
@@ -96,23 +66,7 @@ def sibling_projects(tmp_path: Path) -> dict:
 def _names(targets, *parts: str) -> bool:
     """True when some target ends in these components, in any OS's spelling.
 
-    THE CONTRACT, ruled 2026-08-31: the target list stays OS-NATIVE. These are
-    the Path objects edit_gate hands to write_ownership.project_of, which globs the real
-    filesystem for *_REGISTRY.json — a list canonicalised to POSIX spelling
-    would be unwalkable on Windows, so the fence would go dark in exactly the
-    place this whole train was fixing. 1.2.0 normalises separators on the way
-    IN, before pathlib parses a token; it deliberately does not normalise on the
-    way out.
-
-    So a test may not assert on str(target). @devpulse's windows-setup run
-    caught two that did — they expected "/other/Project/x.json" and got
-    "\\other\\Project\\x.json". That spelling is pathlib's own __str__ on
-    Windows, not anything 1.2.0 did: a rooted-but-driveless path is not
-    absolute there, and joining it onto the cwd REPLACES the cwd, so the same
-    two pins were red on Windows before 1.2.0 for the same reason.
-
-    Comparing components says what the test actually means — this command
-    surrendered that path — in a spelling neither OS owns.
+    Targets stay OS-native (project_of globs the real filesystem), so never assert on str(target).
     """
     return any(tuple(t.parts[-len(parts) :]) == parts for t, _ in targets)
 
@@ -160,12 +114,7 @@ class TestAdminExemptionToolLane:
     def test_another_seat_is_blocked_even_with_a_valid_grant_on_the_machine(
         self, sibling_projects: dict, grant_withheld
     ):
-        """A machine-wide grant is not a machine-wide licence.
-
-        The rail answers for the CALLER, so a grant that verifies for devpulse
-        says nothing about @hooks. Withholding here is the rail doing exactly
-        that — the seat changed, so the answer changed.
-        """
+        """A machine-wide grant is not a machine-wide licence: the rail answers for the CALLER."""
         result = _run(sibling_projects["plain_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
@@ -201,11 +150,7 @@ class TestAdminIdentityIsVerifiedNotClaimed:
     def test_the_stamp_does_not_outlive_the_check(self, sibling_projects: dict, grant_granted, monkeypatch):
         """A hook process is short-lived, but it is not the only thing in it.
 
-        The arrangement uses monkeypatch.delenv, not os.environ.pop: the
-        interpreter environment is process-wide, so a raw pop outlives this test
-        and every later test in the session sees it — and it is NOT restored on
-        the failing path, which is exactly the run where you least want the
-        environment silently rearranged (host_state, @seedgo 2026-09-08).
+        monkeypatch.delenv, not os.environ.pop: a raw pop outlives the test and is not restored on failure.
         """
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
@@ -232,11 +177,9 @@ class TestAdminIdentityIsVerifiedNotClaimed:
         assert _blocked(result)
 
     def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict, grant_granted):
-        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too.
+        """Only the rail is missing; the fence itself is a call-time import too.
 
-        The grant is given (fleet green leg 8), so the dark rail is the only thing that can refuse:
-        without it this pin passed with the rail arm opened. Only the gate's own import seam is
-        refused; a None entry in sys.modules was tried and did not isolate the rail arm.
+        The grant is given, so only the dark rail can refuse; a None sys.modules entry did not isolate it.
         """
         real = edit_gate._import_module
 
@@ -307,9 +250,7 @@ class TestScriptedLaneCatches:
     def test_writing_to_the_foreign_project_root_itself(self, sibling_projects: dict, grant_withheld):
         """The boundary walk starts AT the target, not at its parent.
 
-        A bash operand can name a directory, and a project root's parent holds
-        no registry — so starting one level up reads a write INTO Vera-Studio
-        as a write into the tree that merely contains it, and allows it.
+        An operand can name a project root, whose parent holds no registry.
         """
         command = f"cp ./local.json {sibling_projects['vera']}"
         assert _blocked(self._cmd_blocked(sibling_projects, command))
@@ -338,8 +279,7 @@ class TestScriptedLaneCatches:
         assert "sed -i" in _reason(result)
         assert "drone @devpulse feedback send" in _reason(result)
 
-    # The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): own files only, on this lane too.
-    # Until then the shell lane read the project boundary alone: hooks could sed another branch.
+    # Own files only, on this lane too: the project boundary alone would let hooks sed another branch.
 
     def test_sed_into_another_branch(self, registered_projects: dict):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
@@ -378,10 +318,9 @@ class TestScriptedLaneDoesNotOverreach:
         assert self._run_plain(sibling_projects, command)["exit_code"] == 0
 
     def test_a_program_that_only_reads_may_name_a_foreign_file(self, sibling_projects: dict):
-        """DPLAN-0356 phase 4, P2: default-deny. Only a read-only program may name it as an operand.
+        """Default-deny: only a read-only program may name it as an operand.
 
-        sed without -i was allowed until phase 4; its script can still write (w) or run (e),
-        so it is no longer read as a filter. grep and cat are.
+        sed without -i can still write (w) or run (e), so it is not read as a filter.
         """
         foreign = Path(sibling_projects["foreign_file"]).as_posix()  # bash eats an unquoted backslash (PR #774)
         assert self._run_plain(sibling_projects, f"sed s/a/b/ {foreign}")["exit_code"] == 2
@@ -412,11 +351,7 @@ class TestScriptedLaneDoesNotOverreach:
         assert self._run_plain(sibling_projects, "")["exit_code"] == 0
 
     def test_a_parser_failure_refuses_the_call(self, sibling_projects: dict, monkeypatch):
-        """DPLAN-0356 item 2: a fence that cannot read a command does not let it through.
-
-        The parser is made unimportable for real (fleet green leg 8); the error the refusal must carry
-        is asked of the interpreter, not named here.
-        """
+        """A fence that cannot read a command does not let it through."""
         monkeypatch.setitem(sys.modules, _BASH_WRITES, None)
         with pytest.raises(ImportError) as raised:
             importlib.import_module(_BASH_WRITES)
@@ -434,19 +369,16 @@ class TestScriptedLaneDoesNotOverreach:
     def test_an_interpreter_reading_another_branch_is_allowed(self, registered_projects: dict):
         """Inside one project the branch fence convicts on write grammar only.
 
-        An interpreter's held paths cannot be told from reads, and reading
-        another branch is the daily loop — the ruling allows it. The residual
-        (an interpreter that DOES write another branch) is published in
-        docs/edit_gate.md; the project fence still reads held paths.
+        An interpreter's held paths cannot be told from reads; the residual is published in docs/edit_gate.md.
         """
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         for command in (f"python3 -c \"print(open('{target}').read())\"", f"grep def {target}", f"cat {target}"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
-        # DPLAN-0356 phase 4, P2: awk is not a read-only program (print > file, system()), so it may not name it.
+        # awk is not a read-only program (print > file, system()), so it may not name it.
         assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
 
     def test_seedgo_and_the_manager_no_longer_write_across_branches_from_a_shell(self, registered_projects: dict):
-        """DPLAN-0356 item 5: a name (seedgo) and a manager row (vera) decide nothing in the shell lane either."""
+        """A name (seedgo) and a manager row (vera) decide nothing in the shell lane either."""
         memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
         assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
@@ -480,13 +412,7 @@ class TestScriptedLaneDoesNotOverreach:
 
 
 class TestShellWritesToMemoryAreRefused:
-    """DPLAN-0342 row 3: a memory file is written where its caps are measured, never from a shell.
-
-    @memory's caps run on the Edit/Write lane. A shell write landed unmeasured: @baud's 21 of 21
-    sessions went over cap that way, @api 12 sessions and 16 learnings, @hooks 9 entries. Every
-    one of those shapes is one this reader already claims, so the rule is a comparison on its
-    targets.
-    """
+    """A memory file is written where its caps are measured (the Edit/Write lane), never from a shell."""
 
     @pytest.mark.parametrize(
         "command",
@@ -532,12 +458,7 @@ class TestShellWritesToMemoryAreRefused:
     def test_the_cure_drops_the_fleet_clauses_where_there_is_no_fleet(self, sibling_projects: dict):
         """This gate ships to projects `aipass init` creates, and they have no @memory.
 
-        Two clauses of the cure sentence are AIPass-only: that a cap is measured
-        on the Edit/Write lane, and that a `drone @memory` verb is the other
-        door. Sent to a project without the fleet they name a service that is
-        not there and a verb that will refuse the caller — a refusal whose cure
-        does not work is one agents route around instead of reporting
-        (feedback c273274e, 2026-09-16).
+        A cure naming an absent service is one agents route around instead of reporting.
         """
         from unittest.mock import patch
 
@@ -545,10 +466,8 @@ class TestShellWritesToMemoryAreRefused:
         with patch(target, return_value=False):
             reason = _reason(_run(sibling_projects["plain_seat"], command="sed -i s/a/b/ .trinity/local.json"))
 
-        # Still refused, and still says where the write belongs.
         assert "local.json via sed -i" in reason
         assert "Edit or Write tool" in reason
-        # The two clauses that would be false there.
         assert "drone @memory" not in reason
         assert "@memory's caps are measured" not in reason
 
@@ -573,25 +492,16 @@ class TestShellMemoryRuleDoesNotOverreach:
         assert _run(sibling_projects["plain_seat"], command=command)["exit_code"] == 0, command
 
     def test_a_shell_write_to_a_passport_is_refused_like_the_other_two(self, sibling_projects: dict):
-        """DPLAN-0347 row 4 inverts this: passport.json was the one .trinity file any lane could write.
-
-        It was allowed here for a reason that no longer holds — @memory capped no
-        passport field, so there was nothing to measure. The identity block is
-        injected on every cadence beat, and the largest passport in the fleet had
-        reached 5,461 chars against a 4,000 budget nothing read. The refusal names
-        all three files now.
-        """
+        """passport.json is capped like the other two .trinity files, so a shell write to it is refused."""
         result = _run(sibling_projects["plain_seat"], command="echo x > .trinity/passport.json")
         assert _blocked(result)
         assert "passport.json" in _reason(result)
 
 
 class TestTheVerbIsReadTheSameOnEveryHost:
-    """One program, four spellings — the reading the gates share (DPLAN-0352).
+    """One program, four spellings — the reading the gates share.
 
-    Found while curing git_gate and rm_gate on 2026-09-19: this parser had the
-    same hole. ``CP.EXE`` and ``cp.exe`` are cp on a Windows host, and the
-    scripted lane read them as an unknown program that names no target.
+    ``CP.EXE`` is cp on a Windows host, not an unknown program that names no target.
     """
 
     def test_verb_name_reads_path_extension_and_case(self):
@@ -627,12 +537,7 @@ class TestBashWritesParser:
         assert write_targets("some_command 2>&1", str(tmp_path)) == []
 
     def test_a_quoted_heredoc_body_is_data_not_shell(self, tmp_path: Path):
-        """Found live: this gate blocked the reply describing its own proof.
-
-        A mail body assembled with ``cat <<EOF`` that QUOTES a shell command had
-        its quoted text read as real syntax. cat cannot write anywhere; the
-        redirection inside the body belongs to the prose, not to the shell.
-        """
+        """A redirection quoted inside a ``cat <<EOF`` body belongs to the prose, not to the shell."""
         command = "BODY=$(cat <<'EOF'\necho probe > /other/Project/x.tmp\nEOF\n)\ndrone @ai_mail reply id \"$BODY\""
         assert write_targets(command, str(tmp_path)) == []
 
@@ -656,12 +561,9 @@ class TestBashWritesParser:
             assert named in joined
 
     def test_no_usable_cwd_raises_rather_than_reading_no_writes(self, tmp_path: Path, monkeypatch):
-        """Fleet green leg 5: with no cwd to resolve against, the reader answered [] ("writes nothing").
+        """With no cwd to resolve against, the reader raises; [] would let a relative write through.
 
-        Every gate read that as nothing to judge and let a relative write through. It
-        now raises, and each gate's crash refusal refuses the call. The platform is
-        asked inside the test: Windows refuses to remove a process's cwd, and then
-        the cwd stays usable and the command is read as before.
+        Windows refuses to remove a process's cwd, so there the command is read as before.
         """
         gone = tmp_path / "gone"
         gone.mkdir()
@@ -688,17 +590,12 @@ class TestBashWritesParser:
         ids=["non-path-script", "ni-cluster", "i-suffix", "Ei-cluster", "e-script", "two-files", "script", "read"],
     )
     def test_sed_in_place_names_every_file_and_never_its_script(self, tmp_path: Path, command: str, named: list):
-        """Pad row 87 (devpulse 953c8a70): a non-path script dropped the real target, and -ni was not in place."""
+        """A non-path script must not drop the real target, and -ni is in place."""
         assert write_targets(command, str(tmp_path)) == [(tmp_path / name, "sed -i") for name in named]
 
 
 class TestEveryLineIsACommand:
-    """2026-09-10, found measuring devpulse's 213c64fd: a newline never separated.
-
-    shlex counts a newline as blank space, so "\\n" sat in _SEPARATORS and never
-    arrived. Line two of a multi-line command was glued onto line one as extra
-    operands: its write was invisible to both gates, and its cd never moved.
-    """
+    """A newline separates commands: shlex reads it as blank space, gluing line two onto line one."""
 
     def test_a_write_on_line_two_is_seen(self, tmp_path: Path):
         targets = write_targets("true\ntouch made.json", str(tmp_path))
@@ -729,8 +626,7 @@ class TestEveryLineIsACommand:
 
     def test_a_quoted_hash_is_data(self, tmp_path: Path):
         """The '#' starts a word INSIDE the quotes - only quote tracking keeps it data.
-        (MUTATION-CHECK: "'# header'" put it after the quote, where it never
-        starts a word, so the pin passed with quote tracking switched off.)"""
+        (MUTATION-CHECK: "'# header'" would pass with quote tracking off.)"""
         targets = write_targets("echo 'see # header' > made.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "made.json"), targets
 
@@ -750,13 +646,7 @@ class TestEveryLineIsACommand:
 
 
 class TestAnInterpreterHoldsOnlyItsOwnText:
-    """devpulse 213c64fd, @aipass hit it twice curing PR #761 (2026-09-09).
-
-    The interpreter scan was handed the WHOLE command although its docstring
-    said "the segment", so a python step claimed every path in the command and
-    resolved it from where IT stood. Standing before a cd, it took the later
-    pytest argument and named a doubled path that does not exist.
-    """
+    """An interpreter claims only its own segment's paths, resolved from where it stands."""
 
     def test_another_commands_path_is_not_claimed(self, tmp_path: Path):
         command = f"python3 - <<'EOF'\nprint(1)\nEOF\ncd {(tmp_path / 'sub').as_posix()} && cat data/x.json"
@@ -786,46 +676,21 @@ class TestAnInterpreterHoldsOnlyItsOwnText:
 
 
 def _win(path) -> str:
-    """Spell a path the way Windows spells it, on whatever OS is reading.
-
-    This is the whole trick that makes the class below runnable anywhere. On
-    Windows ``str(tmp_path)`` is already backslashed and this is a no-op. On
-    Linux it turns a real absolute POSIX path into ``\\tmp\\...\\f.json`` — the
-    exact spelling that killed the parser — and the gate must still resolve it
-    back to the same real file under the same real fence. The claim under test
-    is "separators are understood", and that claim is OS-independent even
-    though drive letters are not.
-    """
+    """Spell a path the way Windows spells it, on whatever OS is reading."""
     return str(path).replace("/", "\\")
 
 
 class TestWindowsSpelledPathsAreStillFenced:
     """Backslash separators must not walk a foreign write past the fence.
 
-    THE DEFECT (@devpulse, windows-test.yml, 2026-08-31): every test in
-    TestScriptedLaneCatches failed on Windows CI, all in the ALLOW direction —
-    exit 0 on `sed -i` into a sibling project. Their reading was "path
-    extraction or the fence comparison never matches that spelling". The
-    measurement puts it one layer earlier than either: shlex runs in POSIX
-    mode, where a backslash is an ESCAPE, so it ate every separator and
-    `C:\\Users\\me\\Vera-Studio\\f.json` arrived as the single token
-    `C:UsersmeVera-Studiof.json`. A drive-absolute foreign path became one
-    relative filename, resolved under the caller's OWN project, and read as a
-    local write. The extraction and the comparison were both working
-    correctly on a path that had already been destroyed.
-
-    Reproduced on Linux before the fix, no Windows box involved — which is the
-    point: the parser never needed a Windows runner to be wrong, it needed a
-    backslash. The class had never been green on Windows since the day it
-    shipped, and NOT_CAUGHT did not name it. A category believed caught and
-    silently uncaught on one OS is worse than a named blind spot.
+    POSIX shlex reads a backslash as an escape, collapsing a foreign path into one local filename.
     """
 
     def _cmd(self, sibling_projects: dict, command: str) -> dict:
         return _run(sibling_projects["plain_seat"], command=command)
 
     def test_sed_in_place_with_backslash_separators(self, sibling_projects, grant_withheld):
-        """The exact shape of devpulse's log line: exit 0 where 2 belonged."""
+        """sed -i into a sibling project, backslash-spelled: exit 2, not 0."""
         target = _win(sibling_projects["foreign_file"])
 
         result = self._cmd(sibling_projects, f"sed -i s/a/b/ {target}")
@@ -844,11 +709,7 @@ class TestWindowsSpelledPathsAreStillFenced:
         assert _blocked(self._cmd(sibling_projects, f"cp local.txt {target}")), "backslash cp allowed"
 
     def test_interpreter_holding_a_backslash_path(self, sibling_projects, grant_withheld):
-        """The regex knew only "/" — so on a Windows path it matched NOTHING.
-
-        Not a degraded reading: the interpreter mode, the broadest catch this
-        parser has, returned an empty list for every Windows-spelled command.
-        """
+        """The interpreter scan must read "\\" as a separator, or a Windows path matches nothing."""
         target = _win(sibling_projects["foreign_file"])
 
         result = self._cmd(sibling_projects, f"python3 -c \"open('{target}', 'w')\"")
@@ -866,11 +727,7 @@ class TestWindowsSpelledPathsAreStillFenced:
     def test_directory_target_with_no_extension(self, sibling_projects, grant_withheld):
         """`mkdir C:\\Proj\\Vera\\newdir` — no dot anywhere to fall back on.
 
-        Mutation found this one: with the backslash clause removed from
-        _looks_like_path every other Windows case still passed, because a
-        filename carries a dot and the dot clause caught it by luck of
-        spelling. A directory target has no dot, so the separator is the only
-        evidence that the token is a path at all.
+        Pins _looks_like_path's backslash clause: a dotted filename passes on the dot clause alone.
         """
         target = _win(Path(sibling_projects["vera"]) / "newdir")
         assert "." not in target, f"precondition lost — this path has a dot to fall back on: {target}"
@@ -878,12 +735,7 @@ class TestWindowsSpelledPathsAreStillFenced:
         assert _blocked(self._cmd(sibling_projects, f"mkdir {target}")), "backslash mkdir allowed"
 
     def test_local_write_stays_allowed_in_both_spellings(self, sibling_projects, grant_withheld):
-        """The fix must not convict the seat's own project of being foreign.
-
-        Reading a backslash as a separator only ever ADDS path components, so
-        it cannot move a write upward out of its own project — this pins that
-        reasoning rather than trusting it.
-        """
+        """The fix must not convict the seat's own project of being foreign."""
         own = _win(Path(sibling_projects["plain_seat"]) / "mine.txt")
 
         result = self._cmd(sibling_projects, f"echo x > {own}")
@@ -895,19 +747,14 @@ class TestBothSpellingsAreRead:
     """Parser level: neither dialect may be chosen at the other's expense."""
 
     def test_posix_escaped_space_survives(self, tmp_path: Path):
-        """shlex's escape reading is still produced — it is correct for POSIX.
-
-        `cp a\\ b.txt dest` names ONE source file with a space in it. If the
-        separator reading had replaced the escape reading rather than joining
-        it, this filename would have become two tokens on every OS.
-        """
+        """shlex's escape reading is still produced — it is correct for POSIX."""
         segments = bash_writes.write_targets_by_segment(r"cp a\ b.txt dest.txt", str(tmp_path))
         readings = [tokens for tokens, _ in segments]
 
         assert ["cp", "a b.txt", "dest.txt"] in readings, f"escape reading lost: {readings}"
 
     def test_separator_reading_is_produced_too(self, tmp_path: Path):
-        """The reading that was missing entirely until 2026-08-31."""
+        """The separator-keeping reading is produced alongside the escape reading."""
         segments = bash_writes.write_targets_by_segment(r"sed -i s/a/b/ C:\Proj\Vera\f.json", str(tmp_path))
         readings = [tokens for tokens, _ in segments]
 
@@ -922,11 +769,7 @@ class TestBothSpellingsAreRead:
     def test_a_target_named_twice_is_reported_once(self):
         """Both readings can find the SAME write; the caller is told once.
 
-        The first cut of this test used a Windows-spelled target, where the two
-        readings produce two DIFFERENT paths and there is nothing to dedupe —
-        it passed with the dedupe removed. Mutation caught it. The command here
-        carries a backslash (so both readings run) on something that is not the
-        target, so both readings agree on `out.txt` and the duplicate is real.
+        The backslash is off the target, so both readings agree on `out.txt` and the duplicate is real.
         """
         command = r'python3 -c "print(\"hi\")" > out.txt'
         readings = bash_writes.write_targets_by_segment(command, str(Path.cwd()))
@@ -939,8 +782,7 @@ class TestBothSpellingsAreRead:
     def test_separators_alone_are_not_a_path(self):
         """Widening the run to accept "\\" made every escaped quote match.
 
-        Harmless to the verdict — filesystem root holds no registry — but a
-        refusal listing paths the command never named is one nobody believes.
+        A refusal listing paths the command never named is one nobody believes.
         """
         hits = bash_writes.write_targets(r'python3 -c "print(\"hi\")"', str(Path.cwd()))
 
@@ -954,20 +796,10 @@ class TestBothSpellingsAreRead:
 
 
 class TestTargetSpellingIsNotPartOfTheContract:
-    """The two pins @devpulse's windows-setup run left red, pinned in-process.
-
-    Both asserted on str(target) and expected the POSIX spelling. Neither could
-    ever pass on Windows, and neither failure was about the parser — the target
-    was correct, the test was reading it through __str__.
-    """
+    """Tests compare target components, never str(target), which differs per OS."""
 
     def test_names_accepts_the_windows_rendering(self):
-        """The exact spelling from the CI log, compared on any OS.
-
-        This is the half that matters: the tests above are green here either
-        way, so without this one I would be shipping a fix to a Windows failure
-        with no evidence it addresses the Windows failure.
-        """
+        """The Windows rendering, compared on any OS: the tests above are green on Linux either way."""
         as_windows = [(PureWindowsPath(r"\other\Project\x.json"), "python3 (interpreter)")]
 
         assert _names(as_windows, "other", "Project", "x.json")
@@ -981,10 +813,7 @@ class TestTargetSpellingIsNotPartOfTheContract:
     def test_the_target_list_stays_os_native(self):
         """The ruling, pinned: normalise on the way IN, never on the way out.
 
-        edit_gate hands these straight to write_ownership.project_of, which globs the
-        real filesystem for *_REGISTRY.json. A list canonicalised to one
-        spelling would be unwalkable on the other OS — the fence would go dark
-        in precisely the place this train was fixing.
+        project_of globs the real filesystem; a canonicalised list is unwalkable on the other OS.
         """
         from pathlib import Path as LocalPath
 
@@ -999,11 +828,7 @@ class TestTargetSpellingIsNotPartOfTheContract:
 def _read_as(monkeypatch, pure: type) -> None:
     """The platform oracle: bash_writes builds every path in *pure*'s flavour.
 
-    The reader decides what a drive spelling means from the flavour of the path
-    it resolves against, so swapping the class it builds with is the one change
-    that makes Linux read a command the way Windows does (and Windows the way
-    Linux does). Nothing about the host is asserted. expanduser is the only
-    concrete method the reader calls, and a pure path has none.
+    expanduser is the only concrete method the reader calls, and a pure path has none.
     """
 
     class Flavour(pure):
@@ -1014,16 +839,7 @@ def _read_as(monkeypatch, pure: type) -> None:
 
 
 class TestTheGitBashDriveSpelling:
-    """devpulse 401ee814 (PR #762 windows-setup), FPLAN-0537 - a reader branch, not only a pin.
-
-    Git Bash spells drive C as /c: its pwd prints /c/Users/me, and every command it
-    runs accepts that. A Windows path cannot hold that spelling. WindowsPath("/c/Users/me")
-    has a root and no drive, so it joined the seat's drive and named
-    C:\\c\\Users\\me, a directory that holds no registry. So edit_gate ALLOWED a
-    foreign write spelled that way, and testwrite_gate called an edit of an
-    existing test a creation. Measured under the oracle before the cure: no
-    Windows box needed, only a Windows path.
-    """
+    """Git Bash's /c/... names drive C on Windows, not C:\\c\\... on the seat's drive."""
 
     SEAT = r"C:\Work\AIPass\src\aipass\hooks"
     VERA_FILE = PureWindowsPath(r"C:\Work\Vera-Studio\f.json")
@@ -1058,9 +874,7 @@ class TestTheGitBashDriveSpelling:
     def test_the_respelled_ci_pin_lands_on_the_existing_test(self, monkeypatch):
         """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
 
-        The half that matters: on Linux as_posix() changes nothing, so the pin
-        is green here either way. This is the evidence that C:/... reaches the
-        real file on Windows, rather than a directory under the seat.
+        On Linux as_posix() changes nothing; this shows C:/... reaches the real file on Windows.
         """
         _read_as(monkeypatch, PureWindowsPath)
         command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
@@ -1077,7 +891,7 @@ class TestTheGitBashDriveSpelling:
 
 
 class TestTheBranchAndMemoryLanesAreDefaultDeny:
-    """DPLAN-0356 phase 4, P2 in edit_gate: an unlisted write verb passed the branch and .trinity fences."""
+    """An unlisted program naming another branch or a .trinity file is refused, not passed."""
 
     def test_an_unlisted_program_naming_another_branch_is_refused(self, registered_projects: dict):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
@@ -1092,8 +906,8 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
 
     @pytest.mark.parametrize("cd", ["cd", "pushd"])
     def test_a_cd_into_another_branch_is_a_read_not_a_write(self, registered_projects: dict, grant_withheld, cd):
-        """Trigger a837a4c7, 54 hits from 10-01: `cd <AIPass>/src/aipass && ...` was refused, cd's directory
-        read as a write. Only the cd is cured: pytest naming another branch's directory stays that branch's."""
+        """`cd <AIPass>/src/aipass && ...`: cd's directory is not a write.
+        Only the cd is cured: pytest naming another branch's directory stays that branch's."""
         seat = Path(registered_projects["hooks"])
         other = Path(registered_projects["memory"]).as_posix()
         for command in (f"{cd} {seat.parent.as_posix()} && pytest hooks/tests -q", f"{cd} {other} && popd"):
@@ -1106,10 +920,9 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
 
     @pytest.mark.parametrize("flags", ["-p no:cacheprovider", "-k cd_into", "-k slow/net"])
     def test_a_flag_value_is_not_a_branch_write(self, registered_projects: dict, grant_withheld, flags):
-        """devpulse 73358617: a word that does not exist, whose first existing ancestor is src/aipass, names no file.
+        """A word that does not exist, whose first existing ancestor is src/aipass, names no file.
 
-        `-k slow/net` is the one the first-existing-ancestor walk decides: its own parent
-        (src/aipass/slow) reads as a branch by the path shape; src/aipass, where the walk stops, does not.
+        `-k slow/net` pins the first-existing-ancestor walk: its parent src/aipass/slow looks like a branch.
         """
         aipass = Path(registered_projects["hooks"]).parent.as_posix()
         result = _run(registered_projects["hooks"], command=f"cd {aipass} && pytest hooks/tests {flags}")
@@ -1129,10 +942,8 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
     def test_a_project_whose_directory_cannot_be_listed_is_refused_not_read_as_none(
         self, registered_projects: dict, grant_withheld, tmp_path: Path
     ):
-        """Fleet green leg 5: glob answered [] for a writable directory it could not list, so the registry
-        inside was read as no project and a crossing into it passed. Mode 0o300 keeps write and enter,
-        drops list. Where the platform still lists it (Windows, root) the crossing rule refuses instead:
-        the test asks os.scandir with its own hands and asserts the refusal either way."""
+        """An unlistable directory (0o300) must not read as no project: glob answers [] for it.
+        Where the platform still lists it (Windows, root) the crossing rule refuses instead."""
         locked = tmp_path / "Projects" / "Locked"
         locked.mkdir(parents=True)
         (locked / "LOCKED_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
@@ -1155,7 +966,7 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
 
 
 class TestAWordTheGateCannotProbe:
-    """devpulse 729ffaa9: a long printf format string was probed as a path and crashed the gate (ENAMETOOLONG)."""
+    """A long printf format string probed as a path must not crash the gate (ENAMETOOLONG)."""
 
     @pytest.mark.parametrize(
         "name",
@@ -1193,7 +1004,7 @@ class TestAWordTheGateCannotProbe:
 
 
 class TestASedPrintScriptIsARead:
-    """hooks todo 80 (devpulse c393e2f8): `sed -n 68,90p .claude/provider_manifest.json` was refused as a write."""
+    """`sed -n 68,90p .claude/provider_manifest.json` is a read, not a write."""
 
     def _manifest(self, registered_projects: dict) -> str:
         manifest = registered_projects["aipass"] / ".claude" / "provider_manifest.json"
@@ -1238,14 +1049,14 @@ class TestASedPrintScriptIsARead:
 
     @pytest.mark.parametrize("flags", ["-i -n", "-ni", "--in-place -n", "-n -i.bak"])
     def test_sed_in_place_on_the_same_path_stays_refused(self, registered_projects: dict, grant_withheld, flags: str):
-        """Both lanes hold all four: every sed read as a read still refuses here, through bash_writes (pad row 87)."""
+        """Both lanes hold all four: every sed read as a read still refuses here, through bash_writes."""
         manifest = self._manifest(registered_projects)
         result = _run(registered_projects["hooks"], command=f"sed {flags} 68,90p {manifest}")
         assert _blocked(result)
         assert "provider_manifest.json" in _reason(result)
 
     def test_a_print_read_of_a_memory_file_is_allowed_and_its_writes_are_not(self, registered_projects: dict):
-        """Refused by the memory lane until 1.3.0 of shell_programs, like cat and jq it now reads."""
+        """The memory lane reads a sed print script like cat and jq; its write forms stay refused."""
         seat = Path(registered_projects["hooks"])
         (seat / ".trinity").mkdir()
         (seat / ".trinity" / "local.json").write_text("{}\n", encoding="utf-8")

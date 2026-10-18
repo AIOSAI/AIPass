@@ -5,40 +5,12 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
 
-Measured before this module: any branch could write ``src/aipass/<self>/.aipass/hooks.json``
-(its own directory, so ownership allowed it) and its sessions ran with no gates;
-``~/.aipass/trusted_projects.json`` was writable by every branch and named by no
-gate. The loader now ignores a branch-level config, and these files are the
-admin seat's to write, through the tool lane and the Bash lane alike
-(handlers/security/git_gate.py consumes this):
-
-  - any ``.aipass/hooks.json`` under AIPASS_HOME, the root one included;
-  - ``~/.aipass/trusted_projects.json``;
-  - any ``.claude/settings*.json`` (the provider wiring), ``.claude/hooks/`` and ``.git/hooks/``;
-  - this branch's promoted copies (``.live-*``): only ``drone @hooks promote`` writes them;
-  - since 2.1.0 (phase 4, P2): everything under AIPASS_HOME's ``.git/``, and every
-    sealed ``*_REGISTRY.json`` under AIPASS_HOME (registry_gate's set).
-
-Since 2.1.0 the Bash lane is default-deny for this set: off the admin seat a
-command naming one as an operand is refused unless the program only reads
-(modules/shell_programs.READ_ONLY_PROGRAMS).
-
-An external project's own ``.aipass/hooks.json`` is not listed: trust decides
-whether it runs, and changing it breaks its trust hash.
-
-Since 2.0.0 (DPLAN-0356 phase 3, the red team's R1) a file is matched by WHAT
-it is as well as by its name. A hard link is a second name for the same file:
-``ln ~/.aipass/trusted_projects.json mine.json`` and a write to ``mine.json``
-lands in the trust registry. So an existing file with more than one link is
-compared by (device, inode) against every protected file on disk; one name of
-a protected file is protected under every name. :func:`protected_within` names a
-directory that holds a protected file, for the lanes that delete or move a
-directory whole (R2).
+Reference: docs/git_gate.md
 """
 
 import os
@@ -62,7 +34,7 @@ _ANYWHERE = (
     (re.compile(r"/\.git/hooks/", re.IGNORECASE), "git's own hooks (.git/hooks/)"),
 )
 _CONFIG_TAIL = re.compile(r"/\.aipass/hooks\.json$", re.IGNORECASE)
-# registry_gate's sealed set: any *_REGISTRY.json (phase 4, P2 — under AIPASS_HOME).
+# registry_gate's sealed set, matched only under AIPASS_HOME.
 _REGISTRY_TAIL = re.compile(r"/\w+_REGISTRY\.json$", re.IGNORECASE)
 
 TRUST = "the trust registry (~/.aipass/trusted_projects.json)"
@@ -125,11 +97,7 @@ def _files(root: Path, pattern: str) -> list[Path]:
 
 
 def anchors() -> list[Path]:
-    """Every protected file on disk now: the files a second name could reach.
-
-    Returns:
-        The existing protected files, each spelled once.
-    """
+    """Every protected file on disk now: the files a second name could reach."""
     user = Path.home()
     found = [user / ".aipass" / "trusted_projects.json", *_files(user / ".claude", "settings*.json")]
     found.extend(_files(user / ".claude" / "hooks", "**/*"))
@@ -174,29 +142,13 @@ def _by_identity(target: Path) -> str | None:
 
 
 def protected(path: str | Path, cwd: str = "") -> str | None:
-    """What *path* governs when it is a protected file, by name or by file identity, else None.
-
-    Args:
-        path: The file a write lands on; a relative path is read from *cwd*.
-        cwd: The session directory.
-
-    Returns:
-        A short phrase naming what the file switches, or None.
-    """
+    """What *path* governs when it is a protected file, by name or by file identity, else None."""
     target = _absolute(path, cwd)
     return _by_name(_spelled(target)) or _by_identity(target)
 
 
 def protected_within(path: str | Path, cwd: str = "") -> str | None:
-    """What a protected file inside directory *path* governs, else None (R2: a directory deleted or moved whole).
-
-    Args:
-        path: A directory a delete or move takes whole; a relative path is read from *cwd*.
-        cwd: The session directory.
-
-    Returns:
-        A short phrase naming what the held file switches, or None.
-    """
+    """What a protected file inside directory *path* governs, else None (R2: a directory deleted or moved whole)."""
     target = _absolute(path, cwd)
     spelled = _spelled(target)
     for anchor in anchors():

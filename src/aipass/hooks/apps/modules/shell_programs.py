@@ -5,29 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
 
-Phases 1 to 3 listed what writes, deletes and launches. The final review's
-verdict: that list is permanently incomplete — a write verb nobody listed passed
-every file fence at once. Phase 4 turns it around for the paths that matter:
-
-  - :data:`READ_ONLY_PROGRAMS` (P2). Off the admin seat, a protected path, a path
-    in another branch or a ``.trinity`` path may appear as an operand only of a
-    program on this short list. Anything else naming it is refused, whatever it is.
-    Since 1.1.0 (devpulse 73358617) the branch and .trinity lanes judge a word by
-    what exists on disk: a path that does not exist, whose first existing ancestor
-    is in no branch (``-k cd_into`` run from src/aipass), names no file.
-  - :data:`PLAIN_PROGRAMS` (P3). Programs whose operands are data or files, never a
-    program to run. Every OTHER command word may be a launcher nobody tabled, so
-    modules/shell_reader scans its operands for a delete verb, git or gh and reads
-    from there as a nested command.
-
-``drone`` is on both: it is the router, and every service it reaches answers for
-its own writes. modules/shell_reader, handlers/security/git_gate and edit_gate
-read these; no other copy exists.
+Off the admin seat a protected, other-branch or .trinity path may be an operand only of a READ_ONLY_PROGRAMS
+member (drone's services answer for their own writes); shell_reader, git_gate and edit_gate read these.
 """
 
 import re
@@ -38,13 +22,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-#: Programs that read their operands and write nothing of their own (P2).
 READ_ONLY_PROGRAMS = frozenset(
     {
         "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq", "wc", "stat",
         "ls", "dir", "tree", "diff", "cmp", "file", "du", "realpath", "readlink", "basename", "dirname",
         "sha256sum", "sha1sum", "sha512sum", "md5sum", "b2sum", "cksum", "test", "[", "drone",
-        # A directory change writes nothing (trigger a837a4c7: `cd <dir> && pytest` was refused as a write).
         "cd", "pushd", "popd",
     }
 )  # fmt: skip
@@ -58,7 +40,7 @@ _SED_LONG_FLAGS = frozenset(
     {"--quiet", "--silent", "--regexp-extended", "--separate", "--null-data", "--unbuffered", "--posix"}
 )
 
-#: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs (hooks todo 80).
+#: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs.
 _SED_PRINT_SCRIPT = re.compile(r"[0-9$,;!~pdq= ]+")
 
 #: The shells: with -n (noexec) among their leading options they parse a script and run nothing.
@@ -88,17 +70,7 @@ WATCHED_VERBS = frozenset(
 
 
 def read_only(program: str, argv: tuple[str, ...]) -> bool:
-    """True when *program* run with *argv* only reads its operands.
-
-    Args:
-        program: The program the shell runs, as shell_reader names it.
-        argv: Its whole argument vector, the program word first.
-
-    Returns:
-        True for a READ_ONLY_PROGRAMS member, for find without an acting flag, for
-        sed running only print scripts, a shell's -n syntax check, and
-        `aipass init update --dry-run` (the owner, 2026-10-16).
-    """
+    """True when *program* run with *argv* only reads its operands."""
     if program == "find":
         return not any(arg in _FIND_ACTIONS for arg in argv[1:])
     if program == "sed":
@@ -127,11 +99,7 @@ def syntax_check_only(argv: tuple[str, ...]) -> bool:
 
 
 def _sed_only_prints(argv: tuple[str, ...]) -> bool:
-    """True when sed's every script is a print script and every flag is a reading one (hooks todo 80).
-
-    `sed -n 68,90p file` was refused as a write: sed's script can write (w) or run (e), so
-    phase 4 read every sed as a writer. A script of addresses and p, d, q, = can do neither.
-    """
+    """True when sed's every script is a print script and every flag is a reading one (hooks todo 80)."""
     scripts: list[str] = []
     plain: list[str] = []
     script_next = False
@@ -184,8 +152,7 @@ def _carriers(invocations: list) -> set[int]:
 def _operand_texts(argv: tuple[str, ...], program: str = "") -> list[str]:
     """Every operand a path could hide in: plain words, and the value of a --flag=value.
 
-    printf's and echo's first plain word is a FORMAT, data and never a path; their
-    redirect target is the write, read by bash_writes (devpulse 729ffaa9).
+    printf's and echo's first plain word is a FORMAT, never a path; bash_writes reads their redirect.
     """
     texts = []
     format_pending = program in _FORMAT_FIRST
@@ -212,9 +179,7 @@ def first_existing(path: Path) -> Path:
 def _names_a_place(path: Path, places) -> bool:
     """True when *path* exists, or its first existing ancestor is one *places* accepts (devpulse 73358617).
 
-    A flag's value (``-k cd_into``, ``-p no:cacheprovider``) resolves to a path that
-    does not exist under a directory no branch owns: it names no file. An unreadable
-    path is kept, so the lane rules it as before rather than guessing.
+    A flag's value (``-k cd_into``) resolves to a nonexistent path under no branch: it names no file.
     """
     try:
         found = first_existing(path)
@@ -227,15 +192,7 @@ def _names_a_place(path: Path, places) -> bool:
 def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     """(program, path) for every operand of a program that does not only read (P2), resolved from its cwd.
 
-    Args:
-        invocations: shell_reader.invocations() of one command.
-        places: Optional judge of a directory. When given, an operand that does not
-            exist is kept only when places(its first existing ancestor) is true
-            (edit_gate: inside a branch). None keeps every operand (the protected lane).
-
-    Returns:
-        Each operand of each acting program, as the absolute path it would name.
-        A launcher that only carries a later program is judged through that program.
+    A nonexistent operand is kept only when places(its first existing ancestor) is true; None keeps every one.
     """
     carried = _carriers(invocations)
     found = []
@@ -254,15 +211,7 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
 
 
 def named_paths(invocations: list, judge) -> tuple[str, str, str] | None:
-    """(program, path, what) for the first operand *judge* names, in a program that does not only read (P2).
-
-    Args:
-        invocations: shell_reader.invocations() of one command.
-        judge: Called as judge(path, cwd); returns what the path is, or None.
-
-    Returns:
-        The first refused (program, path, what), or None when every naming program only reads.
-    """
+    """(program, path, what) for the first operand *judge* names, in a program that does not only read (P2)."""
     for program, path in named_operands(invocations):
         what = judge(path, "")
         if what:

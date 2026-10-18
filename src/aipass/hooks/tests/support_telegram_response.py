@@ -3,13 +3,10 @@
 # Description: Helpers shared by the telegram_response test files: patch targets, transcript lines, pending lookups
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Helpers for the telegram_response tests (no test_ prefix: never collected)."""
-
-# Shared by test_telegram_response.py, test_telegram_response_delivery.py and
-# test_telegram_response_mirror.py, all of apps/handlers/notification/telegram_response.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -27,14 +24,8 @@ def _kept_redirect() -> dict[str, str]:
     return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
 
 
-# The prax logger is mocked per test to keep log output out of the run.
 LOGGER_PATCH = "aipass.hooks.apps.handlers.notification.telegram_response.logger"
 MOD = "aipass.hooks.apps.handlers.notification.telegram_response"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _jsonl_line(entry_type: str, text: str = "", *, sidechain: bool = False, tool_result: bool = False) -> str:

@@ -1075,7 +1075,7 @@
     {
       "file": "tests/test_engine_contracts.py",
       "standard": "through_the_command",
-      "lines": [30],
+      "lines": [25],
       "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises."
     },
     {
@@ -1367,7 +1367,7 @@
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
-      "lines": [685, 747, 815, 1095, 1158],
+      "lines": [501, 539, 591, 830, 886],
       "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 685 _allowed_fields: the refusal's wording only, the refusal stands. 747: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 815: the todos advisory text, never a verdict. 1095 _seat_trinity and 1158 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5. Re-pinned +3 after the 729ffaa9 probe refusal landed above them (2026-10-08)."
     },
     {
@@ -1379,43 +1379,43 @@
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "logged_fallback",
-      "lines": [106, 127],
+      "lines": [76, 95],
       "reason": "Fleet green leg 5: 106 _format_session_age is display text only. 127 _session_start: None means 'cannot rank', which the docstring states and the caller treats as never younger, so no seat gains standing from an unreadable start."
     },
     {
       "file": "apps/modules/bash_writes.py",
       "standard": "logged_fallback",
-      "lines": [627],
+      "lines": [377],
       "reason": "Fleet green leg 5: a word Path() cannot construct (a NUL byte) names no file the OS can write; NOT_CAUGHT says so, and the shell itself refuses such a path."
     },
     {
       "file": "apps/modules/testgate_policy.py",
       "standard": "logged_fallback",
-      "lines": [117, 126],
+      "lines": [63, 72],
       "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
     },
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "logged_fallback",
-      "lines": [200],
+      "lines": [167],
       "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
-      "lines": [252, 255, 258, 261],
+      "lines": [203, 206, 209, 212],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
-      "lines": [170, 203, 209, 212, 215, 238, 321],
+      "lines": [137, 165, 171, 174, 177, 200, 275],
       "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
-      "lines": [157, 332, 503, 508, 604, 804, 898, 958, 1051],
+      "lines": [131, 285, 437, 442, 529, 711, 796, 853, 937],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
     {
@@ -1427,25 +1427,25 @@
     {
       "file": "apps/modules/cc_transcripts.py",
       "standard": "logged_fallback",
-      "lines": [209, 251],
+      "lines": [149, 188],
       "reason": "Fleet green leg 5: the recent-chats listing a session boot displays. An unlistable or unstattable transcript shows as no chat; guards no write."
     },
     {
       "file": "apps/modules/alert_dismiss.py",
       "standard": "logged_fallback",
-      "lines": [63, 78],
+      "lines": [62, 77],
       "reason": "Fleet green leg 5: the dismiss verb prints the failure in red to the operator who ran it and logs an error; False is the verb's 'not dismissed'. Not silent, guards no write."
     },
     {
       "file": "apps/modules/release_notice.py",
       "standard": "logged_fallback",
-      "lines": [59, 76, 98],
+      "lines": [45, 62, 80],
       "reason": "Fleet green leg 5: the manager-only release notice (advisory). No root, no passport or an unreadable passport means no notice; guards no write. 76 gained its log line in leg 5 (it was silent)."
     },
     {
       "file": "apps/modules/injection_ledger.py",
       "standard": "logged_fallback",
-      "lines": [73],
+      "lines": [52],
       "reason": "Fleet green leg 5: _automated is tri-state by its signature (bool | None); None records the ledger line without the flag, as its comment says."
     },
     {
@@ -1463,19 +1463,19 @@
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "logged_fallback",
-      "lines": [152, 221, 373, 984],
+      "lines": [104, 173, 313, 852],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
     {
       "file": "apps/handlers/config/output_merge.py",
       "standard": "logged_fallback",
-      "lines": [58],
+      "lines": [46],
       "reason": "Fleet green leg 5: _as_object's None is 'not a JSON object', and the merge keeps that stdout as text. A block is decided by the engine from exit code 2, before any merge."
     },
     {
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "logged_fallback",
-      "lines": [63],
+      "lines": [56],
       "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
     },
     {
@@ -1540,19 +1540,19 @@
     {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "through_the_command",
-      "lines": [241],
+      "lines": [184],
       "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a missing admin rail refuses (the lane goes dark, never open). Isolating that arm needs only the rail's import refused while every other call-time import of the gate runs, which is what edit_gate._import_module (its own import seam, leg 4) is for. A None entry in sys.modules was tried and did not isolate the arm: its 'return True' mutant survived twice. Through this seam, with the grant given, the mutant dies at _blocked."
     },
     {
       "file": "tests/test_cc_transcripts.py",
       "standard": "through_the_command",
-      "lines": [93, 117, 149],
+      "lines": [83, 106, 138],
       "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (a Windows path, the empty string, a non-BMP character). project_dir_for resolves its argument first, so on POSIX a raw Windows path or '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling (a drive letter on Windows), so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
     },
     {
       "file": "tests/test_cc_sessions.py",
       "standard": "through_the_command",
-      "lines": [120, 190, 200],
+      "lines": [108, 173, 181],
       "reason": "Fleet green leg 9, ruling (b), hooks' decision: three guards no public door reaches. resolve_session_pid walks from os.getpid() and its parents, so a dead PID never reaches the ppid lookup (contract: a failed ps answers None); find_live_for_cwd checks liveness first, so a dead PID never reaches the /proc start read (contract: unreadable answers None, liveness only) nor a non-int pid the identity check (contract: cannot check, keep). The live halves of the same helpers are read through resolve_session_pid, find_live_for_cwd and the sessions listing."
     },
     {
@@ -1594,7 +1594,7 @@
     {
       "file": "tests/test_session_boot_doors.py",
       "standard": "stdlib_patch",
-      "lines": [119, 205, 299],
+      "lines": [117, 201, 291],
       "reason": "Moved from test_session_boot.py by the 2026-10-08 split; that file's execvp row's ruling: fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8: patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux, claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
     },
     {
@@ -1612,19 +1612,19 @@
     {
       "file": "tests/test_cc_sessions.py",
       "standard": "stdlib_patch",
-      "lines": [152, 156],
+      "lines": [136, 140],
       "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): os.kill, a real signal."
     },
     {
       "file": "tests/test_cc_sessions.py",
       "standard": "stdlib_patch",
-      "lines": [152, 185, 189],
+      "lines": [136, 168, 172],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): sys.platform emulation; Windows pinned for real by CI's Windows lane."
     },
     {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
-      "lines": [1013],
+      "lines": [838],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {

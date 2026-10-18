@@ -3,15 +3,10 @@
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/engine.py: its contracts and error resilience."""
-
-# Error handling at the config and log edges, the data and exception contracts,
-# the mock infrastructure the suite stands on, provisioning, CLI routing and the
-# branch paths. The dispatcher core is test_engine.py; trust, timeouts and the
-# ledger are test_engine_safeguards.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
@@ -47,10 +42,7 @@ pytestmark = pytest.mark.usefixtures("_no_real_trust_banners")
 class TestErrorResilience:
     """Tests for error handling edge cases."""
 
-    # Both enrol the project first: unenrolled, find_project_config returns None
-    # at the trust check and never reads the file, so these passed without ever
-    # reaching the parse they are named for. The enrolment lands in conftest's
-    # sandbox registry (isolated_trust_registry).
+    # Both enrol first: unenrolled, find_project_config returns None before the parse they are named for.
     def test_corrupt_hooks_json(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
@@ -86,10 +78,7 @@ class TestErrorResilience:
     def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
         """seedgo's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
 
-        find_project_config bootstraps the registry when it is absent, and
-        REGISTRY_PATH is bound to Path.home() at import. The sandbox is checked
-        BEFORE the call, so a run without the guard fails without touching the
-        live file.
+        The sandbox is checked BEFORE the call, so a run without the guard fails without touching the live file.
         """
         registry = trust_registry.REGISTRY_PATH
         assert registry != Path.home() / ".aipass" / "trusted_projects.json"
@@ -112,24 +101,14 @@ class TestErrorResilience:
     def test_log_write_failure_does_not_crash(self, tmp_path, mock_logger):
         """A failed log write is reported and swallowed, never raised.
 
-        Had no oracle: the call sat alone and anything that did not raise was a
-        pass - including a version that dropped the OSError silently. Crash
-        isolation is the point of this handler, but a hook whose diagnostics
-        die quietly is the one failure nobody would ever see.
-
-        A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
-        via append_jsonl's Path(...).parent.mkdir - use a real tmp path.
+        A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD: use a real tmp path.
         """
-        # A directory stands where the log file should be, so the platform refuses
-        # the append itself (fleet green leg 7: no builtins.open patch). The test
-        # asks the platform what that open raises and asserts the report carries it.
+        # A directory where the log file should be makes the platform itself refuse the append.
         log_file = tmp_path / "engine.jsonl"
         log_file.mkdir()
         with pytest.raises(OSError) as raised:
             open(log_file, "a", encoding="utf-8").close()
-        # The report goes through diagnostics' own logger, not engine's - the
-        # mock_logger fixture patches engine.logger and would be blind here,
-        # which is exactly the "assert on the wrong seam" trap.
+        # The report goes through diagnostics' own logger; mock_logger patches engine's and is blind here.
         with (
             patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file),
             patch("aipass.hooks.apps.handlers.config.diagnostics.logger") as diag_logger,
@@ -145,15 +124,7 @@ class TestErrorResilience:
     def test_no_mock_named_directory_survives_in_the_branch_root(self):
         """A Mock handed to a filesystem call names a directory after its repr.
 
-        The cure for the known instance is in the test above (a real tmp path
-        instead of a bare Mock LOG_FILE, because append_jsonl calls
-        Path(...).parent.mkdir). This is the detector, and it is deliberately a
-        property of the TREE rather than of one call site: the next leak will
-        come from a different test, and the only thing every version of this
-        mistake has in common is the directory it leaves behind.
-
-        Found by @seedgo, 2026-09-16: MagicMock/LOG_FILE/ had sat in this branch
-        root since 2026-07-10 with nothing pointing at it.
+        A property of the TREE, not one call site: the next leak comes from a different test.
         """
         root = Path(__file__).resolve().parent.parent
         leaked = sorted(p.name for p in root.iterdir() if "mock" in p.name.lower())
@@ -165,10 +136,6 @@ class TestDataStructureContracts:
 
     def test_config_has_hooks_enabled_key(self, sample_hooks_config):
         assert "hooks_enabled" in sample_hooks_config
-
-    # test_config_event_values_are_dicts archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - it
-    # asserted a property of the conftest literal, never touching the engine.
 
     def test_log_entry_has_required_fields(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "test.jsonl"
@@ -271,10 +238,6 @@ class TestConftest:
         assert "command" in hook
         assert "matcher" in hook
 
-    # test_hooks_config_file_is_valid_json archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - the
-    # fixture writes the file with json.dumps, so the round trip was a tautology.
-
     def test_temp_test_dir_exists(self, temp_test_dir):
         assert temp_test_dir.exists()
         assert temp_test_dir.is_dir()
@@ -321,11 +284,7 @@ class TestCliRouting:
     def test_help_commands_auto_discovered(self, capsys):
         print_help()
         captured = capsys.readouterr()
-        # The floor, per module and not in total. Auto-discovery is the claim,
-        # so a module that stopped declaring HELP_COMMANDS has to red here - and
-        # a total-only floor would let hooksound go empty while engine's rows
-        # kept the count up. A floor and not the exact counts (3/1/1 today):
-        # adding a help command must not red a test about discovery.
+        # A floor per module, not in total and not exact: a module that stops declaring HELP_COMMANDS reds.
         assert min(len(hs_cmds), len(hst_cmds), len(eng_cmds)) >= 1
         commands = hs_cmds + hst_cmds + eng_cmds
         for cmd, _ in commands:
@@ -342,20 +301,13 @@ class TestCliRouting:
             with pytest.raises(SystemExit) as exit_info:
                 handle_command("status", [])
 
-        # Exit 1, not 0: rewritten 2026-09-07 (canary refusal sweep). Showing
-        # nothing and reporting success is the defect, not the message.
+        # Exit 1, not 0: showing nothing and reporting success is the defect.
         assert exit_info.value.code == 1
         captured = capsys.readouterr()
         assert "No .aipass/hooks.json" in captured.err
 
     def test_version_output(self, capsys):
-        """Read from the header, never hardcoded.
-
-        This asserted a literal "1.1.0" while the file header said 1.2.0 — the
-        second of two tests pinning the stale value they existed to catch
-        (todo 16, fixed 2026-09-07). Its twin lives in test_cli_routing.py and
-        covers both flags; this one keeps the claim on the engine-routed path.
-        """
+        """Read from the header, never hardcoded."""
         import re
 
         versions = re.findall(r"^# Version:\s*(\S+)", Path(entry.__file__).read_text(encoding="utf-8"), re.MULTILINE)
@@ -369,11 +321,6 @@ class TestCliRouting:
 
 class TestConfigDataContracts:
     """Additional data structure contract tests."""
-
-    # test_config_keys_are_strings archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - same
-    # species: it asserted a property of the conftest literal.
-    # test_hook_def_has_command_key 2026-09-28: asserts the conftest literal, no product (devpulse's decision F, leg 4).
 
     def test_data_keys_in_log_entry(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "test.jsonl"
@@ -392,13 +339,7 @@ class TestPathContracts:
     def test_paths_return_path(self):
         """BRANCH_ROOT resolves to this branch, not to whatever the cwd was.
 
-        The isinstance pair this replaces could not fail: both names are built
-        from Path literals at import, so they are Paths whether or not they
-        point anywhere. That mattered here more than most - BRANCH_ROOT is
-        resolved at import time, and the known gotcha in this branch is exactly
-        an import-time resolve that reads the cwd (ntpath.realpath on Windows).
-        A type check is blind to a BRANCH_ROOT pointing at the caller's
-        directory; a landmark under it is not.
+        A type check is blind to a BRANCH_ROOT pointing at the caller's directory; a landmark under it is not.
         """
         assert BRANCH_ROOT.name == "hooks"
         assert (BRANCH_ROOT / "apps" / "modules" / "engine.py").is_file()

@@ -5,33 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-09-06
+# Modified: 2026-10-17
 # =============================================
 
 """Portable hook test runner.
 
-Fires every hook from a project's .aipass/hooks.json with mock data
-and reports what fired, what blocked, and what crashed. Runnable from
-any project directory.
-
-A probe that mutates what it measures is not a probe. Every fire is aimed at a
-throwaway branch skeleton in tempdir, so no run touches the real branch's
-memory. Three inputs decide which branch a handler acts on, and the runner
-overrides all three (:func:`run_test`, skeleton from :func:`_build_skeleton`):
-
-* ``hook_data["cwd"]`` — honoured by pre_compact_prep, compact, the gates.
-* the process cwd — read directly by rollover, persistent_alert, email, loader.
-* ``AIPASS_HOME`` — rollover's preferred repo-root source.
-
-Two handlers reach past all three into another citizen's tree and get an
-explicit refusal instead (``AIPASS_HOOK_PROBE``, checked at their mutation
-point, never at their entry): rollover shells out to a fleet-wide memory trim,
-and auto_process spawns @memory's real background worker. @memory resolves
-neither from cwd nor from AIPASS_HOME — measured 2026-09-06, the name appears
-nowhere in its tree — so no environment seam can confine either one.
-
-Usage:
-    drone @hooks test [--verbose]
+Every fire aims at a throwaway branch skeleton (hook_data cwd, process cwd and AIPASS_HOME all overridden),
+so no run touches the real branch's memory.
 """
 
 import json
@@ -55,21 +35,14 @@ HELP_COMMANDS = [
 
 _SYNTHETIC_PATH = os.path.join(tempfile.gettempdir(), "hook_test_synthetic.txt")
 
-# Session identity for mock fires. Handlers resolve CLAUDE_CODE_SESSION_ID env-first,
-# and a live session's ID leaks into this subprocess — without an override, mock
-# PreCompact fires arm the REAL session's regroup backstop (mid-turn RE-GROUND
-# injection with no actual compaction).
+# Handlers resolve CLAUDE_CODE_SESSION_ID env-first: without an override a mock PreCompact
+# arms the real session's regroup backstop.
 _MOCK_SESSION_ID = "hook-test-mock"
 
-# Set for the duration of a probe run. Handlers whose real work mutates ANOTHER
-# citizen's tree read this at the mutation itself, so everything up to that
-# point still executes for real. Two sites today: rollover (fleet-wide memory
-# trim) and auto_process (spawns @memory's worker).
+# Read at the mutation itself by handlers that write another citizen's tree (rollover,
+# auto_process), which no environment seam confines.
 PROBE_ENV_VAR = "AIPASS_HOOK_PROBE"
 
-# Copied into the skeleton so handlers get realistic input. passport.json is
-# read for identity and observations.json for caps; local.json is the file
-# pre_compact_prep stamps, and stamping the COPY is the point.
 _SKELETON_MEMORY_FILES = ("local.json", "observations.json", "passport.json")
 
 MOCK_EVENTS = {
@@ -117,14 +90,7 @@ def _restore_env(name: str, prior: str | None) -> None:
 def _build_skeleton(real_branch: Path, destination: Path) -> Path:
     """Build a throwaway branch under ``destination`` and return it.
 
-    ``find_branch_dir`` walks a path for ``src/aipass/<name>`` and otherwise
-    accepts any directory holding a ``.trinity/``. The skeleton takes the second
-    door on purpose: a tempdir is never under ``src/aipass``, so a handler that
-    walks upward out of it finds nothing rather than finding the real fleet.
-
-    No ``AIPASS_REGISTRY.json`` is written. rollover treats the repo root as the
-    thing it hands to a subprocess, and a temp root would not confine that
-    subprocess anyway — the refusal at the mutation is what does that.
+    Never under src/aipass, so a handler walking upward out of it finds nothing rather than the real fleet.
     """
     branch = destination / real_branch.name
     trinity = branch / ".trinity"
@@ -179,8 +145,7 @@ def _test_single_hook(event_type: str, hook_name: str, hook_def: dict, stdin_dat
 def run_test(verbose: bool = False) -> dict:
     """Fire every hook with mock data against a throwaway branch, return results.
 
-    Config discovery happens BEFORE the cwd moves — the real project's
-    hooks.json is what we are probing, and the skeleton has none.
+    Config discovery happens before the cwd moves: the skeleton has no hooks.json.
     """
     config = find_project_config()
     if config is None:
@@ -212,7 +177,6 @@ def run_test(verbose: bool = False) -> dict:
 
             mock_data = dict(MOCK_EVENTS.get(event_type, {"type": event_type}))
             mock_data.setdefault("session_id", _MOCK_SESSION_ID)
-            # Handlers that honour a supplied cwd never see the real branch.
             mock_data["cwd"] = str(skeleton)
             stdin_data = json.dumps(mock_data)
 
@@ -228,15 +192,12 @@ def run_test(verbose: bool = False) -> dict:
             if event_results:
                 results[event_type] = event_results
     finally:
-        # cwd first: a caller left standing in a deleted directory is worse than
-        # any of the state below being briefly wrong.
+        # cwd first: a caller left standing in a deleted directory is the worst outcome.
         os.chdir(real_cwd)
         _restore_env("CLAUDE_CODE_SESSION_ID", prior_session)
         _restore_env("AIPASS_HOME", prior_home)
         _restore_env(PROBE_ENV_VAR, prior_probe)
         shutil.rmtree(workspace, ignore_errors=True)
-        # The throwaway aipass-cadence-hook-test-mock.json state file is left in
-        # tempdir on purpose: fixed name, overwritten per run, OS-cleans on reboot.
 
     return results
 

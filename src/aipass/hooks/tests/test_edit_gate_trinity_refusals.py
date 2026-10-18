@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity refusals: renamed fields, carried vs authored, field shapes, passport, logging
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: what a .trinity refusal names, and what it carries."""
@@ -32,23 +32,8 @@ from aipass.hooks.tests.support_edit_gate_trinity import (
 )
 
 
-# ---------------------------------------------------------------------------
-# B3 — the renamed-field dodge (DPLAN-0318 trinity standard, MASTER_LIST §2)
-# ---------------------------------------------------------------------------
-#
-# The cap check reads ONE canonical field name per entry type, taken from
-# @memory's memory.config.json entry_limits (file/container/field). When a
-# branch renamed that field — `learning` instead of `value` in ai_mail, api and
-# this branch — the extractor found no such key, answered "" and the entry
-# measured as ZERO characters. Three branches ran 2.7x over cap for the two
-# months AFTER the gate landed, and the gate reported compliance every time.
-#
-# `""` and "cannot read this" are different answers and must stay different.
-# An entry whose canonical field is MISSING is refused by NAME, never measured
-# as empty. The asymmetry mirrors @memory's entry_limits 1.3.0: only NEW or
-# EDITED entries are refused. Nine-plus branches carry legacy shapes until the
-# fleet reset wipes them, and bricking every memory write fleet-wide tonight
-# would cost more than the drift does.
+# An entry whose canonical field is MISSING is refused by NAME, never measured as "" (zero chars);
+# only NEW or EDITED entries are refused, as @memory's entry_limits does.
 
 
 _LIMITS_LIST_ENFORCE = {
@@ -79,11 +64,7 @@ class TestRenamedFieldDodge:
     """An entry whose canonical field was renamed must not measure as empty."""
 
     def test_renamed_field_over_cap_is_blocked(self, tmp_path):
-        """`learning` where the config says `value`: 500 chars read as 0 and passed.
-
-        This is B3 exactly as it shipped — the species this branch's own
-        local.json carries.
-        """
+        """`learning` where the config says `value`: 500 chars read as 0 and passed."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]})
@@ -111,12 +92,7 @@ class TestRenamedFieldDodge:
         assert "summary" in parsed["reason"]
 
     def test_renamed_field_under_cap_is_still_blocked(self, tmp_path):
-        """The refusal is about UNREADABILITY, not length.
-
-        A short renamed field is still a field the gate cannot measure, and
-        letting it through because it happens to be small is how the shape
-        spreads.
-        """
+        """The refusal is about UNREADABILITY, not length."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "short"}]})
@@ -153,21 +129,12 @@ class TestRenamedFieldLegacyAsymmetry:
     """Only NEW or EDITED entries are refused — untouched legacy shapes pass."""
 
     def test_untouched_legacy_entry_is_carried_not_refused(self, tmp_path):
-        """REVERSED BACK (2026-08-30) — and the round trip is the record.
-
-        Written the night B3 landed, flipped on 08-27 because the push had cured
-        the fleet (22/22), flipped back now because @memory measured that drift
-        RECURS and that refusing carried debt deadlocks their rollover. The
-        08-27 premise was a temporary state treated as permanent. A write is
-        refused for what it AUTHORS, never for what it CARRIES — the NEW
-        canonical entry on top is judged; the untouched legacy one is not.
-        """
+        """A write is refused for what it AUTHORS, never for what it CARRIES."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
         Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
 
-        # Same legacy entry, plus a NEW canonical one on top.
         content = json.dumps({"key_learnings": [{"number": 2, "date": "2026-08-25", "value": "new and legal"}, legacy]})
 
         with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
@@ -221,11 +188,7 @@ class TestUnreadableFieldWarnMode:
 
 
 class TestUnmeasurableReasonIsRendered:
-    """@memory's unmeasurable refusal must not render as '0/300 chars (+0)'.
-
-    A refusal that prints zeros reads like a bug in the gate. The reason it
-    carries is the whole point of refusing loudly.
-    """
+    """@memory's unmeasurable refusal must not render as '0/300 chars (+0)'."""
 
     def test_non_string_field_reason_reaches_the_agent(self, tmp_path):
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -244,16 +207,7 @@ class TestUnmeasurableReasonIsRendered:
 class TestNoDuplicateViolationLines:
     """One defect, one line — even when two checkers both find it.
 
-    @memory's entry_limits 1.4.0 closed the missing-field hole in their
-    extractor on the same night this gate grew its own check, so both now
-    report the same entry. Two identical lines in a refusal read as two
-    problems and cost the agent a hunt for the second one.
-
-    The independent check is KEPT rather than deleted. A gate that outsources
-    all of its measurement inherits its supplier's blind spots silently — which
-    is exactly how this bug survived two months. The union is the safe
-    direction for a gate (strictly more refusals, never fewer); the dedupe just
-    stops it being said twice.
+    The gate's own check stays beside @memory's: the union refuses more, the dedupe says it once.
     """
 
     def test_missing_field_reported_once(self, tmp_path):
@@ -300,29 +254,8 @@ class TestNoDuplicateViolationLines:
         assert "no 'value' field" in reason
 
 
-# ---------------------------------------------------------------------------
-# Authored vs carried — the on-disk pass is universal (2026-08-30)
-# ---------------------------------------------------------------------------
-#
-# I narrowed the exemption to todos on 08-27 on two beliefs: the fleet had
-# converged, so the clause protected nothing real; and "unchanged and over cap
-# passes" hid new drift. @memory disproved both from the outside — their
-# rollover lane failed identically every 20 minutes for three hours because the
-# extractor removed a tail, wrote the SMALLER document back, and a write gate
-# refused the whole file over an entry in the head it never touched. The
-# archiver is always on the losing side of that trade: the file cannot get
-# smaller because it is too big.
-#
-# So the rule is @memory's, and it is universal: a write is refused for what it
-# AUTHORS, never for what it CARRIES. My own refusal text is the other half of
-# the evidence — writes made through Bash are not checked, so a write gate is
-# structurally blind to how drift ARRIVES and was never the thing that could
-# detect it. That job is drone @memory lint, which reads the file.
-#
-# Carried drift is REPORTED at INFO, never refused. Identity is the raw entry,
-# never its index: a prepend shifts every position down, and an index-keyed
-# diff would call the whole file newly authored on exactly the write that
-# authored nothing.
+# A write is refused for what it AUTHORS, never for what it CARRIES: carried drift is logged at
+# INFO (drone @memory lint owns it). Identity is the raw entry, never its index.
 
 
 _LIMITS_TODOS = {
@@ -355,13 +288,7 @@ class TestCarriedDriftIsNotRefused:
     """Untouched drift is CARRIED everywhere — reported, never refused."""
 
     def test_untouched_drifted_key_learning_is_carried_not_refused(self, tmp_path):
-        """REVERSED BACK (2026-08-30): the on-disk pass is universal, not todos-only.
-
-        "Unchanged" means this write did not author it — the only thing a write
-        gate can honestly judge. Reading whole files for drift already on disk
-        is drone @memory lint's job, and it is the only component that can
-        actually see drift that arrived through Bash.
-        """
+        """The on-disk pass is universal, not todos-only."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
@@ -378,12 +305,7 @@ class TestCarriedDriftIsNotRefused:
         assert result["stdout"] == "", "carried drift must be reported in the log, never in a block"
 
     def test_untouched_drifted_todo_still_passes(self, tmp_path):
-        """THE CAUTION: a drifted todo must not brick a write to another section.
-
-        67 todos were restored by mail after the push defect and owners
-        reshape them on their own schedule. Blocking every write until they do
-        would make the exemption brick the branch it protects.
-        """
+        """THE CAUTION: a drifted todo must not brick a write to another section."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         drifted_todo = {"priority": "medium", "status": "open", "chore": "reshape me"}
@@ -432,15 +354,7 @@ class TestCarriedDriftIsNotRefused:
 class TestAuthoredVsCarriedUnit:
     """The authored half alone: @memory's changed_entries answers nothing here.
 
-    Mutation found the gap (2026-08-30): making _missing_field_violations
-    return NOTHING left all 115 end-to-end tests green. The union in
-    _evaluate_limits adds @memory's real changed_entries, which refuses a new
-    missing-field entry through its own lane — so every through-handle() test
-    that proves "authored drift is refused" passes for the wrong reason and
-    would keep passing if this checker were deleted outright. The overlap is
-    deliberate; a test suite that cannot tell the two halves apart is not.
-    These go through handle() with @memory's half (another branch, the edge)
-    standing in silent, so only this gate's own checker can refuse (fleet green leg 9).
+    With @memory's half silent, only this gate's checker can refuse, so deleting it fails these.
     """
 
     @staticmethod
@@ -482,9 +396,7 @@ class TestAuthoredVsCarriedUnit:
     def test_carrying_one_does_not_license_authoring_another(self, tmp_path):
         """The mixed case names the new entry and only the new entry.
 
-        This is the test the two survivors could not have been caught without:
-        it needs the checker to both skip AND refuse in the same call, so no
-        blanket answer — refuse everything, refuse nothing — satisfies it.
+        Skip AND refuse in one call: no blanket answer satisfies it.
         """
         legacy = {"number": 1, "date": "2026-08-01", "learning": "carried"}
         fresh = {"number": 2, "date": "2026-08-30", "learning": "authored in the same shape"}
@@ -495,12 +407,7 @@ class TestAuthoredVsCarriedUnit:
         assert hits[0].startswith("  key_learnings [0]: "), "the refusal named the carried entry's position"
 
     def test_a_prepend_does_not_reauthor_the_whole_file(self, tmp_path):
-        """Identity is the entry text, never its index.
-
-        A prepend shifts every position down. An index-keyed diff reads the
-        entire file as newly authored on exactly the write that authored
-        nothing new below the head.
-        """
+        """Identity is the entry text, never its index: a prepend shifts every position."""
         carried = [
             {"number": 1, "date": "2026-08-01", "learning": "a"},
             {"number": 2, "date": "2026-08-02", "learning": "b"},
@@ -541,14 +448,9 @@ def _session(**over):
 
 
 class TestMemorysNewRefusalReasonsRender:
-    """FPLAN-0593 row 6: @memory 1.11.0 publishes unknown_field and field_over_cap; this gate renders them.
+    """@memory publishes unknown_field and field_over_cap; this gate renders them, never as "unmeasurable".
 
-    Both arrive in the same six-key shape as the canonical cap, plus `field` and
-    `units`. The catch-all that used to swallow every reason called them
-    "unmeasurable — expected a string", which is the opposite of what happened:
-    a 917-char status was measured exactly, and a field outside the shape was
-    never a measurement at all. The closed shape is @memory's to publish and
-    this gate's to render — the allow-list comes from fields_for, never a copy.
+    The allow-list comes from @memory's fields_for, never a copy.
     """
 
     def _refuse(self, tmp_path, entry):
@@ -568,7 +470,7 @@ class TestMemorysNewRefusalReasonsRender:
         assert "unmeasurable" not in reason, "an unknown field was never a measurement"
 
     def test_a_field_over_its_cap_is_rendered_with_its_numbers(self, tmp_path):
-        """devpulse's 917-char status is the entry this shape exists for (S464 in a field nobody capped)."""
+        """A capped non-canonical field is measured and rendered with its numbers."""
         result = self._refuse(tmp_path, _session(status="s" * 917))
 
         reason = json.loads(result["stdout"])["reason"]
@@ -585,12 +487,9 @@ class TestMemorysNewRefusalReasonsRender:
 
 
 class TestPassportFileBudget:
-    """FPLAN-0593 row 6, the passport row: size only, the numbers are @memory's.
+    """The passport row: size only, the numbers are @memory's.
 
-    @spawn owns passport.json's schema, so this gate never judges its fields —
-    only how big the file is (6,000) and whether any one string is oversized
-    (600). Until today a passport was the one .trinity file any lane could write
-    at any size, and the identity block renders from it on every cadence beat.
+    @spawn owns passport.json's schema, so this gate judges only file size and string size.
     """
 
     def _write(self, tmp_path, doc, limits=_TEST_LIMITS_ENFORCE):
@@ -608,7 +507,7 @@ class TestPassportFileBudget:
         assert "/6000 chars" in reason
 
     def test_one_oversized_string_is_named_by_its_path(self, tmp_path):
-        """aipass carries identity.purpose at 869 today; the refusal has to say WHICH string."""
+        """The refusal has to say WHICH string."""
         result = self._write(tmp_path, {"identity": {"purpose": "p" * 700, "role": "r"}})
 
         reason = json.loads(result["stdout"])["reason"]
@@ -626,13 +525,7 @@ class TestPassportFileBudget:
 
 
 class TestTrinityRefusalsAreLogged:
-    """The memory-lane refusals that blocked silently until 2026-09-22.
-
-    The cap refusal only logged in WARN mode — the branch that returns the block
-    skipped _log_violation entirely — and newest-first and the unparseable guard
-    never logged at all. Measured from a live block on 2026-09-22 04:37:29 that
-    left no line in edit_gate.log.
-    """
+    """Every memory-lane refusal is logged, not only the WARN-mode cap."""
 
     def test_enforced_cap_refusal_is_logged(self, tmp_path, caplog):
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")

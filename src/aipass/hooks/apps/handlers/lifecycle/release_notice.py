@@ -5,18 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-10-17
 # =============================================
 
 """SessionStart door for the manager-only AIPass release notice.
 
-Fires on source=startup (new chat) and source=clear (/clear) — a manager
-waking is exactly when the news is actionable. Skips source=resume, whose
-restored context already carries the block if it fired, and source=compact,
-which is covered by post_compact_regrounding so the two never double up.
-
-All the deciding lives in apps/modules/release_notice.py; this file is the
-event wiring. Reads two files, writes none, and never runs the update.
+Skips resume (its context already carries the block) and compact (post_compact_regrounding covers it).
 """
 
 import importlib

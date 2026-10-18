@@ -5,44 +5,15 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
 
 Failure mode: a crash refuses the write it was checking; the engine refuses on import error and timeout.
 
-The ruling (devpulse DPLAN-0323): while @seedgo's test_quality v5 pack lands,
-agents are stripped of self-directed test creation. The corpus that ruling is
-draining — tests written to satisfy a checker rather than to pin a defect —
-regrows faster than a standards pack can cull it, so the cull needs a gate in
-front of it.
-
-WHAT IS BLOCKED: the CREATION of a pytest-collectable file inside a ``tests/``
-tree, on both lanes — the tool lane (Edit/Write/MultiEdit/NotebookEdit) and the
-scripted lane (Bash, read through ``bash_writes``, the same parser edit_gate's
-cross-project fence uses).
-
-WHAT IS NOT: edits to test files that already exist. An agent fixing a red test
-is doing legitimate work, and this ruling is about the corpus GROWING. That is
-a config field (``block_test_edits``), shipped false, live rather than dormant
-— a switch nobody has ever executed is not a switch, it is an untested branch,
-and the whole design brief here was that later changes are field flips and not
-rebuilds.
-
-ORDER OF QUESTIONS, and each one is load-bearing:
-
- 1. Is any target a test file at all? If not, return immediately — the policy
-    is never read. This is what makes the fail-closed policy safe: a missing or
-    corrupt policy cannot brick ordinary work, only test creation.
- 2. Is this the admin seat? Verified through the same 5-leg grant rail
-    edit_gate uses (``modules/admin_seat``), consulted BEFORE the policy so
-    that cleanup work with the owner survives a broken policy file.
- 3. What does the policy say? See ``modules/testgate_policy`` for the
-    fail-closed ruling and why it differs from bash_writes' allow-and-log.
-
-What this gate cannot see is published as data in
-``testwrite_targets.NOT_CAUGHT`` and printed by ``drone @hooks testwrite``.
+Blocks the CREATION of a test file on both lanes (tool, and Bash via bash_writes); edits pass unless
+block_test_edits is on. Non-test targets return before the policy is read: a broken policy cannot brick other work.
 """
 
 import importlib
@@ -54,43 +25,21 @@ from typing import Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-# Log-line only; modules/admin_seat's verified rail decides WHO. Spelled rather
-# than imported at module scope — see _module() on why handlers reach sideways
-# at call time.
+# Log-line only; modules/admin_seat's verified rail decides WHO.
 ADMIN_SEAT = "devpulse"
 _ALLOW = {"stdout": "", "exit_code": 0}
 _SOUND = "edit gate"
 
 
 def _module(name: str) -> Any:
-    """Reach a sibling module at CALL time, never at import time.
-
-    A handler importing ``apps.modules`` at module scope is the orchestration
-    inversion @seedgo's architecture check names, and it also drags every
-    module's imports into every hook process. edit_gate reaches bash_writes and
-    diagnostics_state exactly this way.
-
-    Args:
-        name: Module name under ``aipass.hooks.apps.modules``.
-
-    Returns:
-        The imported module.
-    """
+    """Reach a sibling module at CALL time, never at import time."""
     return importlib.import_module(f"aipass.hooks.apps.modules.{name}")
 
 
 def _is_admin_seat(cwd: str) -> bool:
     """True only when the 5-leg admin grant verifies, fail-closed at every edge.
 
-    An unimportable ``admin_seat`` refuses rather than raises: the delegation
-    must not become a way IN, and an exemption that opens because a module was
-    missing is worse than no exemption at all.
-
-    Args:
-        cwd: The session working directory from the hook payload.
-
-    Returns:
-        True when the grant verifies, False on every doubt.
+    An unimportable admin_seat refuses: a missing module must never open the exemption.
     """
     try:
         return bool(_module("admin_seat").is_admin_seat(cwd))
@@ -114,16 +63,7 @@ def _block(reason: str) -> dict:
 def _caller_branch(cwd: str) -> str:
     """Name the branch a session is standing in, or "" when it is not in one.
 
-    Reads the ``src/<package>/<branch>`` shape rather than an env var: a hook
-    process inherits whatever the session exported, and the ``allow`` array
-    decides who is exempt from a ruling — that must key on where the write is
-    actually being made from, not on a name the session could set for itself.
-
-    Args:
-        cwd: The session working directory from the hook payload.
-
-    Returns:
-        The branch name, or "" when the path has no branch shape.
+    Reads the path, not an env var: the session could set its own name to join the allow array.
     """
     parts = Path(cwd).parts
     for i, part in enumerate(parts):
@@ -135,24 +75,13 @@ def _caller_branch(cwd: str) -> str:
 def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[Path]:
     """Every write target this event can be seen to name.
 
-    Two lanes, one classification. The scripted lane reuses ``bash_writes``
-    rather than growing a second shell reader — a gate that reads commands
-    differently from the fence beside it will one day disagree with it.
-
-    Args:
-        tool_name: The tool the platform is about to run.
-        tool_input: That tool's input payload.
-        cwd: The session working directory relative paths resolve against.
-
-    Returns:
-        Resolved candidate paths, possibly empty.
+    Bash reuses bash_writes so this gate never reads a command differently from edit_gate's fence.
     """
     if tool_name == "Bash":
         command = tool_input.get("command", "")
         if not command:
             return []
-        # A parser that cannot read a command raises into handle()'s crash refusal:
-        # the gate refuses what it cannot read (DPLAN-0356 item 2; it allowed until 1.4.0).
+        # A command the parser cannot read raises into handle()'s crash refusal.
         return [target for target, _why in testwrite_targets_bash(command, cwd)]
 
     file_path = tool_input.get("file_path", "")
@@ -161,36 +90,18 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[Path]:
     return [Path(file_path)]
 
 
-# A module-run of one of these is a test RUN. It executes existing tests and
-# cannot create a source file, so the paths it is handed are arguments, not
-# write targets. Kept narrow on purpose: only the `-m <runner>` form, never a
-# bare `python script.py`, which really can write anything.
+# A `-m <runner>` run executes existing tests and creates no file; a bare `python script.py` can write anything.
 _TEST_RUNNER_MODULES = frozenset({"pytest", "unittest"})
 
-# Why-strings bash_writes attributes to an interpreter holding a path. Breadth
-# that is correct for edit_gate's cross-project fence — an interpreter holding
-# a foreign path cannot be distinguished from one writing to it — and wrong for
-# this gate, which asks the narrower question "is a NEW TEST being created".
+# bash_writes' interpreter reason: right for edit_gate's fence, too broad for "is a new test created".
 _INTERPRETER_REASON = "(interpreter — may write any path it holds)"
 
-# The marker bash_writes appends when an interpreter's own text names no verb
-# that creates a file. READ from the reader, never restated here: auto_fix spent
-# months grepping for a marker @seedgo had stopped printing, and this gate
-# refusing a command it should pass is that same silence with a wall in front of
-# it. Absent — an older bash_writes — means no evidence either way, and the gate
-# keeps its old, broader reading.
+# Read from bash_writes, never restated, so a renamed marker cannot drift; absent means no evidence either way.
 _NO_WRITE_VERB_ATTR = "NO_WRITE_VERB"
 
 
 def _is_test_run(segment: list[str]) -> bool:
-    """True when this segment merely RUNS tests.
-
-    An interpreter asked for the pytest module, handed a test path, names that
-    path and writes nothing. Before this, every such invocation was refused as
-    a test creation — false fire #7, banked 2026-09-05 and reproduced live
-    2026-09-07 while measuring this fix: the diagnostic command written to
-    MEASURE the defect tripped it.
-    """
+    """True when this segment merely RUNS tests."""
     for index, token in enumerate(segment):
         if token == "-m" and index + 1 < len(segment):
             return segment[index + 1] in _TEST_RUNNER_MODULES
@@ -200,27 +111,7 @@ def _is_test_run(segment: list[str]) -> bool:
 def testwrite_targets_bash(command: str, cwd: str) -> list[tuple[Path, str]]:
     """Seam onto ``bash_writes``, minus the targets a test RUN merely names.
 
-    Reuses the one shell reader rather than growing a second, and drops the two
-    interpreter-attributed targets that cannot be a test CREATION:
-
-     * one from a segment that merely RUNS tests (see :func:`_is_test_run`)
-     * one from an interpreter whose own text names no write verb at all — a
-       path printed, compared or logged. @seedgo was refused for an interpreter
-       one-liner that PRINTED a test path (2026-09-19), @canary for one in a
-       heredoc, and this branch for both: data was being read as a target. The
-       evidence comes from bash_writes, the one reader holding the program text.
-
-    Everything else survives: a runner segment chained to a ``touch`` of a new
-    test still refuses, because ``touch`` names its target under its own reason
-    in its own segment, and a heredoc that really writes still carries a write
-    verb.
-
-    Args:
-        command: The raw Bash command string.
-        cwd: The session working directory.
-
-    Returns:
-        The (path, why) pairs bash_writes reports, runner and read-only noise gone.
+    A `touch` of a new test or a heredoc with a write verb still refuses.
     """
     reader = _module("bash_writes")
     grouped = reader.write_targets_by_segment(command, cwd)
@@ -287,14 +178,7 @@ def _refuse_unreadable(targets: list[Path], policy: Any, lane: str) -> dict:
 
 
 def handle(hook_data: dict) -> dict:
-    """Apply the test-write policy and return a block or allow decision.
-
-    Args:
-        hook_data: Parsed hook event dict from the engine.
-
-    Returns:
-        Result dict with stdout (block JSON or empty) and exit_code.
-    """
+    """Apply the test-write policy and return a block or allow decision."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     if tool_name != "Bash" and tool_name not in EDIT_TOOLS:
         return _ALLOW
@@ -306,8 +190,7 @@ def handle(hook_data: dict) -> dict:
         targets = _module("testwrite_targets")
         created, edited = targets.classify(_targets(tool_name, tool_input, cwd))
         if not created and not edited:
-            # The policy is deliberately NOT read here. Ordinary work must not be
-            # reachable by a broken policy file — see modules/testgate_policy.
+            # Policy deliberately unread here: a broken policy file must not reach ordinary work.
             return _ALLOW
 
         if _is_admin_seat(cwd):
@@ -321,9 +204,7 @@ def handle(hook_data: dict) -> dict:
         policy = _module("testgate_policy").load(cwd)
         if policy.error:
             if not created:
-                # A policy we cannot read says nothing about edits either, but the
-                # ruling it stands in for only ever blocked creation. Refusing an
-                # edit on an unreadable file would extend a ruling by accident.
+                # The ruling only ever blocked creation; refusing an edit here would extend it by accident.
                 logger.warning("[HOOKS] testwrite_gate: policy unreadable, edit-only write allowed: %s", policy.error)
                 return _ALLOW
             logger.warning("[HOOKS] testwrite_gate: refusing (fail-closed): %s", policy.error)
@@ -357,56 +238,25 @@ def handle(hook_data: dict) -> dict:
 
         return _ALLOW
 
-    except Exception as exc:  # fail closed on the write this gate guards (DPLAN-0356 item 2)
-        # Until 2026-09-30 a defect here allowed the write ("loud, not a wall").
-        # The owner's ruling turned every gate's crash into a refusal: the gate
-        # is broken, and nothing it guards runs until it is fixed.
+    except Exception as exc:  # fail closed on the write this gate guards
         logger.error("[HOOKS] testwrite_gate: crashed on %s, refusing it: %s", tool_name, exc)
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
 
 
-# ---------------------------------------------------------------------------
-# The template pointer — @seedgo's contract, this branch's hook (DPLAN-0354)
-#
-# @seedgo houses the fleet's test template and distributes it as a page in each
-# branch's own tests/, beside a receipt. Their contract, verbatim: on a
-# PostToolUse touching a path matching tests/**, one line pointing at the LOCAL
-# page and then the checklist. Nothing here reads seedgo's manifest — the page
-# beside the file is the whole question, read per call, because a receipt that
-# was true when the process started is not evidence about now.
-#
-# It shares this file with the gate rather than growing a second reader of the
-# tests/ shape: the gate's own target walk (_targets) answers both lanes, and
-# testwrite_targets.in_test_tree answers the path question for both callers.
-# ---------------------------------------------------------------------------
+# Template pointer, @seedgo's contract: on PostToolUse in tests/**, one line pointing at the LOCAL page, read per call.
 
 #: The page @seedgo stamps into each branch's tests/, and the receipt beside it.
 TEMPLATE_PAGE = "TEST_TEMPLATE.md"
 TEMPLATE_RECEIPT = ".template_version.json"
 
-#: The receipt key that carries this template's version.
 _TEMPLATE_KEY = "test_template"
 
-#: What the line says when no readable receipt names a version. The PAGE is what
-#: decides whether the line appears at all; the receipt only spells the number,
-#: so an unreadable one costs accuracy in one word, never the pointer.
+#: The page decides whether the line appears; an unreadable receipt costs only the version word.
 _DEFAULT_VERSION = "v1"
 
 
 def _nearest_test_tree(path: Path) -> Path | None:
-    """The innermost ``tests`` directory *path* sits in, or None.
-
-    Innermost on purpose: the page lives beside the suite it describes, so a
-    file at ``tests/fixtures/x.json`` is pointed at ``tests/TEST_TEMPLATE.md``
-    and a branch that nests a second test tree gets its own page rather than
-    its parent's.
-
-    Args:
-        path: A write target already known to be inside a test tree.
-
-    Returns:
-        That directory, or None when no component is named ``tests``.
-    """
+    """The innermost ``tests`` directory *path* sits in, or None."""
     for parent in path.parents:
         if parent.name == targets_module_test_dir():
             return parent
@@ -414,16 +264,7 @@ def _nearest_test_tree(path: Path) -> Path | None:
 
 
 def targets_module_test_dir() -> str:
-    """The directory name that marks a test tree, read from the classifier.
-
-    Read rather than restated: ``testwrite_targets.TEST_DIR`` is the one place
-    this branch spells it, and a constant spelled twice is a constant that
-    drifts. An unimportable classifier falls back to the shipped spelling so
-    the pointer degrades to a wrong-tree miss rather than a crash.
-
-    Returns:
-        The test-tree directory name.
-    """
+    """The directory name that marks a test tree, read from the classifier."""
     try:
         return str(_module("testwrite_targets").TEST_DIR)
     except Exception as exc:
@@ -432,22 +273,12 @@ def targets_module_test_dir() -> str:
 
 
 def _template_version(tests_dir: Path) -> str:
-    """The template version the local receipt names, as ``v<major>``.
-
-    Args:
-        tests_dir: The branch's test tree.
-
-    Returns:
-        ``v<major>`` from the receipt, or :data:`_DEFAULT_VERSION` when there is
-        no readable receipt or it names no version for this template.
-    """
+    """The template version the local receipt names, as ``v<major>``."""
     receipt = tests_dir / TEMPLATE_RECEIPT
     try:
         data = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        # Worth one line rather than a silent default: we only get here because
-        # the PAGE is present, so a receipt that is missing or unreadable beside
-        # it is a stamp that half-landed.
+        # Only reached when the PAGE exists, so a missing receipt is a half-landed stamp.
         logger.info("[HOOKS] testwrite_gate: template receipt unread at %s (%s)", receipt, exc)
         return _DEFAULT_VERSION
     version = (data.get("template_versions") or {}).get(_TEMPLATE_KEY) if isinstance(data, dict) else None
@@ -457,21 +288,7 @@ def _template_version(tests_dir: Path) -> str:
 
 
 def _spelled(path: Path, cwd: str) -> str:
-    """*path* as a line can carry it: project-relative when it is inside one.
-
-    A project-relative POSIX path is copy-pasteable from the project root, the
-    same spelling every dispatch and plan in this fleet uses, and it keeps a
-    machine's home directory out of a rendered line. Outside a project — or on
-    another drive, which is what ``relative_to`` raises about — the absolute
-    path is the only true answer and is used as is.
-
-    Args:
-        path: The page or the touched file.
-        cwd: The session working directory, where the project walk starts.
-
-    Returns:
-        The path as text, POSIX-spelled.
-    """
+    """*path* as a line can carry it: project-relative when it is inside one."""
     try:
         project = _module("write_ownership").project_of(Path(cwd))
         if project is not None:
@@ -484,18 +301,7 @@ def _spelled(path: Path, cwd: str) -> str:
 def template_pointer(hook_data: dict) -> dict:
     """PostToolUse: one line pointing at the branch's own test template page.
 
-    @seedgo's contract (DPLAN-0354). Suppressed — an empty document, not a
-    pointer at nothing — when the branch carries no page, which is how an
-    unstamped branch reads. Both lanes are covered because the gate's own
-    ``_targets`` reads them: the tool payload's ``file_path``, and a Bash
-    command's write targets through ``bash_writes``.
-
-    Args:
-        hook_data: Parsed hook event dict from the engine.
-
-    Returns:
-        A result dict carrying PostToolUse ``additionalContext``, or an empty
-        stdout when there is nothing to say. Never raises.
+    Suppressed when the branch carries no page (unstamped). Never raises.
     """
     try:
         tool_name = hook_data.get("tool_name", "")
@@ -536,7 +342,6 @@ def template_pointer(hook_data: dict) -> dict:
         return {"stdout": json.dumps(document), "exit_code": 0}
 
     except Exception as exc:
-        # A pointer is a courtesy, never a wall: a defect here must cost the
-        # line and nothing else.
+        # A pointer is a courtesy, never a wall: a defect costs the line and nothing else.
         logger.error("[HOOKS] testwrite_gate: template pointer failed (silent): %s", exc)
         return _ALLOW

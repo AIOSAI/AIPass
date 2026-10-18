@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-08-18
+# Modified: 2026-10-17
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
@@ -47,11 +47,7 @@ def handle_command(command: str, args: list) -> bool:
             CONSOLE.print("  drone @hooks hooksound off    Mute all hook sounds")
             return True
 
-        # The flag is written through sound.py, not touched here: one writer. This
-        # module used to import the logger and never call it (noqa: F401), so a
-        # state change nobody could audit left no trace at all. The split is real:
-        # the door logs that the CLI was used, sound.py logs the effect — @api now
-        # imports mute()/unmute() directly, and those two callers look different.
+        # sound.py is the one flag writer and logs the effect; this logs that the CLI asked.
         if sub in ("on", "off"):
             logger.info("[HOOKS] hooksound: '%s' requested via CLI", sub)
 

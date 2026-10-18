@@ -4,25 +4,12 @@
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
 
-# Tests for help-flag safety — a help flag anywhere means explain, never execute.
-#
-# Red-first canaries for DPLAN-0291 rule E / help_flag_safety. Every module below
-# gated help at args[0] only, so a flag later on the line was discarded and the
-# subcommand ran. The damage was real per module:
-#
-#     dismiss <alert-id> --help   -> removed the alert it was asked to describe
-#     test --verbose --help       -> fired every hook with mock data
-#     sessions reclaim --help     -> stopped live sessions, filtered on "-help"
-#     feedback on --help          -> flipped the toggle
-#     hooksound off --help        -> muted the fleet's hook audio
-#     log --help                  -> dumped the log instead of explaining itself
-#
-# Each test mocks the damaging target and asserts it is NEVER called.
+# A help flag after args[0] must not run the subcommand: each test mocks the damaging target, asserts never called.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that help_flags.py parses and imports, ruff and collection cover it
@@ -76,11 +63,7 @@ class TestWantsHelpPredicate:
     def test_help_flags_table_is_the_three_spellings(self):
         """Arms the parametrized row below, which reads HELP_FLAGS at collection.
 
-        An emptied or shortened HELP_FLAGS makes that row collect zero cases,
-        which pytest reports as SKIPPED and the summary line reads green - the
-        table would vanish and the suite would say nothing. The count is what
-        notices a table that came back one entry short; the value is what
-        notices a spelling silently swapped.
+        An emptied HELP_FLAGS collects zero cases, which pytest reports as a green SKIPPED.
         """
         assert len(HELP_FLAGS) == 3
         assert set(HELP_FLAGS) == {"--help", "-h", "help"}
@@ -106,14 +89,7 @@ class TestDismissNeverDismissesOnHelp:
         target.assert_not_called()
 
     def test_real_dismiss_still_runs_and_carries_the_outcome(self):
-        """Strengthened 2026-09-07 (canary refusal sweep), not merged away.
-
-        The old body patched _dismiss_alert with a bare MagicMock and asserted
-        `is True`. A MagicMock is truthy, so it passed whether or not the exit
-        code was wired — it could not fail in either direction, which is why the
-        exit-0 defect survived under a green test. Both legs are now pinned:
-        a real dismissal routes True, a refusal exits 1.
-        """
+        """Both legs pinned: a real dismissal routes True, a refusal exits 1 (a bare MagicMock is truthy)."""
         with patch.object(alert_dismiss, "_dismiss_alert", return_value=True) as target:
             assert alert_dismiss.handle_command("dismiss", ["some-alert-id"]) is True
         target.assert_called_once_with("some-alert-id")
@@ -207,8 +183,7 @@ class TestFeedbackNeverTogglesOnHelp:
 
 
 class TestHooksoundNeverTogglesOnHelp:
-    """The flag moved behind sound.mute/unmute, so these now patch the real
-    owner and run the true write path end to end rather than a local name."""
+    """These patch the flag's real owner, sound, and run the true write path end to end."""
 
     def test_help_after_off_does_not_mute(self, tmp_path):
         flag = tmp_path / "mute"
@@ -288,18 +263,13 @@ class TestHelpGateDoesNotHijackOtherModules:
 
 
 class TestUnknownCommandNamesWhatFailed:
-    """`hooksound sideways` used to report "Unknown command: hooksound" — and
-    hooksound IS known, so the caller was told the wrong token was wrong. A
-    renamed sub-verb read as a missing top-level command. Exit was always 1;
-    only the wording lied. (@api read exit 0 through a pipe, where the shell
-    reports the last pipeline element's status, not drone's.)"""
+    """An unknown sub-verb is named with its known parent, not reported as an unknown command."""
 
     def _main(self, argv):
         import sys
         from unittest.mock import patch
 
-        # Both consoles: the refusal moved to err_console on 2026-09-07 and a
-        # helper watching only stdout would have read the move as silence.
+        # Both consoles: the refusal prints on err_console, and stdout alone would read as silence.
         printed = []
         with (
             patch.object(sys, "argv", ["hooks", *argv]),

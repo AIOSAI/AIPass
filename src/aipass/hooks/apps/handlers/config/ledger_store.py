@@ -5,18 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-16
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
 """Storage for the injection ledger (DPLAN-0347, hooks row 3).
 
-apps/modules/injection_ledger.py orchestrates: it asks cadence for the turn
-token and hands the numbers here. This file owns the record's shape, the file
-it lives in and the fold that reads it back. Why the token and not the turn
-number is written once, in docs/diagnostics.md.
-
-One file per session in the temp dir, beside cadence's own state: it lives as
-long as the session's other guard files and needs no rotation of its own.
+One file per session in the temp dir, beside cadence's state: it needs no rotation of its own.
 """
 
 import hashlib
@@ -29,8 +23,7 @@ from pathlib import Path
 from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-#: The events whose output can reach the model at all. PreCompact and Stop
-#: output never does, so recording them would be a ledger of nothing.
+#: The events whose output can reach the model; PreCompact and Stop output never does.
 LEDGER_EVENTS = frozenset({"UserPromptSubmit", "SessionStart", "PreToolUse", "PostToolUse"})
 
 #: Plain stdout is context only on these; on tool events only additionalContext is.
@@ -65,16 +58,7 @@ def newest_session() -> str | None:
 
 
 def injected_text(event_type: str, stdout: str) -> str:
-    """The part of one hook output that reaches the model, or "" when none does.
-
-    Args:
-        event_type: The hook event the output answers.
-        stdout: What the hook (or the merge) printed.
-
-    Returns:
-        additionalContext when the output is a JSON object carrying one; the
-        plain text on the two events where plain text is context; else "".
-    """
+    """The part of one hook output that reaches the model, or "" when none does."""
     text = stdout.strip()
     if not text:
         return ""
@@ -83,8 +67,7 @@ def injected_text(event_type: str, stdout: str) -> str:
     try:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:
-        # A brace that does not parse is text, but it is also a hook that meant
-        # JSON and did not produce it — worth a line, because CC will not parse it either.
+        # A brace that does not parse is text, but CC will not parse it either: worth a line.
         logger.info("[HOOKS] injection_ledger: %s output opens like JSON but does not parse: %s", event_type, exc)
         return text if event_type in _PLAIN_IS_CONTEXT else ""
     if not isinstance(doc, dict):
@@ -97,8 +80,7 @@ def injected_text(event_type: str, stdout: str) -> str:
 def measure_hooks(event_type: str, outputs: list[tuple[str, str, str]]) -> dict[str, dict]:
     """Per hook, the chars and a short sha of what it injected; hooks that injected nothing are left out.
 
-    WARNS for a single injection over the persist line: the model was shown a
-    preview, not the text, so the seat was told less than it looks like.
+    WARNS over the persist line: the model was shown a preview, not the text.
     """
     hooks: dict[str, dict] = {}
     for hook_name, _handler, stdout in outputs:
@@ -124,13 +106,7 @@ def append_record(
 ) -> dict | None:
     """Write one record. A record that cannot be written WARNS: a gap in the ledger must not be silent.
 
-    "total" is what the hooks produced and "delivered" is what the merged
-    document carried to the model; they differ only when the merge dropped a block.
-    "automated" rides only when known: whether the harness, not a person, sent
-    the prompt (DPLAN-0348).
-
-    Returns:
-        The record written, or None when the write failed.
+    "total" is what the hooks produced, "delivered" what the merge carried; "automated" only when known.
     """
     entry = {
         "ts": round(time.time(), 3),
@@ -153,14 +129,7 @@ def append_record(
 
 
 def read_turns(session_id: str) -> list[dict]:
-    """The ledger folded to one row per injection moment: every sibling of a turn shares its token.
-
-    Args:
-        session_id: The session whose ledger to read.
-
-    Returns:
-        Rows in first-seen order, each {"event", "token", "turn", "ts", "hooks", "total"}.
-    """
+    """The ledger folded to one row per injection moment: every sibling of a turn shares its token."""
     path = ledger_path(session_id)
     if not path.exists():
         return []

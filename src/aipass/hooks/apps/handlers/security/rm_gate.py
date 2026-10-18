@@ -5,55 +5,17 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """Refuses deletes on the agent Bash tool, and writes every refused one down.
 
 Failure mode: a crash refuses the Bash call it was checking; the engine refuses on import error and timeout.
 
-The owner, 2026-09-30 (DPLAN-0356): "canary rm and git should of been blocked.
-right. drone rm should only be known by u. only u should be able to use it."
-
-  - A raw ``rm``, recursive or not, is refused for every seat, the admin seat
-    included. The admin seat is taught ``drone rm``; every other seat is taught
-    not to delete at all (the owner, 2026-09-30): rename to
-    ``name(disabled).ext``, move into a ``.archive/`` folder beside it (made with
-    ``mkdir -p .archive`` when it isn't there), or both; a file that truly must
-    go is mailed to @devpulse with the path and why. Moving and renaming is the
-    safety feature: the owner sees the files and decides.
-  - ``drone rm`` is refused unless the session is the verified admin seat.
-  - Every other delete is refused off the admin seat, with the same text (the
-    owner, 2026-09-30, mail dab4e222: "rm is a big no no; only devpulse
-    deletes"): ``rmdir``, ``unlink``, ``shred`` and their kin wherever a program
-    runs, ``find -delete``, and an interpreter's delete when its program text can
-    be read (inline, a heredoc, or since 3.0.0 the script FILE it is handed).
-    ``find -exec rm`` and ``xargs rm`` are raw rm. Moving, renaming and ``mkdir``
-    are never deletes.
-
-Since 3.0.0 (DPLAN-0356 phase 3, the red team's R3 and R4) this gate reads no
-text of its own. modules/shell_reader is the branch's one shell-word reader:
-it hands back every program the command runs the way the shell will run it —
-quotes removed, escapes and ``$'...'`` decoded, braces expanded, a glob in the
-command word resolved, ``eval`` / ``bash -c`` / ``source`` / script files read.
-What it cannot read (a program word that is an unfolded expansion, a script that
-cannot be read, a shell fed from a pipe) is refused off the admin seat: a
-program this gate cannot see is not one it lets through.
-
-WHO is ``modules/admin_seat``'s verified 5-leg grant, never a directory name:
-a seat standing in a directory called devpulse with no grant is refused. The
-passport only NAMES the caller, in the refusal and in the record. A caller
-with no passport is refused like any other non-admin seat, and told it could
-not be named.
-
-The gate acts on the agent's Bash tool only. Service code that runs
-``drone rm`` as a subprocess (backup rotation, prax, test suites) never passes
-through a hook and keeps working.
-
-The deletion record stays (the owner, 2026-08-14: "if something deletes, it
-should be a record of it"): every refused attempt is one line per deleting
-program. An admin seat's allowed ``drone rm`` is @drone's to record, not this
-gate's. ``git rm`` touches the index and answers to git_gate.
+Raw rm is refused for every seat; drone rm and every other delete (rmdir, unlink, find -delete,
+an interpreter's readable delete) off the verified admin seat (admin_seat's grant, never a name).
+What modules/shell_reader cannot read is refused off the admin seat too. Bash tool only:
+service code running drone rm passes no hook. git rm answers to git_gate.
 """
 
 import importlib
@@ -62,8 +24,6 @@ import json
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-# The owner, 2026-09-30: "Agents are free to move or rename. That is the safety feature:
-# the owner sees the files and decides. Archived files can stay forever."
 _DONT_DELETE = (
     "Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.\n"
     "  rename it    name(disabled).ext       e.g. mv old.py 'old(disabled).py'\n"
@@ -104,7 +64,6 @@ DELETE_REFUSED = (
     "DPLAN-0356). Caller: {caller}.\n\n" + _DONT_DELETE
 )
 
-# DPLAN-0356 phase 3 (R3, R4): what the reader could not see is not let through off the admin seat.
 UNREAD_REFUSED = (
     "This command runs something the gates cannot read: {what}. Caller: {caller}.\n"
     "A program the gates cannot see could delete or write anything, so off the admin seat it is refused "
@@ -122,7 +81,6 @@ _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 # searches for the word, `unlink f` deletes f.
 _DELETE_VERBS = frozenset({"rmdir", "unlink", "shred", "srm", "wipe", "trash", "trash-put", "rimraf"})
 
-# `drone rm` is the admin seat's lane; `git rm` removes from the index and answers to git_gate.
 _DRONE = "drone"
 
 
@@ -151,9 +109,7 @@ def _seat(cwd: str) -> tuple[str | None, bool]:
 def _record(cmd: str, cwd: str, caller: str | None, lanes: dict[str, int]) -> None:
     """Write down every refused delete — one line per deleting program, its lane named.
 
-    The command is logged as the agent wrote it. INFO by design (compass #273): the
-    engine already records the block at WARNING, and this line adds the command,
-    cwd and caller the engine never carried.
+    INFO by design: the engine already logs the block at WARNING; this adds cmd, cwd and caller.
     """
     for lane, count in lanes.items():
         for _ in range(count):
@@ -207,14 +163,7 @@ def _refusal(raw: int, drone: int, others: list[str], admin: bool, caller: str |
 
 
 def handle(hook_data: dict) -> dict:
-    """Refuse every raw rm, and drone rm, every other delete and any unreadable program off the admin seat.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (block JSON or empty) and exit_code.
-    """
+    """Refuse every raw rm, and drone rm, every other delete and any unreadable program off the admin seat."""
     if not isinstance(hook_data, dict) or hook_data.get("tool_name", "") != "Bash":
         return _BLOCK_ALLOW
     try:
@@ -237,6 +186,6 @@ def handle(hook_data: dict) -> dict:
         _record(cmd, cwd, caller, {"raw rm": raw, "drone rm": drone, "delete verb": len(others)})
         return _block(_refusal(raw, drone, others, admin, caller, cwd))
 
-    except Exception as exc:  # fail closed on the Bash call this gate guards (DPLAN-0356 item 2)
+    except Exception as exc:  # fail closed on the Bash call this gate guards
         logger.error("[HOOKS] rm_gate: crashed, refusing the Bash call: %s", exc)
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))

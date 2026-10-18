@@ -5,21 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-07-07
+# Modified: 2026-10-17
 # =============================================
 
 """Resets cadence counter on SessionStart so loaders re-fire at turn 0.
 
-Fires on source=startup (new chat) and source=clear (/clear).
-Skips source=resume — restored context already carries grounding.
-
-Also skips source=compact: PreCompact (compact.py) already reset for the
-same boundary. This was previously treated as a harmless duplicate, but it
-is not — it re-arms the PostToolUse regroup token (DPLAN-0276) a second
-time per compact, and was the confirmed over-fire mechanism in DPLAN-0278
-(one session saw 16 regroup fires with no matching PreCompact reset logged
-in between). cadence.reset_counter() also debounces same-boundary re-arms
-as defense in depth, but the redundant call itself serves no purpose here.
+Skips resume (context carries grounding) and compact (PreCompact reset already; twice re-arms the regroup token).
 """
 
 import importlib

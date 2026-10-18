@@ -5,33 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
 
-Until 2.0.0 the first ``.aipass/hooks.json`` above the working directory won,
-and anything wrong with it — untrusted, malformed, an edit that broke its trust
-hash — returned None, which the bridge turned into NO hooks. Five measured
-windows ran with every gate off (09-07: 704 hook calls), and any branch could
-switch its own gates off by writing ``src/aipass/<self>/.aipass/hooks.json``.
-
-Now, walking up from the working directory:
-
-  - The AIPass install (AIPASS_HOME) is configured by AIPASS_HOME/.aipass/hooks.json
-    alone, with no trust check: the trust registry is not its gatekeeper.
-  - A ``.aipass/hooks.json`` inside AIPASS_HOME that is not a nested project root
-    (a branch's own) is IGNORED, with a WARNING naming it.
-  - A nested project root (a directory holding a ``*_REGISTRY.json``, like
-    projects/baud) and anything outside AIPASS_HOME is an external project. Its
-    own config runs only when the trust registry vouches for it.
-  - Whatever the walk finds, :func:`resolve_config` never answers "no hooks":
-    an untrusted, malformed or missing project config falls back to the AIPass
-    gate set (the gate entries of AIPASS_HOME's config, or, when that cannot be
-    read, the built-in set in handlers/config/gates.py, with an ERROR).
-  - A trusted project inside AIPASS_HOME still cannot switch a gate off: the gate
-    set is forced over its config. Only a trusted project outside AIPASS_HOME
-    owns its gates outright.
+Reference: docs/project_config.md
 """
 
 import hashlib
@@ -56,9 +35,7 @@ NONE = "none"
 def _search_bounds() -> tuple[Path, Path]:
     """Where the walk for .aipass/hooks.json starts (the working directory) and stops (home).
 
-    A seam: the tests are the reason it exists. They replace this function by name
-    in place of patching Path.cwd and Path.home, which replaces them process-wide.
-    It changes no verdict. The decision is hooks', leg 4.
+    A seam: tests replace it by name instead of patching Path.cwd and Path.home process-wide.
     """
     return Path.cwd(), Path.home()
 
@@ -75,9 +52,7 @@ def _absolute(raw: str) -> Path:
 def aipass_home() -> Path | None:
     """The AIPass install: $AIPASS_HOME, else the repo this code was loaded from, else None.
 
-    Read per call so a test's environment patch is honoured. The fallback walks
-    from this file to the root that holds ``src/aipass`` and ``.aipass/hooks.json``
-    (the promoted copy sits at the same depth as apps/, so the walk is the same).
+    Read per call so a test's environment patch is honoured.
     """
     raw = os.environ.get("AIPASS_HOME", "")
     if raw:
@@ -104,13 +79,9 @@ def _is_project_root(directory: Path) -> bool:
 
 
 def locate_config() -> tuple[str, Path | None]:
-    """Where this session's config comes from: (AIPASS | EXTERNAL | NONE, the directory holding .aipass/).
-
-    Logs a WARNING for every config it ignores on the way.
-    """
+    """Where this session's config comes from: (AIPASS | EXTERNAL | NONE, the directory holding .aipass/)."""
     home = aipass_home()
-    # One canonical form, resolved like home and like the trust registry's keys: a walk spelled
-    # through a symlink (macOS /var -> /private/var) read the install as external (CI red, PR #774).
+    # One canonical form, like home and the trust registry's keys: a symlinked walk (macOS /var) reads as external.
     search, stop = (_absolute(str(bound)) for bound in _search_bounds())
     start = search
     while search != stop and search.parent != search:
@@ -132,11 +103,7 @@ def locate_config() -> tuple[str, Path | None]:
 
 
 def _read_config(config_file: Path) -> dict:
-    """Parse one hooks.json, $AIPASS_HOME substituted.
-
-    Raises:
-        OSError, ValueError: unreadable, not JSON, or not an object.
-    """
+    """Parse one hooks.json, $AIPASS_HOME substituted."""
     raw = config_file.read_text(encoding="utf-8")
     home = os.environ.get("AIPASS_HOME", "")
     if home:
@@ -166,10 +133,7 @@ def gate_set() -> dict:
 def find_project_config() -> dict | None:
     """The config this session's own site supplies, or None when it supplies nothing usable.
 
-    AIPass seats get AIPASS_HOME's config, untouched by trust. An external
-    project gets its own config only when trusted; inside AIPASS_HOME the gate
-    set is forced over it. None means: fall back to the gate set
-    (:func:`resolve_config` does), never "no hooks".
+    None means fall back to the gate set (:func:`resolve_config` does), never "no hooks".
     """
     from aipass.hooks.apps.handlers.config.trust_registry import (
         bootstrap,
@@ -201,7 +165,7 @@ def find_project_config() -> dict | None:
     if kind == EXTERNAL and home is not None and _inside(where, home):
         return gates.enforce(config, gate_set())
     if kind == AIPASS and not gates.has_gates(config):
-        # The 09-07 shape: a root edit that dropped every gate ran 704 calls ungated.
+        # A root edit that drops every gate must not run ungated.
         logger.error("[HOOKS] loader: %s names no gate — the built-in gates are forced over it", config_file)
         return gates.enforce(config, gates.builtin_config())
     return config
@@ -218,9 +182,7 @@ def resolve_config() -> dict:
 def config_unavailable_reason() -> str:
     """Explain truthfully why find_project_config() returned None.
 
-    The loader refuses for several reasons but returns the same bare None for
-    all of them, so a CLI surface asks here. Every answer ends the same way,
-    because it is now true of every one: the AIPass gate set still runs.
+    find_project_config() returns the same bare None for every refusal, so a CLI surface asks here.
     """
     from aipass.hooks.apps.handlers.config.trust_registry import (
         is_hash_mismatch,
@@ -250,10 +212,8 @@ def config_unavailable_reason() -> str:
 def trust_break_banner() -> str | None:
     """Loud check for an external project whose enrolled config has changed since enrolment.
 
-    Only an EXTERNAL project's own config answers to trust; the AIPass install's
-    never does, so an edit to AIPASS_HOME's hooks.json raises no banner and turns
-    nothing off. Returns None when nothing is broken or the project was simply
-    never enrolled (normal first-run state, not a break).
+    Only an EXTERNAL project's config answers to trust; an AIPASS_HOME edit raises no banner.
+    Never-enrolled returns None: normal first-run state, not a break.
     """
     from aipass.hooks.apps.handlers.config.trust_registry import is_hash_mismatch
 
@@ -295,9 +255,7 @@ def _mark_nudged(session_id: str, project_path: str) -> None:
 def never_enrolled_banner(session_id: str = "") -> str | None:
     """One-time-per-session nudge for an external project that was simply never enrolled.
 
-    Distinct from trust_break_banner() — that fires on a genuine hash-mismatch
-    break and nags every prompt by design. Never-enrolled is normal first-run
-    state, not a break (#712), so the ask is a single nudge, not a persistent nag.
+    Never-enrolled is first-run state, not a break: one nudge per session, where trust_break_banner nags by design.
     """
     from aipass.hooks.apps.handlers.config.trust_registry import is_unenrolled
 

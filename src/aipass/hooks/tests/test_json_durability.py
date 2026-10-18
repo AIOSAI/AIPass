@@ -5,26 +5,13 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
 
-# Torn-write durability for the json files module.
-#
-# Axis 1 of the fleet defect: a write that truncates the target in place leaves a
-# window where every concurrent reader sees an empty file. Measured on the
-# handler this module was carved out of, before the fix: 587 of 1023 reads
-# unusable (57.4%), three runs 56.7-57.5%.
-#
-# DPLAN-0325 moved the nine standard names to the fleet's one json service, whose
-# behaviour seedgo's cross-branch contract pins once for everyone. What stayed
-# here is what stayed in hooks: ``read_json_file`` / ``write_json_file`` and the
-# atomic write beneath them, in ``apps/handlers/json/files.py``. They write
-# the TRUST REGISTRY and a project's alerts file — a torn registry read is every
-# hook in the project going dark — so the mechanism keeps its own pins. The tests
-# that pinned the service half moved verbatim to
-# ``tests/.archive/deleted_2026-09-03_json_durability.py``.
+# A truncate-in-place write lets concurrent readers see an empty file; these files hold the
+# trust registry, where a torn read darks every hook in the project.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(json_handler) — the nine standard json names, pinned by seedgo's cross-branch contract
@@ -49,11 +36,7 @@ WRITE_TEXT = re.compile(r"\.write_text\(")
 
 
 class TestAtomicHelper:
-    """The mechanism, reached through write_json_file, its one public door (fleet green leg 9).
-
-    The test that only pinned write_json_file -> _atomic_write_json routing is retired:
-    test_stages_temp_in_target_directory pins the staged move through the door itself.
-    """
+    """The mechanism, reached through write_json_file, its one public door."""
 
     def test_creates_document_that_did_not_exist(self, tmp_path: Path):
         target = tmp_path / "fresh.json"
@@ -67,8 +50,7 @@ class TestAtomicHelper:
         assert json.loads(target.read_text(encoding="utf-8")) == {"new": True}
 
     def test_leaves_no_staged_file_behind(self, tmp_path: Path):
-        # Its own directory: mock_infrastructure builds the json sandbox under
-        # tmp_path, so the "nothing else is here" claim needs a clean floor.
+        # Own directory: mock_infrastructure builds the json sandbox under tmp_path.
         directory = tmp_path / "documents"
         directory.mkdir()
         target = directory / "clean.json"
@@ -83,14 +65,12 @@ class TestAtomicHelper:
         seen: dict = {}
 
         def at_the_move(source, destination):
-            # The staged file as it stands on disk the moment before it is moved in;
-            # the recorder then makes the move with its own hands.
             seen["staged"] = Path(source)
             seen["on_disk"] = Path(source).is_file()
             seen["destination"] = Path(destination)
             os.replace(source, destination)
 
-        # The product's own mover, not tempfile.mkstemp (fleet green leg 7, stdlib_patch).
+        # The product's own mover, not tempfile.mkstemp (stdlib_patch).
         monkeypatch.setattr(json_files, "_replace_with_retry", at_the_move)
         json_files.write_json_file(target, {"a": 1})
         assert seen["on_disk"] is True
@@ -159,8 +139,7 @@ class TestSourceGuard:
 class TestContractPreserved:
     """These two RAISE where the fleet service answers None / False.
 
-    An unreadable trust registry must never be mistaken for an empty one, so
-    the loud contract is the reason the module exists at all.
+    An unreadable trust registry must never be mistaken for an empty one.
     """
 
     def test_write_json_file_returns_none(self, tmp_path: Path):
@@ -191,7 +170,7 @@ class TestContractPreserved:
 
 
 class TestConcurrentReadsStayUsable:
-    """The measurement, as a test. 57.4% unusable before; zero tolerated now."""
+    """Concurrent readers never see an unusable document; zero tolerated."""
 
     def test_two_writers_two_readers_zero_unusable(self, tmp_path: Path):
         target = tmp_path / "trusted_projects.json"
@@ -204,9 +183,7 @@ class TestConcurrentReadsStayUsable:
         lock = threading.Lock()
 
         def writer(tag: int) -> None:
-            # A writer that dies silently leaves the content assertions below
-            # passing vacuously. On Windows an exhausted os.replace retry raises
-            # here, and that must read as a probe failure, not as a clean race.
+            # A writer that dies silently would leave the content assertions passing vacuously.
             try:
                 for i in range(150):
                     json_files.write_json_file(
@@ -227,25 +204,13 @@ class TestConcurrentReadsStayUsable:
             local_reads = 0
             local_failures = []
             while not stop.is_set():
-                # Yield between polls — Windows share-mode semantics, not tuning.
-                # A zero-delay spin-reader holds the target open at near-100% duty
-                # cycle, and Python opens files without FILE_SHARE_DELETE, so on
-                # Windows an os.replace onto a handle a reader holds fails with
-                # WinError 5. Two spinning readers can then collide with every one
-                # of the writer's bounded retry attempts and starve a correct retry
-                # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
-                # models a real reader — no fleet workload spin-reads a config file
-                # — and weakens no content check below. At the top of the pass so
-                # the `continue` paths yield too: a refused open means a replace is
-                # in flight, exactly when re-spinning hurts most. An Event wait,
-                # not a sleep: the yield ends the moment the writers finish.
+                # Yield: on Windows a spinning reader's handle makes os.replace fail (WinError 5)
+                # and can starve the writer's bounded retry; Event wait ends with the writers.
                 stop.wait(0.001)
                 try:
                     raw = target.read_text(encoding="utf-8")
                 except PermissionError:
-                    # Windows refuses the open while a concurrent os.replace is
-                    # in flight. A refused open is share-mode semantics, not an
-                    # unusable document — it is not counted as a read at all.
+                    # Windows share-mode refusal mid-replace: not an unusable document, not a read.
                     continue
                 except FileNotFoundError:
                     local_failures.append("missing")

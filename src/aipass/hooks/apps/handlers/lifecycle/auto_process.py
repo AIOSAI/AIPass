@@ -5,16 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
 
-DPLAN-0294 phase 1b. This handler used to call auto_process() inline, which put
-memory vectorize + rollover on the critical path of the first prompt of every
-session — measured at 78-120s and killed by the hook timeout, silently discarding
-the injection. spawn_background() detaches the work and returns immediately; the
-child reports its own counters to memory_json/auto_process_log.json.
+Inline, vectorize + rollover outlasts the hook timeout and the injection is lost.
 """
 
 import importlib
@@ -51,20 +47,14 @@ def _mark_session_ran() -> None:
 def handle(hook_data: dict) -> dict:
     """Kick @memory's detached auto-process run and return. Never does the work inline.
 
-    The guard means "kicked once this session", not "ran once" — a refusal counts,
-    because a live run is the work already happening. Only a failed kick stays
-    retryable on the next prompt.
+    The guard means "kicked once this session": a refusal counts, only a failed kick retries.
     """
     _ = hook_data
 
     if _already_ran_this_session():
         return {"stdout": "", "exit_code": 0}
 
-    # The kick starts @memory's real background worker on the real pool. A probe
-    # that fires every wired hook must not put another citizen to work, and the
-    # session guard does not stop it — the guard is per session id, so the first
-    # probe run of a given mock id spawns for real. Refused here rather than at
-    # entry, so the guard path above is still exercised.
+    # A probe must not start @memory's real worker; the per-session guard does not stop a new mock id.
     if os.environ.get("AIPASS_HOOK_PROBE") == "1":
         logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}

@@ -5,15 +5,10 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Reads .trinity/passport.json and outputs formatted identity for prompt injection.
-
-Cadence-gated like the kernel and navmap: fires on turn 0 and every Nth turn
-(loader "identity" in cadence_config.json, default period 5, offset 0), so the
-four grounding parts land together on one beat instead of identity every turn.
-"""
+"""Reads .trinity/passport.json and outputs formatted identity for prompt injection."""
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -35,8 +30,7 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("identity", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
-        # The degraded fail mode (DPLAN-0347): a cadence that cannot answer withholds
-        # this loader; the kernel fires alone and its banner names why.
+        # A cadence that cannot answer withholds this loader; the kernel fires alone and names why.
         logger.warning(
             "[HOOKS] identity DEGRADED loader=identity: cadence check raised, so it is WITHHELD and the kernel "
             "fires alone until this is cured: %s",

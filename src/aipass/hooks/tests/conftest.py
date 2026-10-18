@@ -5,21 +5,13 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
 
-The json redirect is the ``AIPASS_TEST_LOG_DIR`` seam (DPLAN-0325). This
-branch's ``json_handler`` binds the fleet's one json service, which resolves
-this branch's document directory PER CALL and honours that variable itself —
-there is no singleton and no private attribute left to patch.
-
-The variable is armed twice, on purpose. At import, so it is set before any
-test runs: the repo-root conftest REFUSES a run that reaches a shim-bound
-``log_operation`` with the seam unset, because such a run would write into live
-``<branch>_json`` directories, and its autouse fixture runs before this file's.
-Then per test by ``mock_infrastructure``, so each test gets its own tmp_path.
+``AIPASS_TEST_LOG_DIR`` is armed at import (the repo-root conftest refuses a run that reaches
+the json shim with it unset) and again per test by ``mock_infrastructure``.
 """
 
 import json
@@ -49,11 +41,7 @@ collect_ignore_glob = [".archive/*"]
 def isolated_engine_log(tmp_path_factory, monkeypatch) -> Path:
     """The engine's diagnostics log goes to a file under the pytest temp root, per test.
 
-    diagnostics._get_log_file answers a shared directory under the system temp during
-    pytest, the same one for every run and every seat; engine._log writes through it
-    on every dispatch. Pointing the function at a sandbox, by name, lets a test that
-    does not pin the log stop patching engine._log (devpulse's decision G, leg 4).
-    No product change and no environment variable.
+    Under pytest the real log dir is shared by every run and every seat.
     """
     sandbox = tmp_path_factory.mktemp("engine_log") / "engine.jsonl"
     monkeypatch.setattr(diagnostics, "_get_log_file", lambda: sandbox)
@@ -74,9 +62,7 @@ class TriggerRecorder:
 def recorded_cli_trigger(monkeypatch) -> TriggerRecorder:
     """cli's header fires cli_header_displayed on the real bus; here it fires on a recorder.
 
-    A test that leaves mock_console for the real console used to reach the trigger
-    bus through display._TRIGGER. The recorder stands on that name, and the loaded
-    flag stays set so cli never imports the real trigger in its place (leg 4, 5b).
+    The loaded flag stays set so cli never imports the real trigger in the recorder's place.
     """
     recorder = TriggerRecorder()
     monkeypatch.setattr(display, "_TRIGGER", recorder)
@@ -103,16 +89,7 @@ def clean_command_state() -> Generator[None, None, None]:
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     """Redirect this branch's json writes into a temp dir.
 
-    autouse=True on purpose: the shim's names write into the real hooks_json/
-    unless the seam is set, so a test that forgets to redirect pollutes the
-    branch. The guard belongs on every test, not on the ones that remember.
-
-    The service recomputes its directory on every call, so setting the variable
-    here — after import — still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
+    Without the seam the shim writes the real hooks_json/; the sandbox is read off the shim so it cannot drift.
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
     sandbox = json_handler.get_json_path("probe", "config").parent
@@ -124,14 +101,7 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
     """Keep the trust registry out of the LIVE ~/.aipass/trusted_projects.json.
 
-    REGISTRY_PATH is bound to Path.home() at import. A test that walks into a
-    .aipass/hooks.json while that file is absent runs bootstrap(), which WRITES
-    it: seedgo's runtime probe (HOME pointed at a throwaway, 2026-09-14) caught
-    test_engine's TestErrorResilience creating it. On a dev seat that file is
-    the live registry. Tests that exercise the registry patch it on top.
-
-    Returns:
-        The sandbox registry path (absent until something writes it).
+    REGISTRY_PATH binds at import, and bootstrap() WRITES it when a test meets an absent registry.
     """
     sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
     monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
@@ -202,13 +172,7 @@ def mock_subprocess():
 def isolated_cadence_state(tmp_path_factory, monkeypatch):
     """Keep per-session cadence/advisory state out of the LIVE seat's files.
 
-    cadence persists throttle state in the system temp dir keyed by
-    CLAUDE_CODE_SESSION_ID, so an unisolated run both reads and WRITES the
-    state of whatever session is executing the suite — a test could silence a
-    real advisory for ten turns, or be silenced by one. Same class of defect as
-    the 12 fixture lines this branch put in the production presence_gate.log.
-
-    Tests that exercise cadence itself patch _GUARD_DIR on top of this.
+    The state is keyed by CLAUDE_CODE_SESSION_ID, so an unisolated run reads and writes the running seat's.
     """
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")
@@ -216,12 +180,7 @@ def isolated_cadence_state(tmp_path_factory, monkeypatch):
 
 @pytest.fixture
 def _restore_cadence_globals(monkeypatch):
-    """Hand cadence's module caches back as they were found, whatever a test wrote.
-
-    _reset_module_globals below writes them directly, mid-test, to model a new
-    process; monkeypatch records the originals here first and restores them at
-    teardown, so no cached turn or config leaks into the next test file.
-    """
+    """Hand cadence's module caches back as they were found, whatever a test wrote."""
     monkeypatch.setattr(cadence, "_turn", None)
     monkeypatch.setattr(cadence, "_config", None)
     monkeypatch.setattr(cadence, "_turn_degraded", None)
@@ -232,10 +191,7 @@ def _restore_cadence_globals(monkeypatch):
 def _no_real_trust_banners():
     """dispatch() now runs both trust banners unconditionally on UserPromptSubmit.
 
-    Neutralize by default so the many dispatch()-calling tests in this file
-    never do a real CWD-to-home walk against the actual ~/.aipass registry.
-    Tests that want to exercise the banners override with their own nested
-    patch, which takes precedence inside its `with` block.
+    Stubbed so dispatch tests never walk CWD-to-home against the real ~/.aipass registry.
     """
     with (
         patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
@@ -244,7 +200,6 @@ def _no_real_trust_banners():
         yield
 
 
-# Classes that test the tmux lookups themselves — they must see the real thing.
 _TMUX_OWN_TESTS = {
     "TestFindTmux",
     "TestTmuxSessionExists",
@@ -257,12 +212,7 @@ _TMUX_OWN_TESTS = {
 def _no_real_tmux_lookup(request):
     """Keep the MENU tests off a real subprocess.
 
-    Rendering the multi-session menu describes each live process, which asks
-    tmux where that process lives. That is a real `tmux list-panes` call: it
-    raises WinError 2 on the Windows runner (6 CI failures, 2026-08-18) and is
-    slow everywhere else. Whether [Enter] continues the last chat is not a
-    platform question, so the lookup is stubbed for every test except the ones
-    whose subject IS the lookup.
+    The menu asks tmux where each process lives: WinError 2 on the Windows runner, slow elsewhere.
     """
     if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
         yield
@@ -284,15 +234,7 @@ def fake_projects(tmp_path, monkeypatch):
 def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
     """Keep the fleet-shared .diagnostics_state.json out of every test.
 
-    The file sits at src/aipass/ and every live session's auto_fix writes it. A test
-    whose Edit targets a .py file reached edit_gate's diagnostics block with whatever
-    error another branch had open at that moment. Measured 2026-09-18: @memory's
-    open import error turned two tests red in one run and green in the next.
-
-    Measured 2026-09-27: TestAutofixPython wrote it, then removed it, so a run could
-    erase a live session's open error. Since leg 4 the state is one file per seat in
-    STATE_DIR under the system temp, and the version 1 file (LEGACY_FILE) is removed by
-    the next write: both point into one sandbox, and auto_fix writes through them.
+    Live sessions write it, so a test would read another branch's open error or erase one.
     """
     sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
     monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
@@ -303,18 +245,7 @@ def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
 def registered_projects(tmp_path: Path) -> dict:
     """AIPass, a project nested inside it, and a sibling Vera Studio, each with a REAL registry.
 
-    The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): who may write whose
-    files is read from the registries — branch rows, their paths, the ``owner``
-    flag that marks a project's manager. The older fixtures write ``{}``, which
-    has no rows to read, so they only ever exercised the path-shape fallback.
-
-        Projects/
-          AIPass/        AIPASS_REGISTRY.json   (list shape; devpulse owner, one absolute path)
-            src/aipass/{devpulse,hooks,memory,seedgo,spawn,flow}
-            src/aipass/flow/flow_json/PLAN_REGISTRY.json   an artifact, not a project
-            projects/baud/  BAUD_REGISTRY.json   (nested project, baud owner)
-          Vera-Studio/   VERA-STUDIO_REGISTRY.json   (dict shape; VERA owner)
-            src/vera_studio/{vera,writer,seedgo}   seedgo here is only a name
+    Write permission reads the registries' rows, paths and ``owner`` flag; a ``{}`` registry tests only the fallback.
     """
     projects = tmp_path / "Projects"
     aipass = projects / "AIPass"

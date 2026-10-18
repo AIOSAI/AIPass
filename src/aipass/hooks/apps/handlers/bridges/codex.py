@@ -5,27 +5,14 @@
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Codex bridge.
 
-Thin entry point called from .codex/hooks.json hook entries.
-Normalizes Codex's stdin/stdout format and calls the engine.
-
-Codex protocol differences from Claude Code:
-  - stdin: uses 'input' instead of 'tool_input' for tool parameters
-  - stdout: wraps output in hookSpecificOutput envelope
-  - blocking: permissionDecision + permissionDecisionReason (not exit code 2)
-
-Supports two forms:
-  codex.py EventType          — dispatch ALL enabled hooks for that event
-  codex.py EventType:hook_name — dispatch ONLY that one hook (separate output)
-
-Since 2.0.0 (DPLAN-0356), as claude.py: the hook code is the promoted copy
-(mount.py), engine.run_event owns everything past argv and stdin, and a
-PreToolUse call whose hook code cannot load or raises is DENIED. Every other
-event answers an empty document.
+Called from .codex/hooks.json. Codex sends 'input' for 'tool_input', wants output in a hookSpecificOutput
+envelope and blocks by permissionDecision, not exit code 2. The hook code is the promoted copy (mount.py),
+and a PreToolUse call whose hook code cannot load or raises is DENIED.
 """
 
 import importlib.util

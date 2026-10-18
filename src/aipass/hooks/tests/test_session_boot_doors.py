@@ -4,7 +4,7 @@
 # Description: Tests for session boot's resume doors: the session pointer and the dispatched-job guard
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the session-pointer doors and the dispatch guard."""
@@ -39,10 +39,8 @@ pytestmark = pytest.mark.usefixtures("_no_real_tmux_lookup")
 class TestSessionPointerDoors:
     """FPLAN-0448: every human entry door resumes by the session pointer.
 
-    `-c` REFUSES headless transcripts outright ("No conversation found to
-    continue"), so it can never enter a dispatched agent's session — the
-    pointer is the only record that can. Chain, never hard-failing:
-    pointer → today's behaviour → fresh.
+    `-c` REFUSES headless transcripts, so only the pointer can enter a dispatched agent's session.
+    Chain, never hard-failing: pointer → today's behaviour → fresh.
     """
 
     def test_no_live_enter_resumes_the_pointer(self, tmp_path, monkeypatch):
@@ -183,9 +181,7 @@ class TestSessionPointerDoors:
 
     def test_fresh_never_writes_outside_the_boot_cwd(self, tmp_path, monkeypatch):
         """The defect that wrote a REAL pointer into the live hooks branch
-        during a test run (2026-08-20): menu chains dropped boot's cwd, and
-        _start_fresh fell back to Path.cwd() — wherever pytest happened to
-        run. Every chain must carry boot's cwd all the way to the write."""
+        when a menu chain dropped boot's cwd: every chain carries it all the way to the write."""
         decoy = tmp_path / "decoy"
         decoy.mkdir()
         target = tmp_path / "branch"
@@ -236,12 +232,8 @@ def plant_dispatch_lock(tmp_path, pid=None):
 class TestDispatchedGuard:
     """FPLAN-0449: while an agent WORKS in the branch, resume steps aside.
 
-    Resume onto a live dispatch is takeover, not spectate — two claudes on
-    one session id migrate the session's background-task state to the newer
-    PID and the job dies mid-run, unreplied (DPLAN-0310, measured live
-    2026-08-20, the OSPREY intercept). The boot menus must never offer that
-    door by default: Enter waits, 'n' stays safe (new session id), 'r'
-    takes the seat with eyes open, and a dead lock gates nothing.
+    Resume onto a live dispatch is takeover: two claudes on one session id kill the job mid-run.
+    Enter waits, 'n' stays safe (new session id), 'r' takes the seat with eyes open, a dead lock gates nothing.
     """
 
     def test_enter_leaves_the_job_working(self, tmp_path):

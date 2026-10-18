@@ -5,14 +5,12 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
 
-Accepts a policy (writable/RO path map) + command + cwd + env, resolves the
-bwrap command via @anthropic-ai/sandbox-runtime, and spawns inside the sandbox.
-Phase 1 of FPLAN-0250 / DPLAN-0202.
+Reference: docs/sandbox.md
 """
 
 import json
@@ -38,14 +36,7 @@ _VAR_TMP = Path("/var/tmp")
 def _srt_resolve_cwd() -> str:
     """Return a CWD for the srt resolver that is outside any allow_write path.
 
-    srt auto-denies DANGEROUS_FILES (.bashrc, .gitconfig, …) resolved relative
-    to process.cwd(). When the deny target doesn't exist and its ancestor IS in
-    allow_write, bwrap creates 0-byte mount-point files that persist after exit.
-    Running the resolver from /var/tmp (never in allow_write) makes srt skip
-    those entries entirely — no bwrap args, no mount points, no pollution.
-
-    The leg 7 gettempdir seam is gone (fleet green leg 8): its tests now read
-    the fallback through resolve_bwrap_command, so nothing passed it.
+    srt denies DANGEROUS_FILES relative to cwd; inside allow_write, bwrap leaves 0-byte mount-point files behind.
     """
     if _VAR_TMP.is_dir():
         return str(_VAR_TMP)
@@ -113,12 +104,7 @@ def _find_src_aipass(repo_root: Path) -> Path:
 def build_policy(branch_path: str | Path) -> dict:
     """Generate sandbox policy for a branch agent.
 
-    Returns a policy dict compatible with sandbox_launch / build_srt_config:
-        allow_write: list of writable paths
-        deny_write: broker secret only (it sits inside the writable .ai_central)
-        deny_read: broker secret only — agents must never read it, or a
-            path-connected broker client could forge a devpulse identity.
-            Everything else stays readable (shared live filesystem).
+    The broker secret is denied read and write: reading it lets a broker client forge a devpulse identity.
     """
     branch_path = Path(branch_path).resolve()
     repo_root = _find_repo_root(branch_path)
@@ -174,13 +160,7 @@ def build_policy(branch_path: str | Path) -> dict:
 
 
 def build_srt_config(policy: dict) -> dict:
-    """Convert a policy dict to srt config format.
-
-    Policy keys:
-        allow_write: list[str] — paths the sandboxed process may write to
-        deny_write:  list[str] — paths to deny write within writable (optional)
-        deny_read:   list[str] — paths to deny read (optional)
-    """
+    """Convert a policy dict to srt config format."""
     return {
         "network": {
             "allowAllUnixSockets": True,
@@ -239,17 +219,7 @@ def sandbox_launch(
     policy: dict,
     env: dict | None = None,
 ) -> subprocess.Popen:
-    """Launch a command inside the srt kernel sandbox.
-
-    Args:
-        command: Shell command string to run inside the sandbox.
-        cwd: Working directory for the sandboxed process.
-        policy: Dict with allow_write (required), deny_write, deny_read (optional).
-        env: Environment variables (defaults to current env).
-
-    Returns:
-        subprocess.Popen handle for the sandboxed process.
-    """
+    """Launch a command inside the srt kernel sandbox."""
     srt_config = build_srt_config(policy)
     bwrap_cmd = resolve_bwrap_command(command, srt_config)
 

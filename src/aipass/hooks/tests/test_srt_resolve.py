@@ -4,16 +4,12 @@
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""
 
-# Exercises the real Node script via subprocess -- the candidate-list logic is
-# ESM and not importable from pytest directly. Node's own execPath prefix on
-# the machine running these tests is left alone (can't be faked without a
-# privileged symlink); each test isolates a different resolution mechanism
-# instead: the npm_config_prefix env var, a stubbed `npm` on PATH, or neither.
+# Real Node via subprocess (ESM); node's execPath prefix cannot be faked, so each test isolates one other mechanism.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — the script's header comment, the documentation standard covers it
@@ -34,16 +30,10 @@ _NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(_NODE is None, reason="requires a real node binary")
 
-# The candidate scenarios are POSIX layouts by design (lib/node_modules joins,
-# sh-script npm stubs; srt's sandbox wrap targets bwrap + /bin/bash). On Windows
-# the minimal envs also abort node itself at startup — its CSPRNG needs
-# SYSTEMROOT (exit 134, "Assertion failed: ncrypto::CSPRNG").
+# POSIX layouts by design; on Windows the minimal envs also abort node (its CSPRNG needs SYSTEMROOT).
 _posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX-layout scenario")
 
-# A hang backstop, not a latency assertion. 15s flaked red on a cold Windows
-# runner (CI run 31202533460) purely on node.EXE process startup; the identical
-# rerun passed. Nothing here should take seconds, so a wide margin still catches
-# a genuine deadlock while refusing to fail a green build over runner warm-up.
+# A hang backstop, not a latency assertion: cold Windows runners are slow to start node.
 _NODE_TIMEOUT_S = 60
 
 
@@ -83,7 +73,7 @@ def _run_resolve(tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
 
 
 class TestSrtResolveCandidates:
-    """DPLAN-0279 regression coverage: candidate-list prefix discovery."""
+    """Regression coverage: candidate-list prefix discovery."""
 
     @_posix_only
     def test_npm_config_prefix_env_wins(self, tmp_path):
@@ -136,7 +126,7 @@ class TestSrtResolveCandidates:
     def test_missing_entirely_exits_nonzero_with_tried_candidates(self, tmp_path):
         """srt not installed anywhere a candidate looks: non-zero exit, no
         stdout, and the tried candidate paths listed on stderr (not silently
-        exit-0 -- the bug this DPLAN exists to fix)."""
+        exit-0)."""
         exec_path_prefix = Path(_node()).resolve().parent.parent
         real_candidates = [
             Path("/usr/local/lib/node_modules") / _PKG_RELATIVE_ENTRY,

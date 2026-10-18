@@ -5,15 +5,11 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-21
-# Modified: 2026-07-21
+# Modified: 2026-10-17
 # =============================================
 
 """Tiny always-on temporal grounding line — no cadence gating, fires every
-turn. Reads the live clock each fire (no caching) and injects one short line:
-weekday, date, 24h time, tz abbreviation, part of day. Timezone comes from
-the host system (astimezone()) — never hardcoded, so clones running outside
-Vancouver still show their own local time. Keep it to one line — every-turn
-cost matters."""
+turn. Timezone comes from the host (astimezone()), never hardcoded; one line, every-turn cost matters."""
 
 from datetime import datetime
 
