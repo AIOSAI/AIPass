@@ -276,27 +276,6 @@ print("IMPORTED")
     )
 
 
-def test_dashboard_writer_survives_an_oserror_from_devpulse():
-    """The lazy @devpulse import degrades to None rather than raising."""
-    world = _peer_world(
-        "aipass.devpulse.apps.modules",
-        r"""
-from aipass.commons.apps.handlers.dashboard import dashboard_writer
-
-assert dashboard_writer._get_write_section() is None, "expected the unavailable-peer fallback"
-
-print("IMPORTED")
-""",
-    )
-    result = _run(world)
-    out = result.stdout
-
-    assert "DENIAL_ARMED" in out, f"the peer denial never fired - the pin proves nothing:\n{out}"
-    assert "IMPORTED" in out, (
-        f"an OSError from an uncured peer escaped `except ImportError`:\nstdout={out}\nstderr={result.stderr}"
-    )
-
-
 def test_handlers_guard_survives_the_ntpath_shaped_denial():
     """The guard must not walk inspect.stack(): red against a stack walk, green against sys._getframe."""
     result = _run(NTPATH_GUARD_WORLD)

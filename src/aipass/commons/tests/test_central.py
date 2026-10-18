@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_central.py
-# Description: Tests for central_writer, dashboard_writer, and dashboard_pipeline handlers
-# Version: 1.0.0
+# Description: Tests for the central_writer handler
+# Version: 1.2.0
 # Created: 2026-03-29
 # Modified: 2026-10-17
 # =============================================
 
-"""Tests for apps/handlers/central/, apps/handlers/dashboard/, and apps/handlers/notifications/dashboard_pipeline.py."""
+"""Tests for apps/handlers/central/central_writer.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that central_writer.py, dashboard_writer.py, and dashboard_pipeline.py parse and import
+# seedgo: no-test-needed(ruff) — that central_writer.py parses and imports
 # seedgo: no-test-needed(constant) — AI_CENTRAL_DIR and BRANCH_REGISTRY_PATH's literal path segments
 
 import json
@@ -20,8 +20,6 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from aipass.commons.apps.handlers.central import central_writer
-from aipass.commons.apps.handlers.dashboard import dashboard_writer
-from aipass.commons.apps.handlers.notifications import dashboard_pipeline
 
 
 def test_get_registered_branches_returns_dict(tmp_path: Path) -> None:
@@ -214,160 +212,3 @@ def test_update_central_orchestrates_full_pipeline(
     mock_build.assert_called_once_with({"X": {"mentions": 0}}, top_threads=[])
     mock_write.assert_called_once()
     assert result["service"] == "the_commons"
-
-
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
-def test_write_commons_activity_success(
-    mock_find: MagicMock,
-    mock_ws: MagicMock,
-    mock_json: MagicMock,
-) -> None:
-    """write_commons_activity should call write_section with correct args on success."""
-    mock_find.return_value = "/projects/seed"
-    mock_write_section = MagicMock(return_value=True)
-    mock_ws.return_value = mock_write_section
-
-    activity = {"managed_by": "the_commons", "mentions": 3}
-    result = dashboard_writer.write_commons_activity("SEED", activity)
-
-    assert result is True
-    mock_write_section.assert_called_once_with("/projects/seed", "commons_activity", activity)
-
-
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
-def test_write_commons_activity_branch_not_found(
-    mock_find: MagicMock,
-) -> None:
-    """write_commons_activity should return False when branch path is not found."""
-    mock_find.return_value = None
-
-    result = dashboard_writer.write_commons_activity("MISSING", {"mentions": 0})
-    assert result is False
-
-
-def test_write_commons_activity_raises_a_failed_write_instead_of_answering_not_found() -> None:
-    """A failed write raises, never answering the False that means "branch not found"."""
-    with (
-        patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
-        pytest.raises(OSError, match="registry unreadable"),
-    ):
-        dashboard_writer.write_commons_activity("SEED", {"mentions": 0})
-    lookup.assert_called_once_with("SEED")
-
-
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
-@patch(
-    "aipass.commons.apps.handlers.dashboard.dashboard_writer._read_last_checked", return_value="1970-01-01T00:00:00Z"
-)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.close_db", side_effect=lambda conn: None)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.get_db")
-def test_update_commons_dashboard_queries_db(
-    mock_get_db: MagicMock,
-    mock_close: MagicMock,
-    mock_find: MagicMock,
-    mock_last_checked: MagicMock,
-    mock_ws: MagicMock,
-    mock_json: MagicMock,
-    initialized_db: sqlite3.Connection,
-) -> None:
-    """update_commons_dashboard should query DB for counts and push to dashboard."""
-    mock_get_db.return_value = initialized_db
-    mock_find.return_value = "/projects/seed"
-    mock_write_section = MagicMock(return_value=True)
-    mock_ws.return_value = mock_write_section
-
-    initialized_db.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('SEED', 'Seed')")
-    initialized_db.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('OTHER', 'Other')")
-    initialized_db.execute("INSERT INTO posts (room_name, author, title) VALUES ('general', 'OTHER', 'Hey')")
-    initialized_db.execute(
-        "INSERT INTO mentions (post_id, mentioned_agent, mentioner_agent, read) VALUES (1, 'SEED', 'OTHER', 0)"
-    )
-    initialized_db.commit()
-
-    result = dashboard_writer.update_commons_dashboard("SEED")
-
-    assert result is True
-    call_args = mock_write_section.call_args
-    section_data = call_args[0][2]
-    assert section_data["managed_by"] == "the_commons"
-    assert section_data["mentions"] == 1
-    assert section_data["new_posts_since_last_visit"] == 1
-
-
-def test_update_commons_dashboard_raises_a_failed_write_instead_of_answering_not_found() -> None:
-    """A failed lookup raises before any database opens, never answering the "not found" False."""
-    with (
-        patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
-        patch.object(dashboard_writer, "get_db") as db,
-        pytest.raises(OSError, match="registry unreadable"),
-    ):
-        dashboard_writer.update_commons_dashboard("SEED")
-    lookup.assert_called_once_with("SEED")
-    db.assert_not_called()
-
-
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
-def test_update_dashboards_for_event_counts_past_a_branch_whose_write_raised(
-    mock_collect: MagicMock,
-    mock_update_dash: MagicMock,
-    mock_update_central: MagicMock,
-    mock_json: MagicMock,
-) -> None:
-    """The caller of the raising write: one branch raising is skipped and the rest still update."""
-    mock_collect.return_value = ["GOOD", "BAD", "ALSO_GOOD"]
-    mock_update_dash.side_effect = [True, OSError("registry unreadable"), True]
-
-    count = dashboard_pipeline.update_dashboards_for_event("new_post", {"room_name": "general", "author": "X"})
-
-    assert count == 2
-    assert mock_update_dash.call_count == 3
-    mock_update_central.assert_called_once()
-
-
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
-def test_update_dashboards_for_event_calls_pipeline(
-    mock_collect: MagicMock,
-    mock_update_dash: MagicMock,
-    mock_update_central: MagicMock,
-    mock_json: MagicMock,
-) -> None:
-    """update_dashboards_for_event should update each collected branch and central."""
-    mock_collect.return_value = ["SEED", "DRONE"]
-    mock_update_dash.return_value = True
-
-    count = dashboard_pipeline.update_dashboards_for_event("new_post", {"room_name": "general", "author": "FLOW"})
-
-    assert count == 2
-    assert mock_update_dash.call_count == 2
-    mock_update_central.assert_called_once()
-
-
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
-def test_update_dashboards_for_event_handles_partial_failure(
-    mock_collect: MagicMock,
-    mock_update_dash: MagicMock,
-    mock_update_central: MagicMock,
-    mock_json: MagicMock,
-) -> None:
-    """Pipeline should continue updating remaining branches when one fails, and still update central."""
-    mock_collect.return_value = ["GOOD", "BAD", "ALSO_GOOD"]
-    mock_update_dash.side_effect = [True, False, True]
-
-    count = dashboard_pipeline.update_dashboards_for_event("new_comment", {"room_name": "dev", "author": "X"})
-
-    assert count == 2  # Only the two successful ones
-    assert mock_update_dash.call_count == 3
-    mock_update_central.assert_called_once()
