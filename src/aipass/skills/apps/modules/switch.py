@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
 # Modified: 2026-10-17
 # =============================================
@@ -30,15 +30,9 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "on":
-        if not args:
-            error("Error: skill name required. Usage: skills on <name>")
-            return False
         return switch_on(args[0])
 
     if command == "off":
-        if not args:
-            error("Error: skill name required. Usage: skills off <name> [reason]")
-            return False
         reason = " ".join(args[1:]) if len(args) > 1 else None
         return switch_off(args[0], reason)
 

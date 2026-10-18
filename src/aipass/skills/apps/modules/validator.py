@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Skill validation module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
 # Modified: 2026-10-17
 # =============================================
@@ -24,10 +24,6 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "validate":
-        if not args:
-            error("Error: skill name required. Usage: skills validate <name>")
-            return False
-
         from aipass.skills.apps.modules.loader import load_skill
 
         name = args[0]

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_creator_handler.py
 # Description: Tests for skill creation handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-03
 # Modified: 2026-10-17
 # =============================================
@@ -107,10 +107,14 @@ class TestCreateSkill:
         assert result["path"] is None
         assert result["files"] == []
 
-    def test_invalid_name_fails(self):
+    def test_invalid_name_fails_naming_every_rule_is_valid_name_applies(self):
+        # The rule takes underscores (five built-ins carry them), so the message names them.
         result = create_skill("Bad Name!", template_type="markdown_only")
         assert result["success"] is False
-        assert "Invalid skill name" in result["error"]
+        assert result["error"] == (
+            "Invalid skill name: 'Bad Name!'. Use lowercase letters, numbers, hyphens and underscores, "
+            "starting with a letter."
+        )
 
     def test_invalid_template_type_fails(self, tmp_path):
         result = create_skill("valid-name", template_type="nonexistent", target_dir=tmp_path)

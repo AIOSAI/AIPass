@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
 # Modified: 2026-10-17
 # =============================================
@@ -26,10 +26,6 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "run":
-        if not args:
-            error("Error: skill name required. Usage: skills run <name> [action] [args...]")
-            return False
-
         name = args[0]
         action = args[1] if len(args) > 1 else None
         extra_args = _parse_run_args(args[2:]) if len(args) > 2 else {}

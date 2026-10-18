@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: creator.py
 # Description: Scaffold new skills from templates
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
 # Modified: 2026-10-17
 # =============================================
@@ -9,7 +9,7 @@
 """Skill creator module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console
 from aipass.skills.apps.handlers.creator_handler import create_skill as _handler_create_skill
 from aipass.skills.apps.handlers.json import json_handler
 
@@ -30,10 +30,6 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "create":
-        if not args:
-            error("Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
-            return False
-
         name = args[0]
         template_type = "markdown_only"
         if "--with-handler" in args:

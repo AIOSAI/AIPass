@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: creator_handler.py
 # Description: Skill creation handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
 # Modified: 2026-10-17
 # =============================================
@@ -38,7 +38,10 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
             "success": False,
             "path": None,
             "files": [],
-            "error": f"Invalid skill name: '{name}'. Use lowercase letters, numbers, and hyphens only.",
+            "error": (
+                f"Invalid skill name: '{name}'. Use lowercase letters, numbers, hyphens and underscores, "
+                "starting with a letter."
+            ),
         }
 
     template_result = get_template(template_type)

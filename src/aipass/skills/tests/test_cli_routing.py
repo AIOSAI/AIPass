@@ -18,8 +18,11 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from aipass.skills.apps import skills as entry
 from aipass.skills.apps.modules import runner
+from aipass.skills.apps.modules.switch import read_state
 from aipass.skills.apps.skills import handle_command, print_help, print_introspection
 
 
@@ -331,3 +334,18 @@ class TestRunHelpDoesNotDispatch:
             handle_command("run", ["telegram", "status"])
         mock_run.assert_called_once()
         assert mock_run.call_args[0][1] == "status"
+
+
+class TestSwitchVerbsHelpWritesNothing:
+    """`on`, `off` and `switch` take a help flag as a request for usage, never as a skill name to record."""
+
+    @pytest.mark.parametrize("verb", ["on", "off", "switch"])
+    @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
+    def test_a_help_flag_prints_the_switch_usage_and_records_no_skill(self, capsys, verb, flag):
+        assert handle_command(verb, [flag]) is True
+        assert "Skills Switch - Disconnect and reconnect a skill" in capsys.readouterr().out
+        assert read_state() == {}
+
+    def test_a_skill_name_is_still_recorded(self, capsys):
+        assert handle_command("off", ["github"]) is True
+        assert read_state()["github"]["enabled"] is False

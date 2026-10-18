@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-08
 # Modified: 2026-10-17
 # =============================================
@@ -338,9 +338,24 @@ def _cmd_validate(name):
     return result["valid"]
 
 
+def _print_switch_help():
+    """Print help text for the on, off and switch subcommands."""
+    console.print("Skills Switch - Disconnect and reconnect a skill")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills off <name> \\[reason]    Switch a skill off, stop its processes")
+    console.print("  drone @skills on <name>              Switch a skill on, start its processes")
+    console.print("  drone @skills switch \\[name]          Show each skill's on/off state")
+
+
 def _cmd_switch(command, args):
     """Route an off-switch command to the switch module."""
     from aipass.skills.apps.modules.switch import show_switch, switch_off, switch_on
+
+    # on/off record their argument, so a help flag read as a skill name would be written to the state.
+    if args and args[0] in ("--help", "-h", "help"):
+        _print_switch_help()
+        return True
 
     if command == "switch":
         return show_switch(args[0] if args else None)
