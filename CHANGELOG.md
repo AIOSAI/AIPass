@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The README links BAUD's repository, not a path that is not in the tree** (`README.md`; the owner 2026-10-17 23:49: "baud link doesnt work. it goes to aipass readme"). The face section linked `projects/baud/README.md`, a gitignored clone that GitHub cannot serve, so the link fell back to the AIPass README. BAUD is a separate repository, and the README now says so three times: a "BAUD, the phone face" link in the header row, the repository named where BAUD is introduced, and the face section pointing at `github.com/AIOSAI/baud` with the one-line installer under it.
+
 ## [2026-10-17] — v2.8.20: the fleet's comments say why, the audit at 100 on all 18, a project's manager runs its own repo's git, docs say what exists
 
 ### Added

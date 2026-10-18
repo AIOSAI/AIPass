@@ -14,6 +14,7 @@
 <p align="center"><em>AI agents that remember, collaborate, and never start from zero.</em></p>
 <p align="center">
   <a href="https://aipass.ai">aipass.ai</a> ·
+  <a href="https://github.com/AIOSAI/baud">BAUD, the phone face</a> ·
   <a href="https://github.com/AIOSAI/AIPass/issues/new?template=feedback.yml">Feedback</a> ·
   <a href="https://reddit.com/r/AIPass">r/AIPass</a> ·
   <a href="https://github.com/AIOSAI/AIPass/discussions">Discussions</a>
@@ -21,7 +22,7 @@
 
 AIPass is an operating system for AI agents. Agents live in it as citizens. Each has an identity, a memory that survives the session, a mailbox, and a home directory. They work on the same filesystem as you and each other, with no sandboxes and no worktrees, because the hooks and gates decide who may write what. You talk to one agent, say what you want built, and the fleet places the work where it belongs and does not lose track of it. Switch projects, come back a week later, and nothing has to be explained again.
 
-BAUD is its face: a real UI, built by AIPass agents for AIPass, that presents the same functions to a human on a phone. AIPass is what everything runs on. BAUD is how you look at it.
+BAUD is its face: a real UI, built by AIPass agents for AIPass, that presents the same functions to a human on a phone. AIPass is what everything runs on. BAUD is how you look at it. BAUD is a separate repository: **[github.com/AIOSAI/baud](https://github.com/AIOSAI/baud)**.
 
 <p align="center">
   <img src="assets/baud-phone.png" alt="BAUD on a phone" width="340" />
@@ -93,7 +94,7 @@ drone @seedgo audit aipass                       # Run the standards checks
 </p>
 <p align="center"><em>The same agent seen from BAUD: what it is doing right now, its mail, plans and todos, and the doors into its files, shell, memory and passport.</em></p>
 
-**Want the face? BAUD:** its [README](projects/baud/README.md) covers what it installs, phone pairing, and security.
+**Want the face?** BAUD lives in its own repository, **[github.com/AIOSAI/baud](https://github.com/AIOSAI/baud)**. Its README there covers what it installs, phone pairing, and security. One line installs BAUD together with AIPass:
 
 ```sh
 curl -fsSL https://github.com/AIOSAI/baud/releases/latest/download/install.sh | sh
