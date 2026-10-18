@@ -3,16 +3,11 @@
 # Description: Entry point for devpulse branch — auto-discovers modules
 # Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-09-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 DEVPULSE Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- No manual imports or routing needed
 """
 
 import difflib
@@ -22,12 +17,7 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-# Windows terminals/pipes default to cp1252, which can't encode the Unicode
-# Rich emits (✓/✗, box-drawing, arrows). PYTHONUTF8 only affects child
-# interpreters, not this process's already-open stdout/stderr — so we also
-# reconfigure the live streams to UTF-8 in place (Python 3.7+). Without this,
-# the introspection/help banners crash with UnicodeEncodeError on Windows.
-# Mirrors aipass/apps/aipass.py and drone/cli.py.
+# Windows streams default to cp1252 and crash on Rich's Unicode; PYTHONUTF8 reaches only child interpreters.
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")  # for child subprocesses
     for _stream in (sys.stdout, sys.stderr):
@@ -38,19 +28,10 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console, error, resolve_exit, reset_command_state
 
-# console is stdout, err_console is stderr. Until 2026-09-15 this file aliased
-# console = err_console (a 2026-03 compliance sweep, no reason recorded), so the
-# bare self-map and --help went to stderr: every other branch prints them to
-# stdout, and a fleet measurement of self-map sizes read devpulse as 0 chars.
+# The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 
-# The one version string. --version printed a hardcoded "1.0.0" while the header
-# above said 1.0.1 (FPLAN-0490, found 2026-09-06); keep this constant and the
-# header in step - there is no other version source in the branch.
+# The one version source in the branch: keep it in step with the header's Version line.
 VERSION = "1.0.3"
-
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -66,7 +47,6 @@ def discover_modules() -> list[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        # Try package import first, fall back to relative import
         module_names = [
             f"aipass.devpulse.apps.modules.{file_path.stem}",
             f"apps.modules.{file_path.stem}",
@@ -133,24 +113,13 @@ def print_help():
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
-    """Route command to appropriate module.
-
-    An unknown command or flag is refused BY NAME (the owner's standing ruling:
-    fail with a message naming the token, never silently, never a default).
-    Until 2026-09-07 this returned False with nothing printed — exit 1, empty
-    stdout and stderr — which the fleet sweep of that morning classified as
-    REFUSES-SILENT: the right exit code with no explanation for a human.
-    """
+    """Route command to appropriate module; an unknown command or flag is refused BY NAME, never silently."""
     for module in modules:
         try:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            # A module that RAISED is a defect in that module, not an unknown
-            # command. Until 2026-09-08 this logged and fell through to
-            # "Unknown command: compass / Did you mean: compass?" — the
-            # honest message (compass query "opt-in" died in FTS5's parser)
-            # went to the log nobody was reading.
+            # A module that RAISED is a defect in that module, not an unknown command: say so, not "Unknown".
             name = module.__name__.split(".")[-1]
             logger.error(f"[DEVPULSE] Module {name} error on '{command}': {e}")
             error(
@@ -165,11 +134,6 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
         err_console.print(f"Did you mean: {close[0]}?")
     err_console.print(f"Known commands: {', '.join(known)}. Run: drone @devpulse --help")
     return False
-
-
-# =============================================================================
-# HANDLER SECURITY GUARD
-# =============================================================================
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -194,11 +158,6 @@ def _handle_command(command: str, args: list) -> bool:
         return True
 
     return route_command(command, args, modules)
-
-
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
 
 
 def main():

@@ -3,29 +3,12 @@
 # Description: Compass storage core — SQLite/FTS5 rated decision store
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-06-16
+# Modified: 2026-10-17
 # =============================================
 
 """Compass storage core — the SQLite/FTS5 layer for rated decisions.
 
-Compass holds short, *rated* decisions (``good | bad | impressive |
-interesting``). The rating is the signal: repeat the good, avoid the bad.
-This is deliberately separate from the @memory vector store — compass is
-truth (curated), @memory is story (ingest-all). See DPLAN-0212.
-
-Storage is one SQLite file with a ``decisions`` table and an FTS5 virtual
-table (``decisions_fts``) mirroring ``context, decision, note, tags``. Search
-ranks by FTS5 BM25 relevance. Stdlib ``sqlite3`` only — no embeddings, no
-ChromaDB, no extra dependencies. FTS5 is compiled into standard CPython's
-sqlite3; availability is verified at runtime and a clear error is raised if
-it is missing.
-
-Every public function accepts an optional ``db_path`` so tests can point at a
-temp file. The default path is resolved relative to the branch root via
-``Path(__file__)`` parents — never a hardcoded absolute path.
-
-This module is the storage core ONLY (FPLAN P1). The drone command, slash
-command, and maintenance UX are later phases.
+Kept apart from the @memory vector store on purpose: compass is curated truth, @memory is ingest-all story.
 """
 
 import logging
@@ -35,10 +18,6 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-# Prefer the prax system logger so compass logs land with the rest of the
-# ecosystem; fall back to stdlib logging if prax is unavailable in this
-# context (e.g. an isolated test run). Verified working at build time —
-# prax import is clean here, so this is the active path.
 try:
     from aipass.prax.apps.modules.logger import system_logger as logger
 except Exception as _prax_exc:  # pragma: no cover - defensive fallback only
@@ -48,9 +27,6 @@ except Exception as _prax_exc:  # pragma: no cover - defensive fallback only
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.module_root import module_file
 
-# Branch-root-relative default DB path. store.py lives at
-# <branch_root>/apps/handlers/compass/store.py, so parents[3] is the branch
-# root. NEVER hardcode an absolute /home/... path here.
 _BRANCH_ROOT = module_file(__file__).parents[3]
 DEFAULT_DB_PATH = _BRANCH_ROOT / "devpulse_json" / "compass" / "compass.db"
 
@@ -58,10 +34,7 @@ VALID_RATINGS = ("good", "bad", "impressive", "interesting")
 VALID_SOURCES = ("devpulse", "user")
 VALID_STATUSES = ("active", "archived")
 
-# Columns we return / surface from the decisions table (everything useful).
-# NOTE: ``score`` is deliberately absent — it is code-invisible (DPLAN-0246
-# seedgo ruling). The column stays physically on disk as inert NULL, but no
-# Python surface (SELECTs, returned dicts) touches it.
+# ``score`` is absent on purpose: the column stays on disk as inert NULL and no Python surface reads it.
 _DECISION_COLUMNS = (
     "id",
     "created",
@@ -124,11 +97,7 @@ END;
 
 
 def _verify_fts5(conn: sqlite3.Connection) -> None:
-    """Raise a clear error if FTS5 is not compiled into this sqlite3.
-
-    FTS5 ships with standard CPython, but we never assume — a missing module
-    must fail loudly, not silently degrade search.
-    """
+    """Raise a clear error if FTS5 is not compiled into this sqlite3, never degrade search silently."""
     try:
         conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_probe USING fts5(x)")
         conn.execute("DROP TABLE IF EXISTS _fts5_probe")
@@ -140,14 +109,7 @@ def _verify_fts5(conn: sqlite3.Connection) -> None:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Apply idempotent schema migrations to an already-open DB.
-
-    Adds the ``supersedes`` column to DBs created before it existed. Guarded by
-    a ``PRAGMA table_info`` pre-check so it is safe to run on every connect —
-    never a blind ``ALTER`` (DPLAN-0246 seedgo ruling: idempotent migration).
-    Fresh DBs already carry the column from ``_SCHEMA``; the pre-check makes
-    this a no-op for them.
-    """
+    """Apply idempotent schema migrations to an already-open DB; runs on every connect, never a blind ALTER."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(decisions)")}
     if "supersedes" not in cols:
         conn.execute("ALTER TABLE decisions ADD COLUMN supersedes INTEGER")
@@ -155,22 +117,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         logger.info("[compass] migration: added supersedes column")
 
 
-# FTS5 MATCH treats characters like " * ( ) : - ^ and the words AND/OR/NOT as
-# syntax. Untrusted text (a decision's own words) can therefore crash MATCH.
-# We defuse it by extracting bare word tokens and OR-ing them as quoted string
-# literals — no operator can survive, and quoting a bareword is exact.
+# FTS5 MATCH parses " * ( ) : - ^ and AND/OR/NOT, so untrusted text crashes it; only quoted word tokens reach MATCH.
 _FTS_WORD = re.compile(r"\w+", re.UNICODE)
 
 
 def _sanitize_fts_query(text: Optional[str], join: str = " OR ") -> Optional[str]:
     """Turn arbitrary text into a safe FTS5 MATCH expression, or None.
 
-    Returns the text's word tokens, each quoted as a string literal so FTS5
-    syntax characters can never reach the parser, joined by ``join``: ``" OR "``
-    (the default, recall and conflict advisories - any token matches) or
-    ``" "`` (FTS5's implicit AND - every token must match, the user-query
-    contract). Returns None when there are no usable tokens (caller should
-    skip or refuse the search).
+    ``" OR "`` serves the advisories (any token matches); ``" "`` is FTS5's implicit AND, the user-query contract.
     """
     tokens = _FTS_WORD.findall(text or "")
     if not tokens:
@@ -184,12 +138,7 @@ def _resolve_db_path(db_path: Optional[Path | str]) -> Path:
 
 
 def _connect(db_path: Optional[Path | str]) -> sqlite3.Connection:
-    """Open (and lazily initialise) the compass DB.
-
-    Creates parent directories on first use, verifies FTS5, ensures schema, and
-    runs idempotent migrations. Rows come back as ``sqlite3.Row`` so we can
-    build clean dicts.
-    """
+    """Open (and lazily initialise) the compass DB."""
     path = _resolve_db_path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -219,26 +168,7 @@ def add_decision(
 ) -> int:
     """Add a rated decision and return its new id.
 
-    Args:
-        context: Short description of the situation / the fork.
-        decision: Short description of what was chosen.
-        rating: One of ``good | bad | impressive | interesting``.
-        note: Optional human observation.
-        tags: Optional comma-separated tags.
-        source: ``devpulse`` or ``user`` (default ``devpulse``).
-        db_path: Optional DB path override (tests pass a temp path).
-        created: Optional ISO date override; defaults to today. This is the
-            ONLY place a "today" date is stamped.
-        supersedes: Optional id of the decision this entry corrects. When set,
-            the new entry links to it AND that entry is archived — atomically,
-            in one transaction. Errors cleanly (no write) if the id is unknown.
-
-    Returns:
-        The new row's integer id.
-
-    Raises:
-        ValueError: On empty context/decision, invalid rating/source, or a
-            ``supersedes`` target that does not exist.
+    ``supersedes`` links to the corrected entry and archives it in the same transaction; an unknown id writes nothing.
     """
     if not context or not context.strip():
         raise ValueError("context must be a non-empty string")
@@ -253,15 +183,12 @@ def add_decision(
 
     conn = _connect(db_path)
     try:
-        # Validate the supersede target BEFORE any write so a bad id never
-        # leaves a partial insert behind.
         if supersedes is not None:
             target = conn.execute("SELECT 1 FROM decisions WHERE id = ?", (supersedes,)).fetchone()
             if target is None:
                 raise ValueError(f"cannot supersede #{supersedes}: no decision with that id")
 
-        # Insert + archive-the-target in ONE transaction (commit once at the
-        # end); any failure rolls the whole thing back — never half-applied.
+        # One commit at the end: the insert and the archive land together or not at all.
         cur = conn.execute(
             """
             INSERT INTO decisions (created, context, decision, rating, note, tags, source, supersedes)
@@ -305,30 +232,7 @@ def query_decisions(
 ) -> list[dict]:
     """Search decisions, ranked by FTS5 BM25 relevance.
 
-    Increments ``times_surfaced`` for every returned row. Each result dict
-    carries a computed ``superseded_by`` field: the id of the row that
-    supersedes this one, or None. Combined with the ``supersedes`` column this
-    lets callers render both pointer directions.
-
-    Args:
-        query: Free text. Its word tokens are quoted FTS5 literals joined by
-            implicit AND (see :func:`_sanitize_fts_query`), so every word must
-            match and hyphens, quotes, parentheses and the words AND/OR/NOT
-            are searched for, never parsed.
-        rating: Optional exact rating filter (one of VALID_RATINGS).
-        limit: Max rows to return (default 5).
-        include_archived: When True, lift the ``status = 'active'`` filter so
-            archived rows (the avoid-list) are searchable too. Default False —
-            unchanged active-only behaviour.
-        db_path: Optional DB path override.
-
-    Returns:
-        A list of decision dicts (most relevant first). Each dict includes the
-        rating, all useful fields, and the computed ``superseded_by`` pointer.
-
-    Raises:
-        ValueError: On empty query, a query with no word tokens, bad rating
-            filter, or non-positive limit.
+    Increments ``times_surfaced`` on every returned row and attaches ``superseded_by``, the reverse pointer.
     """
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -337,11 +241,7 @@ def query_decisions(
     if limit <= 0:
         raise ValueError(f"limit must be a positive integer, got {limit!r}")
 
-    # The raw text used to reach MATCH untouched, so `compass query "opt-in"`
-    # died in FTS5's parser ("no such column: in") and the router reported it
-    # as an unknown command (2026-09-08). Same defusing as recall/find_conflicts
-    # but joined by FTS5's implicit AND, so "old choice" still means both words
-    # (the contract every caller of this function was written against).
+    # Raw text in MATCH crashes the parser ("opt-in"); implicit AND keeps "old choice" meaning both words.
     match = _sanitize_fts_query(query, join=" ")
     if match is None:
         raise ValueError(f"query has no searchable words (letters, digits, underscore): {query!r}")
@@ -371,7 +271,6 @@ def query_decisions(
         ids = [r["id"] for r in results]
         if ids:
             placeholders = ",".join("?" for _ in ids)
-            # Reverse-lookup: which returned rows are pointed AT by a superseder?
             successors: dict = {}
             for row in conn.execute(
                 f"SELECT id, supersedes FROM decisions WHERE supersedes IN ({placeholders})",
@@ -383,7 +282,6 @@ def query_decisions(
                 ids,
             )
             conn.commit()
-            # Reflect the increment + attach the reverse pointer without re-query.
             for r in results:
                 r["times_surfaced"] = (r["times_surfaced"] or 0) + 1
                 r["superseded_by"] = successors.get(r["id"])
@@ -406,23 +304,7 @@ def find_conflicts(
     limit: int = 3,
     db_path: Optional[Path | str] = None,
 ) -> list[dict]:
-    """Return ACTIVE decisions whose text overlaps a would-be new entry.
-
-    A write-time, side-effect-free advisory helper: it does NOT increment
-    ``times_surfaced`` and never writes. The combined ``context + decision``
-    text is sanitised (:func:`_sanitize_fts_query`) so no FTS5 syntax character
-    can crash the MATCH. Returns up to ``limit`` active hits by BM25 relevance,
-    or an empty list when the text has no usable tokens / nothing overlaps.
-
-    Args:
-        context: The would-be new entry's context.
-        decision: The would-be new entry's decision.
-        limit: Max advisory hits to return (default 3).
-        db_path: Optional DB path override.
-
-    Returns:
-        A list of active decision dicts (most relevant first), possibly empty.
-    """
+    """Return ACTIVE decisions whose text overlaps a would-be new entry; an advisory, it never writes."""
     match = _sanitize_fts_query(f"{context or ''} {decision or ''}")
     if match is None:
         return []
@@ -453,19 +335,7 @@ def set_note(
     note: Optional[str],
     db_path: Optional[Path | str] = None,
 ) -> bool:
-    """Set (replace) the note on an existing decision.
-
-    The FTS5 external-content ``decisions_au`` trigger re-indexes the row on
-    UPDATE, so the new note is immediately searchable.
-
-    Args:
-        decision_id: Target decision id.
-        note: The note text to store (may be empty to clear).
-        db_path: Optional DB path override.
-
-    Returns:
-        True if a row was updated, False if no such id.
-    """
+    """Set (replace) the note on an existing decision; False if no such id. The update trigger re-indexes it."""
     conn = _connect(db_path)
     try:
         cur = conn.execute("UPDATE decisions SET note = ? WHERE id = ?", (note, decision_id))
@@ -480,12 +350,7 @@ def set_note(
 
 
 def stats(db_path: Optional[Path | str] = None) -> dict:
-    """Return decision counts by rating, by status, and the total.
-
-    Returns:
-        ``{"total": int, "by_rating": {...}, "by_status": {...}}`` where each
-        valid rating/status key is always present (zero when none).
-    """
+    """Return decision counts by rating, by status, and the total; every valid key is present."""
     conn = _connect(db_path)
     try:
         total = int(conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0])
@@ -504,19 +369,7 @@ def stats(db_path: Optional[Path | str] = None) -> dict:
 
 
 def rate(decision_id: int, rating: str, db_path: Optional[Path | str] = None) -> bool:
-    """Change the rating of an existing decision.
-
-    Args:
-        decision_id: Target decision id.
-        rating: New rating (one of VALID_RATINGS).
-        db_path: Optional DB path override.
-
-    Returns:
-        True if a row was updated, False if no such id.
-
-    Raises:
-        ValueError: On invalid rating.
-    """
+    """Change the rating of an existing decision; False if no such id."""
     if rating not in VALID_RATINGS:
         raise ValueError(f"rating must be one of {VALID_RATINGS}, got {rating!r}")
 
@@ -534,18 +387,7 @@ def rate(decision_id: int, rating: str, db_path: Optional[Path | str] = None) ->
 
 
 def archive(decision_id: int, db_path: Optional[Path | str] = None) -> bool:
-    """Archive a decision (sets ``status='archived'``).
-
-    Archived rows drop out of ``query_decisions`` and ``review`` but are never
-    deleted — bad decisions are kept on purpose as an avoid-list.
-
-    Args:
-        decision_id: Target decision id.
-        db_path: Optional DB path override.
-
-    Returns:
-        True if a row was updated, False if no such id.
-    """
+    """Archive a decision, never delete it: archived rows are the avoid-list. False if no such id."""
     conn = _connect(db_path)
     try:
         cur = conn.execute("UPDATE decisions SET status = 'archived' WHERE id = ?", (decision_id,))
@@ -563,26 +405,11 @@ def review(
     db_path: Optional[Path | str] = None,
     reviewed_on: Optional[str] = None,
 ) -> Optional[dict]:
-    """Surface ONE active decision to review and stamp ``last_reviewed``.
-
-    Selection prefers the oldest ``last_reviewed`` (NULL/never-reviewed first);
-    among ties it picks randomly. The chosen row's ``last_reviewed`` is stamped
-    before returning.
-
-    Args:
-        db_path: Optional DB path override.
-        reviewed_on: Optional ISO date override for the stamp; defaults to today.
-
-    Returns:
-        The reviewed decision dict (with the fresh ``last_reviewed`` stamp), or
-        None if there are no active decisions.
-    """
+    """Surface ONE active decision to review and stamp ``last_reviewed``; None when none is active."""
     stamp = reviewed_on if reviewed_on is not None else date.today().isoformat()
 
     conn = _connect(db_path)
     try:
-        # NULLs first, then oldest reviewed; random() breaks ties (and orders
-        # within the all-NULL group, satisfying "else random").
         row = conn.execute(
             """
             SELECT * FROM decisions
@@ -608,20 +435,10 @@ def review(
     return result
 
 
-# Ambient recall caps the OR-expansion of a raw prompt: beyond this many unique
-# tokens the extra words add noise, not recall, and the MATCH string balloons.
 _RECALL_MAX_TOKENS = 64
 
-# Stopwords never reach the MATCH: in an OR-of-tokens query, high-frequency
-# filler ("lets keep working on the...") outweighs topic words in BM25 and
-# surfaces unrelated entries — proven live in the FPLAN-0332 acceptance run.
-# Three categories, all query-side only (entry text is never filtered):
-# grammatical stopwords; conversational filler verbs that open most prompts
-# ("lets keep working on / need to fix"); greeting/small-talk words ("good
-# morning", "how did it go last night"). In a technical store casual words are
-# RARE (df 1-2), so rarity scoring alone cannot reject them — they must never
-# become query tokens at all. The topic space is open; this filler set is
-# closed and small, which is why filtering here works.
+# Query-side only. Casual words are rare in a technical store, so rarity scoring cannot reject them;
+# in an OR query they outweigh topic words in BM25. The filler set is closed and small; the topic space is not.
 _RECALL_STOPWORDS = frozenset(
     """a an and about again also are as at back be bit but by can could did do
     does for from had has have how i if in is it its just me my no not of on
@@ -642,30 +459,8 @@ def recall_decisions(
 ) -> list[dict]:
     """Return scored ambient-recall candidates for raw prompt text.
 
-    The Track 2 read path (DPLAN-0246): a hooks handler passes the raw user
-    prompt; governance (@memory's ``should_surface``) judges the candidates.
-    Side-effect-free — ``times_surfaced`` is NOT incremented here, because a
-    candidate is not yet surfaced; the caller reports actual injections via
-    :func:`mark_surfaced` so the counter stays honest.
-
-    The prompt is arbitrary text, never FTS5 syntax: unique word tokens (first
-    ``_RECALL_MAX_TOKENS``) are OR-ed as quoted literals, ACTIVE rows only,
-    ranked by BM25. Each result dict carries ``relevance`` — the BM25 magnitude
-    mapped to (0, 1) via ``m / (1 + m)``, higher = more relevant — so
-    governance thresholds live on a bounded scale.
-
-    Args:
-        prompt_text: Raw prompt text (any content, any length).
-        limit: Max candidates to return (default 3).
-        db_path: Optional DB path override.
-
-    Returns:
-        A list of active decision dicts (most relevant first), each with a
-        ``relevance`` float in (0, 1); empty when the prompt has no usable
-        tokens or nothing matches.
-
-    Raises:
-        ValueError: On non-positive limit.
+    Side-effect-free: a candidate is not yet surfaced, so the caller reports injections through mark_surfaced.
+    ``relevance`` is m / (1 + m) over rare matched tokens, a bounded scale for @memory's governance thresholds.
     """
     if limit <= 0:
         raise ValueError(f"limit must be a positive integer, got {limit!r}")
@@ -698,15 +493,12 @@ def recall_decisions(
     """
     conn = _connect(db_path)
     try:
-        # Over-fetch: rare-token scoring below reorders, so BM25's top-N alone
-        # would let a filler-heavy row crowd out a topical one.
+        # Over-fetch: rare-token scoring reorders, so BM25's top-N would let filler crowd out a topical row.
         rows = conn.execute(sql, (match, max(limit * 3, 10))).fetchall()
 
-        # Rarity cutoff: a token is evidence only if few entries contain it.
         active_total = conn.execute("SELECT count(*) FROM decisions WHERE status = 'active'").fetchone()[0]
         rare_cutoff = max(3, active_total // 10)
 
-        # Document frequency per prompt token, ONE query against the FTS index.
         df: dict[str, int] = {}
         for t in unique:
             df[t.lower()] = conn.execute(
@@ -719,10 +511,7 @@ def recall_decisions(
         for row in rows:
             item = _row_to_dict(row)
             text = row["_text"].lower()
-            # Rare-token evidence: how many DISTINCTIVE prompt words this entry
-            # actually contains. Filler matches score zero — an entry with no
-            # rare-token overlap must not surface (FPLAN-0332 acceptance: a
-            # haiku prompt surfaced an unrelated ruling on BM25 alone).
+            # Filler matches score zero: an entry with no rare-token overlap must not surface on BM25 alone.
             matched_rare = sum(
                 1
                 for t in unique
@@ -747,19 +536,7 @@ def mark_surfaced(
     decision_ids: list[int],
     db_path: Optional[Path | str] = None,
 ) -> int:
-    """Increment ``times_surfaced`` for decisions actually injected.
-
-    The write half of the recall contract: :func:`recall_decisions` returns
-    candidates without side effects; whatever governance approves and the
-    caller truly injects gets counted here — never the merely-considered.
-
-    Args:
-        decision_ids: Ids of the decisions that were injected.
-        db_path: Optional DB path override.
-
-    Returns:
-        Number of rows updated (0 for an empty list).
-    """
+    """Increment ``times_surfaced`` for decisions actually injected, never the merely-considered."""
     if not decision_ids:
         return 0
 

@@ -3,15 +3,11 @@
 # Description: Release Notify Module — release mail fan-out to project managers
 # Version: 1.0.0
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 Release Notify Module — release mail fan-out to project managers (release-notify).
-
-Auto-discovered by devpulse.py via handle_command(). One merge-train step
-(DPLAN-0335 leg 1): enumerate the managers, mail each one, post one commons
-thread, stamp the version so a second run sends nothing.
 """
 
 from rich.table import Table
@@ -41,11 +37,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console as stdout_console, err_console, error, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 
-# Progress and refusals are chatter and belong on stderr; the preview and the
-# summary are this command's PRODUCT and go to stdout, where a redirect
-# captures them. Help is documentation, so it goes to stdout too (feedback.py
-# carries the measurement that settled this: help on stderr wrote an empty
-# file).
+# Progress and refusals go to stderr; the preview, the summary and help are the product, on stdout for a redirect.
 console = err_console
 
 COMMAND_NAMES = ("release-notify", "release_notify")
@@ -91,29 +83,12 @@ def print_introspection() -> None:
 
 
 def _wants_help(args: list[str]) -> bool:
-    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
-
-    Bare word 'help' counts only at position 0 — later positions may be values.
-
-    Args:
-        args: Arguments after the command word.
-
-    Returns:
-        True when the caller asked to be told, not to be obeyed.
-    """
+    """Help flag anywhere in args = explain, never execute; bare 'help' only first, later positions are values."""
     return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
 
 
 def _parse_args(args: list[str]) -> tuple[str, bool, bool] | None:
-    """Read the version token and the two flags, refusing anything else BY NAME.
-
-    Args:
-        args: Arguments after the command word.
-
-    Returns:
-        tuple: (raw version token, dry_run, force), or None when the line was
-        refused — the refusal is already printed.
-    """
+    """Read (version token, dry_run, force), refusing anything else BY NAME; None means the refusal is printed."""
     flags = [arg for arg in args if arg.startswith("-")]
     positionals = [arg for arg in args if not arg.startswith("-")]
 
@@ -145,27 +120,14 @@ def _parse_args(args: list[str]) -> tuple[str, bool, bool] | None:
 def _print_lines(lines: list[str]) -> None:
     """Print plain text on stdout with Rich told to leave it alone.
 
-    A CHANGELOG line carries square brackets and a path may carry anything;
-    Rich reads [...] as markup and raises on an unknown style. soft_wrap keeps
-    a passport path on ONE line — the default 80-column wrap folded every path
-    in the first preview, which is unreadable and unpasteable.
-
-    Args:
-        lines: The lines to print verbatim.
+    CHANGELOG brackets would read as markup; soft_wrap keeps a passport path on one pasteable line.
     """
     for line in lines:
         stdout_console.print(line, markup=False, highlight=False, soft_wrap=True)
 
 
 def _preview(version: str, subject: str, body: str, discovery: dict) -> None:
-    """Print the recipients, what was skipped and why, and the whole body.
-
-    Args:
-        version: The bare version being announced.
-        subject: The subject line.
-        body: The composed body.
-        discovery: The result of discover_managers().
-    """
+    """Print the recipients, what was skipped and why, and the whole body."""
     managers = discovery["managers"]
     skipped = discovery["skipped"]
 
@@ -190,12 +152,7 @@ def _preview(version: str, subject: str, body: str, discovery: dict) -> None:
 
 
 def _summary(rows: list[tuple[str, str, str]], commons: str) -> None:
-    """Print the per-recipient outcome table on stdout.
-
-    Args:
-        rows: (address, manager name, outcome) per recipient.
-        commons: The commons post outcome.
-    """
+    """Print the per-recipient outcome table on stdout."""
     table = Table(title="release-notify", show_lines=False)
     table.add_column("Recipient", style="cyan", width=18)
     table.add_column("Manager", style="green", width=16)
@@ -207,16 +164,7 @@ def _summary(rows: list[tuple[str, str, str]], commons: str) -> None:
 
 
 def _fan_out(subject: str, body: str, managers: list[dict]) -> tuple[list[str], list[str], list[tuple[str, str, str]]]:
-    """Mail every manager, keeping going past any single failure.
-
-    Args:
-        subject: The subject line.
-        body: The composed body.
-        managers: Manager entries from discover_managers().
-
-    Returns:
-        tuple: (addresses sent, addresses failed, table rows).
-    """
+    """Mail every manager, keeping going past any single failure: (sent, failed, table rows)."""
     sent: list[str] = []
     failed: list[str] = []
     rows: list[tuple[str, str, str]] = []
@@ -236,17 +184,7 @@ def _fan_out(subject: str, body: str, managers: list[dict]) -> tuple[list[str], 
 
 
 def _notify(version: str, dry_run: bool, force: bool) -> bool:
-    """Run the fan-out for one version.
-
-    Args:
-        version: The bare version being announced.
-        dry_run: Preview only — no sends, no stamp.
-        force: Send again even though this version is stamped.
-
-    Returns:
-        bool: Always True — the command was handled. Failures are reported
-        through error(), which is what sets the non-zero exit.
-    """
+    """Run the fan-out for one version; always True, failures go through error(), which sets the exit."""
     discovery = discover_managers()
     managers = discovery["managers"]
     headline = changelog_headline(aipass_root() / CHANGELOG_FILENAME, version)
@@ -299,17 +237,7 @@ def _notify(version: str, dry_run: bool, force: bool) -> bool:
 
 
 def handle_command(command: str, args: list[str]) -> bool:
-    """Route release-notify to the fan-out.
-
-    Auto-discovered by devpulse.py's module loader.
-
-    Args:
-        command: The primary command string.
-        args: Additional arguments after the command.
-
-    Returns:
-        bool: True if the command was handled, False otherwise.
-    """
+    """Route release-notify to the fan-out."""
     if command not in COMMAND_NAMES:
         return False
 

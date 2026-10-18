@@ -3,27 +3,13 @@
 # Description: Watchdog Agent Handler — block until dispatched agent exits
 # Version: 1.5.0
 # Created: 2026-04-14
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-# Signal choice: ai_mail dispatch lock file polling.
-#
-# When ai_mail dispatches an agent, dispatch_monitor.py creates
-# branch_path/.ai_mail.local/.dispatch.lock containing the monitor PID,
-# and ALWAYS deletes it on exit (success OR crash). So the lock
-# file's existence is the agent's liveness signal — OS-level, crash-aware,
-# template-independent. We poll for: (a) lock file gone, OR (b) monitor
-# PID dead. Crash vs success is distinguished by the presence of
-# .ai_mail.local/last_bounce.json which the monitor writes on failure.
+# Liveness is ai_mail's dispatch lock: dispatch_monitor deletes it on any exit.
+# last_bounce.json, which the monitor writes only on failure, tells a crash from a success.
 
-"""
-Watchdog Agent Handler — block until a dispatched agent process exits.
-
-The whole point: this function returns ONLY when the dispatched agent
-has finished, however it finished. The exit is the wake signal — when
-this function returns from a `run_in_background: true` invocation,
-devpulse wakes.
-"""
+"""Watchdog Agent Handler — block until a dispatched agent process exits."""
 
 import json
 import os
@@ -48,10 +34,7 @@ def _stdout_event(msg: str) -> None:
     """Write one flushed event line to stdout so a Monitor-tool wrapper turns it
     into a live notification to devpulse.
 
-    The Monitor tool treats each stdout line as an event but only captures stderr
-    to a file (never surfaced). So mid-watch signals a caller must ACT on — a stall
-    or a possibly-hung tool — go here, while the verbose debug trail stays on
-    _stderr + logger. (#634 part 2.)
+    The Monitor tool never surfaces stderr, so signals a caller must act on go here.
     """
     sys.stdout.write(msg + "\n")
     sys.stdout.flush()
@@ -108,11 +91,7 @@ def _search_registry(registry_file: Path, target_email: str, strict: bool = Fals
 
 
 def _resolve_branch_path(agent_id: str) -> Path | None:
-    """Resolve an `@branch` token (or bare name) to its absolute branch path.
-
-    Checks the AIPass registry first, then scans external project registries
-    found via AIPASS_CALLER_CWD or known project paths.
-    """
+    """Resolve an `@branch` token (or bare name) to its absolute branch path."""
     target = f"@{agent_id.lstrip('@').lower()}"
 
     repo_root = _find_repo_root()
@@ -122,13 +101,8 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         if result is not None:
             return result
 
-        # In-repo project citizens (projects/<name>/<NAME>_REGISTRY.json) —
-        # same sweep ai_mail's admin lane uses, and deliberately AFTER the
-        # main registry so a local branch always wins a name collision.
-        # Live miss 2026-08-12: watchdog agent @baud said agent-not-found
-        # minutes after the admin lane's first dispatch reached that seat.
-        # glob is case-insensitive on Windows — re-check the suffix exactly so
-        # a *_registry.json counter is never read as a trust anchor
+        # After the main registry, so a local branch wins a name collision. Windows globs
+        # case-insensitively: re-check the suffix so a *_registry.json is never a trust anchor.
         project_regs = (repo_root / "projects").glob("*/*_REGISTRY.json")
         for reg in sorted(p for p in project_regs if p.name.endswith("_REGISTRY.json")):
             result = _search_registry(reg, target)
@@ -209,12 +183,8 @@ def _pid_alive(pid: int) -> bool:
     except OSError as exc:
         logger.info("[watchdog.agent] PID %s os.kill error (assuming dead): %s", pid, exc)
         return False
-    # Portable, never gated on Linux: os.kill(pid, 0) SUCCEEDS for a zombie, so
-    # skipping this off Linux made an exited-but-unreaped agent read alive and
-    # the watch never ended (macOS CI 34682737363, FPLAN-0554). The one
-    # implementation lives in registry.py — this module already imports it, and
-    # registry.py imports nothing from here, so there is no cycle and no second
-    # copy of a rule that must not drift.
+    # Never gate this on Linux: os.kill(pid, 0) succeeds for a zombie on every platform.
+    # registry.py owns the one is_zombie rule; no second copy.
     if _registry.is_zombie(pid):
         return False
     return True
@@ -229,9 +199,9 @@ def _get_jsonl_projects_dir(branch_path: Path) -> Path:
 
 def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
     """Non-blank newline-delimited lines from a bounded tail read of ``path``.
-    Reads at most ``max_bytes`` from the end so a multi-MB transcript stays
-    cheap; a line truncated by the bound decodes partially and simply fails to
-    parse downstream (→ skipped)."""
+
+    A line cut by the bound fails to parse downstream and is skipped.
+    """
     try:
         size = path.stat().st_size
         with path.open("rb") as fh:
@@ -247,8 +217,7 @@ def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip()]
 
 
-# Backwards-walk bound for the in-flight scan: bookkeeping lines between the
-# real message entries are few, so the last message entry sits well inside this.
+# Bookkeeping lines between message entries are few; the last message sits well inside this.
 _INFLIGHT_SCAN_LIMIT = 25
 
 
@@ -256,33 +225,17 @@ def _inflight_from_lines(lines: list[str], source: str = "?") -> bool:
     """True if the last MESSAGE event in ``lines`` is an assistant message
     dispatching a tool call — an in-flight ``tool_use`` awaiting its result.
 
-    While a tool runs (a big Read, a long Bash, a synchronous sub-agent) the
-    agent writes NO new JSONL lines, so size-growth alone misreads that span as
-    idle and false-fires STALLED (#634 part 1). The last message entry being an
-    assistant ``tool_use`` is the precise signal that the agent is actively
-    working, not stuck.
-
-    Transcripts interleave bookkeeping lines (``type: last-prompt``, summaries)
-    with message entries, and bookkeeping can land AFTER the assistant's
-    ``tool_use`` line — seen live 2026-08-08: a parent mid-Task-call had
-    ``last-prompt`` as its literal last line, masking the in-flight signal. So
-    walk backwards past roleless lines to the last entry carrying a role:
-    assistant + ``tool_use`` → in-flight; any other message (text-only turn, a
-    returned ``tool_result``) → not.
-
-    Best-effort: any parse/shape surprise degrades to False so the stall
-    detector never crashes on a format drift.
+    A running tool writes no JSONL, so size growth alone false-fires STALLED. Bookkeeping
+    lines can land after the ``tool_use``, so walk back to the last line carrying a role.
     """
     for line in reversed(lines[-_INFLIGHT_SCAN_LIMIT:]):
         try:
             entry = json.loads(line)
         except (json.JSONDecodeError, ValueError) as exc:
-            # torn partial write or format drift — keep walking
             logger.info("[watchdog.agent] skipping unparseable transcript line in %s: %s", source, exc)
             continue
         if not isinstance(entry, dict):
             continue
-        # Schemas vary: role/content may sit under "message" or at the top level.
         message = entry.get("message")
         if not isinstance(message, dict):
             message = entry
@@ -300,22 +253,11 @@ def _inflight_from_lines(lines: list[str], source: str = "?") -> bool:
 class TranscriptScanner:
     """Cached per-tick view of one branch's ``~/.claude/projects/<dir>`` tree.
 
-    The naive loop cost ~152 ms per 5 s tick against a 307-file projects dir —
-    two pathlib rglobs plus a 1 MB tail re-read even when nothing changed —
-    ~3% of a core per watchdog, compounding across concurrent watches
-    (owner-caught, todo #126; measured 2026-08-11). The scanner keeps the
-    discovered file list and re-walks it only every ``REFRESH_INTERVAL``
-    seconds (or when a stall is about to be declared — see
-    ``StallTracker.observe``), so a tick is one ``os.stat`` pass. The in-flight
-    tail parse is cached on ``(size, mtime)``: an unchanged file cannot change
-    its last entry, so the 1 MB read happens only when the transcript actually
-    changed — and during the silent spans the stall detector exists for, it
-    doesn't.
+    A full walk and tail re-read every tick cost a few percent of a core per watch, so a
+    tick is one ``os.stat`` pass and the tail verdict is cached on ``(size, mtime)``.
     """
 
-    # Full re-walk cadence. New transcripts (fresh session, fresh sub-agent)
-    # appear rarely and the 300s stall threshold dwarfs this, so a new file is
-    # always discovered long before its absence could matter.
+    # New transcripts are rare and the 300s stall threshold dwarfs this cadence.
     REFRESH_INTERVAL = 60.0
     _VERDICT_CACHE_MAX = 64
 
@@ -336,10 +278,7 @@ class TranscriptScanner:
         """Re-walk the tree for ``.jsonl`` files (``os.walk`` — pathlib.rglob
         spent most of the old tick in ``relative_to``/path-object overhead).
 
-        A directory the walk cannot list lands in ``unreadable`` (path -> error)
-        for the caller to read; ``os.walk`` would otherwise drop it in silence and
-        the stall verdict would be judged over a tree it never saw
-        (``os_walk_onerror``, 2026-09-25).
+        An unlistable directory lands in ``unreadable``, never dropped in silence.
         """
         paths: list[str] = []
         unreadable: dict[str, str] = {}
@@ -391,10 +330,10 @@ class TranscriptScanner:
     def tick(self, now: float) -> bool:
         """One poll tick: True if any known transcript grew or a newly
         discovered one has content, compared against the sizes seen at the
-        previous tick. Recursive coverage matters: sub-agent transcripts live
-        under ``<session>/subagents/``, and a parent waiting on one writes no
-        JSONL of its own while the nested file grows — a top-level-only scan
-        false-fired STALLED on exactly that (live 2026-08-08, @trigger)."""
+        previous tick.
+
+        Recursive: a parent waiting on a sub-agent writes nothing while ``subagents/`` grows.
+        """
         if now - self._last_refresh >= self.REFRESH_INTERVAL:
             self.refresh(now)
         prev = self._stat_pass()
@@ -404,11 +343,8 @@ class TranscriptScanner:
         """In-flight tool_use in the newest transcript OR the newest top-level
         session transcript.
 
-        Two candidates, not one: a parent blocked on a synchronous sub-agent
-        holds its in-flight ``Agent`` tool_use in the PARENT transcript while
-        the sub-agent's nested file is the newest — and a sub-agent silently
-        composing a long response writes nothing at all. Checking only the
-        newest file false-fires STALLED on exactly that span (todo #126).
+        A parent blocked on a sub-agent holds its in-flight call in the parent
+        transcript while the sub-agent's nested file is the newest.
         """
         checked: set[str] = set()
         for candidate in (self.newest, self.newest_toplevel):
@@ -434,10 +370,7 @@ class TranscriptScanner:
 def _read_lock(lock_file: Path) -> dict | None:
     """Read the dispatch lock: its dict, None when absent, ``{}`` when held but unreadable.
 
-    A lock that exists but cannot be parsed (half-written, corrupt) is still a
-    dispatch in flight, the same rule as ai_mail's pid_lock: ``{}`` means held,
-    with no pid or timestamp to read. It used to answer None, and the watchdog
-    reported "agent already idle" while the agent ran.
+    An unparseable lock is still a dispatch in flight, the same rule as ai_mail's pid_lock.
     """
     if not lock_file.exists():
         return None
@@ -497,7 +430,6 @@ def _classify_exit(
 ) -> tuple[str, str, int | None]:
     """After lock disappears, decide success vs crash vs silent finish.
 
-    Returns (agent_state, reason, exit_code).
     States: completed_replied, completed_silent, crashed.
     """
     bounce_file = branch_path / ".ai_mail.local" / "last_bounce.json"
@@ -528,27 +460,13 @@ def _classify_exit(
 class StallTracker:
     """Per-watch JSONL liveness/stall state — one ``observe()`` call per poll tick.
 
-    Liveness signal = new JSONL lines (size growth) OR an in-flight tool call. A
-    long single tool call (big Read, long Bash, heavy compute) writes no new JSONL
-    lines while it runs but leaves an assistant ``tool_use`` as the last entry, so
-    it counts as activity instead of false-firing STALLED (#634 part 1). Both
-    signals are read through a ``TranscriptScanner`` so a tick costs one
-    ``os.stat`` pass, not two directory globs and a tail re-read (todo #126).
-
-    Actionable signals — stall, long-running tool, resumed — go to stdout via
-    ``_stdout_event`` so a Monitor-tool wrapper surfaces them to devpulse live
-    (#634 part 2). The verbose trail stays on ``_stderr`` + logger.
+    Liveness is JSONL growth OR an in-flight tool call, so one long tool call is not a stall.
     """
 
-    # Quiet spans with zero JSONL output are routine, not stalls: a model composing
-    # a long response writes nothing until the turn completes, and compaction is one
-    # multi-minute silent API call. 120s false-fired on every stall of S329 (8/8);
-    # 300s clears normal turns and most compactions while a wedged agent still
-    # surfaces well inside a long watch.
+    # Silent spans are routine: a long response or a compaction writes nothing for minutes.
+    # 120s false-fired on every one; 300s clears them and still surfaces a wedged agent.
     STALL_THRESHOLD = 300.0
-    # A single tool call held in-flight this long is surfaced as a soft advisory
-    # (heavy op or a hung tool). Below the 600s default timeout so long watches
-    # get a mid-flight heads-up instead of waiting on the timeout.
+    # Below the 600s default timeout, so a long watch hears of a hung tool before it ends.
     LONG_TOOL_THRESHOLD = 300.0
 
     def __init__(
@@ -578,9 +496,7 @@ class StallTracker:
             and not self.stall_reported
             and (now - self.last_activity_at) >= self.STALL_THRESHOLD
         ):
-            # About to declare a stall — force a full re-walk first so a
-            # transcript born since the last refresh (new session, fresh
-            # sub-agent) counts before we cry wolf.
+            # Re-walk before declaring a stall, so a transcript born since the last refresh counts.
             self.scanner.refresh(now)
             size_grew = self.scanner.tick(now)
             inflight = False if size_grew else self.scanner.last_entry_inflight()
@@ -648,20 +564,8 @@ def watch_agent(
 ) -> dict:
     """Block until the dispatched agent at `agent_id` exits.
 
-    Args:
-        agent_id: Branch token like ``@drone`` (or bare ``drone``).
-        timeout_seconds: Maximum wait. Default 10 min — catches crashes + silent-finishes
-            fast; long agent watches should pass an explicit ``--timeout``.
-        poll_interval: Seconds between checks. Default 5.0 — a tick is a lock
-            stat, a PID liveness check, and one ``os.stat`` pass over the
-            scanner's cached transcript list (~1-2ms; the full re-walk runs
-            every ``TranscriptScanner.REFRESH_INTERVAL``). 5s keeps completion
-            latency invisible on multi-minute dispatches while the 300s stall
-            threshold has ample resolution.
-
-    Returns:
-        dict with keys: woke, reason, elapsed, agent_state, exit_code, agent_id.
-        agent_state is one of: "completed_replied", "completed_silent", "crashed", "timeout".
+    Returns woke, reason, elapsed, agent_state, exit_code, agent_id and handle.
+    agent_state is one of: "completed_replied", "completed_silent", "crashed", "timeout".
     """
     started_at = time.monotonic()
     _stderr(f"[watchdog.agent] watching {agent_id} (timeout={timeout_seconds}s)")

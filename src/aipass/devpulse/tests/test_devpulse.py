@@ -3,7 +3,7 @@
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
 # Version: 1.0.0
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
@@ -50,12 +50,7 @@ class TestCLIRouting:
         assert capsys.readouterr().out == f"devpulse {devpulse_module.VERSION}\n"
 
     def test_unknown_command_returns_false(self, capsys):
-        """Unrecognized command returns False AND names the token on stderr.
-
-        The owner's unknown-argument ruling (fleet sweep 2026-09-07): fail
-        non-zero and say which token was refused. Until 09-07 devpulse
-        returned False with nothing printed — exit 1, empty stderr.
-        """
+        """Unrecognized command returns False AND names the token on stderr."""
         result = devpulse_module.handle_command("nonexistent_unknown_command", [])
         assert result is False
         err = capsys.readouterr().err
@@ -75,13 +70,7 @@ class TestCLIRouting:
         assert "Did you mean: watchdog?" in capsys.readouterr().err
 
     def test_a_module_that_raises_is_reported_by_name_not_as_unknown(self, capsys):
-        """A module exception names the module and the exception, never "Unknown command".
-
-        Measured 2026-09-08: `compass query "opt-in"` raised
-        sqlite3.OperationalError inside the module; route_command logged it
-        and fell through to "Unknown command: compass / Did you mean: compass?"
-        — handled=False, the real message in a log nobody reads.
-        """
+        """A module exception names the module and the exception, never "Unknown command"."""
 
         def _raise(command, args):
             raise RuntimeError("no such column: in")
@@ -138,12 +127,7 @@ class TestErrorResilience:
     """Graceful handling of edge cases."""
 
     def test_route_command_catches_module_errors(self, capsys):
-        """Module exceptions are caught, reported by name, and count as handled.
-
-        Rewritten 2026-09-08: this pinned ``False`` - the fall-through that
-        rendered a module crash as "Unknown command". The crash is now the
-        module's failure (True, exit 2 through resolve_exit), named on stderr.
-        """
+        """Module exceptions are caught, reported by name, and count as handled (exit 2 via resolve_exit)."""
         bad_module = MagicMock(__name__="bad_module")
         bad_module.handle_command.side_effect = Exception("boom")
         result = devpulse_module.route_command("test", [], [bad_module])
@@ -178,12 +162,7 @@ class TestHandleCommandGuard:
 
 
 class TestReleaseNotifyRouting:
-    """release-notify routing — a question never becomes a send (DPLAN-0335 leg 1).
-
-    The command mails every project manager on the machine. Every pin here is
-    about the paths that must NOT reach the sender: help, a refused flag, a
-    token that is not a version, and --dry-run.
-    """
+    """release-notify routing — a question never becomes a send; the command mails every project manager."""
 
     def test_both_spellings_route_to_the_same_work(self):
         """The module file is release_notify.py; the owner types release-notify."""

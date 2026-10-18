@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog agent handler
 # Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -31,22 +31,13 @@ from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 def _hermetic_watch_store(tmp_path, monkeypatch):
     """Every watch_agent call registers a handle via the DEFAULT store path.
 
-    Unpatched, these tests wrote the live .watchdog/watchdog_active.json —
-    and before the __file__-derived root (2026-08-31) they wrote wherever the
-    process stood, which on CI's composed runner was the repo root. Module-
-    local autouse, per this branch's conftest philosophy: the registry pin
-    tests measure default_storage_path itself and must not inherit a patch.
+    Module-local, not conftest: the registry pin tests measure default_storage_path itself.
     """
     monkeypatch.setattr(
         watch_registry,
         "default_storage_path",
         lambda: tmp_path / "watchdog_active.json",
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Test helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _build_fake_branch(tmp_path: Path, branch_name: str = "fakebranch") -> Path:
@@ -91,9 +82,7 @@ def _mark_resolved(branch_dir: Path) -> None:
 def _exit_during_first_poll(monkeypatch, side_effect):
     """Run ``side_effect`` (the agent exiting) inside the watch loop's first poll tick.
 
-    The loop calls TranscriptScanner.tick once per poll, before it sleeps, so the
-    next iteration sees the exit. A class seam, not time.sleep: patching the
-    stdlib sleep is process-wide and raced the prax logger's daemon threads.
+    A class seam, not time.sleep: the stdlib sleep is process-wide and races the logger's threads.
     """
 
     def tick_and_exit(self, now):
@@ -101,11 +90,6 @@ def _exit_during_first_poll(monkeypatch, side_effect):
         return False
 
     monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", tick_and_exit)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Unit tests — return shape per branch
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_watch_agent_branch_not_found(monkeypatch, tmp_path):
@@ -125,12 +109,7 @@ def test_watch_agent_branch_not_found(monkeypatch, tmp_path):
 def test_resolve_branch_path_finds_projects_citizen(monkeypatch, tmp_path):
     """A projects/* citizen resolves via the in-repo project registry sweep.
 
-    Live failure 2026-08-12: watchdog agent @baud reported agent-not-found
-    right after the admin lane opened — the resolver checked the main
-    registry and external ~/Projects roots but never descended into
-    <repo>/projects/*/ where project citizens actually live. The whole
-    world is pinned to tmp_path here (repo root, caller cwd, home) so the
-    real tree can neither save nor break this test.
+    The whole world is pinned to tmp_path, so the real tree can neither save nor break this.
     """
     (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
     branch_dir = tmp_path / "projects" / "baud" / "src" / "baud" / "baud"
@@ -167,11 +146,7 @@ def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
 
 
 def test_an_unreadable_main_registry_never_hands_over_a_projects_namesake(monkeypatch, tmp_path):
-    """The main registry exists but cannot be read: refuse, never watch a namesake.
-
-    Skipping it let a projects/* citizen with the same name answer, and the
-    watchdog then watched (and reported on) the wrong agent (fleet green, 2026-10-04).
-    """
+    """The main registry exists but cannot be read: refuse, never watch a namesake."""
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
     shadow_dir = tmp_path / "projects" / "twin" / "home"
     shadow_dir.mkdir(parents=True)
@@ -189,11 +164,7 @@ def test_an_unreadable_main_registry_never_hands_over_a_projects_namesake(monkey
 
 
 def test_an_unreadable_lock_is_a_held_lock(monkeypatch, tmp_path):
-    """A lock that exists but cannot be parsed is a dispatch in flight, not an idle agent.
-
-    It used to read as no lock, so the watchdog answered "agent already idle" at once
-    while the agent ran (a half-written lock, or a corrupt one).
-    """
+    """A lock that exists but cannot be parsed is a dispatch in flight, not an idle agent."""
     branch_path = _build_fake_branch(tmp_path)
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
     lock_file.write_text('{"pid": 12', encoding="utf-8")
@@ -318,14 +289,8 @@ def test_watch_agent_return_keys():
         "agent_id",
         "handle",
     }
-    # Use the not-found path for a fast invocation
     result = agent_handler.watch_agent("@__definitely_not_a_branch__", timeout_seconds=1)
     assert set(result.keys()) == expected
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# #634 — in-flight tool detection + stall surfaced to stdout
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _write_jsonl(projects_dir: Path, *lines: dict, name: str = "session.jsonl") -> Path:
@@ -427,8 +392,7 @@ def _stub_scanner(
     tick: "bool | Callable[[], bool]" = False,
     inflight: "bool | Callable[[], bool]" = False,
 ):
-    """Pin a tracker's scanner signals. ``tick``/``inflight`` may be bools or
-    zero-arg callables for tests that flip signals mid-flight."""
+    """Pin a tracker's scanner signals: bools, or zero-arg callables to flip them mid-flight."""
     tick_fn = tick if callable(tick) else (lambda: tick)
     inflight_fn = inflight if callable(inflight) else (lambda: inflight)
     tracker.scanner.tick = lambda now: tick_fn()
@@ -494,16 +458,10 @@ def test_stalltracker_resume_clears_stall(capsys, tmp_path):
 
 
 def _fake_clock_sleep(agent_module, monkeypatch, lock_file, unlink_at=200.0, step=60.0):
-    """Patch monotonic + sleep with a fake clock that advances `step`s per sleep
-    and unlinks the dispatch lock once the clock passes `unlink_at` (loop exit).
+    """Fake clock: each sleep advances `step`; the lock goes once it passes `unlink_at`.
 
-    THREAD-SCOPED (S300): ``agent_module.time`` is the shared stdlib module, so
-    patching ``time.sleep`` is process-global — background daemon threads (prax
-    logger spawns three on first log) also hit the fake and would race the
-    clock forward, unlinking the lock before ``watch_agent`` even reads it
-    (flaked exactly so: 'no active lock' + uptime-sized elapsed). Only sleeps
-    called FROM the agent module advance the clock; foreign callers get a tiny
-    real sleep so they don't spin hot.
+    THREAD-SCOPED: ``time.sleep`` is process-global, and the logger's daemon threads would
+    race the clock forward. Only sleeps called FROM the agent module advance it.
     """
     clock = {"t": 0.0}
     agent_file = Path(agent_module.__file__).resolve()
@@ -565,11 +523,6 @@ def test_watch_agent_inflight_tool_no_false_stall(monkeypatch, tmp_path, capsys)
     assert len(asked) == len(ticked)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Integration tests (require live ai_mail dispatch — skipped by default)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.integration
 @pytest.mark.skipif(
     os.environ.get("WATCHDOG_INTEGRATION") != "1",
@@ -597,18 +550,8 @@ def test_watch_agent_live_dispatch_completes():
     assert result["agent_state"] in ("completed_replied", "completed_silent", "crashed")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Sub-agent visibility + bookkeeping-line masking (false STALLED, 2026-08-08)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_scanner_sees_subagent_transcript_growth(tmp_path):
-    """A known sub-agent transcript growing under <session>/subagents/ counts
-    as activity per tick.
-
-    A parent waiting on a synchronous sub-agent writes no top-level JSONL while
-    the sub-agent's nested file grows — top-level-only scanning false-fired
-    STALLED on exactly this (live, @trigger digest build)."""
+    """A sub-agent transcript growing under <session>/subagents/ counts as activity: the parent writes nothing."""
     proj = tmp_path / "proj"
     _write_jsonl(proj, {"type": "user", "message": {"role": "user", "content": []}})
     sub = proj / "session-abc" / "subagents"
@@ -623,8 +566,7 @@ def test_scanner_sees_subagent_transcript_growth(tmp_path):
 
 
 def test_scanner_no_basename_collision(tmp_path):
-    """Equal basenames in different session dirs are tracked independently
-    (absolute-path keys)."""
+    """Equal basenames in different session dirs are tracked independently (absolute-path keys)."""
     proj = tmp_path / "proj"
     a = proj / "session-a" / "subagents"
     b = proj / "session-b" / "subagents"
@@ -636,7 +578,6 @@ def test_scanner_no_basename_collision(tmp_path):
     s = agent_handler.TranscriptScanner(proj, now=0.0)
     assert len(s.sizes) == 2
     assert s.tick(1.0) is False
-    # Growth in only one of the twins is seen.
     with (a / "agent-1.jsonl").open("a", encoding="utf-8") as fh:
         fh.write("more\n")
     assert s.tick(2.0) is True
@@ -683,11 +624,6 @@ def test_scanner_newest_file_may_be_subagent(tmp_path):
     s = agent_handler.TranscriptScanner(proj, now=0.0)
     s.tick(1.0)
     assert s.last_entry_inflight() is True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# #126 — TranscriptScanner: cheap ticks, cached verdicts, no false stalls
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_scanner_growth_and_steady_state(tmp_path):
@@ -755,8 +691,7 @@ def test_scanner_vanished_file_is_not_activity(tmp_path):
 
 
 def test_scanner_inflight_verdict_cached_until_file_changes(tmp_path, monkeypatch):
-    """The tail parse runs only when the newest file's (size, mtime) changed —
-    during a genuine silent span every tick reuses the cached verdict."""
+    """The tail parse runs only when the newest file's (size, mtime) changed; silence reuses the verdict."""
     proj = tmp_path / "proj"
     _write_jsonl(
         proj,
@@ -860,10 +795,7 @@ def test_watch_agent_live_dispatch_timeout_path():
 
 
 def _case_insensitive_glob(monkeypatch):
-    """Emulate a Windows directory listing on any OS: *_REGISTRY.json also
-    matches *_registry.json there, because NTFS compares names case-folded.
-    The wrapper widens the real glob the same way, so the exact-case filter
-    in agent.py can be proven load-bearing from a Linux box."""
+    """Emulate NTFS's case-folded glob, so agent.py's exact-case filter is provably load-bearing from Linux."""
     real_glob = agent_handler.Path.glob
 
     def widened(self, pattern):
@@ -876,10 +808,7 @@ def _case_insensitive_glob(monkeypatch):
 
 
 def test_lowercase_counter_never_answers_a_projects_resolve(monkeypatch, tmp_path):
-    """A lowercase *_registry.json (a plan counter, a template registry) must
-    never be read as a project's trust anchor, even where the filesystem
-    globs case-insensitively. The decoy sorts FIRST and maps the same email
-    to a wrong directory — without the exact-case re-check it wins."""
+    """A lowercase *_registry.json is never a trust anchor; the decoy sorts FIRST, so without the check it wins."""
     (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
     wrong_dir = tmp_path / "projects" / "aaa" / "wrong"
     wrong_dir.mkdir(parents=True)
@@ -907,8 +836,7 @@ def test_lowercase_counter_never_answers_a_projects_resolve(monkeypatch, tmp_pat
 
 
 def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_path):
-    """Same defect, the external-roots walk: a lowercase counter in a caller's
-    project must not resolve a branch at all — absence is the right answer."""
+    """The external-roots walk: a lowercase counter must not resolve a branch at all."""
     ext = tmp_path / "ext"
     (ext / "somewhere").mkdir(parents=True)
     (ext / "ext_registry.json").write_text(
@@ -929,24 +857,11 @@ def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_pa
     assert asked == [()]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Zombies off Linux — FPLAN-0554, from macOS CI run 34682737363
-#
-# os.kill(pid, 0) SUCCEEDS for a zombie, so gating the zombie check on
-# `sys.platform == "linux"` made an exited-but-unreaped agent read ALIVE off
-# Linux and the watch never ended. The rule now lives once, in registry.py
-# (agent.py already imports that module; registry.py imports nothing from here,
-# so there is no cycle and no second copy to drift), and it is called
-# unconditionally. Run on THIS Linux box by pretending to be darwin.
-# ─────────────────────────────────────────────────────────────────────────────
+# The zombie rule lives once, in registry.py; these pretend darwin here.
 
 
 def _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, ps_state: str) -> dict:
-    """watch_agent on a lock holding THIS pid, with agent and registry both seeing darwin.
-
-    Both modules are pretended, because agent's liveness asks registry's zombie
-    rule; the ps answer is the only thing that can call this live pid a corpse.
-    """
+    """watch_agent on a lock holding THIS pid, with agent and registry both seeing darwin."""
     branch_path = _build_fake_branch(tmp_path)
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
@@ -962,27 +877,19 @@ def _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, ps_state:
 
 
 def test_a_zombie_agent_is_not_alive_off_linux(monkeypatch, pretend_platform, tmp_path):
-    """This pid genuinely answers os.kill(pid, 0) — the ps state is the only
-    thing that can call it a corpse, and before FPLAN-0554 nobody asked."""
+    """This pid answers os.kill(pid, 0); only the ps state can call it a corpse."""
     result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "Z+\n")
     assert "dead, lock still present" in result["reason"]
 
 
 def test_a_live_agent_off_linux_is_still_alive(monkeypatch, pretend_platform, tmp_path):
-    """The other half: the portable probe must not bury a working agent — the
-    watch runs on until the lock goes."""
+    """The portable probe must not bury a working agent: the watch runs on until the lock goes."""
     result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "S+\n")
     assert result["reason"].endswith("(lock removed)")
 
 
 def test_the_zombie_rule_is_not_duplicated_in_this_module():
-    """One implementation, in registry.py. A private copy here would drift, and
-    a drifted liveness rule is how a dead watch passes for a live one.
-
-    Split from the call-through below so this half runs EVERYWHERE: whether a
-    second copy of the rule exists in this module is a fact about the source,
-    and no host changes it.
-    """
+    """One implementation, in registry.py: a drifted private copy lets a dead watch pass for live. Runs everywhere."""
     assert not hasattr(agent_handler, "_is_zombie_linux")
 
 
@@ -994,13 +901,7 @@ def test_the_zombie_rule_is_not_duplicated_in_this_module():
     "still runs on this host.",
 )
 def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch, tmp_path):
-    """The other half: the single implementation is actually REACHED.
-
-    Not having a private copy proves nothing on its own — a liveness check that
-    simply forgot to ask is the same silent lie by another route. Reached through
-    watch_agent: the registry's zombie verdict ends the watch as a crash.
-    Mutant: _pid_alive stops asking registry.is_zombie — the watch times out, calls stays empty.
-    """
+    """The single implementation is actually REACHED: the registry's zombie verdict ends the watch as a crash."""
     branch_path = _build_fake_branch(tmp_path)
     _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)

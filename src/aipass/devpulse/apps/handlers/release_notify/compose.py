@@ -3,16 +3,12 @@
 # Description: Release mail body — version, release URL, CHANGELOG headline, ritual
 # Version: 1.0.0
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-10-17
 # =============================================
 
 """The one body every manager receives (DPLAN-0335 leg 1).
 
-Plain text, no markdown, and above all NO BACKTICKS: the body travels as a
-shell argument to ``drone @ai_mail email``, and a backtick in a double-quoted
-bash argument is command substitution. Every command the ritual names is
-therefore written bare, and :func:`compose_body` strips any backtick that
-survives composition rather than trusting the writer to remember.
+Plain text and NO BACKTICKS: the body can travel as a double-quoted shell argument, where a backtick runs a command.
 """
 
 import re
@@ -26,13 +22,9 @@ MODULE_NAME = "release_notify"
 CHANGELOG_FILENAME = "CHANGELOG.md"
 RELEASE_URL = "https://github.com/AIOSAI/AIPass/releases/tag/v{version}"
 
-# Enough of the top block to say what shipped, short enough that the mail is
-# still read: the section header plus the first bullets. The link carries the rest.
 HEADLINE_LINES = 8
 
-# One CHANGELOG bullet in this repo runs past 4,000 characters (the entries are
-# written as paragraphs, not one-liners). A headline is a headline: the mail
-# links to the full notes.
+# CHANGELOG bullets here are paragraphs, some past 4,000 characters; the mail links to the full notes.
 HEADLINE_CHAR_LIMIT = 220
 
 _VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.\-]+)?)$")
@@ -42,14 +34,7 @@ _HEADING_RE = re.compile(r"^#+\s*")
 
 
 def normalize_version(raw: str) -> str:
-    """Accept ``v2.8.4`` or ``2.8.4``, return the bare number.
-
-    Args:
-        raw: The version as typed on the command line.
-
-    Returns:
-        The version without its leading v, or "" when the token is not a version.
-    """
+    """Accept ``v2.8.4`` or ``2.8.4``, return the bare number, or "" when the token is not a version."""
     match = _VERSION_RE.match(raw.strip())
     if not match:
         logger.warning(f"[{MODULE_NAME}] refused version token: {raw!r}")
@@ -58,27 +43,12 @@ def normalize_version(raw: str) -> str:
 
 
 def release_url(version: str) -> str:
-    """The GitHub Release URL the tag publishes to.
-
-    Args:
-        version: A bare version number.
-
-    Returns:
-        The release URL.
-    """
+    """The GitHub Release URL the tag publishes to."""
     return RELEASE_URL.format(version=version)
 
 
 def _clean(line: str) -> str:
-    """Strip the markdown a plain-text mail cannot render.
-
-    Args:
-        line: One raw CHANGELOG line.
-
-    Returns:
-        The line as prose: no heading hashes, no bullet, no bold or backtick
-        markers, truncated at HEADLINE_CHAR_LIMIT.
-    """
+    """Strip the markdown a plain-text mail cannot render, truncated at HEADLINE_CHAR_LIMIT."""
     text = _HEADING_RE.sub("", line.strip())
     text = _BULLET_RE.sub("", text)
     text = text.replace("**", "").replace("`", "").strip()
@@ -88,22 +58,9 @@ def _clean(line: str) -> str:
 
 
 def changelog_headline(changelog_path: Path, version: str, limit: int = HEADLINE_LINES) -> list[str]:
-    """The top of the CHANGELOG section that describes this release.
+    """The top of the CHANGELOG section that describes this release; empty when missing or sectionless.
 
-    Prefers the section whose header names the version being announced, and
-    falls back to the topmost ``## [`` section. The fallback is not the same
-    thing: at the moment a tag goes out the top section is usually
-    ``[Unreleased]``, whose contents are what has NOT shipped — so announcing
-    it verbatim would describe the wrong release. When the merge train has
-    already dated the section (the normal case) the version match finds it.
-
-    Args:
-        changelog_path: Path to CHANGELOG.md.
-        version: The bare version being announced.
-        limit: How many non-empty lines to keep, header line included.
-
-    Returns:
-        Cleaned lines, empty when the file is missing or has no section.
+    The version match comes first: the topmost section is often [Unreleased], which is what has NOT shipped.
     """
     try:
         raw = changelog_path.read_text(encoding="utf-8")
@@ -142,27 +99,12 @@ def changelog_headline(changelog_path: Path, version: str, limit: int = HEADLINE
 
 
 def compose_subject(version: str) -> str:
-    """The subject line every manager sees.
-
-    Args:
-        version: The bare version being announced.
-
-    Returns:
-        The subject.
-    """
+    """The subject line every manager sees."""
     return f"AIPass v{version} released - preview your scaffold update before applying"
 
 
 def compose_body(version: str, headline: list[str]) -> str:
-    """The mail body: what shipped, where to read it, and the ritual.
-
-    Args:
-        version: The bare version being announced.
-        headline: Cleaned CHANGELOG lines from :func:`changelog_headline`.
-
-    Returns:
-        The plain-text body, backtick-free.
-    """
+    """The plain-text, backtick-free mail body: what shipped, where to read it, and the ritual."""
     json_handler.log_operation("compose_body", {"version": version}, module_name=MODULE_NAME)
     parts = [
         f"AIPass v{version} is released.",
@@ -196,8 +138,6 @@ def compose_body(version: str, headline: list[str]) -> str:
 
     body = "\n".join(parts)
     if "`" in body:
-        # Belt and braces: this body is handed to a shell as an argument, where
-        # a backtick is command substitution, not punctuation.
         logger.warning(f"[{MODULE_NAME}] backticks stripped from the composed body")
         body = body.replace("`", "")
     return body

@@ -3,7 +3,7 @@
 # Description: Tests for the birth-cert admin grant handler (FPLAN-0401)
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/owner/admin_grant.py: keygen, mint, and every named refusal of the 5-leg verify."""
@@ -81,11 +81,6 @@ def _ceremony(world):
     assert ok, msg
 
 
-# =============================================================================
-# KEYGEN
-# =============================================================================
-
-
 def test_keygen_creates_600_hex_key(world):
     ok, msg = admin_grant.generate_key(key_path=world["key"])
     assert ok
@@ -113,11 +108,6 @@ def test_keygen_refuses_overwrite_without_force(world):
     assert world["key"].read_text(encoding="utf-8") != first
 
 
-# =============================================================================
-# MINT
-# =============================================================================
-
-
 def test_mint_requires_key(world):
     """Mutant: the refusal names DEFAULT_KEY_PATH instead of the key it looked for."""
     before = world["cert"].read_text(encoding="utf-8")
@@ -134,7 +124,6 @@ def test_mint_signs_and_preserves_existing_fields(world):
     assert cert["privileges"]["admin"] is True
     assert cert["privileges"]["granted_by"] == "owner"
     assert cert["signature"]["algo"] == "hmac-sha256"
-    # Original SYSTEM-minted identity untouched
     assert cert["creator"] == "SYSTEM"
     assert cert["rarity"] == "unique"
     assert cert["created_at"] == "2026-03-07"
@@ -150,11 +139,6 @@ def test_mint_refuses_foreign_cert(world):
     assert not ok
     assert "refusing to mint" in msg
     assert json.loads(world["cert"].read_text(encoding="utf-8")) == cert
-
-
-# =============================================================================
-# VERIFY — the 5 legs
-# =============================================================================
 
 
 def _verify(world):

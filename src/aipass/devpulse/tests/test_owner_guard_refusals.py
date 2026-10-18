@@ -3,7 +3,7 @@
 # Description: Pins the refusal-exit contract on the owner-gated modules (FPLAN-0455)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/feedback.py and apps/modules/admin_grant.py: a guard refusal marks the command failed."""
@@ -21,8 +21,7 @@ from aipass.devpulse.apps.modules import admin_grant as admin_grant_module
 from aipass.devpulse.apps.modules import feedback as feedback_module
 
 
-# The 2026-08-22 defect: refusals rendered with warning(), which never calls
-# mark_command_failed(), so `feedback inbox && next` reported success to the shell.
+# warning() never calls mark_command_failed(), so a refusal through it exits 0 to the shell.
 @pytest.fixture
 def marks(monkeypatch):
     """Collect mark_command_failed() calls; refusals must append, successes must not."""
@@ -66,11 +65,6 @@ def test_admin_grant_unknown_verb_marks_the_command_failed(capsys, marks):
     assert admin_grant_module.handle_command("admin_grant", ["frobnicate"]) is True
     capsys.readouterr()
     assert marks
-
-
-# ── The three rows canary's fleet sweep found UNDER the cured guard (2026-09-07):
-# verify / keygen / mint refused in a yellow Rich print once the guard had passed,
-# so `admin_grant verify && <next>` ran the next step on an unverified grant.
 
 
 def test_admin_grant_verify_refusal_marks_the_command_failed(capsys, marks):

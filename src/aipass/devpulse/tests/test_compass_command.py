@@ -3,7 +3,7 @@
 # Description: Tests for the compass module command router (FPLAN P2)
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
@@ -61,11 +61,6 @@ def _stats_out(capsys, db) -> str:
     return _output(capsys)
 
 
-# ---------------------------------------------------------------------------
-# Routing basics
-# ---------------------------------------------------------------------------
-
-
 def test_rejects_unrelated_command():
     """Router returns False for commands that aren't 'compass'."""
     assert compass_cmd.handle_command("watchdog", []) is False
@@ -93,11 +88,6 @@ def test_unknown_subcommand_errors(capsys):
     assert compass_cmd.handle_command("compass", ["bogus"]) is True
     out = _output(capsys).lower()
     assert "unknown compass subcommand: bogus" in out
-
-
-# ---------------------------------------------------------------------------
-# add -> query round-trip (rating must be visible)
-# ---------------------------------------------------------------------------
 
 
 def test_add_then_query_shows_rating(capsys, db):
@@ -181,11 +171,6 @@ def test_add_unknown_source_errors_no_write(capsys, db):
     assert "total decisions: 0" in _stats_out(capsys, db).lower()
 
 
-# ---------------------------------------------------------------------------
-# stats
-# ---------------------------------------------------------------------------
-
-
 def test_stats_reports_counts(capsys, db):
     """stats shows total plus by-rating / by-status breakdown."""
     compass_cmd.handle_command("compass", ["add", "c1", "d1", "--rating", "good", "--db", db])
@@ -198,11 +183,6 @@ def test_stats_reports_counts(capsys, db):
     assert "2" in out
     assert "good" in out and "bad" in out
     assert "active" in out
-
-
-# ---------------------------------------------------------------------------
-# rate
-# ---------------------------------------------------------------------------
 
 
 def test_rate_changes_rating(capsys, db):
@@ -227,15 +207,7 @@ def test_rate_missing_id_warns(capsys, db):
 
 
 def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
-    """'nothing changed' must not report success.
-
-    It used ``warning``, which skips ``mark_command_failed``, so
-    ``compass rate <id> good && <next step>`` ran the next step as if the
-    rating had landed. Same defect @canary found in the owner gates on
-    2026-08-22, in a verb nobody was looking at. Asserts the FAILURE MARK
-    rather than the wording — the wording is for humans, the code is for
-    everything else.
-    """
+    """'nothing changed' must not report success: the FAILURE MARK is asserted, not the wording."""
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
 
@@ -257,11 +229,6 @@ def test_a_real_id_still_reports_success(capsys, db, monkeypatch):
     assert marks == [], "a rating that landed must not mark the command failed"
 
 
-# ---------------------------------------------------------------------------
-# archive
-# ---------------------------------------------------------------------------
-
-
 def test_archive_removes_from_query(capsys, db):
     """archive flips status; archived rows drop out of query, stats reflect it."""
     new_id = _add(capsys, db, "arch ctx", "arch decision", "good")
@@ -277,11 +244,6 @@ def test_archive_removes_from_query(capsys, db):
     # ...but stats still count them under archived.
     s_out = _stats_out(capsys, db).lower()
     assert "archived" in s_out
-
-
-# ---------------------------------------------------------------------------
-# review
-# ---------------------------------------------------------------------------
 
 
 def test_review_surfaces_a_decision(capsys, db):
@@ -300,11 +262,6 @@ def test_review_empty_store(capsys, db):
     assert compass_cmd.handle_command("compass", ["review", "--db", db]) is True
     out = _output(capsys).lower()
     assert "no active decisions to review" in out
-
-
-# ---------------------------------------------------------------------------
-# Error surfacing — must fail loud, never silent
-# ---------------------------------------------------------------------------
 
 
 def test_bad_rating_error_surfaces(capsys, db):
@@ -343,11 +300,6 @@ def test_flag_without_value_errors(capsys, db):
     assert compass_cmd.handle_command("compass", ["query", "x", "--rating"]) is True
     out = _output(capsys).lower()
     assert "rating" in out and "value" in out
-
-
-# ---------------------------------------------------------------------------
-# supersedes — atomic archive + link, both pointer directions
-# ---------------------------------------------------------------------------
 
 
 def test_add_supersedes_archives_and_links(capsys, db):
@@ -409,11 +361,6 @@ def test_add_supersedes_non_integer_errors(capsys, db):
     assert "supersedes" in out and "integer" in out
 
 
-# ---------------------------------------------------------------------------
-# write-time conflict advisory — non-blocking
-# ---------------------------------------------------------------------------
-
-
 def test_add_conflict_advisory_prints_but_does_not_block(capsys, db):
     """An overlapping active row triggers an advisory; the add still succeeds."""
     _add(capsys, db, "caching layer strategy", "add redis caching", "good")
@@ -434,11 +381,6 @@ def test_add_no_conflict_on_empty_store(capsys, db):
     compass_cmd.handle_command("compass", ["add", "unique ctx", "unique dec", "--rating", "good", "--db", db])
     out = _output(capsys).lower()
     assert "possible conflict" not in out
-
-
-# ---------------------------------------------------------------------------
-# note — set a note, prove it is immediately searchable
-# ---------------------------------------------------------------------------
 
 
 def test_note_command_sets_and_is_searchable(capsys, db):
@@ -480,11 +422,6 @@ def test_help_and_introspection_list_note(capsys):
     assert "note" in _output(capsys).lower()
     compass_cmd.handle_command("compass", [])
     assert "note" in _output(capsys).lower()
-
-
-# ---------------------------------------------------------------------------
-# --include-archived — archived hits must show status + supersession pointer
-# ---------------------------------------------------------------------------
 
 
 def test_include_archived_shows_archived_pointer(capsys, db):

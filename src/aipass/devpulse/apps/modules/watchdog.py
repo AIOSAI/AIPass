@@ -3,28 +3,12 @@
 # Description: Watchdog Module — directed wake system for devpulse
 # Version: 2.1.0
 # Created: 2026-04-14
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Watchdog Module — devpulse's personal directed-wake system.
+"""Watchdog Module — devpulse's personal directed-wake system.
 
-Subcommands:
-  agent <id>       Wake when a dispatched agent process exits (Phase 1)
-  baseline         Wake on ANY citizen completion — the always-on profile (DPLAN-0308)
-  status           List active watches via watchdog_active.json registry (Phase 4)
-  timer <args>     Wake-in-N or named duration timer (Phase 2)
-  schedule <time>  Wake at wall-clock time, optionally run a command (Phase 3)
-  cancel <handle>  SIGTERM a specific watch + deregister (Phase 4)
-  cancel --all     Kill every active watch (Phase 4)
-  list             Alias for status (Phase 4)
-
-Auto-discovered by devpulse.py via handle_command() convention.
-Heavy handler imports are lazy — only imported when a subcommand is invoked.
-
-Design record: DPLAN-0130 (original), DPLAN-0308 (r2, wire/daemon split),
-DPLAN-0317 (r4, the daemon deleted — the current shape). Builds: FPLAN-0186,
-FPLAN-0451, FPLAN-0452.
+Reference: docs/watchdog.md.
 """
 
 import importlib
@@ -40,11 +24,6 @@ from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 _VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
 
-# Subcommands that are fully wired. Everything in _VALID_SUBCOMMANDS is, today —
-# the list exists so the introspection view stops claiming otherwise. It used to
-# read a _PHASE_BY_SUB dict that was permanently empty and never assigned
-# anywhere in the repo, so timer/schedule/cancel/list each rendered as
-# "phase ?" while being completely implemented (FPLAN-0452 P3).
 _WIRED_SUBCOMMANDS = frozenset(_VALID_SUBCOMMANDS)
 
 HELP_TEXT = """\
@@ -133,9 +112,7 @@ def print_introspection() -> None:
 def _owner_address() -> str | None:
     """Whose watchdog this is, for the refusal message. None if unresolvable.
 
-    Named rather than described: "owner-only" tells a stranger they are in the
-    wrong place but not where the right place is, and a refusal with no next
-    step is what teaches people to route around a gate.
+    Named, not described: a refusal with no next step teaches people to route around a gate.
     """
     from aipass.devpulse.apps.handlers.owner.guard import owner_address
 
@@ -145,19 +122,8 @@ def _owner_address() -> str | None:
 def _guard_caller() -> bool:
     """Reject non-owner invocation. Owner-only tool.
 
-    Gates on the PROJECT OWNER (sealed registry) via the shared owner guard, so
-    it works across projects — not a hardcoded 'devpulse' name. (Drone runs a
-    routed module with cwd=<branch_path>, so Path.cwd() can't identify the real
-    caller; the guard reads the AIPASS_CALLER_* env drone sets.) #681.
-
-    Uses ``error`` and NOT ``warning``, which is the whole point of this
-    docstring. ``warning`` does not call ``mark_command_failed``, so for months
-    this refusal EXITED 0: ``watchdog baseline && <next step>`` ran the next
-    step believing the wire was armed, and nothing in the exit status said
-    otherwise. @canary found it from a non-owner seat on 2026-08-22 and proved
-    it was specific rather than a drone-wide limitation — unknown subcommand
-    exits 2, this exited 0. A refusal that does not flip the exit code is a
-    lie to every caller that is not a human reading stderr.
+    ``error``, never ``warning``: only error marks the command failed, and a refusal
+    that exits 0 lets ``watchdog baseline && <next>`` run as if the wire were armed.
     """
     from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller
 
@@ -185,30 +151,12 @@ def _wants_help(args: List[str]) -> bool:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Route watchdog subcommands.
-
-    Auto-discovered by devpulse.py module loader.
-
-    Args:
-        command: The primary command string.
-        args: Additional arguments after the command.
-
-    Returns:
-        True if the command was handled, False otherwise.
-    """
+    """Route watchdog subcommands."""
     if command != "watchdog":
         return False
 
-    # EXPLAIN BEFORE GATE, EXECUTE AFTER IT. The gate used to run first, which
-    # made --help owner-only too: a non-owner got "refusing non-owner call" and
-    # could not read the text that would have told them whose module it is.
-    # Help is precisely the verb that must survive an ownership check, because
-    # it is how a stranger discovers the thing is not theirs (@canary, from a
-    # non-owner seat, 2026-08-22). It also restores this module's own rule E
-    # (DPLAN-0291), which _wants_help documents and the gate outranked, and it
-    # matches @ai_mail's identity fence, which leaves help/version open for the
-    # same reason. Neither branch reveals anything privileged — both print
-    # static text that is already in a public repo.
+    # Explain before the gate, execute after it: help is how a non-owner learns whose
+    # module this is, the same reason @ai_mail's identity fence leaves help open.
     if not args:
         print_introspection()
         return True
@@ -293,7 +241,6 @@ def _handle_timer(sub_args: List[str]) -> bool:
         console.print(timer_mod.timer_report())
         return True
 
-    # Fall-through: treat the token as a duration for wake_in.
     try:
         result = timer_mod.wake_in(action)
     except ValueError as exc:
@@ -307,9 +254,7 @@ def _handle_timer(sub_args: List[str]) -> bool:
 def _handle_schedule(sub_args: List[str]) -> bool:
     """Route ``watchdog schedule`` through the schedule handler.
 
-    Positional form: ``schedule <time> [command]``. Command (when present)
-    is the entire second positional arg — the caller is responsible for
-    quoting multi-token shell commands in their invocation.
+    The command is the whole second positional; the caller quotes a multi-token command.
     """
     if not sub_args:
         console.print(_SCHEDULE_HELP_TEXT)
@@ -338,10 +283,7 @@ def _handle_schedule(sub_args: List[str]) -> bool:
 def _sign_in_wire() -> dict | None:
     """The live ``baseline_wire`` that delivers this session's completions, or None.
 
-    The same test the statusline paints green on: a registered watch of type
-    ``baseline_wire`` whose ``metadata.session`` is this session (env
-    ``CLAUDE_CODE_SESSION_ID``; with none set, any session) and whose pid is
-    alive. A pure read: nothing is pruned or written here.
+    Must match the test the statusline paints green on. A pure read: nothing is pruned or written.
     """
     session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     for watch in _registry.list_active(prune_stale=False):
@@ -369,15 +311,8 @@ def _handle_agent(sub_args: List[str]) -> bool:
         error("Usage: watchdog agent <branch> [--timeout SECONDS]")
         return True
 
-    # This verb watches ONE job for stalls. It is not the sign-in: completions
-    # are delivered by the baseline wire (DPLAN-0317 r4), and with none armed
-    # they queue as MISSED while the statusline reads idle. On 2026-09-25 a day
-    # of `watchdog agent` wires left 27 completions queued that way, so the arm
-    # line now states which case this is. MUST go to stderr: the Monitor tool
-    # treats every STDOUT line as a wake event, so stdout carries completion and
-    # stall events only (#634 contract; VERA feedback 315c005e). error() is also
-    # wrong: ❌ trips the exit-code fail-flag on an otherwise-successful watch
-    # (#661 output_routing).
+    # Not the sign-in, so say whether one is armed. stderr, never stdout: the Monitor tool reads
+    # every stdout line as a wake event. Not error(): its fail-flag fails a successful watch.
     wire = _sign_in_wire()
     if wire is None:
         err_console.print(
@@ -437,20 +372,9 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
 
 def _handle_baseline(sub_args: List[str]) -> bool:
-    """Route ``watchdog baseline [--once]`` (DPLAN-0317 r4).
+    """Route ``watchdog baseline [--once]``.
 
-    The ARM DOOR (wire.py): take the delivery wire for THIS session, replay
-    completions missed while nothing was wired, follow the notification feed.
-    ``--once`` is the sign-in (DPLAN-0348): under Bash run_in_background it
-    wires until the first delivered completion, and its exit is the one wake.
-    The continuous form needs the Monitor tool, which Claude Code 2.1.271
-    capped at 30 minutes per watch.
-
-    ``--daemon`` was removed in r4. There is no detection process any more: the
-    agent that finishes REPORTS, and this wire delivers what it reported. The
-    flag is rejected by name below rather than as "unknown", because an
-    operator or a stale script passing it deserves to be told the lane changed
-    instead of being told they made a typo.
+    ``--daemon`` is refused by name, so a stale script hears the lane changed, not a typo.
     """
     once = False
     for arg in sub_args:
@@ -469,9 +393,7 @@ def _handle_baseline(sub_args: List[str]) -> bool:
         error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once]")
         return True
 
-    # stderr, never stdout: the Monitor tool reads every stdout line as a wake
-    # event, so an arm-time banner there fires a spurious wake (same contract as
-    # _handle_agent's reminder, #634).
+    # stderr, never stdout: a banner there would fire a spurious Monitor wake.
     wrapper_hint = "Bash run_in_background" if once else "Monitor tool only — prefer --once"
     err_console.print(f"[dim]watchdog baseline: arming the wire ({wrapper_hint})[/dim]")
 
@@ -501,8 +423,6 @@ def _handle_status() -> bool:
     registry_mod = _load_registry_module()
     timer_mod = _load_timer_module_for_format()
 
-    # list_active handles its own stale pruning — we just count survivors
-    # before and after to know if we pruned anything to report.
     pre = registry_mod.list_active(prune_stale=False)
     post = registry_mod.list_active(prune_stale=True)
     pruned = len(pre) - len(post)
@@ -531,11 +451,7 @@ def _handle_status() -> bool:
 
 
 def _handle_list() -> bool:
-    """Alias for ``status`` — terser framing chosen: same output.
-
-    Phase 4 Notes: `list` just routes to `_handle_status`. The UX bar for
-    differentiating wasn't worth the divergence.
-    """
+    """Alias for ``status`` — terser framing chosen: same output."""
     return _handle_status()
 
 
@@ -561,10 +477,7 @@ def _handle_cancel(sub_args: List[str]) -> bool:
     result = registry_mod.kill_watch(handle)
     presenter.print_kill_result(result)
     if not result.get("killed", False):
-        # error, not a bare log line: a FAILED cancel that exits 0 lets
-        # `watchdog cancel <h> && <next>` run the next step believing the watch
-        # is gone. Found 2026-09-06 (FPLAN-0490) - the one refusal in this
-        # branch that still exited 0 after 32349742 cured the others.
+        # error(), not a log line: a failed cancel that exits 0 lets `&& <next>` run.
         logger.info("[watchdog] cancel failed handle=%s", handle)
         error(f"cancel failed for {handle}: {result.get('reason', 'unknown')}")
     return True

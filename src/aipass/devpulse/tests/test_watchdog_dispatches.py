@@ -3,7 +3,7 @@
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
 # Version: 2.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-07
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
@@ -28,15 +28,8 @@ SEAT = "@devpulse"
 
 @pytest.fixture(autouse=True)
 def _mail_doors(hermetic_mail_doors):
-    """outstanding() re-roots @ai_mail's register; the transplant must not
-    depend on this machine's live registry marker (the CI fresh-checkout
-    failure, PR #739)."""
+    """outstanding() re-roots @ai_mail's register; never on this machine's live registry marker."""
     return hermetic_mail_doors
-
-
-# --------------------------------------------------------------------------
-# Attribution — rule 5, one field, fails closed
-# --------------------------------------------------------------------------
 
 
 def test_my_own_dispatch_is_mine():
@@ -49,12 +42,7 @@ def test_another_citizens_dispatch_is_not_mine():
 
 
 def test_a_record_without_a_sender_is_not_mine():
-    """Unattributable fails CLOSED.
-
-    Failing open here is not a smaller version of the bug — it IS the bug: every
-    completion in the fleet arrives without a sender under an older producer,
-    and treating those as mine restores the fleet-wide wake exactly.
-    """
+    """Unattributable fails CLOSED: failing open restores the fleet-wide wake."""
     assert dispatches.is_mine({"kind": "dispatch", "source": "flow"}, SEAT) is False
     assert dispatches.is_mine({"sender": ""}, SEAT) is False
     assert dispatches.is_mine({"sender": None}, SEAT) is False
@@ -66,17 +54,8 @@ def test_attribution_tolerates_the_at_sign_and_case():
     assert dispatches.is_mine({"sender": "@DEVPULSE"}, "devpulse") is True
 
 
-# --------------------------------------------------------------------------
-# Identity — the $1.41 lesson
-# --------------------------------------------------------------------------
-
-
 def test_seat_email_reads_the_owner_entrys_email_not_the_dict(monkeypatch):
-    """get_owner returns a registry ENTRY DICT, not a name.
-
-    Stringifying it would produce a plausible-looking address that matches
-    nothing — a filter that silently excludes every dispatch.
-    """
+    """get_owner returns an ENTRY DICT: stringified, it matches nothing and silently excludes every dispatch."""
     monkeypatch.setattr(
         spawn_registry,
         "get_owner",
@@ -92,7 +71,7 @@ def test_seat_email_is_portable_across_projects(monkeypatch):
 
 
 def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):
-    """Without an identity there is no 'mine', and guessing one is the 2026-08-21 bug."""
+    """Without an identity there is no 'mine', and it is never guessed."""
     monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: None)
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
@@ -100,13 +79,7 @@ def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):
 
 
 def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
-    """An entry with no email cannot name a seat, so arming must refuse.
-
-    It collapses into the same refusal as 'no owner sealed' on purpose: both
-    mean "I cannot name the owner" and both have the same remedy. The
-    distinction survives in ``owner_address``'s log, which is where a
-    diagnostic belongs — the message a caller reads should say what to DO.
-    """
+    """An entry with no email cannot name a seat: the same refusal and remedy as 'no owner sealed'."""
     monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: {"owner": True, "name": "vera"})
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
@@ -114,19 +87,13 @@ def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
 
 
 def test_the_owner_lookup_has_exactly_one_implementation():
-    """seat_email must not re-derive the owner — two answers to one question is
-    the 2026-08-21 bug in miniature. It delegates to the guard handler."""
+    """seat_email delegates to the guard handler: two answers to one question drift."""
     assert dispatches._owner_address is guard.owner_address
 
 
 def test_register_unavailable_catches_as_a_runtime_error():
     """The seat refusal and @ai_mail's re-root refusal must catch uniformly."""
     assert issubclass(dispatches.RegisterUnavailable, RuntimeError)
-
-
-# --------------------------------------------------------------------------
-# Crash coverage — read through @ai_mail's door, never re-folded here
-# --------------------------------------------------------------------------
 
 
 def _repo_with_register(tmp_path: Path, entries: list[dict]) -> Path:
@@ -169,12 +136,7 @@ def test_a_closed_dispatch_is_not_outstanding(tmp_path):
 
 
 def test_overdue_is_true_on_its_own_with_nothing_running(tmp_path):
-    """The whole of r4's crash coverage: a fact about a file, not a poll result.
-
-    An overdue entry is not a slow agent — expected_by is dispatch_monitor's own
-    hard timeout, which a live monitor kills the run at. Overdue means the
-    monitor died.
-    """
+    """Overdue is a fact about a file, not a poll result: expected_by is the monitor's own hard timeout."""
     root = _repo_with_register(tmp_path, [_sent("late", minutes_ahead=-30), _sent("fine", minutes_ahead=30)])
     late = dispatches.overdue(root)
     assert [e["dispatch_id"] for e in late] == ["late"]
@@ -191,15 +153,8 @@ def test_a_completed_dispatch_is_never_overdue(tmp_path):
 def test_outstanding_refuses_rather_than_returning_the_live_register(tmp_path):
     """ "None outstanding" and "I cannot tell" must never render the same.
 
-    The principle survives; the TRIGGER moved (2026-08-23, @ai_mail's CI fix):
-    re-rooting was the wrong event to hang it on — it fired on every fresh
-    checkout, where nothing is wrong. The event that actually means "I cannot
-    tell" is an EXISTING register that cannot be read, and @ai_mail's strict
-    read raises OSError there. A MISSING register stays [] — that genuinely is
-    "nobody has dispatched here yet". Staged as a DIRECTORY at the register
-    path (their shape): it exists, so the empty-state check passes, and opening
-    it fails the same under any user — a permissions-based stage behaves
-    differently under root.
+    An EXISTING unreadable register raises; a MISSING one stays []. Staged as a
+    directory, which fails the same under any user (a permissions stage passes as root).
     """
     register = tmp_path / ".aipass" / "dispatch_register.jsonl"
     register.mkdir(parents=True)

@@ -3,14 +3,11 @@
 # Description: Feedback Module — command routing for devpulse feedback mailbox
 # Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-08-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 Feedback Module — command routing for devpulse's personal feedback mailbox.
-
-Auto-discovered by devpulse.py via handle_command() convention.
-Routes feedback subcommands to the appropriate handler functions.
 """
 
 from aipass.devpulse.apps.handlers.feedback.inbox import (
@@ -30,12 +27,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console as stdout_console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
-# This module's ordinary output goes to stderr, deliberately — it is a mailbox
-# UI, and its chatter must not pollute a pipeline that is capturing something
-# else. HELP is the exception: `feedback --help > usage.txt` wrote an EMPTY FILE
-# because help rode the same alias (@canary, 2026-08-22, measuring watchdog's
-# help at 1861B on stdout against this module's 0B). Help is documentation, not
-# chatter, and documentation belongs on the stream a redirect captures.
+# Mailbox chatter goes to stderr so it never pollutes a pipeline; help is documentation and goes to stdout.
 console = err_console
 
 HELP_TEXT = """\
@@ -56,16 +48,7 @@ HELP_TEXT = """\
 def _guard_caller() -> bool:
     """Owner-only gate for mailbox reads/management (see handlers.owner.guard).
 
-    The mailbox belongs to the project owner. `send` and `--help` stay open
-    (send is the inbound channel any agent uses to drop feedback here); every
-    other verb reads or mutates the owner's mail and is owner-gated. #681.
-
-    ``error`` and NOT ``warning``: ``warning`` does not call
-    ``mark_command_failed``, so this refusal used to EXIT 0 — every script
-    chaining ``feedback inbox && <next step>`` ran the next step believing it
-    had read the mailbox. @canary found the identical defect in watchdog from a
-    non-owner seat on 2026-08-22 and asked whether the shared guard had other
-    callers. It had two.
+    ``error``, not ``warning``: warning skips mark_command_failed, so a chained next step would run.
     """
     from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller, owner_address
 
@@ -95,31 +78,16 @@ def print_introspection() -> None:
 
 
 def _wants_help(args: list[str]) -> bool:
-    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
-
-    Bare word 'help' counts only at position 0 — later positions may be values.
-    """
+    """Help flag anywhere in args = explain, never execute; bare 'help' only first, later positions are values."""
     return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
 
 
 def handle_command(command: str, args: list[str]) -> bool:
-    """Route feedback commands to handler functions.
-
-    Auto-discovered by devpulse.py module loader.
-
-    Args:
-        command: The primary command string.
-        args: Additional arguments after the command.
-
-    Returns:
-        bool: True if the command was handled, False otherwise.
-    """
+    """Route feedback commands to handler functions."""
     if command != "feedback":
         return False
 
-    # Open verbs (no owner gate): help + `send`. `send` is the inbound channel
-    # any agent uses to drop feedback into the owner's mailbox. Everything else
-    # reads or manages that mailbox -> owner-only (#681).
+    # Help and `send` stay open: send is the inbound channel any agent uses. Every other verb is owner-only.
     if _wants_help(args):
         stdout_console.print(HELP_TEXT)
         return True
@@ -177,27 +145,15 @@ def handle_command(command: str, args: list[str]) -> bool:
 
 
 def _handle_send(args: list[str]) -> bool:
-    """Handle the send subcommand, parsing from_branch, subject, and body.
-
-    Expected format: send "subject" "body"
-    The from_branch is extracted from the first arg or defaults to 'unknown'.
-
-    Args:
-        args: Arguments after 'send'.
-
-    Returns:
-        bool: Always True (command was handled).
-    """
+    """Handle the send subcommand; an explicit first-arg from_branch gets a reply path only if it is the caller."""
     if len(args) < 2:
         error('Usage: feedback send "subject" "body"')
         console.print("[dim]Tip: from_branch is auto-detected or pass as first arg.[/dim]")
         return True
 
-    # Auto-detect sender from drone env vars, fall back to arg parsing
     auto_branch, auto_path = _resolve_sender()
 
     if len(args) >= 3 and not args[0].startswith('"'):
-        # Explicit from_branch provided as first arg
         from_branch = args[0]
         subject = args[1]
         body = " ".join(args[2:])

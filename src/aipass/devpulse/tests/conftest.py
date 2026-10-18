@@ -3,22 +3,16 @@
 # Description: Shared pytest fixtures for devpulse tests
 # Version: 1.4.0
 # Created: 2025-11-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""Shared pytest fixtures for devpulse tests.
-
-The first thing this file does is arm the fleet's test-redirect seam. The json
-handler is the one-source shim (DPLAN-0325): prax's service derives this
-branch's ``devpulse_json`` directory PER CALL and honours ``AIPASS_TEST_LOG_DIR``
-itself, so setting the variable here, before any import of the shim, is the
-only redirect a suite needs. Nothing patches handler attributes any more.
-"""
+"""Shared pytest fixtures for devpulse tests."""
 
 import os
 import sys
 import tempfile
 
+# Before any import of the json shim: the only redirect a suite needs.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -33,9 +27,7 @@ from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    # Registered here, not pytest.ini: the composed run (rootdir=repo,
-    # -c pyproject.toml) never reads this branch's ini, and its
-    # --strict-markers would turn an unknown marker into an error.
+    # Not pytest.ini: the composed run never reads it, and --strict-markers fails an unknown marker.
     config.addinivalue_line("markers", "integration: live-dispatch integration tests (WATCHDOG_INTEGRATION=1)")
     config.addinivalue_line(
         "markers", "live_default_store: reads the watchdog's real default store path; the seal stands aside"
@@ -44,16 +36,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the watchdog's default stores at this test's tmp_path.
-
-    The registry and the timer resolve their default file on every call. Unsealed,
-    a test that reaches register(), a sweep or an arm without naming a store writes
-    the live .watchdog/ of the seat running the suite, and a sweep there signals
-    live wires: 2026-09-27 03:40, a mutant of the owner gate armed a real wire from
-    inside pytest and killed the seat's own. File-local seals run after this one
-    and still win; a test that measures the default path itself carries the
-    live_default_store marker.
-    """
+    """Point the watchdog's default stores at tmp_path: unsealed, a sweep signals the seat's live wires."""
     if request.node.get_closest_marker("live_default_store"):
         return
     store = tmp_path / "_sealed_watchdog"
@@ -62,8 +45,7 @@ def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkey
 
 
 class _SysAs:
-    """A stand-in for one module's ``sys`` name: ``platform`` is the pretended one,
-    every other attribute reads the real ``sys`` at the moment it is asked."""
+    """One module's ``sys``: a pretended ``platform``, every other attribute the real ``sys``."""
 
     def __init__(self, platform: str) -> None:
         self.platform = platform
@@ -74,12 +56,7 @@ class _SysAs:
 
 @pytest.fixture
 def pretend_platform(monkeypatch: pytest.MonkeyPatch):
-    """Make ONE module see another ``sys.platform``: ``pretend_platform(wire, "darwin")``.
-
-    Setting sys.platform itself is process-wide: every module and the prax logger's
-    threads would see it until the test ends. Swapping only the module's own ``sys``
-    name keeps the pretence inside the code under test.
-    """
+    """Make ONE module see another ``sys.platform``; setting sys.platform itself is process-wide."""
 
     def _pretend(module, platform: str) -> None:
         monkeypatch.setattr(module, "sys", _SysAs(platform))
@@ -89,8 +66,7 @@ def pretend_platform(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console per print, and the width differs by host and capture mode."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -104,21 +80,8 @@ def clean_command_state() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect this branch's json writes into a per-test sandbox.
-
-    The module-level seam above gives the whole process one directory; this
-    autouse fixture narrows it to one per test. The service recomputes its
-    directory on every call, so setting the variable after import still takes
-    effect. The sandbox is MEASURED off the shim rather than spelled out, so it
-    cannot drift from what the service does (template conftest shape).
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/<branch>/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    """Redirect this branch's json writes into a per-test sandbox, measured off the shim so it cannot drift."""
+    # A seam AT tmp_path would create tmp_path/<branch>/, colliding with a test's own dir of that name.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -129,20 +92,8 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 def hermetic_mail_doors(tmp_path_factory, monkeypatch):
     """Point @ai_mail's path doors at a fake live repo that carries the marker.
 
-    The watchdog re-root (feed.feed_file / dispatches' register transplant)
-    learns the feed's shape by walking UP from @ai_mail's live answer to the
-    parent holding AIPASS_REGISTRY.json. That marker is runtime state: it
-    exists on any machine the system has run on and on NO fresh checkout —
-    which is exactly CI. 37 tests passed here for weeks and failed the first
-    fresh-checkout run (PR #739, 2026-08-23), because they were implicitly
-    testing this machine, not the code.
-
-    This fixture makes the live half of the walk hermetic too: a tmp "live"
-    repo with the marker and the owner's real shape. The production walk stays
-    exactly as ruled (no fallback, loud refusal) — only the tests stop needing
-    a machine with history. Tests opt in via a module-local autouse wrapper
-    rather than branch-wide autouse, so a future test that MEANS to exercise
-    live resolution can still exist by simply not opting in.
+    The re-root walks up to AIPASS_REGISTRY.json, which no fresh checkout (CI) has.
+    Opt-in, not branch-wide, so a test that MEANS live resolution can still exist.
     """
     live = tmp_path_factory.mktemp("live_mail_repo")
     (live / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -151,11 +102,6 @@ def hermetic_mail_doors(tmp_path_factory, monkeypatch):
     feed = aipass_dir / "notifications.jsonl"
     register = aipass_dir / "dispatch_register.jsonl"
     monkeypatch.setattr("aipass.ai_mail.feed_path", lambda: feed)
-    # The register transplant lives INSIDE @ai_mail (outstanding_dispatches →
-    # register_file). register.py 1.3.0 (DPLAN-0404 leg 15) reads
-    # AIPASS_DISPATCH_REGISTER at every rootless call and the public
-    # register_path door follows it, so one variable moves both. The old patch
-    # of @ai_mail's private find_repo_root is gone: its handlers fence refuses
-    # that reach from this seat now.
+    # One variable moves @ai_mail's register and its register_path door; its fence refuses a private patch.
     monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(register))
     return live

@@ -3,16 +3,11 @@
 # Description: Admin grant module — birth-cert privilege ceremony CLI (FPLAN-0401)
 # Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-09-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Admin grant ceremony — keygen, mint, verify the birth-cert admin privilege.
-
-Auto-discovered by devpulse.py via handle_command() convention. The ceremony
-verbs (keygen, mint) are owner-gated; status and verify are open reads.
-DPLAN-0288 / FPLAN-0401: devpulse-only dispatch-anyone privilege, anchored in
-a signed privilege block on the existing birth certificate.
 """
 
 from aipass.prax import logger
@@ -46,12 +41,7 @@ HELP_TEXT = """\
 def _guard_caller() -> bool:
     """Owner-only gate for ceremony verbs (see handlers.owner.guard).
 
-    ``error`` and NOT ``warning``: ``warning`` does not call
-    ``mark_command_failed``, so this refusal used to EXIT 0 — a privilege
-    ceremony reporting success to the shell while granting nothing. @canary
-    found the identical defect in watchdog from a non-owner seat on 2026-08-22
-    and asked whether the shared guard had other callers; it had two, and this
-    was the worse one.
+    ``error``, not ``warning``: warning skips mark_command_failed, and the shell would read a refusal as success.
     """
     from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller, owner_address
 
@@ -96,9 +86,7 @@ def _cmd_verify() -> None:
     if ok:
         console.print(f"[green]VERIFIED[/green] — {reason}")
     else:
-        # error, not a yellow print: a refusal that exits 0 lets
-        # `admin_grant verify && <next>` run the next step on an unverified
-        # grant (canary's fleet sweep 2026-09-07, devpulse row 1).
+        # error, not a print: a refusal that exits 0 lets a chained next step run on an unverified grant.
         error(f"REFUSED — {reason}")
 
 
@@ -125,25 +113,12 @@ def _cmd_mint() -> None:
 
 
 def _wants_help(args: list[str]) -> bool:
-    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
-
-    Bare word 'help' counts only at position 0 — later positions may be values.
-    """
+    """Help flag anywhere in args = explain, never execute; bare 'help' only first, later positions are values."""
     return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
 
 
 def handle_command(command: str, args: list[str]) -> bool:
-    """Route admin_grant commands to handler functions.
-
-    Auto-discovered by devpulse.py module loader.
-
-    Args:
-        command: The primary command string.
-        args: Additional arguments after the command.
-
-    Returns:
-        bool: True if the command was handled, False otherwise.
-    """
+    """Route admin_grant commands to handler functions."""
     if command != "admin_grant":
         return False
 
@@ -168,10 +143,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     elif verb == "mint":
         _cmd_mint()
     else:
-        # error, not warning: an unrecognised verb ran nothing, and a caller
-        # chaining on this needs the exit code to say so. watchdog's unknown
-        # subcommand already exits 2; this one exited 0 for the same reason
-        # the owner refusal above did.
+        # error, not warning: an unrecognised verb ran nothing, and a chained caller needs the exit code to say so.
         error(f"unknown admin_grant verb: {verb}", suggestion="Use 'admin_grant --help' for usage")
         console.print(HELP_TEXT)
     return True
