@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-05
 # Modified: 2026-10-17
 # =============================================
@@ -279,10 +279,8 @@ def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            in_docstring = not in_docstring
-
-        if in_docstring or not stripped or stripped.startswith("#"):
+        skip_line, in_docstring = _track_docstring_state(stripped, in_docstring)
+        if skip_line or in_docstring or not stripped or stripped.startswith("#"):
             continue
 
         if stripped.startswith("from ") or stripped.startswith("import "):

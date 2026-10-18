@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-21
 # Modified: 2026-10-17
 # =============================================
@@ -15,7 +15,6 @@ when violations are found.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import List
@@ -54,10 +53,9 @@ def _find_repo_root() -> Path:
 def _scan_inbox(inbox_path: Path) -> List[dict]:
     """Return a list of violation dicts for messages with bad ids in *inbox_path*."""
     violations: List[dict] = []
-    try:
-        data = json.loads(inbox_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("[inbox_audit] could not read %s: %s", inbox_path, exc)
+    data = json_handler.read_json(inbox_path)
+    if data is None:
+        logger.warning("[inbox_audit] could not read %s", inbox_path)
         return violations
 
     for msg in data.get("messages", []):

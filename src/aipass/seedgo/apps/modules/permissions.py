@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: permissions.py
 # Description: Shared trust list for hook layer and drone authorization
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-21
 # Modified: 2026-10-17
 # =============================================
@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from aipass.prax import logger
@@ -37,7 +36,9 @@ def identify_caller(cwd: str | None = None) -> str:
         passport = current / ".trinity" / "passport.json"
         if passport.exists():
             try:
-                data = json.loads(passport.read_text(encoding="utf-8"))
+                data = json_handler.read_json(passport)
+                if not isinstance(data, dict):
+                    raise ValueError("not a JSON object")
                 name = data.get("branch_info", {}).get("branch_name")
                 if not name:
                     name = data.get("identity", {}).get("name")
