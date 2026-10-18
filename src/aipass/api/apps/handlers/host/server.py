@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -421,11 +421,13 @@ def create_app() -> Any:
         dir: str = "",
         project: str = "",
         root: str = "",
+        offset: str = "0",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """One directory level under a root, by NAME. The phone's file browser."""
+        """One directory level under a root, by NAME. The phone's file browser.
+        offset is a str so a bad one is the handler's 400 read_refused, not FastAPI's 422."""
         try:
-            return host_reads.list_dir(branch=branch, dir=dir, project=project, root=root)
+            return host_reads.list_dir(branch=branch, dir=dir, project=project, root=root, offset=offset)
         except host_reads.ReadRefused as e:
             raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
