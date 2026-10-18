@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -81,6 +81,9 @@ REFUSE_PUSH_ARGS = "push takes no arguments: drone @git push --repo <path>"
 REFUSE_DETACHED = "push refused: HEAD is detached in {repo}. Check out the branch to push first."
 REFUSE_NO_ARGS = "{verb} takes no arguments: drone @git {verb} --repo <path>"
 REFUSE_HEAD_DETACHED = "{verb} refused: HEAD is detached in {repo}. Check out a branch first."
+# A branch created locally never had branch.<name>.remote set; origin's same-named branch
+# stands in, compared by name, and .git/config is left as the owner set it.
+BY_NAME_NOTE = " (by name; none configured)"
 REFUSE_NO_UPSTREAM = "{verb} refused: '{branch}' in {repo} has no upstream to compare against. Fetched: {fetched}."
 REFUSE_DIRTY = (
     "{verb} refused: {repo} has tracked changes. Commit them or set them aside first; "
@@ -155,7 +158,9 @@ def help_block() -> str:
         "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"
         "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
         "  fetch fetches origin and prints ahead/behind against the branch's upstream, with\n"
-        "  the commits on each side; nothing local moves. sync does the same fetch, then\n"
+        "  the commits on each side; nothing local moves. With no upstream configured it\n"
+        "  compares against origin/<branch> by name and says so; .git/config is never\n"
+        "  written. sync does the same fetch, then\n"
         "  fast-forwards the branch onto its upstream (git merge --ff-only). It refuses a\n"
         "  tracked change in the tree and a diverged branch (both lists printed): it never\n"
         "  rebases, merges, stashes or resets. AIPass's own sync and smart-sync are not these.\n"
@@ -409,6 +414,7 @@ class Standing(NamedTuple):
     upstream: str
     ahead: list[str]
     behind: list[str]
+    note: str = ""
 
 
 def _run_git(repo_root: Path, *argv: str) -> subprocess.CompletedProcess:
@@ -445,7 +451,8 @@ def _commit_lines(repo_root: Path, rev_range: str) -> list[str]:
 def _fetch_standing(repo_root: Path, verb: str) -> Standing:
     """Fetch origin, then read where the checked-out branch stands against its upstream.
 
-    Raises _DoorRefusal for a detached HEAD or no upstream, _GitFailed when git fails.
+    With none configured, ``origin/<branch>`` is the upstream by name. Raises _DoorRefusal for
+    a detached HEAD or when neither exists, _GitFailed when git fails.
     """
     branch = _run_git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
     name = branch.stdout.strip() if branch.returncode == 0 else ""
@@ -454,13 +461,18 @@ def _fetch_standing(repo_root: Path, verb: str) -> Standing:
     _git_out(repo_root, "fetch", _REMOTE)
     upstream = _run_git(repo_root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     upstream_name = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    note = ""
     if not upstream_name:
-        raise _DoorRefusal(REFUSE_NO_UPSTREAM.format(verb=verb, branch=name, repo=repo_root, fetched=_REMOTE))
+        twin = _run_git(repo_root, "rev-parse", "--verify", "-q", f"refs/remotes/{_REMOTE}/{name}")
+        if twin.returncode != 0:
+            raise _DoorRefusal(REFUSE_NO_UPSTREAM.format(verb=verb, branch=name, repo=repo_root, fetched=_REMOTE))
+        upstream_name, note = f"{_REMOTE}/{name}", BY_NAME_NOTE
     return Standing(
         name,
         upstream_name,
         _commit_lines(repo_root, f"{upstream_name}..HEAD"),
         _commit_lines(repo_root, f"HEAD..{upstream_name}"),
+        note,
     )
 
 
@@ -474,7 +486,7 @@ def _commit_block(title: str, commits: list[str]) -> str:
 def _standing_text(standing: Standing) -> str:
     """The ahead/behind line and both commit lists, for the reader to decide on."""
     return (
-        f"'{standing.branch}' against {standing.upstream}: "
+        f"'{standing.branch}' against {standing.upstream}{standing.note}: "
         f"ahead {len(standing.ahead)}, behind {len(standing.behind)}."
         + _commit_block(f"Behind: on {standing.upstream}, not here", standing.behind)
         + _commit_block(f"Ahead: here, not on {standing.upstream}", standing.ahead)

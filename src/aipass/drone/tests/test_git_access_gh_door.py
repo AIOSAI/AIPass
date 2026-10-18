@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
@@ -562,14 +562,47 @@ class TestRepoDoorFetchAndSync:
         assert _git(ext, "rev-parse", "origin/main") == head, "nothing was fetched"
         assert (ext / "README.md").read_text(encoding="utf-8") == "edited\n"
 
-    def test_a_branch_with_no_upstream_is_refused_by_name(self, door_world: dict[str, Path]) -> None:
+    def test_no_configured_upstream_compares_against_origin_by_name_and_writes_no_config(
+        self, door_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the by-name lookup removed — a branch created locally beside origin/main is refused."""
         ext = door_world["ext"]
+        config = (ext / ".git" / "config").read_text(encoding="utf-8")
+        remote = _remote_commit(door_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("fetch", ["--repo", "projects/ext"])
+
+        assert result["stdout"] == (
+            f"Fetched origin in {ext.resolve()}.\n"
+            f"'main' against origin/main{repo_door.BY_NAME_NOTE}: ahead 0, behind 1.\n"
+            "Behind: on origin/main, not here (newest first):\n"
+            f"  {remote[:7]} remote upstream.txt"
+        )
+        assert (ext / ".git" / "config").read_text(encoding="utf-8") == config
+
+    def test_sync_fast_forwards_onto_origin_by_name_when_none_is_configured(self, door_world: dict[str, Path]) -> None:
+        ext = door_world["ext"]
+        remote = _remote_commit(door_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert _git(ext, "rev-parse", "HEAD") == remote
+
+    def test_a_branch_with_neither_an_upstream_nor_an_origin_twin_is_refused_by_name(
+        self, door_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the by-name ref unverified — git is asked to compare against a ref that does not exist."""
+        ext = door_world["ext"]
+        _git(ext, "checkout", "-q", "-b", "solo")
 
         with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
             result = handle_command("fetch", ["--repo", "projects/ext"])
 
         expected = repo_door.REFUSE_NO_UPSTREAM.format(
-            verb="fetch", branch="main", repo=ext.resolve(), fetched="origin"
+            verb="fetch", branch="solo", repo=ext.resolve(), fetched="origin"
         )
         assert result == {"stdout": "", "stderr": expected, "exit_code": 1}
 

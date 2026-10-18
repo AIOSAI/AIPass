@@ -55,7 +55,13 @@ upstream. A diverged branch, with commits on both sides, is refused with both li
 no rebase, no merge commit, no stash, no reset. Diverged is the owner's call. This is not AIPass's
 own `sync` or `smart-sync`, which keep their dev-branch behaviour, and `--repo` on the AIPass repo is
 refused as it is for every door verb. Both verbs take no other arguments, and both refuse a
-detached HEAD or a branch with no upstream by name.
+detached HEAD by name.
+
+**The upstream.** `fetch`, `sync` and `merge-upstream` read the same stand: the branch's
+configured upstream, or, when none is configured (a branch created locally never gets
+`branch.<name>.remote`), `origin/<branch>` compared by name, which the stand line marks
+`(by name; none configured)`. `.git/config` is never written. A branch with neither is refused by
+name.
 
 **`merge-upstream` is the cure for diverged.** A project's branch diverges as a matter of course
 when PRs are merged on GitHub while this seat commits locally. It refuses a tracked change first, with sync's words, then fetches. Behind only, it
