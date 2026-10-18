@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dev_pr_handler.py
 # Description: Dev branch PR handler — push dev and create PR to main
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-12
 # Modified: 2026-10-17
 # =============================================
@@ -18,6 +18,10 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
+
+
+# gh prints the open PR's URL in its refusal; only a whole GitHub PR URL counts, not any line naming the host.
+_PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 
 
 def _slugify(text: str) -> str:
@@ -92,9 +96,9 @@ def create_branch_pr(description: str, target_branch: str = "main") -> dict:
         if "already exists" in stderr:
             existing_url = ""
             for line in stderr.splitlines():
-                # codeql[py/incomplete-url-substring-sanitization]
-                if "github.com" in line:
-                    existing_url = line.strip()
+                found = _PR_URL.search(line)
+                if found:
+                    existing_url = found.group(0)
                     break
             msg = (
                 f"Pushed to {pr_branch}. PR already open: {existing_url}"
@@ -181,9 +185,9 @@ def create_dev_pr(description: str) -> dict:
         if "already exists" in stderr:
             existing_url = ""
             for line in stderr.splitlines():
-                # codeql[py/incomplete-url-substring-sanitization]
-                if "github.com" in line:
-                    existing_url = line.strip()
+                found = _PR_URL.search(line)
+                if found:
+                    existing_url = found.group(0)
                     break
             msg = (
                 f"Pushed to dev. PR already open: {existing_url}" if existing_url else "Pushed to dev. PR already open."
