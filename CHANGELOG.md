@@ -11,6 +11,8 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+## [2026-10-17] — v2.8.20: the fleet's comments say why, the audit at 100 on all 18, a project's manager runs its own repo's git, docs say what exists
+
 ### Added
 
 - **`POST /v1/verbs/new-project`: the phone creates a project** (@api, `handlers/host/verbs.py` 1.1.0, `new_project_route.py` 1.0.0 new, `server.py` 1.1.5, `denials.py` 1.0.2, `docs/host_api.md`, `tests/test_host_verb_new_project.py` 22 tests; @aipass seam by devpulse: `handlers/new_project/__init__.py` 1.1.0 `create_project(host=)`, `modules/new_project.py` 1.1.0 publishes `create_project` and `TEMPLATES` on first use; FPLAN-0649, the owner 2026-10-16: "Lets add the create new project button"). Operate scope, body `{name, template?}`. The verb calls @aipass's `create_project` with the installation root named (a server cannot chdir per request), the same thing `aipass new <name> --template <t>` makes: project, registry, scaffold, resident manager agent, birth commit. A name outside `^[a-zA-Z][a-zA-Z0-9_-]{0,63}$` or an unknown template is 400 before the door is called; an existing project is 409 with the door's own sentence; a git, spawn, root or disk failure is 503 `project_door_failed` with a fixed sentence and a log ref, the words kept off the wire (the house rule from PR #774). 200 carries the new manager agent's branch name so the face can open its room. Red first (21 of 22 were 404), six mutants red, @api suite 1938, audit 100. BAUD's "+ new project" row in the phone switcher follows (@baud).
