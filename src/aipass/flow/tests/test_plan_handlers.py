@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-05
 # Modified: 2026-10-17
 # =============================================
@@ -25,7 +25,6 @@ from aipass.flow.apps.handlers.plan.build_registry_entry import build_plan_regis
 from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_relative_location
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
 from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plans
-from aipass.flow.apps.handlers.plan.get_closed_plans import get_closed_plans
 
 #: Only ever handed to MagicMocks; gettempdir() keeps the suite free of a POSIX literal.
 _TMP = Path(tempfile.gettempdir())
@@ -365,75 +364,6 @@ class TestAutoCloseOrphanedPlans:
 
         ts = datetime.fromisoformat(updated["plans"]["1"]["closed"])
         assert before <= ts <= after
-
-
-class TestGetClosedPlans:
-    """Tests for get_closed_plans()."""
-
-    _SINGLE_REG = ["fplan_registry.json"]
-    _DISCOVERY_PATH = "aipass.flow.apps.handlers.plan.get_closed_plans._get_all_registry_files"
-    _LOAD_PATH = "aipass.flow.apps.handlers.plan.get_closed_plans.load_registry"
-
-    def test_returns_only_closed_plans(self, mock_registry):
-        _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 1
-        plan_num, plan_info = result[0]
-        assert plan_num == "2"
-        assert plan_info["status"] == "closed"
-
-    def test_returns_empty_when_no_closed(self):
-        registry = {
-            "plans": {
-                "1": {"status": "open", "subject": "active"},
-            }
-        }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert result == []
-
-    def test_returns_empty_on_empty_registry(self):
-        with (
-            patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG),
-            patch(self._LOAD_PATH, return_value={"plans": {}}),
-        ):
-            result = get_closed_plans()
-
-        assert result == []
-
-    def test_returns_multiple_closed_plans(self):
-        registry = {
-            "plans": {
-                "1": {"status": "closed", "subject": "done A"},
-                "2": {"status": "closed", "subject": "done B"},
-                "3": {"status": "open", "subject": "still going"},
-            }
-        }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 2
-        subjects = {info["subject"] for _, info in result}
-        assert subjects == {"done A", "done B"}
-
-    def test_result_tuples_contain_plan_num_and_info(self, mock_registry):
-        """Every returned row is a (plan_num, plan_info) pair, and there IS a row.
-
-        Mutant: append((plan_num, ...)) -> append((str(len(closed_plans)), ...)) reddens this.
-        """
-        _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 1
-        # The pair is the closed row's registry KEY and ITS info, not just any str/dict.
-        plan_num, plan_info = result[0]
-        assert plan_num == "2"
-        assert plan_info["subject"] == "Closed plan"
-        assert plan_info["closed_reason"] == "completed"
 
 
 class TestCreatePlanImpl:

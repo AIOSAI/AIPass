@@ -16,7 +16,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
-import json
 from pathlib import Path
 from typing import Callable, Generator
 import sys
@@ -123,10 +122,7 @@ def mock_logger(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect flow's json writes into a temp dir.
-
-    Autouse: without the seam the json service writes into the real flow_json/.
-    """
+    """Redirect flow's json writes into a temp dir; autouse, else the json service writes the real flow_json/."""
     # A seam AT tmp_path would create tmp_path/flow/ and collide with tests that build that dir.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler_module.get_json_path("probe", "config").parent
@@ -136,57 +132,10 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def mock_json_handler(request):
-    """Spy on the audit line, so a test can assert WHICH operation was logged.
-
-    test_json_handler is excluded: its subject is that each name IS the service's bound method.
-    """
+    """Spy on the audit line, so a test can assert WHICH operation was logged."""
     if request.node.module.__name__.endswith("test_json_handler"):
         yield None
         return
 
     with patch("aipass.flow.apps.handlers.json.json_handler.log_operation") as mock_log_op:
         yield mock_log_op
-
-
-@pytest.fixture
-def mock_registry(tmp_path):
-    """Create a mock plan registry with sample data."""
-    registry = {
-        "next_number": 5,
-        "last_updated": "2026-03-24",
-        "plans": {
-            "1": {
-                "subject": "Test plan one",
-                "status": "open",
-                "created": "2026-03-20",
-                "file_path": str(tmp_path / "FPLAN-0001_test_plan_one_2026-03-20.md"),
-                "location": str(tmp_path),
-                "relative_path": "FPLAN-0001_test_plan_one_2026-03-20.md",
-            },
-            "2": {
-                "subject": "Closed plan",
-                "status": "closed",
-                "created": "2026-03-18",
-                "closed": "2026-03-19",
-                "closed_reason": "completed",
-                "file_path": str(tmp_path / "FPLAN-0002_closed_plan_2026-03-18.md"),
-                "location": str(tmp_path),
-                "relative_path": "FPLAN-0002_closed_plan_2026-03-18.md",
-            },
-            "3": {
-                "subject": "Another open",
-                "status": "open",
-                "created": "2026-03-22",
-                "file_path": str(tmp_path / "FPLAN-0003_another_open_2026-03-22.md"),
-                "location": str(tmp_path),
-                "relative_path": "FPLAN-0003_another_open_2026-03-22.md",
-            },
-        },
-    }
-    registry_file = tmp_path / "fplan_registry.json"
-    registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_file, registry
-
-
-# .archive/ holds verbatim disposal copies that must never be collected.
-collect_ignore_glob = [".archive/*", "**/.archive/*"]

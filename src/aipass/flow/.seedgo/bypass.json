@@ -210,12 +210,6 @@
       "reason": "Handler imports trigger module \u2014 create_ops fires trigger events when plans are created"
     },
     {
-      "file": "apps/handlers/plan/get_closed_plans.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of load_registry \u2014 get_closed_plans needs registry data to find closed plans"
-    },
-    {
       "file": "apps/handlers/plan/command_parser.py",
       "standard": "handlers",
       "category": "architectural",
