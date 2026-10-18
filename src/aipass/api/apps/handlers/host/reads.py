@@ -13,6 +13,7 @@ Reference: docs/host_api.md
 No deny-list, by ruling: a read-scope token can read ~/.ssh.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -354,13 +355,17 @@ def _fence(root: Path, file: str) -> Path:
     if ".." in parts:
         raise ReadRefused("File name may not contain '..'")
 
-    resolved = (root / candidate).resolve()
+    base = os.path.realpath(root)
+    real = os.path.realpath(os.path.join(base, candidate))
+    if real == base:
+        return root
 
-    # Only a post-resolution check catches a symlink pointing out of the root.
-    if resolved != root and root not in resolved.parents:
+    # Only a post-resolution check catches a symlink out; realpath plus startswith is the guard CodeQL reads.
+    if not real.startswith(base + os.sep):
         logger.warning("[host_api] fence blocked a read outside %s: %r", root, file)
         raise ReadRefused("File resolves outside the root")
 
+    resolved = Path(real)
     if not resolved.exists():
         raise ReadRefused(f"No such file: {file!r}")
 

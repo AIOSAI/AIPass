@@ -106,6 +106,18 @@ class TestOpeningAnAttach:
 
         spawn.assert_not_called()
 
+    @pytest.mark.parametrize("room", [";", "-t", "a;b", "a b", "a.b", "a:b", "a\nb"])
+    def test_a_room_name_outside_the_charset_is_refused_before_any_spawn(
+        self, quiet: Any, tmux_preflight: Any, room: str
+    ) -> None:
+        """A lone ';' is tmux's command separator and '-' opens an option: refused before argv reaches a process."""
+        for attach_only in (False, True):
+            with patch.object(host_attach, "_spawn_pty", side_effect=AssertionError("spawned")) as spawn:
+                with pytest.raises(host_attach.AttachRefused):
+                    host_attach.open_attach("memory", room=room, attach_only=attach_only)
+
+            spawn.assert_not_called()
+
     def test_a_room_override_wins_over_the_naming_rule(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
         """A branch AND a room: the room decides the name, the branch the label."""
         with patch.object(host_attach.subprocess, "Popen") as spawn:
@@ -521,7 +533,7 @@ class TestAWatchIsNotAnchorTooling:
 
 @fastapi_required
 class TestOneRoomHonoursAnOutsideSeat:
-    """ONE ROOM, step 1 (DPLAN-0327). The phone attaches to where the agent
+    """The phone attaches to where the agent
     ACTUALLY IS, not to a room rebuilt from its name."""
 
     def _row(self, has_room: bool, outside: Any) -> dict:
@@ -731,7 +743,7 @@ class TestThisModuleImportsWhereItCannotRun:
 
 @fastapi_required
 class TestThePhoneCanMeasureItsOwnSocket:
-    """@baud's FPLAN-0446 r5 finding: the corpse frame on the owner's seat."""
+    """A ping is answered with a pong, so the phone can tell a dead socket from an open one."""
 
     # The JS WebSocket API exposes no ping, so a peer gone without a FIN reads as OPEN forever on the phone.
 

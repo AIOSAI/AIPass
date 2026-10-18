@@ -231,6 +231,27 @@ class TestFence:
 
         assert str(exc.value) == "File resolves outside the root"
 
+    def test_symlink_into_a_sibling_sharing_the_prefix_refused(self, fake_repo: dict) -> None:
+        """demo-evil starts with demo's path as a string; only the separator in the guard tells them apart."""
+        if sys.platform == "win32":
+            pytest.skip("POSIX symlinks")
+
+        sibling = fake_repo["branch"].parent / (fake_repo["branch"].name + "-evil")
+        sibling.mkdir()
+        (sibling / "secret.txt").write_text("do not read me", encoding="utf-8")
+        (fake_repo["branch"] / "escape.txt").symlink_to(sibling / "secret.txt")
+
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "escape.txt")
+
+        assert str(exc.value) == "File resolves outside the root"
+
+    def test_the_root_itself_lists_as_the_floor(self, fake_repo: dict) -> None:
+        """'.' names the floor, the one candidate equal to the root rather than under it."""
+        result = host_reads.list_dir("demo", ".")
+
+        assert "hello.txt" in [entry["name"] for entry in result["entries"]]
+
     def test_empty_name_refused(self, fake_repo: dict) -> None:
         """An empty name is a bug, not a directory listing."""
         with pytest.raises(host_reads.ReadRefused) as exc:

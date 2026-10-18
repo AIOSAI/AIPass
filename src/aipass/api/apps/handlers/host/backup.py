@@ -60,6 +60,11 @@ STATUS_JSON_MISSING = (
 
 WORKER_DIED = "The backup worker stopped before @backup answered; the reason is in this host's log"
 
+JOB_UNKNOWN = (
+    "No backup job by that id on this server: finished jobs are kept an hour and a restart "
+    "forgets them all; /v1/backup/status reads the store"
+)
+
 
 class JobUnknown(Exception):
     """No job by that id on this server: never started, dropped after an hour, or lost to a restart."""
@@ -331,7 +336,8 @@ def answer(call: Callable[..., Dict[str, Any]], *args: Any) -> Tuple[int, Dict[s
     try:
         return 200, call(*args)
     except JobUnknown as e:
-        return 404, {"code": "job_unknown", "message": str(e)}
+        logger.info("[host_api] backup job refused: %s", e)
+        return 404, {"code": "job_unknown", "message": JOB_UNKNOWN}
     except NotRunning as e:
         return 404, {"code": "not_running", "message": str(e)}
     except VerbRefused as e:
