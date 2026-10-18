@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_cli.py
 # Description: cli_check rulings: relays, the pre-console window, the stream ruling (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_check.py and cli_content.py."""
@@ -200,6 +200,30 @@ class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
         printed = cli_check.check_module(str(stream_print))
         assert written["score"] == 100
         assert printed["score"] == written["score"], [c["message"] for c in printed["checks"] if not c["passed"]]
+
+
+class TestCliReadsCodeLinesAndNeverDocstrings:
+    """Handler separation and print usage judge code lines; a docstring is prose whatever it names."""
+
+    def test_a_print_after_a_docstring_quoting_the_other_delimiter_is_found(self):
+        result = check_handler_separation('"""Uses \'\'\' quoting."""\nprint("x")\n')
+        assert result["message"].startswith("Handler contains print() on lines [2]")
+
+    def test_a_print_of_a_triple_quoted_literal_is_found(self):
+        result = check_handler_separation('def f():\n    print("""hello""")\n')
+        assert result["message"].startswith("Handler contains print() on lines [2]")
+
+    def test_print_usage_ignores_a_one_line_docstring_naming_print(self):
+        source = '"""Never print("x") here."""\nconsole.print("ok")\n'
+        result = cli_check.check_print_usage(source, source.split("\n"))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_print_usage_ignores_a_multi_line_docstring_naming_print(self):
+        source = 'def f():\n    """Avoid\n    print("x") here.\n    """\n    console.print("ok")\n'
+        result = cli_check.check_print_usage(source, source.split("\n"))
+        assert result is not None
+        assert result["passed"] is True
 
 
 class TestTheCliRulingsAreQueryableNotJustEnforced:

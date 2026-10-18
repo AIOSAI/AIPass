@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_coverage_proof_diagnostics.py
 # Description: Line-coverage tests for plugin_integrity.py and diagnostics_check.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-10-02
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_proof/plugin_integrity.py and apps/handlers/diagnostics/diagnostics_check.py."""
@@ -381,6 +381,19 @@ class TestScanFileRegex:
         """Single-quote triple docstrings are tracked. Mutant: docstring lines not skipped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
         result = _findings(tmp_path, "'''\ncheck_custom_std(path)\n'''\npass\n", ("custom_std",))
         assert result == []
+
+    def test_a_one_line_docstring_naming_a_checker_call_is_not_a_finding(self, tmp_path):
+        result = _findings(tmp_path, '"""Never check_custom_std(path) here."""\npass\n', ("custom_std",))
+        assert result == []
+
+    def test_the_closing_line_of_a_docstring_is_prose(self, tmp_path):
+        result = _findings(tmp_path, '"""Opening.\ncheck_custom_std(path) is named here."""\npass\n', ("custom_std",))
+        assert result == []
+
+    def test_code_opening_a_triple_quoted_literal_is_read(self, tmp_path):
+        source = 'x = custom_std_violations or """\nbody\n"""\n'
+        result = _findings(tmp_path, source, ("custom_std",))
+        assert [(f["line"], f["kind"]) for f in result] == [(1, "hardcoded_violation_key")]
 
 
 # ===========================================================================

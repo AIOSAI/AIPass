@@ -29,7 +29,8 @@ The following are **not** flagged:
 
 | Exclusion | Reason |
 |-----------|--------|
-| Docstrings | Triple-quoted regions are tracked via a state machine |
+| Docstrings | Docstring lines are read from the parse tree (`prose_lines.py`) |
+| String bodies | The body lines of a multi-line string literal are data, never a call |
 | Comment lines | Lines starting with `#` are skipped |
 | Doctest lines | Lines starting with `>>>` or `...` are skipped |
 | `if __name__ == "__main__":` blocks | Main blocks may legitimately use print for CLI tools |

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: output_routing_check.py
 # Description: Output Routing Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-09
-# Modified: 2026-09-25
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -22,6 +22,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -73,30 +74,16 @@ def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
 
     lines = source.splitlines()
     hit_lines: list[int] = []
-    in_docstring = False
-    docstring_char: str | None = None
+    # A string body line is data, never a call, so it is skipped with the prose.
+    try:
+        kinds = classify(source)
+        skipped = kinds.prose | kinds.string_bodies
+    except UnparseableSource as exc:
+        logger.info("output_routing: unparseable, comment lines only skipped: %s", exc)
+        skipped = hash_lines(source)
 
     for lineno, line in enumerate(lines, start=1):
-        stripped = line.strip()
-
-        for tq in ('"""', "'''"):
-            count = line.count(tq)
-            if count == 0:
-                continue
-            if not in_docstring:
-                in_docstring = True
-                docstring_char = tq
-                if count >= 2:
-                    in_docstring = False
-                    docstring_char = None
-            elif docstring_char == tq:
-                in_docstring = False
-                docstring_char = None
-
-        if in_docstring:
-            continue
-
-        if stripped.startswith("#"):
+        if lineno in skipped:
             continue
 
         code_part = line.split("#")[0]

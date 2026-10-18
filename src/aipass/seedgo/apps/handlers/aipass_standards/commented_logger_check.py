@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commented_logger_check.py
 # Description: Commented Logger Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: a commented-out logger call is dead weight in any file.
 APPLIES_TO = "everywhere"
@@ -75,18 +76,16 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     violation_lines: list[int] = []
-    in_docstring = False
+    # Comments are this checker's target, so only docstrings and string bodies are skipped.
+    try:
+        kinds = classify(source)
+        skipped = kinds.docstrings | kinds.string_bodies
+    except UnparseableSource as exc:
+        logger.info("commented_logger: unparseable, every line read: %s", exc)
+        skipped = frozenset()
 
     for lineno, line in enumerate(source.splitlines(), start=1):
-        stripped = line.strip()
-
-        triple_count = stripped.count('"""') + stripped.count("'''")
-        if triple_count == 1:
-            in_docstring = not in_docstring
-            continue
-        if triple_count >= 2:
-            continue
-        if in_docstring:
+        if lineno in skipped:
             continue
 
         if _COMMENTED_LOGGER_RE.search(line):

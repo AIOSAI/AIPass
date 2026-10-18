@@ -3,7 +3,7 @@
 # Description: Line-coverage tests for architecture_check.py and checklist.py
 # Version: 1.1.2
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -383,6 +383,31 @@ class TestHandlerIndependenceEdgeCases:
         result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
         assert result is not None
         assert result["passed"] is True
+
+
+class TestHandlerIndependenceReadsCodeLinesOnly:
+    """check_handler_independence judges code lines through the shared prose_lines helper."""
+
+    def _verdict(self, tmp_path, lines: List[str]) -> dict:
+        result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
+        assert result is not None
+        return result
+
+    def test_an_import_after_a_docstring_closed_mid_line_is_named_by_its_line(self, tmp_path):
+        lines = ['"""Open.', '    Close."""', "from seedgo.apps.modules.audit import run"]
+        assert self._verdict(tmp_path, lines)["message"].endswith("on line 3 (violates independence)")
+
+    def test_import_text_inside_a_raw_prefixed_docstring_body_is_not_a_finding(self, tmp_path):
+        lines = ['r"""Doc.', "from seedgo.apps.modules.audit import run", '"""', "def work():", "    pass"]
+        assert self._verdict(tmp_path, lines)["passed"] is True
+
+    def test_the_other_delimiter_inside_a_docstring_does_not_end_it(self, tmp_path):
+        lines = ['"""Doc.', "'''", "from seedgo.apps.modules.audit import run", '"""', "x = 1"]
+        assert self._verdict(tmp_path, lines)["passed"] is True
+
+    def test_an_import_on_a_line_opening_with_a_triple_quoted_literal_is_found(self, tmp_path):
+        lines = ["import os", "'''x'''; import seedgo.apps.modules.audit"]
+        assert self._verdict(tmp_path, lines)["message"].endswith("on line 2 (violates independence)")
 
 
 class TestDomainOrganizationEdgeCases:

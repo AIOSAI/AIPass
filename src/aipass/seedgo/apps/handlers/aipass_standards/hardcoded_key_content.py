@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_key_content.py
 # Description: Hardcoded Key Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -44,7 +44,7 @@ def get_hardcoded_key_standards() -> str:
         "",
         "  [yellow]Smart filtering -- these are NOT flagged:[/yellow]",
         "  - Comment lines ([dim]# sk-or-v1-...[/dim])",
-        "  - Docstring regions (triple-quoted blocks)",
+        "  - Docstrings (a triple-quoted literal in code is still scanned)",
         "  - Placeholder values ([dim]your_key_here, xxx, example, placeholder, ...[/dim])",
         "  - Placeholder suffixes ([dim]...-example, ...-test, ...-placeholder[/dim])",
         "  - Lines with example context words ([dim]example, template, sample, demo[/dim])",

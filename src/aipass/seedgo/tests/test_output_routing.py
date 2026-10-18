@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_output_routing.py
 # Description: Unit tests for output_routing_check
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-09
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/output_routing_check.py."""
@@ -203,6 +203,27 @@ class TestScanFile:
         assert result["passed"] is False
         assert result["checks"][0]["name"] == "File readable"
         assert result["checks"][0]["message"].startswith("Error reading file: cannot read:")
+
+
+class TestOutputRoutingReadsCodeLinesOnly:
+    """_scan_file reads code lines: docstrings are prose, a string body is data."""
+
+    def _scan(self, tmp_path, source: str) -> dict:
+        f = tmp_path / "subject.py"
+        f.write_text(source, encoding="utf-8")
+        return output_routing_check.check_module(str(f))
+
+    def test_a_status_print_after_a_one_line_docstring_holding_the_other_delimiter_is_found(self, tmp_path):
+        result = self._scan(tmp_path, '"""Quotes \'\'\' here."""\nconsole.print("[red]Error[/red]")\n')
+        assert result["checks"][0]["message"] == "1 raw status output(s) on lines 2"
+
+    def test_a_status_print_opening_a_triple_quoted_literal_is_found(self, tmp_path):
+        result = self._scan(tmp_path, 'console.print("""[red]Error:\nthe load failed[/red]""")\n')
+        assert result["checks"][0]["message"] == _ONE_HIT
+
+    def test_a_status_print_inside_a_string_body_is_data(self, tmp_path):
+        result = self._scan(tmp_path, 'TEMPLATE = """\nconsole.print("[red]Error[/red]")\n"""\n')
+        assert result["checks"][0]["message"] == _CLEAN
 
 
 class TestCheckModule:

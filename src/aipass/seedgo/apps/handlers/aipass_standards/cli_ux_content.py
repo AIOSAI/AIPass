@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_ux_content.py
 # Description: CLI UX Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-17
-# Modified: 2026-07-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -67,7 +67,7 @@ def get_cli_ux_standards() -> str:
         "    print_help() contains a Usage section",
         "",
         "  [yellow]Check 7:[/yellow] examples_section",
-        "    print_help() contains an Examples section",
+        "    print_help() prints a heading that starts with Examples (a docstring does not count)",
         "",
         "  [yellow]Check 8:[/yellow] no_internal_modules",
         "    modules/ directory does not expose internal plumbing names",

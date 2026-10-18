@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_text_check.py
 # Description: Help Text Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -19,13 +19,13 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: --help content; a test file has none.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
-_SHEBANG_RE = re.compile(r"^\s*#!")
 _COMMENT_RE = re.compile(r"^\s*#")
 
 _STRING_RE = re.compile(
@@ -35,9 +35,6 @@ _STRING_RE = re.compile(
 
 _PYTHON3_CMD_RE = re.compile(r"\bpython3\s+\S")
 _PYTHON_CMD_RE = re.compile(r"\bpython\s+(?:-[a-zA-Z]|\S+\.py)")
-
-_TRIPLE_DOUBLE = '"""'
-_TRIPLE_SINGLE = "'''"
 
 
 def _has_python_instruction(text: str) -> bool:
@@ -123,33 +120,23 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     lines = content.splitlines()
     violation_lines: list[int] = []
 
-    in_multiline: bool = False
-    multiline_delim: str = ""
+    try:
+        kinds = classify(content)
+        # A docstring is prose, not help text; a string body is help text read whole.
+        text_lines, skip = kinds.string_bodies, kinds.prose
+    except UnparseableSource as exc:
+        logger.info("help_text: %s unparseable, only quoted literals are read: %s", module_path, exc)
+        text_lines, skip = frozenset(), hash_lines(content)
 
     for lineno, raw_line in enumerate(lines, start=1):
-        if in_multiline:
-            if multiline_delim in raw_line:
-                in_multiline = False
-                multiline_delim = ""
-            if not _COMMENT_RE.match(raw_line) and _has_python_instruction(raw_line):
-                if not is_bypassed(module_path, "help_text", lineno, bypass_rules):
-                    violation_lines.append(lineno)
+        if lineno in skip:
             continue
-
-        if _SHEBANG_RE.match(raw_line) or _COMMENT_RE.match(raw_line):
-            continue
-
-        for delim in (_TRIPLE_DOUBLE, _TRIPLE_SINGLE):
-            if delim in raw_line:
-                count = raw_line.count(delim)
-                if count % 2 == 1:
-                    in_multiline = True
-                    multiline_delim = delim
-                break
-
-        if _line_has_python_instruction(raw_line):
-            if not is_bypassed(module_path, "help_text", lineno, bypass_rules):
-                violation_lines.append(lineno)
+        if lineno in text_lines:
+            found = not _COMMENT_RE.match(raw_line) and _has_python_instruction(raw_line)
+        else:
+            found = _line_has_python_instruction(raw_line)
+        if found and not is_bypassed(module_path, "help_text", lineno, bypass_rules):
+            violation_lines.append(lineno)
 
     total_found = len(violation_lines)
 

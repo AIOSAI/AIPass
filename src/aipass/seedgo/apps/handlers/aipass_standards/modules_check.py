@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: the module contract describes apps/modules/
@@ -181,46 +182,15 @@ def check_door(content: str, module_path: str) -> Dict:
     }
 
 
-def _track_docstring_state(stripped: str, in_docstring: bool) -> tuple:
-    """Returns (skip_line, new_in_docstring) for a stripped line."""
-    if '"""' in stripped or "'''" in stripped:
-        has_triple_double = '"""' in stripped
-        has_triple_single = "'''" in stripped
-
-        if has_triple_double:
-            quote_count = stripped.count('"""')
-            if quote_count % 2 == 1:
-                in_docstring = not in_docstring
-            return True, in_docstring
-        elif has_triple_single:
-            quote_count = stripped.count("'''")
-            if quote_count % 2 == 1:
-                in_docstring = not in_docstring
-            return True, in_docstring
-
-    return False, in_docstring
-
-
 def check_handle_command(content: str) -> Optional[Dict]:
     """Check for handle_command pattern (drone routing standard)"""
-    lines = content.split("\n")
-
-    code_lines = []
-    in_docstring = False
-
-    for line in lines:
-        stripped = line.strip()
-
-        skip_line, in_docstring = _track_docstring_state(stripped, in_docstring)
-        if skip_line:
-            continue
-
-        if in_docstring or stripped.startswith("#"):
-            continue
-
-        code_lines.append(line)
-
-    code_only = "\n".join(code_lines)
+    try:
+        prose = classify(content).text_only
+    except UnparseableSource as exc:
+        # A def named only in a docstring must not pass, so a source we cannot sort fails the row.
+        logger.info("modules: handle_command unread, unparseable: %s", exc)
+        return {"name": "handle_command pattern", "passed": False, "message": f"Source does not parse: {exc}"}
+    code_only = "\n".join(line for i, line in enumerate(content.split("\n"), 1) if i not in prose)
 
     has_handle_command = bool(re.search(r"def\s+handle_command\s*\(", code_only))
 
@@ -274,26 +244,26 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
 def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
     """Check that module doesn't do direct file operations"""
     file_operations = []
+    source = "\n".join(lines)
+    try:
+        prose = classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("modules: unparseable, only # lines are prose: %s", exc)
+        prose = hash_lines(source)
 
-    in_docstring = False
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-
-        skip_line, in_docstring = _track_docstring_state(stripped, in_docstring)
-        if skip_line or in_docstring or not stripped or stripped.startswith("#"):
+        if i in prose or not stripped:
             continue
 
         if stripped.startswith("from ") or stripped.startswith("import "):
             continue
 
-        # Bare open() only: the lookbehind keeps _handle_open(args) out.
+        # Bare open() only: the lookbehind keeps _handle_open(args) out; one quoted inside a string is no call.
         if re.search(r"(?<![.\w])open\s*\(", stripped) and "# open(" not in stripped:
             before_pattern = stripped.split("open(")[0]
-            single_quotes = before_pattern.count("'")
-            double_quotes = before_pattern.count('"')
-            if single_quotes % 2 == 1 or double_quotes % 2 == 1:
-                continue
-            file_operations.append(f"line {i}: {stripped} (use handler instead)")
+            if before_pattern.count("'") % 2 == 0 and before_pattern.count('"') % 2 == 0:
+                file_operations.append(f"line {i}: {stripped} (use handler instead)")
 
         if ".write_text(" in stripped or ".read_text(" in stripped:
             file_operations.append(f"line {i}: {stripped} (use json_handler instead)")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -13,12 +13,13 @@ import re
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AbstractSet, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 from aipass.seedgo.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
 AUDIT_SCOPE = "all_files"
@@ -374,25 +375,27 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": score >= 75, "checks": checks, "score": score, "standard": "ENCAPSULATION"}
 
 
+def _not_import_lines(lines: List[str]) -> AbstractSet[int]:
+    """Docstring, comment and string-body lines: none of them can hold an import statement."""
+    source = "\n".join(lines)
+    try:
+        kinds = classify(source)
+    except UnparseableSource as exc:
+        logger.info("encapsulation: unparseable, comment lines only skipped: %s", exc)
+        return hash_lines(source)
+    return kinds.prose | kinds.string_bodies
+
+
 def check_cross_branch_imports(
     lines: List[str], module_path: str, file_branch: Optional[str], bypass_rules: list | None = None
 ) -> Dict:
     """Check for cross-branch handler imports"""
     violations = []
 
-    in_docstring = False
+    skipped = _not_import_lines(lines)
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                continue
-            else:
-                in_docstring = not in_docstring
-
-        if in_docstring or not stripped or stripped.startswith("#"):
+        if i in skipped or not stripped:
             continue
 
         if not ("from " in stripped or "import " in stripped):
@@ -608,19 +611,10 @@ def check_cross_package_imports(
 
     allowed_handlers = _allowed_handler_names(module_path)
 
-    in_docstring = False
+    skipped = _not_import_lines(lines)
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                continue
-            else:
-                in_docstring = not in_docstring
-
-        if in_docstring or not stripped or stripped.startswith("#"):
+        if i in skipped or not stripped:
             continue
 
         if not ("from " in stripped or "import " in stripped):
@@ -697,19 +691,10 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
 
     allowed_handlers = _allowed_handler_names(module_path)
 
-    in_docstring = False
+    skipped = _not_import_lines(lines)
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                continue
-            else:
-                in_docstring = not in_docstring
-
-        if in_docstring or not stripped or stripped.startswith("#"):
+        if i in skipped or not stripped:
             continue
 
         if not ("from " in stripped or "import " in stripped):

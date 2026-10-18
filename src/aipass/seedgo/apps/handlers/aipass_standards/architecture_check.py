@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -20,6 +20,7 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_template_ignor
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # Spawn's modules gateway is the ONLY source for the class->template question. No
 # fallback on purpose: if this door moves, the checker must die at import with spawn's
@@ -184,19 +185,15 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
                 parent_branch = path_parts[i - 1]
                 break
 
-    in_docstring = False
+    source = "\n".join(lines)
+    try:
+        prose = classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("architecture: unparseable, every non-# line read as code: %s", exc)
+        prose = hash_lines(source)
+
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                continue  # Skip this line but don't toggle state
-            else:
-                in_docstring = not in_docstring
-
-        if in_docstring or not stripped or stripped.startswith("#"):
+        if i in prose or not line.strip():
             continue
 
         if ".apps.modules" in line and ("from " in line or "import " in line):

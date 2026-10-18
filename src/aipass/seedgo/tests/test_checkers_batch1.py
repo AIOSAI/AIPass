@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -295,6 +295,36 @@ def test_debug_print_string_literal_not_flagged(tmp_path):
     )
     result = check_debug_print(str(f))
     assert result["score"] == 100, f"print() inside strings should not flag: {result}"
+
+
+def test_debug_print_reads_the_code_after_a_one_line_docstring_holding_the_other_delimiter(tmp_path):
+    f = tmp_path / "mixed.py"
+    f.write_text('def f():\n    """Quotes \'\'\' here."""\n    print(\'debug\')\n', encoding="utf-8")
+    assert check_debug_print(str(f))["checks"][0]["message"].endswith("lines 3")
+
+
+def test_debug_print_flags_a_print_opening_a_triple_quoted_literal(tmp_path):
+    f = tmp_path / "literal.py"
+    f.write_text('def f():\n    print("""line one\n    line two""")\n', encoding="utf-8")
+    assert check_debug_print(str(f))["checks"][0]["message"].endswith("lines 2")
+
+
+def test_debug_print_leaves_a_print_inside_a_string_body_alone(tmp_path):
+    f = tmp_path / "template.py"
+    f.write_text('TEMPLATE = """\nprint("generated")\n"""\n', encoding="utf-8")
+    assert check_debug_print(str(f))["passed"] is True
+
+
+def test_commented_logger_skips_a_docstring_past_the_other_delimiter(tmp_path):
+    f = tmp_path / "doc.py"
+    f.write_text('"""Doc.\n\'\'\'\n# logger.info("x") is the shape it finds.\n"""\n', encoding="utf-8")
+    assert check_commented_logger(str(f))["passed"] is True
+
+
+def test_commented_logger_reads_a_comment_on_a_line_holding_a_triple_quoted_literal(tmp_path):
+    f = tmp_path / "literal.py"
+    f.write_text('x = """a"""  # logger.info("old")\n', encoding="utf-8")
+    assert check_commented_logger(str(f))["passed"] is False
 
 
 def test_deep_nesting_check_clean_passes(tmp_path):

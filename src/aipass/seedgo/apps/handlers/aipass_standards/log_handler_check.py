@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -14,10 +14,11 @@ Reference: log_handler.md
 
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import AbstractSet, Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: a test importing stdlib logging to assert on it is legitimate.
 APPLIES_TO = "production"
@@ -107,13 +108,23 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "LOG_HANDLER"}
 
 
+def _prose(lines: List[str]) -> AbstractSet[int]:
+    """Prose and string-body lines; a source that does not parse keeps every line but ``#`` ones."""
+    source = "\n".join(lines)
+    try:
+        return classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("log_handler: unparseable, only # lines are prose: %s", exc)
+        return hash_lines(source)
+
+
 def check_no_raw_file_handler(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """Check that no raw logging.FileHandler is used. Must use RotatingFileHandler instead."""
     violations = []
+    prose = _prose(lines)
 
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
+        if i in prose:
             continue
 
         if re.search(r"logging\.FileHandler\s*\(", line):
@@ -151,10 +162,10 @@ def check_no_raw_stream_handler(
         }
 
     violations = []
+    prose = _prose(lines)
 
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
+        if i in prose:
             continue
 
         if re.search(r"logging\.StreamHandler\s*\(", line):

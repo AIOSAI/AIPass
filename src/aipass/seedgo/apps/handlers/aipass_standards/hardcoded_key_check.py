@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_key_check.py
 # Description: Hardcoded Key Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -18,6 +18,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: a key committed in a test is leaked exactly as hard.
 APPLIES_TO = "everywhere"
@@ -136,19 +137,15 @@ def _scan_file(file_path: Path) -> list[tuple[int, str]] | None:
 
     lines = content.splitlines()
     findings: list[tuple[int, str]] = []
-    in_docstring = False
+    try:
+        docstrings = classify(content).docstrings
+    except UnparseableSource as exc:
+        # A key in a broken file is still a leaked key: nothing is skipped.
+        logger.info("hardcoded_key: %s unparseable, every line scanned: %s", file_path, exc)
+        docstrings = frozenset()
 
     for lineno, line in enumerate(lines, start=1):
-        stripped = line.strip()
-
-        triple_count = stripped.count('"""') + stripped.count("'''")
-        if triple_count:
-            if triple_count % 2 == 1:
-                in_docstring = not in_docstring
-            # Skip the line itself whether it opens or closes a docstring
-            continue
-
-        if in_docstring:
+        if lineno in docstrings:
             continue
 
         findings.extend(_scan_line(lineno, line))

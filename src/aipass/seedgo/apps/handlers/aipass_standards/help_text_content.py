@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_text_content.py
 # Description: Help Text Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -28,7 +28,7 @@ def get_help_text_standards() -> str:
         "  [yellow]Detects:[/yellow]",
         "  - [red]python3 some/script.py[/red] inside string literals",
         "  - [red]python -m module[/red] inside string literals",
-        "  - References inside triple-quoted docstrings and help text",
+        "  - References inside triple-quoted help text; a docstring is prose and never read",
         "",
         "  [yellow]Ignores:[/yellow]",
         "  - Shebangs ([dim]#!/usr/bin/env python3[/dim])",

@@ -18,17 +18,18 @@ When help text tells a user to run `python3 flow.py create`, it bypasses the sta
 
 ## What the Checker Scans For
 
-The checker reads each Python file and scans **string literals** (both single-line and multiline/triple-quoted) for instructional references to `python3` or `python` as a command invocation.
+The checker reads each Python file and scans **string literals in code** (both single-line and multiline/triple-quoted) for instructional references to `python3` or `python` as a command invocation. A docstring is prose, not help text, and is never read.
 
 **Detected patterns:**
 - `python3 some/script.py` inside string literals
 - `python -m module` inside string literals
 - `python -c "code"` inside string literals
-- References inside triple-quoted docstrings and help text
+- References inside triple-quoted help text (a string literal in code)
 
 **Ignored (not flagged):**
 - Shebangs (`#!/usr/bin/env python3`)
 - Comment lines (`# python3 ...`)
+- Docstrings (the first-statement string of a module, class or function)
 - Non-instructional references (e.g., "python version", "python interpreter")
 - `__init__.py` files (always skipped)
 
