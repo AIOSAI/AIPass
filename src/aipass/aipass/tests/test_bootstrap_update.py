@@ -3,7 +3,7 @@
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -343,8 +343,14 @@ def test_update_project_never_touches_user_owned_files(tmp_path):
     assert (target / "README.md").read_text(encoding="utf-8") == "# My custom README\n"
 
 
-def test_update_project_creates_missing_managed_dirs(tmp_path):
-    """update_project recreates .aipass/ and .claude/ if they were deleted."""
+@pytest.mark.parametrize("throwaway_home", [False, True], ids=["real_home", "throwaway_home"])
+def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, throwaway_home):
+    """update_project recreates .aipass/ and .claude/; settings.local.json only for a non-throwaway home.
+
+    The home's throwaway answer is pinned: a checkout under /tmp (CI, seedgo's audit env) reads as one.
+    Mutant: bootstrap's `aipass_home and not is_throwaway_path(...)` -> `aipass_home` -> red on throwaway_home.
+    """
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: throwaway_home)
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="recover")
@@ -356,13 +362,13 @@ def test_update_project_creates_missing_managed_dirs(tmp_path):
 
     result = update_project(target)
 
+    assert result["aipass_home"] == _expected_aipass_home()
     assert (target / ".claude" / "settings.json").exists()
-    # Managed files in deleted dirs re-written (tier0_kernel, tier1_navmap,
-    # hooks.json, settings.json, settings.local.json, prep)
-    if result["aipass_home"]:
-        assert len(result["updated_files"]) == 6
-    else:
-        assert len(result["updated_files"]) == 2
+    local_settings = target.resolve() / ".claude" / "settings.local.json"
+    assert (str(local_settings) in result["updated_files"]) is not throwaway_home
+    assert local_settings.exists() is not throwaway_home
+    # tier0_kernel, tier1_navmap, hooks.json, settings.json, prep, plus settings.local.json for a real home
+    assert len(result["updated_files"]) == (5 if throwaway_home else 6)
     assert len(result["already_current"]) >= 2
 
 
