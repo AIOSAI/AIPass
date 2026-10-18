@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.1.3
+# Version: 2.1.4
 # Created: 2026-06-09
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -126,11 +126,18 @@ class BrokerDaemon:
         )
 
     def _generate_secret(self) -> bytes:
-        """Generate a fresh HMAC secret, write to disk with mode 0600."""
+        """Generate a fresh HMAC secret in a file born 0600 and swapped in whole; the value is never logged.
+
+        Written in place, an existing file (or a handle another process already holds on it) would
+        read the new secret, and a chmod after the write leaves it in an umask-mode file meanwhile.
+        """
         secret = secrets.token_bytes(32)
         self._secret_path.parent.mkdir(parents=True, exist_ok=True)
-        self._secret_path.write_bytes(secret)
-        self._secret_path.chmod(0o600)
+        staged = self._secret_path.with_name(f".{self._secret_path.name}.{secrets.token_hex(4)}.tmp")
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        with os.fdopen(fd, "wb") as staged_file:
+            staged_file.write(secret)
+        os.replace(staged, self._secret_path)
         logger.info("broker: generated secret at %s", self._secret_path)
         return secret
 

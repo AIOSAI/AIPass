@@ -10,6 +10,12 @@ JSON-line protocol and an inherited-fd transport. It records deletions like the 
 (see [rm_and_the_record.md](rm_and_the_record.md)) and passes the requester's identity in rather
 than reading its own cwd.
 
+Each start writes a fresh 32-byte HMAC secret to `.ai_central/broker_secret` under the project root
+(the host temp directory when there is none), which the launcher reads to sign its identify step.
+The file is staged 0600 with an exclusive create and swapped in whole with `os.replace`, so no other
+user and no handle on the previous file ever reads it, and the value never reaches a log or the
+audit line. Pinned in `TestIdentity` in `tests/test_broker.py`.
+
 ---
 
 ## Two lanes, one contract
