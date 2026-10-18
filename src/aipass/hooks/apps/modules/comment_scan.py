@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_scan.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Comment budget counter: full-line comment share of a source file
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Counts a source file's full-line comment lines against the comment budget (docs/comments.md)."""
@@ -38,7 +38,9 @@ KINDS = {
     ".bash": "shell",
 }
 
-HASH_DIRECTIVES = ("!", "-*-", "noqa", "type:", "pyright:", "pragma", "fmt:", "ruff:", "pylint:")
+HASH_DIRECTIVES = ("!", "-*-", "noqa", "type:", "pyright:", "pragma", "fmt:", "ruff:", "pylint:", "seedgo:")
+# The fleet json shim is a byte-identical copy checked by hash in every branch: no branch can trim it.
+EXEMPT_PATHS = ("apps/handlers/json/json_handler.py",)
 SLASH_DIRECTIVES = ("eslint-", "@ts-", "prettier-ignore")
 _STATEMENT_START = {tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING}
 _NOISE = {tokenize.NL, tokenize.COMMENT}
@@ -79,6 +81,8 @@ def print_introspection() -> None:
 
 def kind_of(path: str | Path) -> str | None:
     """The counter kind for *path*'s suffix, None when the budget does not judge it."""
+    if Path(path).as_posix().endswith(EXEMPT_PATHS):
+        return None
     return KINDS.get(Path(path).suffix.lower())
 
 
@@ -88,11 +92,14 @@ def _is_hash_directive(stripped: str) -> bool:
 
 
 def _header_lines(lines: list[str]) -> set[int]:
-    """The AIPass header block's line numbers, empty when the file has none."""
-    if not lines or not lines[0].startswith("# ===="):
+    """The AIPass header block's line numbers, empty when the file has none; a shebang or coding line may precede it."""
+    start = 0
+    while start < len(lines) and lines[start].startswith(("#!", "# -*-")):
+        start += 1
+    if start == len(lines) or not lines[start].startswith("# ===="):
         return set()
     header = set()
-    for number, line in enumerate(lines, 1):
+    for number, line in enumerate(lines[start:], start + 1):
         if not line.startswith("#"):
             break
         header.add(number)
@@ -159,7 +166,7 @@ def scan(source: str | Path, kind: str) -> Scan:
     """Count *source* (a path to read, or the text itself) as *kind*."""
     text = source.read_text(encoding="utf-8", errors="replace") if isinstance(source, Path) else source
     lines = text.splitlines()
-    header = _header_lines(lines) if kind == "python" else set()
+    header = _header_lines(lines) if kind in ("python", "shell") else set()
     if kind == "python":
         marked = _python_comments(text, lines)
     elif kind == "c":

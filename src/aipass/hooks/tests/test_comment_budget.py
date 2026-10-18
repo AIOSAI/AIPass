@@ -4,7 +4,7 @@
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
@@ -60,6 +60,19 @@ class TestPythonCounter:
         text = "# ==== AIPass ====\n# Name: x.py\n# =====\n\n" + _code(10)
         scan = comment_scan.scan(text, "python")
         assert (scan.body, scan.comments) == (10, 0)
+
+    def test_a_header_under_a_shebang_and_coding_line_is_free(self):
+        shebang = "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n"
+        text = shebang + "# ==== AIPass ====\n# Name: x.py\n# =====\n" + _code(10)
+        assert (comment_scan.scan(text, "python").body, comment_scan.scan(text, "python").comments) == (12, 0)
+
+    def test_a_shell_file_header_is_free(self):
+        text = "#!/bin/bash\n# ==== AIPass ====\n# Name: x.sh\n# =====\necho a\n# why\necho b\n"
+        assert (comment_scan.scan(text, "shell").body, comment_scan.scan(text, "shell").comments) == (4, 1)
+
+    def test_a_seedgo_marker_is_a_directive(self):
+        text = "# seedgo: no-test-needed(stdlib) - covered elsewhere\n# a why\n" + _code(3)
+        assert comment_scan.scan(text, "python").runs == [(2, 2)]
 
     def test_a_header_lower_in_the_file_is_counted(self):
         scan = comment_scan.scan(_code(10) + "# ==== AIPass ====\n# Name: x.py\n", "python")
@@ -127,6 +140,19 @@ class TestBudgetBoundary:
     def test_an_unjudged_suffix_has_no_kind(self):
         assert comment_scan.kind_of("notes.md") is None
         assert comment_scan.kind_of("App.TSX") == "c"
+
+    def test_the_fleet_json_shim_is_not_judged_anywhere_else_a_json_handler_is(self, tmp_path):
+        shim = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+        assert comment_scan.kind_of(shim) is None
+        assert comment_scan.kind_of(tmp_path / "apps" / "modules" / "json_handler.py") == "python"
+
+    def test_the_tree_scan_skips_the_shim(self, tmp_path, capsys):
+        shim = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+        shim.parent.mkdir(parents=True)
+        shim.write_text(_hashes(9) + _code(11), encoding="utf-8")
+        (tmp_path / "kept.py").write_text(_code(3), encoding="utf-8")
+        comments.handle_command("comments", [str(tmp_path)])
+        assert capsys.readouterr()[0].strip().splitlines()[-1] == "files 1, over budget 0, share 0% (0 of 3 lines)"
 
 
 class TestHandler:

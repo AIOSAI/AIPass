@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comments.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: The comments verb — the comment budget's ledger, trend and on-demand scan
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """The comment budget: last edits, a file's trend, over-budget files, or a scan now."""
@@ -108,7 +108,7 @@ def _judged_files(root: Path) -> list[Path]:
     found = []
     for folder, dirs, files in os.walk(root, onerror=_walk_error):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
-        found.extend(Path(folder) / name for name in files if comment_scan.kind_of(name))
+        found.extend(Path(folder) / name for name in files if comment_scan.kind_of(Path(folder) / name))
     return sorted(found)
 
 
