@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-12
-# Modified: 2026-10-13
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -204,8 +204,29 @@ class TestRun:
         assert line["status"] == "not_applicable"
         assert line["reason"] == "the unmutated suite is not green"
         assert line["open_survivors"] is None
-        _, err = capsys.readouterr()
-        assert "probe not_applicable" in err
+        out, err = capsys.readouterr()
+        assert "probe not_applicable" in err + out
+
+    def test_a_target_that_cannot_be_measured_is_a_recorded_week_and_exits_zero(self, fleet, probe, capsys):
+        probe["document"] = _artifact(status="not_applicable")
+
+        assert ratchet.handle_command("ratchet", ["run"]) is True
+
+        (line,) = _series(fleet)
+        assert line["status"] == "not_applicable"
+        assert line["reason"] == "the unmutated suite is not green"
+        out, err = capsys.readouterr()
+        assert "alpha: probe not_applicable" in err + out
+        assert "the unmutated suite is not green" in err + out
+
+    def test_a_refused_run_with_a_clean_lane_code_still_exits_non_zero(self, fleet, probe):
+        probe["document"] = _artifact(status="refused")
+
+        with pytest.raises(CommandRefused) as refused:
+            ratchet.handle_command("ratchet", ["run"])
+
+        assert refused.value.code == refusal.EXIT_UNPROVEN
+        assert _series(fleet)[0]["status"] == "refused"
 
 
 class TestRecord:

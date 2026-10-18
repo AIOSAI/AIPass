@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -36,6 +36,10 @@ SUBCOMMANDS: tuple = ("pick", "run", "record")
 DEFAULT_BUDGET_SECONDS = 1800
 
 PROBE_GROUP = "pseudo_tested"
+
+#: A week whose target could not be measured is still a point on the series: the reason is
+#: in the line, and only a lane that could not run exits non-zero.
+RECORDED_STATUSES: tuple = ("measured", "not_applicable")
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -128,7 +132,7 @@ def _run(budget: int) -> None:
     line = _write_point(document, chosen, series.TRIGGER_WEEKLY, reason)
 
     _print_point(line, time.time() - started)
-    if code in refusal.REFUSAL_CODES or line["status"] != "measured":
+    if code in refusal.REFUSAL_CODES or line["status"] not in RECORDED_STATUSES:
         raise CommandRefused(code if code in refusal.REFUSAL_CODES else refusal.EXIT_UNPROVEN, chosen)
 
 
@@ -183,6 +187,8 @@ def _print_point(line: dict, elapsed: Optional[float]) -> None:
     if line["status"] == "measured":
         probed = line["functions_probed"]
         success(f"{line['branch']}: {line['open_survivors']} open survivor(s) of {probed} probed{took}")
+    elif line["status"] in RECORDED_STATUSES:
+        warning(f"{line['branch']}: probe {line['status']}{took} - {line['reason'] or 'no reason given'}")
     else:
         error(f"{line['branch']}: probe {line['status']}{took} - {line['reason'] or 'no reason given'}")
     console.print(f"  [dim]pseudo-tested[/dim] {len(line['pseudo_tested'])}")
