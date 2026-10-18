@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
@@ -27,7 +27,7 @@ READ_ONLY_PROGRAMS = frozenset(
         "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq", "wc", "stat",
         "ls", "dir", "tree", "diff", "cmp", "file", "du", "realpath", "readlink", "basename", "dirname",
         "sha256sum", "sha1sum", "sha512sum", "md5sum", "b2sum", "cksum", "test", "[", "drone",
-        "cd", "pushd", "popd",
+        "cd", "pushd", "popd", "read",
     }
 )  # fmt: skip
 
@@ -56,6 +56,9 @@ PLAIN_PROGRAMS = READ_ONLY_PROGRAMS | frozenset(
         "git", "gh",  # their operands are subcommands; git_gate reads them
     }
 )  # fmt: skip
+
+#: pytest's config flags name a file it only reads; the value alone is carved, every other operand is judged.
+_PYTEST_CONFIG_FLAGS = ("-c", "--config-file")
 
 #: Programs whose first plain word is a format string, never a path (devpulse 729ffaa9).
 _FORMAT_FIRST = frozenset({"printf", "echo"})
@@ -156,7 +159,15 @@ def _operand_texts(argv: tuple[str, ...], program: str = "") -> list[str]:
     """
     texts = []
     format_pending = program in _FORMAT_FIRST
-    for arg in argv[1:]:
+    pytest_from = _pytest_args_start(program, argv)
+    config_next = False
+    for index, arg in enumerate(argv[1:], 1):
+        if config_next:
+            config_next = False
+            continue
+        if pytest_from is not None and index >= pytest_from and arg.split("=", 1)[0] in _PYTEST_CONFIG_FLAGS:
+            config_next = "=" not in arg
+            continue
         if arg.startswith("-"):
             if "=" in arg:
                 texts.append(arg.split("=", 1)[1])
@@ -166,6 +177,15 @@ def _operand_texts(argv: tuple[str, ...], program: str = "") -> list[str]:
             continue
         texts.append(arg)
     return [text for text in texts if text]
+
+
+def _pytest_args_start(program: str, argv: tuple[str, ...]) -> int | None:
+    """Where pytest's own arguments begin: after ``pytest``, or after an interpreter's ``-m pytest``; None otherwise."""
+    if program == "pytest":
+        return 1
+    if program.startswith("python") and argv[1:3] == ("-m", "pytest"):
+        return 3
+    return None
 
 
 def first_existing(path: Path) -> Path:

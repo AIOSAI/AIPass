@@ -405,6 +405,25 @@ class TestScriptedLaneDoesNotOverreach:
         for command in (f"bash {script}", f"bash {script} -n"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 2, command
 
+    def test_pytest_reads_the_value_of_its_config_flag_and_nothing_else(self, registered_projects: dict):
+        config = (registered_projects["aipass"] / "pyproject.toml").as_posix()
+        Path(config).write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+        for command in (
+            f"pytest tests -c {config}",
+            f"pytest -c={config} tests",
+            f"pytest --config-file {config}",
+            f"pytest --config-file={config}",
+            f"python3 -m pytest tests -c {config}",
+        ):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+        for command in (f"pytest {config}", f"pytest -c {config} {config}", f"pytest --basetemp={config}"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 2, command
+
+    def test_the_read_builtin_names_variables_not_files(self, registered_projects: dict):
+        memory = Path(registered_projects["memory"]).as_posix()
+        assert _run(registered_projects["hooks"], command=f"cd {memory}; read f")["exit_code"] == 0
+        assert _run(registered_projects["hooks"], command=f"cd {memory}; touch f")["exit_code"] == 2
+
     def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
         own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()
         for command in (f"echo x > {own}", f"sed -i s/a/b/ {own}", "mkdir -p ./docs.local/probe"):

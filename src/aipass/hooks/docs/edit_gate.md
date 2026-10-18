@@ -20,9 +20,12 @@ nobody listed as a writer cannot name another branch's file or a memory file off
 git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
 `sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
 That shape reads anywhere, a memory file included. A `w` or `e` inside any other
-script is not read: its target or command passes unseen. Two more reads: a shell whose
+script is not read: its target or command passes unseen. More reads: a shell whose
 options before its script carry `-n` (`bash -n x.sh`, a syntax check; git_gate does not read the
-script's commands either), and `aipass init update ... --dry-run` (a preview is a read).
+script's commands either), `aipass init update ... --dry-run` (a preview is a read), and `read`,
+whose operands are variable names. For `pytest` and `python -m pytest`, the value of `-c`,
+`--config-file` or `-c=x` is a file pytest only reads; every other operand is judged, `--rootdir`
+and `--confcutdir` included (the rootdir takes pytest's cache).
 
 ## Who may write whose files
 
